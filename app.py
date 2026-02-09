@@ -1,0 +1,967 @@
+"""
+Aplicación Streamlit para Conciliación Geotécnica: Diseño vs As-Built
+Carga superficies STL, genera secciones, extrae parámetros y exporta a Excel.
+"""
+import streamlit as st
+import numpy as np
+import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
+import tempfile
+import os
+import sys
+import json
+import io
+from pathlib import Path
+from datetime import datetime
+
+sys.path.insert(0, str(Path(__file__).parent))
+from core import (
+    load_mesh, get_mesh_bounds, mesh_to_plotly, decimate_mesh,
+    SectionLine, cut_mesh_with_section, cut_both_surfaces,
+    extract_parameters, compare_design_vs_asbuilt, build_reconciled_profile,
+    export_results,
+)
+
+st.set_page_config(page_title="Conciliación Geotécnica", page_icon="⛏️", layout="wide")
+
+# =====================================================
+# CSS
+# =====================================================
+st.markdown("""
+<style>
+.main-title { font-size: 2rem; font-weight: bold; color: #2F5496; text-align: center; margin-bottom: 0.5rem; }
+.subtitle { font-size: 1.1rem; color: #666; text-align: center; margin-bottom: 1.5rem; }
+.metric-card {
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+    padding: 1rem; border-radius: 10px; text-align: center; margin: 0.5rem 0;
+    border-left: 4px solid #2F5496;
+}
+.status-ok { background-color: #C6EFCE; color: #006100; padding: 4px 12px; border-radius: 4px; font-weight: bold; }
+.status-warn { background-color: #FFEB9C; color: #9C5700; padding: 4px 12px; border-radius: 4px; font-weight: bold; }
+.status-nok { background-color: #FFC7CE; color: #9C0006; padding: 4px 12px; border-radius: 4px; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="main-title">⛏️ Conciliación Geotécnica: Diseño vs As-Built</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Extracción automática de parámetros desde superficies 3D (STL)</div>', unsafe_allow_html=True)
+
+# =====================================================
+# SESSION STATE
+# =====================================================
+defaults = {
+    'mesh_design': None, 'mesh_topo': None,
+    'bounds_design': None, 'bounds_topo': None,
+    'sections': [], 'profiles_design': [], 'profiles_topo': [],
+    'params_design': [], 'params_topo': [],
+    'comparison_results': [], 'step': 1,
+    'clicked_sections': [],
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+# =====================================================
+# SIDEBAR: CONFIGURACIÓN
+# =====================================================
+with st.sidebar:
+    st.header("⚙️ Configuración")
+
+    st.subheader("📐 Tolerancias")
+    tol_h_neg = st.number_input("Altura banco: Tol. (-) m", value=1.0, step=0.5, key="tol_h_neg")
+    tol_h_pos = st.number_input("Altura banco: Tol. (+) m", value=1.5, step=0.5, key="tol_h_pos")
+    tol_a_neg = st.number_input("Ángulo cara: Tol. (-) °", value=5.0, step=1.0, key="tol_a_neg")
+    tol_a_pos = st.number_input("Ángulo cara: Tol. (+) °", value=5.0, step=1.0, key="tol_a_pos")
+    min_berm_width = st.number_input("Berma mínima (m)", value=6.0, step=0.5, key="min_berm")
+    tol_ir_neg = st.number_input("Áng. Inter-Rampa: Tol. (-) °", value=3.0, step=1.0, key="tol_ir_neg")
+    tol_ir_pos = st.number_input("Áng. Inter-Rampa: Tol. (+) °", value=2.0, step=1.0, key="tol_ir_pos")
+
+    st.subheader("🔧 Detección de Bancos")
+    face_threshold = st.slider("Ángulo mínimo cara (°)", 30, 60, 40)
+    berm_threshold = st.slider("Ángulo máximo berma (°)", 5, 30, 20)
+    resolution = st.slider("Resolución de perfil (m)", 0.1, 2.0, 0.5)
+
+    st.subheader("📋 Información del Proyecto")
+    project_name = st.text_input("Proyecto", "")
+    operation = st.text_input("Operación", "")
+    phase = st.text_input("Fase / Pit", "")
+    author = st.text_input("Elaborado por", "")
+
+tolerances = {
+    'bench_height': {'neg': tol_h_neg, 'pos': tol_h_pos},
+    'face_angle': {'neg': tol_a_neg, 'pos': tol_a_pos},
+    'berm_width': {'min': min_berm_width},
+    'inter_ramp_angle': {'neg': tol_ir_neg, 'pos': tol_ir_pos},
+    'overall_angle': {'neg': 2.0, 'pos': 2.0},
+}
+
+
+# =====================================================
+# HELPER: Generate contour data from mesh
+# =====================================================
+def _mesh_to_contour_data(mesh, grid_size=500):
+    """Interpolate mesh vertices onto a regular grid for contour plotting."""
+    from scipy.interpolate import griddata
+
+    verts = mesh.vertices
+    # Subsample if too many vertices to avoid slow griddata
+    # Increased limit to 200k to preserve details in design meshes
+    if len(verts) > 200000:
+        step = len(verts) // 200000
+        verts = verts[::step]
+
+    x, y, z = verts[:, 0], verts[:, 1], verts[:, 2]
+
+    # Create grid
+    xi = np.linspace(x.min(), x.max(), grid_size)
+    yi = np.linspace(y.min(), y.max(), grid_size)
+    xi_grid, yi_grid = np.meshgrid(xi, yi)
+
+    # Linear interpolation is best for triangulation (avoids cubic overshooting)
+    zi_grid = griddata((x, y), z, (xi_grid, yi_grid), method='linear')
+    return xi, yi, xi_grid, yi_grid, zi_grid
+
+
+# =====================================================
+# PASO 1: CARGA DE SUPERFICIES
+# =====================================================
+st.header("📁 Paso 1: Cargar Superficies STL / DXF")
+
+col1, col2 = st.columns(2)
+with col1:
+    st.subheader("🔵 Superficie de Diseño")
+    file_design = st.file_uploader("Cargar Diseño (STL, OBJ, PLY, DXF)", type=["stl", "obj", "ply", "dxf"], key="design_file")
+
+with col2:
+    st.subheader("🟢 Superficie Topográfica (As-Built)")
+    file_topo = st.file_uploader("Cargar Topografía (STL, OBJ, PLY, DXF)", type=["stl", "obj", "ply", "dxf"], key="topo_file")
+
+if file_design and file_topo:
+    # Save to temp files preserving extension
+    import pathlib
+    ext_d = pathlib.Path(file_design.name).suffix
+    ext_t = pathlib.Path(file_topo.name).suffix
+    
+    f_design = f_topo = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=ext_d, delete=False) as f:
+            f.write(file_design.read()); f_design = f.name
+        with tempfile.NamedTemporaryFile(suffix=ext_t, delete=False) as f:
+            f.write(file_topo.read()); f_topo = f.name
+
+        with st.spinner("Cargando superficies..."):
+            st.session_state.mesh_design = load_mesh(f_design)
+            st.session_state.mesh_topo = load_mesh(f_topo)
+            st.session_state.bounds_design = get_mesh_bounds(st.session_state.mesh_design)
+            st.session_state.bounds_topo = get_mesh_bounds(st.session_state.mesh_topo)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            bd = st.session_state.bounds_design
+            st.success(f"✅ Diseño cargado: {bd['n_faces']:,} caras, {bd['n_vertices']:,} vértices")
+            st.caption(f"X: [{bd['xmin']:.1f}, {bd['xmax']:.1f}] | Y: [{bd['ymin']:.1f}, {bd['ymax']:.1f}] | Z: [{bd['zmin']:.1f}, {bd['zmax']:.1f}]")
+        with col2:
+            bt = st.session_state.bounds_topo
+            st.success(f"✅ Topografía cargada: {bt['n_faces']:,} caras, {bt['n_vertices']:,} vértices")
+            st.caption(f"X: [{bt['xmin']:.1f}, {bt['xmax']:.1f}] | Y: [{bt['ymin']:.1f}, {bt['ymax']:.1f}] | Z: [{bt['zmin']:.1f}, {bt['zmax']:.1f}]")
+
+        st.session_state.step = max(st.session_state.step, 2)
+    except Exception as e:
+        st.error(f"Error al cargar: {e}")
+    finally:
+        for tmp in (f_design, f_topo):
+            if tmp and os.path.exists(tmp):
+                os.unlink(tmp)
+
+# =====================================================
+# VISUALIZACIÓN 3D Y PLANTA 2D
+# =====================================================
+if st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None:
+    from core.section_cutter import azimuth_to_direction as _az2dir
+
+    # --- Vista 3D ---
+    with st.expander("🌐 Vista 3D de Superficies", expanded=False):
+        with st.spinner("Generando vista 3D..."):
+            fig = go.Figure()
+
+            md = decimate_mesh(st.session_state.mesh_design, 30000)
+            mt = decimate_mesh(st.session_state.mesh_topo, 30000)
+
+            fig.add_trace(mesh_to_plotly(md, "Diseño", "royalblue", 1.0))
+            fig.add_trace(mesh_to_plotly(mt, "Topografía Real", "forestgreen", 1.0))
+
+            # Draw sections if they exist
+            if st.session_state.sections:
+                for sec in st.session_state.sections:
+                    d = _az2dir(sec.azimuth)
+                    p1 = sec.origin - d * sec.length / 2
+                    p2 = sec.origin + d * sec.length / 2
+                    bd = st.session_state.bounds_design
+                    zmin, zmax = bd['zmin'], bd['zmax']
+                    fig.add_trace(go.Scatter3d(
+                        x=[p1[0], p2[0]], y=[p1[1], p2[1]], z=[(zmin+zmax)/2]*2,
+                        mode='lines+text', text=[sec.name, ""],
+                        line=dict(color='red', width=5),
+                        name=sec.name, showlegend=False,
+                    ))
+
+            fig.update_layout(
+                scene=dict(aspectmode='data',
+                    xaxis_title='Este (m)', yaxis_title='Norte (m)', zaxis_title='Elevación (m)'),
+                height=600, margin=dict(l=0, r=0, t=30, b=0),
+                legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # --- Vista en Planta con Curvas de Nivel ---
+    with st.expander("🗺️ Vista en Planta — Curvas de Nivel", expanded=False):
+        with st.spinner("Generando curvas de nivel..."):
+            contour_cols = st.columns(3)
+            contour_surface = contour_cols[0].selectbox(
+                "Superficie", ["Diseño", "Topografía", "Ambas"], key="contour_surf")
+            contour_interval = contour_cols[1].number_input(
+                "Intervalo curvas (m)", value=5.0, min_value=1.0, step=1.0, key="contour_int")
+            contour_grid = contour_cols[2].number_input(
+                "Resolución grilla", value=500, min_value=100, max_value=2000, step=100, key="contour_grid")
+
+            fig_contour = go.Figure()
+
+            if contour_surface in ("Diseño", "Ambas"):
+                xi, yi, xig, yig, zig = _mesh_to_contour_data(
+                    st.session_state.mesh_design, int(contour_grid))
+                fig_contour.add_trace(go.Contour(
+                    x=xi, y=yi, z=zig,
+                    contours=dict(
+                        start=float(np.nanmin(zig)) if zig is not None else 0,
+                        end=float(np.nanmax(zig)) if zig is not None else 100,
+                        size=contour_interval,
+                        showlabels=True,
+                        labelfont=dict(size=9, color='blue'),
+                    ),
+                    line=dict(color='royalblue', width=1.5),
+                    colorscale=[[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0)']],
+                    showscale=False,
+                    name='Diseño',
+                    hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Diseño</extra>',
+                ))
+
+            if contour_surface in ("Topografía", "Ambas"):
+                xi, yi, xig, yig, zig = _mesh_to_contour_data(
+                    st.session_state.mesh_topo, int(contour_grid))
+                fig_contour.add_trace(go.Contour(
+                    x=xi, y=yi, z=zig,
+                    contours=dict(
+                        start=float(np.nanmin(zig)) if zig is not None else 0,
+                        end=float(np.nanmax(zig)) if zig is not None else 100,
+                        size=contour_interval,
+                        showlabels=True,
+                        labelfont=dict(size=9, color='green'),
+                    ),
+                    line=dict(color='forestgreen', width=1.5),
+                    colorscale=[[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0)']],
+                    showscale=False,
+                    name='Topografía',
+                    hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Topo</extra>',
+                ))
+
+            # Draw sections on plan view
+            if st.session_state.sections:
+                for sec in st.session_state.sections:
+                    d = _az2dir(sec.azimuth)
+                    p1 = sec.origin - d * sec.length / 2
+                    p2 = sec.origin + d * sec.length / 2
+                    fig_contour.add_trace(go.Scatter(
+                        x=[p1[0], sec.origin[0], p2[0]],
+                        y=[p1[1], sec.origin[1], p2[1]],
+                        mode='lines+markers+text',
+                        text=["", sec.name, ""],
+                        textposition="top center",
+                        textfont=dict(size=10, color='red'),
+                        line=dict(color='red', width=2),
+                        marker=dict(size=[4, 7, 4], color='red'),
+                        showlegend=False,
+                        hovertemplate=f'{sec.name}<br>Az: {sec.azimuth:.1f}°<extra></extra>',
+                    ))
+
+            fig_contour.update_layout(
+                xaxis_title='Este (m)', yaxis_title='Norte (m)',
+                yaxis=dict(scaleanchor='x', scaleratio=1),
+                height=650, margin=dict(l=60, r=20, t=30, b=40),
+                legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+            )
+            st.plotly_chart(fig_contour, use_container_width=True)
+
+
+# =====================================================
+# PASO 2: DEFINIR SECCIONES
+# =====================================================
+if st.session_state.step >= 2:
+    st.header("✂️ Paso 2: Definir Secciones de Corte")
+
+    tab_file, tab_interactive, tab_manual, tab_auto = st.tabs([
+        "📂 Archivo de Coordenadas", "🗺️ Interactivo (Clic)",
+        "📌 Manual", "🔄 Automático"])
+
+    # --- TAB ARCHIVO ---
+    with tab_file:
+        st.markdown("""
+        Sube un archivo **CSV** (columnas X, Y) o **DXF** (Polyline/LWPolyline).
+        Las secciones se generarán perpendiculares a cada segmento de la línea.
+        """)
+
+        coord_file = st.file_uploader(
+            "Cargar coordenadas (CSV, DXF)", type=["csv", "txt", "dxf"], key="coord_file")
+
+        cols_file = st.columns(4)
+        spacing_file = cols_file[0].number_input(
+            "Distancia entre perfiles (m)", value=20.0, min_value=1.0, step=5.0,
+            key="spacing_file")
+        length_file = cols_file[1].number_input(
+            "Longitud de sección (m)", value=200.0, min_value=10.0, key="len_file")
+        sector_file = cols_file[2].text_input(
+            "Sector", "Principal", key="sector_file")
+        az_mode_file = cols_file[3].selectbox(
+            "Azimut", ["Perpendicular a la línea (Recomendado)", "Auto (pendiente local - Ruidoso)"],
+            key="az_mode_file")
+
+        if coord_file is not None:
+            try:
+                import pandas as pd
+                filename = coord_file.name.lower()
+                polyline = None
+                
+                if filename.endswith('.dxf'):
+                    # Handle DXF
+                    from core import load_dxf_polyline
+                    with tempfile.NamedTemporaryFile(suffix=".dxf", delete=False) as f:
+                        f.write(coord_file.read())
+                        tmp_path = f.name
+                    try:
+                        polyline = load_dxf_polyline(tmp_path)
+                    finally:
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                    
+                    if len(polyline) == 0:
+                         st.error("No se encontraron polilíneas válidas en el DXF.")
+                else:
+                    # Handle CSV
+                    content = coord_file.read().decode('utf-8')
+                    # Try to parse CSV
+                    df_coords = pd.read_csv(io.StringIO(content), nrows=10000)
+                    # Accept various column name formats
+                    x_col = next((c for c in df_coords.columns
+                                  if c.strip().upper() in ('X', 'ESTE', 'EAST', 'E')), None)
+                    y_col = next((c for c in df_coords.columns
+                                  if c.strip().upper() in ('Y', 'NORTE', 'NORTH', 'N')), None)
+
+                    if x_col is None or y_col is None:
+                        # Try first two numeric columns
+                        num_cols = df_coords.select_dtypes(include=[np.number]).columns
+                        if len(num_cols) >= 2:
+                            x_col, y_col = num_cols[0], num_cols[1]
+                        else:
+                            st.error("No se encontraron columnas X, Y en el archivo.")
+                            x_col = y_col = None
+
+                    if x_col is not None and y_col is not None:
+                        polyline = df_coords[[x_col, y_col]].dropna().values.astype(float)
+                
+                if polyline is not None and len(polyline) > 1:
+
+                    st.success(f"✅ {len(polyline)} puntos cargados desde el archivo")
+                    st.caption(f"X: [{polyline[:,0].min():.1f}, {polyline[:,0].max():.1f}] | "
+                               f"Y: [{polyline[:,1].min():.1f}, {polyline[:,1].max():.1f}]")
+
+                    # Preview polyline on a small plan view
+                    fig_preview = go.Figure()
+                    # Background: mesh vertices
+                    mesh_d = st.session_state.mesh_design
+                    verts = mesh_d.vertices
+                    step_v = max(1, len(verts) // 5000)
+                    sub = verts[::step_v]
+                    fig_preview.add_trace(go.Scatter(
+                        x=sub[:, 0], y=sub[:, 1], mode='markers',
+                        marker=dict(size=2, color=sub[:, 2], colorscale='Earth',
+                                    showscale=False),
+                        name='Superficie', hoverinfo='skip',
+                    ))
+                    # Polyline
+                    fig_preview.add_trace(go.Scatter(
+                        x=polyline[:, 0], y=polyline[:, 1],
+                        mode='lines+markers',
+                        line=dict(color='orange', width=3),
+                        marker=dict(size=6, color='orange'),
+                        name='Línea de evaluación',
+                    ))
+
+                    # Generate preview sections
+                    from core.section_cutter import generate_perpendicular_sections
+                    auto_mesh = (st.session_state.mesh_design
+                                 if "pendiente local" in az_mode_file else None)
+                    preview_sections = generate_perpendicular_sections(
+                        polyline, spacing_file, length_file, sector_file, design_mesh=auto_mesh)
+
+                    for sec in preview_sections:
+                        d = _az2dir(sec.azimuth)
+                        p1 = sec.origin - d * sec.length / 2
+                        p2 = sec.origin + d * sec.length / 2
+                        fig_preview.add_trace(go.Scatter(
+                            x=[p1[0], sec.origin[0], p2[0]],
+                            y=[p1[1], sec.origin[1], p2[1]],
+                            mode='lines+text',
+                            text=["", sec.name, ""],
+                            textposition="top center",
+                            textfont=dict(size=9, color='red'),
+                            line=dict(color='red', width=1.5),
+                            showlegend=False,
+                        ))
+
+                    st.caption(f"Se generarán **{len(preview_sections)} secciones** "
+                               f"cada {spacing_file:.0f}m")
+
+                    fig_preview.update_layout(
+                        xaxis_title='Este (m)', yaxis_title='Norte (m)',
+                        yaxis=dict(scaleanchor='x', scaleratio=1),
+                        height=500, margin=dict(l=60, r=20, t=30, b=40),
+                    )
+                    st.plotly_chart(fig_preview, use_container_width=True)
+
+                    if st.button("✅ Aplicar Secciones desde Archivo", type="primary",
+                                 key="apply_file"):
+                        st.session_state.sections = preview_sections
+                        st.session_state.step = max(st.session_state.step, 3)
+                        st.success(
+                            f"✅ {len(preview_sections)} secciones aplicadas")
+
+            except Exception as e:
+                st.error(f"Error al leer el archivo: {e}")
+
+    # --- TAB INTERACTIVO ---
+    with tab_interactive:
+        st.markdown("Haz clic sobre la vista de planta para colocar el origen de cada sección. "
+                    "El azimut se calcula automáticamente según la pendiente local del diseño.")
+
+        from core.section_cutter import compute_local_azimuth
+
+        cols_cfg = st.columns(3)
+        sec_length_int = cols_cfg[0].number_input(
+            "Longitud de sección (m)", value=200.0, min_value=10.0, key="len_int")
+        sector_int = cols_cfg[1].text_input("Sector", "Principal", key="sector_int")
+        az_mode = cols_cfg[2].selectbox(
+            "Azimut", ["Auto (pendiente local)", "Manual"], key="az_mode_int")
+        if az_mode == "Manual":
+            manual_az_int = st.number_input(
+                "Azimut manual (°)", 0.0, 360.0, 0.0, key="man_az_int")
+
+        # Build plan view
+        mesh_d = st.session_state.mesh_design
+        verts = mesh_d.vertices
+        step_v = max(1, len(verts) // 8000)
+        sub = verts[::step_v]
+
+        fig_plan = go.Figure()
+        fig_plan.add_trace(go.Scatter(
+            x=sub[:, 0], y=sub[:, 1],
+            mode='markers',
+            marker=dict(size=3, color=sub[:, 2], colorscale='Earth',
+                        showscale=True, colorbar=dict(title="Elev (m)")),
+            name='Diseño',
+            hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<extra></extra>',
+        ))
+
+        # Draw placed sections on map
+        for sec in st.session_state.clicked_sections:
+            d = _az2dir(sec.azimuth)
+            p1 = sec.origin - d * sec.length / 2
+            p2 = sec.origin + d * sec.length / 2
+            fig_plan.add_trace(go.Scatter(
+                x=[p1[0], sec.origin[0], p2[0]],
+                y=[p1[1], sec.origin[1], p2[1]],
+                mode='lines+markers+text',
+                text=["", sec.name, ""],
+                textposition="top center",
+                line=dict(color='red', width=3),
+                marker=dict(size=[4, 8, 4], color='red'),
+                showlegend=False,
+            ))
+
+        fig_plan.update_layout(
+            xaxis_title='Este (m)', yaxis_title='Norte (m)',
+            yaxis=dict(scaleanchor='x', scaleratio=1),
+            height=600, margin=dict(l=60, r=20, t=30, b=40),
+        )
+
+        # Interactive selection
+        try:
+            event = st.plotly_chart(
+                fig_plan, on_select="rerun",
+                selection_mode=["points"], key="plan_select")
+
+            if event and event.selection and event.selection.points:
+                for pt in event.selection.points:
+                    px_val, py_val = pt['x'], pt['y']
+                    already = any(
+                        abs(s.origin[0] - px_val) < 1 and abs(s.origin[1] - py_val) < 1
+                        for s in st.session_state.clicked_sections)
+                    if not already:
+                        origin = np.array([px_val, py_val])
+                        if az_mode == "Auto (pendiente local)":
+                            az = compute_local_azimuth(mesh_d, origin)
+                        else:
+                            az = manual_az_int
+                        n = len(st.session_state.clicked_sections) + 1
+                        st.session_state.clicked_sections.append(SectionLine(
+                            name=f"S-{n:02d}", origin=origin,
+                            azimuth=az, length=sec_length_int,
+                            sector=sector_int))
+                        st.rerun()
+        except TypeError:
+            st.plotly_chart(fig_plan, key="plan_fallback")
+            st.info("Actualiza Streamlit a >= 1.35 para selección interactiva. "
+                    "Mientras tanto usa la pestaña Manual.")
+
+        # Table + buttons
+        if st.session_state.clicked_sections:
+            st.subheader(f"📍 {len(st.session_state.clicked_sections)} secciones colocadas")
+            sec_data_int = []
+            for s in st.session_state.clicked_sections:
+                sec_data_int.append({
+                    "Nombre": s.name, "Sector": s.sector,
+                    "Origen X": f"{s.origin[0]:.1f}",
+                    "Origen Y": f"{s.origin[1]:.1f}",
+                    "Azimut (°)": f"{s.azimuth:.1f}",
+                    "Longitud (m)": f"{s.length:.1f}",
+                })
+            st.dataframe(sec_data_int, use_container_width=True)
+
+        cols_btn = st.columns(2)
+        if cols_btn[0].button("✅ Aplicar Secciones", type="primary", key="apply_int"):
+            if st.session_state.clicked_sections:
+                st.session_state.sections = list(st.session_state.clicked_sections)
+                st.session_state.step = max(st.session_state.step, 3)
+                st.success(f"✅ {len(st.session_state.clicked_sections)} secciones aplicadas")
+        if cols_btn[1].button("🗑️ Limpiar", key="clear_int"):
+            st.session_state.clicked_sections = []
+            st.rerun()
+
+    # --- TAB MANUAL ---
+    with tab_manual:
+        st.markdown("Define cada sección con un punto de origen (X, Y), azimut y longitud.")
+
+        cols_top = st.columns(2)
+        n_sections = cols_top[0].number_input(
+            "Número de secciones a definir", min_value=1, max_value=50, value=5)
+        auto_az_manual = cols_top[1].checkbox(
+            "Auto-detectar azimut desde diseño", value=False, key="auto_az_manual")
+
+        sections_manual = []
+        for i in range(n_sections):
+            with st.expander(f"Sección S-{i+1:02d}", expanded=(i==0)):
+                cols = st.columns(5)
+                name = cols[0].text_input("Nombre", f"S-{i+1:02d}", key=f"sname_{i}")
+                sector = cols[1].text_input("Sector", "", key=f"ssector_{i}")
+
+                bd = st.session_state.bounds_design
+                cx, cy = bd['center'][0], bd['center'][1]
+
+                cols2 = st.columns(4)
+                ox = cols2[0].number_input("Origen X", value=float(cx), format="%.1f", key=f"sox_{i}")
+                oy = cols2[1].number_input("Origen Y", value=float(cy), format="%.1f", key=f"soy_{i}")
+
+                if auto_az_manual:
+                    from core.section_cutter import compute_local_azimuth as _calc_az
+                    az = _calc_az(st.session_state.mesh_design, np.array([ox, oy]))
+                    cols2[2].text_input("Azimut (°)", value=f"{az:.1f}", disabled=True, key=f"saz_{i}")
+                else:
+                    az = cols2[2].number_input("Azimut (°)", value=0.0, min_value=0.0,
+                                              max_value=360.0, key=f"saz_{i}")
+
+                length = cols2[3].number_input("Longitud (m)", value=200.0, min_value=10.0, key=f"slen_{i}")
+
+                sections_manual.append(SectionLine(name=name, origin=np.array([ox, oy]),
+                    azimuth=az, length=length, sector=sector))
+
+        if st.button("✅ Aplicar Secciones Manuales", type="primary"):
+            st.session_state.sections = sections_manual
+            st.session_state.step = max(st.session_state.step, 3)
+            st.success(f"✅ {len(sections_manual)} secciones definidas")
+
+    with tab_auto:
+        st.markdown("Genera secciones equiespaciadas a lo largo de una línea (ej: cresta del pit).")
+
+        bd = st.session_state.bounds_design
+        cols = st.columns(4)
+        x1 = cols[0].number_input("Punto inicio X", value=float(bd['xmin']), format="%.1f")
+        y1 = cols[1].number_input("Punto inicio Y", value=float(bd['center'][1]), format="%.1f")
+        x2 = cols[2].number_input("Punto fin X", value=float(bd['xmax']), format="%.1f")
+        y2 = cols[3].number_input("Punto fin Y", value=float(bd['center'][1]), format="%.1f")
+
+        cols2 = st.columns(3)
+        n_auto = cols2[0].number_input("N° de secciones", min_value=2, max_value=50, value=5)
+        
+        # New selection logic
+        az_method = st.radio(
+            "Método de Azimut", 
+            ["Perpendicular a la línea (Recomendado)", "Fijo", "Auto (pendiente local - Ruidoso)"],
+            index=0, horizontal=True)
+            
+        fixed_az = 0.0
+        if az_method == "Fijo":
+            fixed_az = st.number_input("Azimut fijo (°)", value=0.0, min_value=0.0, max_value=360.0)
+            
+        len_auto = cols2[1].number_input("Longitud de sección (m)", value=200.0, min_value=10.0)
+        sector_auto = cols2[2].text_input("Sector", "Sector Principal", key="sector_auto_txt")
+
+        if st.button("🔄 Generar Secciones Automáticas", type="primary"):
+            from core.section_cutter import generate_sections_along_crest, compute_local_azimuth as _calc_az2
+            
+            # Determine azimuth argument for generator
+            # If "Perpendicular", we pass None to let generator handle it
+            # If "Fixed", we pass the fixed value
+            # If "Auto (local)", we pass 0.0 initially and then overwrite
+            
+            gen_az = None
+            if az_method == "Fijo":
+                gen_az = fixed_az
+            elif az_method == "Auto (pendiente local - Ruidoso)":
+                gen_az = 0.0 # Placeholder
+                
+            sections_auto = generate_sections_along_crest(
+                st.session_state.mesh_design,
+                np.array([x1, y1]),
+                np.array([x2, y2]),
+                n_auto, gen_az, len_auto, sector_auto
+            )
+            
+            # Post-process if Local Slope selected
+            if az_method == "Auto (pendiente local - Ruidoso)":
+                for sec in sections_auto:
+                    sec.azimuth = _calc_az2(st.session_state.mesh_design, sec.origin)
+            
+            st.session_state.sections = sections_auto
+            st.session_state.step = max(st.session_state.step, 3)
+            st.success(f"✅ {len(sections_auto)} secciones generadas")
+
+    # Show sections table
+    if st.session_state.sections:
+        st.subheader("📋 Secciones Definidas")
+        sec_data = []
+        for s in st.session_state.sections:
+            sec_data.append({
+                "Nombre": s.name, "Sector": s.sector,
+                "Origen X": f"{s.origin[0]:.1f}", "Origen Y": f"{s.origin[1]:.1f}",
+                "Azimut (°)": f"{s.azimuth:.1f}", "Longitud (m)": f"{s.length:.1f}"
+            })
+        st.dataframe(sec_data, use_container_width=True)
+
+# =====================================================
+# PASO 3: CORTAR Y EXTRAER
+# =====================================================
+if st.session_state.step >= 3 and st.session_state.sections:
+    st.header("🔬 Paso 3: Cortar Superficies y Extraer Parámetros")
+
+    if st.button("🚀 Ejecutar Análisis", type="primary"):
+        progress = st.progress(0)
+        status = st.empty()
+
+        profiles_d = []
+        profiles_t = []
+        params_d = []
+        params_t = []
+        comparisons = []
+
+        total = len(st.session_state.sections)
+
+        for i, section in enumerate(st.session_state.sections):
+            status.text(f"Procesando sección {section.name} ({i+1}/{total})...")
+            progress.progress((i + 1) / total)
+
+            pd_prof = cut_mesh_with_section(st.session_state.mesh_design, section)
+            pt_prof = cut_mesh_with_section(st.session_state.mesh_topo, section)
+
+            profiles_d.append(pd_prof)
+            profiles_t.append(pt_prof)
+
+            if pd_prof is not None and pt_prof is not None:
+                ep_d = extract_parameters(pd_prof.distances, pd_prof.elevations,
+                    section.name, section.sector, resolution, face_threshold, berm_threshold)
+                ep_t = extract_parameters(pt_prof.distances, pt_prof.elevations,
+                    section.name, section.sector, resolution, face_threshold, berm_threshold)
+
+                params_d.append(ep_d)
+                params_t.append(ep_t)
+
+                if ep_d.benches and ep_t.benches:
+                    comp = compare_design_vs_asbuilt(ep_d, ep_t, tolerances)
+                    comparisons.extend(comp)
+
+        st.session_state.profiles_design = profiles_d
+        st.session_state.profiles_topo = profiles_t
+        st.session_state.params_design = params_d
+        st.session_state.params_topo = params_t
+        st.session_state.comparison_results = comparisons
+        st.session_state.step = 4
+
+        status.text("✅ Análisis completado")
+
+        n_ok = sum(1 for c in comparisons for k in ['height_status','angle_status','berm_status'] if c[k] == "CUMPLE")
+        n_total = len(comparisons) * 3
+        pct = n_ok / n_total * 100 if n_total > 0 else 0
+
+        cols = st.columns(4)
+        cols[0].metric("Secciones procesadas", f"{sum(1 for p in profiles_d if p is not None)}/{total}")
+        cols[1].metric("Bancos detectados", len(comparisons))
+        cols[2].metric("Total evaluaciones", n_total)
+        cols[3].metric("Cumplimiento global", f"{pct:.1f}%")
+
+# =====================================================
+# PASO 4: RESULTADOS
+# =====================================================
+if st.session_state.step >= 4 and st.session_state.comparison_results:
+    st.header("📊 Paso 4: Resultados")
+
+    tab_profiles, tab_table, tab_dash, tab_export = st.tabs([
+        "📈 Perfiles", "📋 Tabla Detallada", "📊 Dashboard", "💾 Exportar"
+    ])
+
+    # --- PERFILES ---
+    with tab_profiles:
+        show_reconciled = st.checkbox(
+            "Mostrar perfil conciliado (geometría idealizada detectada)",
+            value=True, key="show_reconciled")
+
+        for i, section in enumerate(st.session_state.sections):
+            pd_prof = st.session_state.profiles_design[i]
+            pt_prof = st.session_state.profiles_topo[i]
+
+            if pd_prof is None or pt_prof is None:
+                st.warning(f"⚠️ Sección {section.name}: sin intersección con una o ambas superficies")
+                continue
+
+            fig = go.Figure()
+
+            # Design profile
+            fig.add_trace(go.Scatter(
+                x=pd_prof.distances, y=pd_prof.elevations,
+                mode='lines', name='Diseño',
+                line=dict(color='royalblue', width=2)))
+
+            # Topo profile
+            fig.add_trace(go.Scatter(
+                x=pt_prof.distances, y=pt_prof.elevations,
+                mode='lines', name='Topografía Real',
+                line=dict(color='forestgreen', width=2)))
+
+            # Reconciled profiles
+            if show_reconciled and i < len(st.session_state.params_design):
+                # Design reconciled
+                rd, re = build_reconciled_profile(
+                    st.session_state.params_design[i].benches)
+                if len(rd) > 0:
+                    fig.add_trace(go.Scatter(
+                        x=rd, y=re, mode='lines+markers',
+                        name='Conciliado Diseño',
+                        line=dict(color='royalblue', width=1.5, dash='dash'),
+                        marker=dict(size=5, symbol='diamond', color='royalblue'),
+                    ))
+
+            if show_reconciled and i < len(st.session_state.params_topo):
+                # Topo reconciled
+                rd, re = build_reconciled_profile(
+                    st.session_state.params_topo[i].benches)
+                if len(rd) > 0:
+                    fig.add_trace(go.Scatter(
+                        x=rd, y=re, mode='lines+markers',
+                        name='Conciliado As-Built',
+                        line=dict(color='#FF7F0E', width=2.5, dash='solid'),
+                        marker=dict(size=6, symbol='diamond', color='#FF7F0E'),
+                    ))
+
+            # Mark detected benches on topo
+            if i < len(st.session_state.params_topo):
+                for bench in st.session_state.params_topo[i].benches:
+                    fig.add_annotation(
+                        x=bench.crest_distance, y=bench.crest_elevation,
+                        text=f"B{bench.bench_number}",
+                        showarrow=True, arrowhead=2,
+                        font=dict(size=10, color="red"))
+
+            fig.update_layout(
+                title=f"Sección {section.name} — {section.sector}",
+                xaxis_title="Distancia (m)", yaxis_title="Elevación (m)",
+                height=400, yaxis=dict(scaleanchor="x", scaleratio=1),
+                legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+                margin=dict(l=60, r=20, t=40, b=40),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # --- TABLA ---
+    with tab_table:
+        import pandas as pd
+
+        if st.session_state.comparison_results:
+            df = pd.DataFrame(st.session_state.comparison_results)
+
+            display_cols = {
+                'sector': 'Sector', 'section': 'Sección', 'bench_num': 'Banco',
+                'level': 'Nivel', 'height_design': 'H. Diseño', 'height_real': 'H. Real',
+                'height_dev': 'Desv. H', 'height_status': 'Cumpl. H',
+                'angle_design': 'Á. Diseño', 'angle_real': 'Á. Real',
+                'angle_dev': 'Desv. Á', 'angle_status': 'Cumpl. Á',
+                'berm_design': 'B. Diseño', 'berm_real': 'B. Real',
+                'berm_min': 'B. Mínima', 'berm_status': 'Cumpl. B',
+            }
+            df_display = df.rename(columns=display_cols)
+
+            def highlight_status(val):
+                if val == "CUMPLE": return 'background-color: #C6EFCE; color: #006100'
+                elif val == "FUERA DE TOLERANCIA": return 'background-color: #FFEB9C; color: #9C5700'
+                elif val == "NO CUMPLE": return 'background-color: #FFC7CE; color: #9C0006'
+                return ''
+
+            styled = df_display.style.map(highlight_status,
+                subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
+            st.dataframe(styled, use_container_width=True, height=400)
+
+    # --- DASHBOARD ---
+    with tab_dash:
+        results = st.session_state.comparison_results
+
+        cols = st.columns(3)
+        for col, (param, key, label) in zip(cols, [
+            ('height', 'height_status', 'Altura de Banco'),
+            ('angle', 'angle_status', 'Ángulo de Cara'),
+            ('berm', 'berm_status', 'Ancho de Berma'),
+        ]):
+            total = len(results)
+            cumple = sum(1 for r in results if r[key] == "CUMPLE")
+            pct = cumple / total * 100 if total > 0 else 0
+            col.metric(label, f"{pct:.0f}%", f"{cumple}/{total} cumplen")
+
+        status_counts = {'Parámetro': [], 'CUMPLE': [], 'FUERA DE TOLERANCIA': [], 'NO CUMPLE': []}
+        for key, label in [('height_status','Altura'), ('angle_status','Ángulo Cara'), ('berm_status','Berma')]:
+            status_counts['Parámetro'].append(label)
+            status_counts['CUMPLE'].append(sum(1 for r in results if r[key] == "CUMPLE"))
+            status_counts['FUERA DE TOLERANCIA'].append(sum(1 for r in results if r[key] == "FUERA DE TOLERANCIA"))
+            status_counts['NO CUMPLE'].append(sum(1 for r in results if r[key] == "NO CUMPLE"))
+
+        import pandas as pd
+        df_status = pd.DataFrame(status_counts)
+        fig_bar = go.Figure()
+        fig_bar.add_trace(go.Bar(name='CUMPLE', x=df_status['Parámetro'], y=df_status['CUMPLE'],
+            marker_color='#006100'))
+        fig_bar.add_trace(go.Bar(name='FUERA TOL.', x=df_status['Parámetro'], y=df_status['FUERA DE TOLERANCIA'],
+            marker_color='#9C5700'))
+        fig_bar.add_trace(go.Bar(name='NO CUMPLE', x=df_status['Parámetro'], y=df_status['NO CUMPLE'],
+            marker_color='#9C0006'))
+        fig_bar.update_layout(barmode='stack', title="Cumplimiento por Parámetro",
+            height=350, margin=dict(l=40, r=20, t=40, b=40))
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            devs_h = [r['height_dev'] for r in results]
+            fig_h = go.Figure(go.Histogram(x=devs_h, nbinsx=15, marker_color='royalblue'))
+            fig_h.update_layout(title="Distribución Desv. Altura (m)", height=300,
+                xaxis_title="Desviación (m)", yaxis_title="Frecuencia")
+            fig_h.add_vline(x=-tol_h_neg, line_dash="dash", line_color="orange")
+            fig_h.add_vline(x=tol_h_pos, line_dash="dash", line_color="orange")
+            st.plotly_chart(fig_h, use_container_width=True)
+        with col2:
+            devs_a = [r['angle_dev'] for r in results]
+            fig_a = go.Figure(go.Histogram(x=devs_a, nbinsx=15, marker_color='forestgreen'))
+            fig_a.update_layout(title="Distribución Desv. Ángulo Cara (°)", height=300,
+                xaxis_title="Desviación (°)", yaxis_title="Frecuencia")
+            fig_a.add_vline(x=-tol_a_neg, line_dash="dash", line_color="orange")
+            fig_a.add_vline(x=tol_a_pos, line_dash="dash", line_color="orange")
+            st.plotly_chart(fig_a, use_container_width=True)
+        with col3:
+            berm_vals = [r['berm_real'] for r in results if r['berm_real'] > 0]
+            if berm_vals:
+                fig_b = go.Figure(go.Histogram(x=berm_vals, nbinsx=15, marker_color='#FF7F0E'))
+                fig_b.update_layout(title="Distribución Ancho Berma (m)", height=300,
+                    xaxis_title="Ancho (m)", yaxis_title="Frecuencia")
+                fig_b.add_vline(x=min_berm_width, line_dash="dash", line_color="red",
+                    annotation_text="Mínimo", annotation_position="top right")
+                st.plotly_chart(fig_b, use_container_width=True)
+
+    # --- EXPORTAR ---
+    with tab_export:
+        st.subheader("💾 Exportar Resultados a Excel")
+
+        if st.button("📥 Generar Excel de Conciliación", type="primary"):
+            with st.spinner("Generando Excel..."):
+                output_path = os.path.join(tempfile.gettempdir(), "Conciliacion_Resultados.xlsx")
+                project_info = {
+                    'project': project_name, 'operation': operation,
+                    'phase': phase, 'author': author,
+                    'date': datetime.now().strftime("%d/%m/%Y"),
+                }
+                export_results(
+                    st.session_state.comparison_results,
+                    st.session_state.params_design,
+                    st.session_state.params_topo,
+                    tolerances, output_path, project_info
+                )
+
+                with open(output_path, "rb") as f:
+                    st.download_button(
+                        "⬇️ Descargar Excel",
+                        f.read(),
+                        file_name="Conciliacion_Diseno_vs_AsBuilt.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        type="primary",
+                    )
+            st.success("✅ Excel generado exitosamente")
+
+        st.divider()
+
+        st.subheader("🖼️ Exportar Imágenes de Sección")
+        st.write("Genera un archivo ZIP con todos los gráficos de perfil en formato PNG.")
+        
+        if st.button("📦 Generar Imágenes (ZIP)", type="primary"):
+            with st.spinner("Generando gráficos e imágenes..."):
+                from core import generate_section_images_zip, cut_both_surfaces
+                
+                # Reconstruct full profile data for plotting
+                all_data_for_images = []
+                progress_bar = st.progress(0)
+                
+                for i, sec in enumerate(st.session_state.sections):
+                     pd_prof, pt_prof = cut_both_surfaces(
+                        st.session_state.mesh_design, 
+                        st.session_state.mesh_topo, 
+                        sec
+                     )
+                     
+                     if pd_prof and pt_prof:
+                         all_data_for_images.append({
+                             'section_name': sec.name,
+                             'params_design': st.session_state.params_design[i],
+                             'params_topo': st.session_state.params_topo[i],
+                             'profile_d': (pd_prof.distances, pd_prof.elevations),
+                             'profile_t': (pt_prof.distances, pt_prof.elevations),
+                         })
+                     progress_bar.progress((i + 1) / len(st.session_state.sections))
+
+                zip_bytes = generate_section_images_zip(all_data_for_images)
+                
+                st.download_button(
+                    label="⬇️ Descargar Imágenes ZIP",
+                    data=zip_bytes,
+                    file_name="Perfiles_Secciones.zip",
+                    mime="application/zip",
+                )
+            st.success("✅ Imágenes generadas exitosamente")
+
+# =====================================================
+# FOOTER
+# =====================================================
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; color: #666; font-size: 0.8rem;">
+    Conciliación Geotécnica v1.1 | Herramienta de análisis Diseño vs As-Built<br>
+    Parámetros: Banco 15m | Cara 65°-75° | Berma 8-10m
+</div>
+""", unsafe_allow_html=True)
