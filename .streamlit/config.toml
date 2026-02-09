@@ -1,0 +1,6 @@
+[server]
+maxUploadSize = 500  # MB - limit file uploads to 500 MB
+maxMessageSize = 500
+
+[browser]
+gatherUsageStats = false
