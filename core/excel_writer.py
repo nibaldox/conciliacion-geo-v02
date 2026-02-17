@@ -24,6 +24,10 @@ FILL_NOK = PatternFill(start_color="FFC7CE", end_color="FFC7CE",
 FONT_OK = Font(color="006100")
 FONT_WARN = Font(color="9C5700")
 FONT_NOK = Font(color="9C0006")
+FILL_GREY = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+FONT_GREY = Font(color="555555")
+FILL_PURPLE = PatternFill(start_color="E6E6FA", end_color="E6E6FA", fill_type="solid")
+FONT_PURPLE = Font(color="4B0082")
 
 
 def _apply_status_style(cell):
@@ -35,9 +39,15 @@ def _apply_status_style(cell):
     elif val == "FUERA DE TOLERANCIA":
         cell.fill = FILL_WARN
         cell.font = FONT_WARN
-    elif val == "NO CUMPLE":
+    elif val == "NO CUMPLE" or "FALTA" in str(val):
         cell.fill = FILL_NOK
         cell.font = FONT_NOK
+    elif val == "NO CONSTRUIDO":
+        cell.fill = FILL_GREY
+        cell.font = FONT_GREY
+    elif val == "EXTRA" or "ADICIONAL" in str(val) or "RAMPA" in str(val):
+        cell.fill = FILL_PURPLE
+        cell.font = FONT_PURPLE
 
 
 def _write_header(ws, row, headers):
@@ -162,6 +172,7 @@ def _write_bench_sheet(wb, comparisons):
         "H. Diseno (m)", "H. Real (m)", "Desv. H (m)", "Cumpl. H",
         "A. Diseno (deg)", "A. Real (deg)", "Desv. A (deg)", "Cumpl. A",
         "B. Diseno (m)", "B. Real (m)", "B. Minima (m)", "Cumpl. B",
+        "Delta Cresta (m)", "Delta Pata (m)"
     ]
     _write_header(ws, 1, headers)
 
@@ -174,6 +185,7 @@ def _write_bench_sheet(wb, comparisons):
             comp['angle_dev'], comp['angle_status'],
             comp['berm_design'], comp['berm_real'],
             comp.get('berm_min', 0), comp['berm_status'],
+            comp.get('delta_crest', ''), comp.get('delta_toe', ''),
         ]
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
@@ -274,6 +286,62 @@ def _write_dashboard_sheet(wb, comparisons):
     _auto_width(ws)
 
 
+def _write_sector_summary(wb, comparisons):
+    """Create Executive Summary by Sector."""
+    ws = wb.create_sheet("Resumen Ejecutivo")
+    
+    ws.cell(row=1, column=1, value="RESUMEN EJECUTIVO POR SECTOR").font = Font(bold=True, size=14, color="2F5496")
+    
+    headers = ["Sector", "Total Bancos", "Cumplimiento Global", "Cumpl. Altura", "Cumpl. Angulo", "Cumpl. Berma"]
+    _write_header(ws, 3, headers)
+    
+    # Group by sector
+    sectors = sorted(list(set(c['sector'] for c in comparisons)))
+    
+    row = 4
+    for sector in sectors:
+        sec_comps = [c for c in comparisons if c['sector'] == sector]
+        total = len(sec_comps)
+        
+        # Helper to count matches
+        def count_ok(key):
+            return sum(1 for c in sec_comps if c.get(key) == "CUMPLE" or c.get(key) == "RAMPA OK")
+            
+        ok_h = count_ok('height_status')
+        ok_a = count_ok('angle_status')
+        ok_b = count_ok('berm_status')
+        
+        # Calculate percentages
+        # Note: Global compliance is average of all parameters? Or average of banks that pass all?
+        # Let's use % of total parameters (3 per bank)
+        n_params = total * 3
+        n_ok_total = ok_h + ok_a + ok_b
+        pct_global = (n_ok_total / n_params * 100) if n_params > 0 else 0
+        
+        pct_h = (ok_h / total * 100) if total > 0 else 0
+        pct_a = (ok_a / total * 100) if total > 0 else 0
+        pct_b = (ok_b / total * 100) if total > 0 else 0
+        
+        ws.cell(row=row, column=1, value=sector).border = THIN_BORDER
+        ws.cell(row=row, column=2, value=total).border = THIN_BORDER
+        
+        # Global
+        c_Glob = ws.cell(row=row, column=3, value=f"{pct_global:.1f}%")
+        c_Glob.border = THIN_BORDER
+        if pct_global >= 90: c_Glob.fill = FILL_OK; c_Glob.font = FONT_OK
+        elif pct_global >= 75: c_Glob.fill = FILL_WARN; c_Glob.font = FONT_WARN
+        else: c_Glob.fill = FILL_NOK; c_Glob.font = FONT_NOK
+            
+        # Per param
+        ws.cell(row=row, column=4, value=f"{pct_h:.1f}%").border = THIN_BORDER
+        ws.cell(row=row, column=5, value=f"{pct_a:.1f}%").border = THIN_BORDER
+        ws.cell(row=row, column=6, value=f"{pct_b:.1f}%").border = THIN_BORDER
+        
+        row += 1
+        
+    _auto_width(ws)
+
+
 def export_results(comparisons, params_design, params_topo,
                    tolerances, output_path, project_info=None):
     """Export comparison results to a formatted Excel workbook."""
@@ -283,6 +351,7 @@ def export_results(comparisons, params_design, params_topo,
     wb = openpyxl.Workbook()
 
     _write_summary_sheet(wb, comparisons, tolerances, project_info)
+    _write_sector_summary(wb, comparisons) # New Executive Summary
     _write_bench_sheet(wb, comparisons)
     _write_interramp_sheet(wb, params_design, params_topo)
     _write_dashboard_sheet(wb, comparisons)

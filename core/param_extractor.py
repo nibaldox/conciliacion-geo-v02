@@ -18,6 +18,7 @@ class BenchParams:
     bench_height: float
     face_angle: float
     berm_width: float
+    is_ramp: bool = False
 
 
 @dataclass
@@ -231,6 +232,10 @@ def extract_parameters(distances, elevations, section_name, sector,
         # Horizontal dist
         h_dist = abs(b_upper.toe_distance - b_lower.crest_distance)
         b_upper.berm_width = float(h_dist)
+        
+        # Ramp Detection: Width 15m - 40m
+        if 15.0 <= b_upper.berm_width <= 42.0:
+            b_upper.is_ramp = True
 
     # Filter unrealistically large berms (ramps/pit floor)
     # Similar logic to before but simplified
@@ -319,40 +324,56 @@ def build_reconciled_profile(benches):
     return np.array(distances), np.array(elevations)
 
 
+    return comparisons
+
+
 def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     """
-    Compare design vs as-built parameters using ELEVATION MATCHING.
+    Compare design vs as-built parameters using Global Best-Fit Matching (Hungarian Algorithm).
+    Now returns matches, missing design benches, and extra topo benches.
     """
+    from scipy.optimize import linear_sum_assignment
+
     comparisons = []
     
-    # Create valid pairs based on elevation proximity
-    # We assume benches should be roughly at same elevation
+    benches_design = params_design.benches
+    benches_topo = params_topo.benches
     
-    # Threshold for matching: half bench height (approx 7m)
-    match_threshold = 8.0 
+    n_d = len(benches_design)
+    n_t = len(benches_topo)
     
-    used_topo_indices = set()
+    if n_d == 0 and n_t == 0:
+        return []
+
+    # Create Cost Matrix (Absolute Elevation Difference)
+    # Rows: Design, Cols: Topo
+    cost_matrix = np.zeros((n_d, n_t))
     
-    for bd in params_design.benches:
-        # Find best matching topo bench
-        best_idx = -1
-        min_diff = float('inf')
-        
-        bd_center_z = (bd.crest_elevation + bd.toe_elevation) / 2
-        
-        for i, bt in enumerate(params_topo.benches):
-            if i in used_topo_indices:
-                continue
-            bt_center_z = (bt.crest_elevation + bt.toe_elevation) / 2
-            diff = abs(bd_center_z - bt_center_z)
-            if diff < min_diff:
-                min_diff = diff
-                best_idx = i
-        
-        if best_idx != -1 and min_diff < match_threshold:
-            # Match found
-            used_topo_indices.add(best_idx)
-            bt = params_topo.benches[best_idx]
+    for i, bd in enumerate(benches_design):
+        bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
+        for j, bt in enumerate(benches_topo):
+            bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
+            cost_matrix[i, j] = abs(bd_z - bt_z)
+            
+    # Solve Assignment Problem (Minimize total elevation difference)
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    
+    # Threshold for valid match (e.g. half bench height ~8m)
+    match_threshold = 8.0
+    
+    matched_design_indices = set()
+    matched_topo_indices = set()
+    
+    # Process Matches
+    for r, c in zip(row_ind, col_ind):
+        diff = cost_matrix[r, c]
+        if diff < match_threshold:
+            # Valid Match
+            bd = benches_design[r]
+            bt = benches_topo[c]
+            
+            matched_design_indices.add(r)
+            matched_topo_indices.add(c)
             
             # --- Comparison Logic ---
             height_dev = bt.bench_height - bd.bench_height
@@ -362,7 +383,6 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
             tol_a = tolerances['face_angle']
             tol_b = tolerances['berm_width']
             
-             # Berm: evaluate against minimum matching tolerances
             min_berm = tol_b.get('min', 0.0)
             if bt.berm_width == 0.0 and bd.berm_width == 0.0:
                 berm_status = "CUMPLE"
@@ -371,12 +391,24 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
             elif bt.berm_width >= min_berm * 0.8:
                 berm_status = "FUERA DE TOLERANCIA"
             else:
-                 berm_status = "NO CUMPLE"
+                berm_status = "NO CUMPLE"
+            
+            # Override status if it's a detected ramp
+            if bt.is_ramp:
+                berm_status = "RAMPA DETECTADA"
+                if bd.is_ramp or bd.berm_width > 15.0:
+                    if abs(bt.berm_width - bd.berm_width) < 3.0:
+                        berm_status = "RAMPA OK"
+                    else:
+                        berm_status = "RAMPA (Desv. Ancho)"
+            elif bd.is_ramp:
+                berm_status = "FALTA RAMPA"
             
             comparisons.append({
                 'sector': params_design.sector,
                 'section': params_design.section_name,
-                'bench_num': bd.bench_number, # Use design number
+                'bench_num': bd.bench_number,
+                'type': 'MATCH',
                 'level': f"{bd.crest_elevation:.0f}",
                 'height_design': round(bd.bench_height, 2),
                 'height_real': round(bt.bench_height, 2),
@@ -390,10 +422,69 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': round(bt.berm_width, 2),
                 'berm_min': min_berm,
                 'berm_status': berm_status,
+                'delta_crest': round(bt.crest_distance - bd.crest_distance, 2),
+                'delta_toe': round(bt.toe_distance - bd.toe_distance, 2),
+                'bench_design': bd,
+                'bench_real': bt,
             })
-        else:
-            # No match found in topo for this design bench
-            # We could report "Missing Bench" or just skip
-            pass
+    
+    # Process Unmatched Design (Missing Benches)
+    for i in range(n_d):
+        if i not in matched_design_indices:
+            bd = benches_design[i]
+            comparisons.append({
+                'sector': params_design.sector,
+                'section': params_design.section_name,
+                'bench_num': bd.bench_number,
+                'type': 'MISSING',
+                'level': f"{bd.crest_elevation:.0f}",
+                'height_design': round(bd.bench_height, 2),
+                'height_real': None,
+                'height_dev': None,
+                'height_status': "NO CONSTRUIDO",
+                'angle_design': round(bd.face_angle, 1),
+                'angle_real': None,
+                'angle_dev': None,
+                'angle_status': "-",
+                'berm_design': round(bd.berm_width, 2),
+                'berm_real': None,
+                'berm_min': None,
+                'berm_status': "FALTA BANCO",
+                'delta_crest': None,
+                'delta_toe': None,
+                'bench_design': bd,
+                'bench_real': None,
+            })
             
+    # Process Unmatched Topo (Extra Benches)
+    for j in range(n_t):
+        if j not in matched_topo_indices:
+            bt = benches_topo[j]
+            comparisons.append({
+                'sector': params_design.sector,
+                'section': params_design.section_name,
+                'bench_num': 999, # Placeholder
+                'type': 'EXTRA',
+                'level': f"{bt.crest_elevation:.0f}",
+                'height_design': None,
+                'height_real': round(bt.bench_height, 2),
+                'height_dev': None,
+                'height_status': "EXTRA",
+                'angle_design': None,
+                'angle_real': round(bt.face_angle, 1),
+                'angle_dev': None,
+                'angle_status': "-",
+                'berm_design': None,
+                'berm_real': round(bt.berm_width, 2),
+                'berm_min': None,
+                'berm_status': "BANCO ADICIONAL",
+                'delta_crest': None, # Meaningless without design? Or could compare to "nearest"? Keep None.
+                'delta_toe': None,
+                'bench_design': None,
+                'bench_real': bt,
+            })
+            
+    # Sort by Level (Descending) for display
+    comparisons.sort(key=lambda x: float(x['level']) if x['level'].replace('.','',1).isdigit() else 0, reverse=True)
+    
     return comparisons

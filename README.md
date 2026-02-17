@@ -6,6 +6,11 @@ Herramienta para conciliación automática de parámetros geotécnicos de talude
 
 Carga superficies 3D de diseño y topografía real, genera secciones transversales, extrae automáticamente los parámetros geométricos (altura de banco, ángulo de cara, ancho de berma, ángulos inter-rampa) y evalúa el cumplimiento respecto al diseño.
 
+### ✨ Nuevas Funcionalidades
+- **🚦 Visualización Semáforo (Perfiles)**: Coloreado automático del perfil topográfico según desviación geométrica (Verde=Cumple, Amarillo=Alerta, Rojo=No Cumple).
+- **🛤️ Detección de Rampas**: Identificación automática de elementos de rampa (bermas anchas 15-40m) y reportabilidad específica (Rampa OK / Falta Rampa).
+
+
 ## 🚀 Instalación
 
 ```bash
@@ -131,5 +136,6 @@ geoconciliacion/
     ├── mesh_handler.py    # Carga y manejo de mallas STL
     ├── section_cutter.py  # Generación de secciones transversales
     ├── param_extractor.py # Extracción de parámetros geotécnicos
+    ├── geom_utils.py      # Cálculos geométricos (desviaciones)
     └── excel_writer.py    # Exportación a Excel
 ```

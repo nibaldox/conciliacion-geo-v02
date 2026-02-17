@@ -22,6 +22,7 @@ from core import (
     extract_parameters, compare_design_vs_asbuilt, build_reconciled_profile,
     export_results,
 )
+from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles
 
 st.set_page_config(page_title="Conciliación Geotécnica", page_icon="⛏️", layout="wide")
 
@@ -81,6 +82,12 @@ with st.sidebar:
     berm_threshold = st.slider("Ángulo máximo berma (°)", 5, 30, 20)
     resolution = st.slider("Resolución de perfil (m)", 0.1, 2.0, 0.5)
 
+    st.subheader("📊 Visualización")
+    grid_height = st.number_input("Grilla Vertical (m)", value=15.0, min_value=1.0, step=1.0, 
+                                  help="Define la separación de líneas horizontales en los perfiles")
+    grid_ref = st.number_input("Cota Referencia (m)", value=0.0, step=1.0,
+                               help="Altura base para alinear la grilla (ej: pata del banco)")
+
     st.subheader("📋 Información del Proyecto")
     project_name = st.text_input("Proyecto", "")
     operation = st.text_input("Operación", "")
@@ -99,11 +106,19 @@ tolerances = {
 # =====================================================
 # HELPER: Generate contour data from mesh
 # =====================================================
-def _mesh_to_contour_data(mesh, grid_size=500):
+@st.cache_data(show_spinner=False)
+def _mesh_to_contour_data(_mesh, grid_size=500):
     """Interpolate mesh vertices onto a regular grid for contour plotting."""
+    # Note: _mesh argument name starts with underscore to prevent hashing large object if not needed,
+    # but st.cache_data hashes arguments. For Trimesh objects, hashing might be slow.
+    # We might want to rely on a unique ID (like filename + hash) but here we just cache.
+    # To be safe and fast, we can transform mesh to vertices array before passing or just cache this.
+    
     from scipy.interpolate import griddata
 
-    verts = mesh.vertices
+    if _mesh is None: return None, None, None, None, None
+
+    verts = _mesh.vertices
     # Subsample if too many vertices to avoid slow griddata
     # Increased limit to 200k to preserve details in design meshes
     if len(verts) > 200000:
@@ -220,7 +235,7 @@ if st.session_state.mesh_design is not None and st.session_state.mesh_topo is no
             contour_surface = contour_cols[0].selectbox(
                 "Superficie", ["Diseño", "Topografía", "Ambas"], key="contour_surf")
             contour_interval = contour_cols[1].number_input(
-                "Intervalo curvas (m)", value=5.0, min_value=1.0, step=1.0, key="contour_int")
+                "Intervalo curvas (m)", value=15.0, min_value=1.0, step=1.0, key="contour_int")
             contour_grid = contour_cols[2].number_input(
                 "Resolución grilla", value=500, min_value=100, max_value=2000, step=100, key="contour_grid")
 
@@ -232,14 +247,14 @@ if st.session_state.mesh_design is not None and st.session_state.mesh_topo is no
                 fig_contour.add_trace(go.Contour(
                     x=xi, y=yi, z=zig,
                     contours=dict(
-                        start=float(np.nanmin(zig)) if zig is not None else 0,
+                        start=grid_ref,
                         end=float(np.nanmax(zig)) if zig is not None else 100,
                         size=contour_interval,
                         showlabels=True,
                         labelfont=dict(size=9, color='blue'),
+                        coloring='lines',
                     ),
-                    line=dict(color='royalblue', width=1.5),
-                    colorscale=[[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0)']],
+                    line=dict(color='royalblue', width=1.0),
                     showscale=False,
                     name='Diseño',
                     hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Diseño</extra>',
@@ -251,14 +266,14 @@ if st.session_state.mesh_design is not None and st.session_state.mesh_topo is no
                 fig_contour.add_trace(go.Contour(
                     x=xi, y=yi, z=zig,
                     contours=dict(
-                        start=float(np.nanmin(zig)) if zig is not None else 0,
+                        start=grid_ref,
                         end=float(np.nanmax(zig)) if zig is not None else 100,
                         size=contour_interval,
                         showlabels=True,
                         labelfont=dict(size=9, color='green'),
+                        coloring='lines',
                     ),
-                    line=dict(color='forestgreen', width=1.5),
-                    colorscale=[[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0)']],
+                    line=dict(color='forestgreen', width=1.0),
                     showscale=False,
                     name='Topografía',
                     hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Topo</extra>',
@@ -661,58 +676,84 @@ if st.session_state.step >= 2:
 if st.session_state.step >= 3 and st.session_state.sections:
     st.header("🔬 Paso 3: Cortar Superficies y Extraer Parámetros")
 
+    if st.session_state.sections:
+        all_names = [s.name for s in st.session_state.sections]
+        selected_names = st.multiselect(
+            "Seleccionar secciones a procesar:",
+            options=all_names,
+            default=all_names,
+            key="section_selector"
+        )
+    else:
+        selected_names = []
+
     if st.button("🚀 Ejecutar Análisis", type="primary"):
-        progress = st.progress(0)
-        status = st.empty()
+        if not selected_names:
+            st.error("Debes seleccionar al menos una sección.")
+        else:
+            # Filter sections
+            sections_to_process = [s for s in st.session_state.sections if s.name in selected_names]
+            
+            progress = st.progress(0)
+            status = st.empty()
+    
+            profiles_d = []
+            profiles_t = []
+            params_d = []
+            params_t = []
+            comparisons = []
+    
+            total = len(sections_to_process)
+    
+            for i, section in enumerate(sections_to_process):
+                status.text(f"Procesando sección {section.name} ({i+1}/{total})...")
+                progress.progress((i + 1) / total)
 
-        profiles_d = []
-        profiles_t = []
-        params_d = []
-        params_t = []
-        comparisons = []
+                pd_prof = cut_mesh_with_section(st.session_state.mesh_design, section)
+                pt_prof = cut_mesh_with_section(st.session_state.mesh_topo, section)
 
-        total = len(st.session_state.sections)
+                profiles_d.append(pd_prof)
+                profiles_t.append(pt_prof)
 
-        for i, section in enumerate(st.session_state.sections):
-            status.text(f"Procesando sección {section.name} ({i+1}/{total})...")
-            progress.progress((i + 1) / total)
+                if pd_prof is not None and pt_prof is not None:
+                    ep_d = extract_parameters(pd_prof.distances, pd_prof.elevations,
+                        section.name, section.sector, resolution, face_threshold, berm_threshold)
+                    ep_t = extract_parameters(pt_prof.distances, pt_prof.elevations,
+                        section.name, section.sector, resolution, face_threshold, berm_threshold)
 
-            pd_prof = cut_mesh_with_section(st.session_state.mesh_design, section)
-            pt_prof = cut_mesh_with_section(st.session_state.mesh_topo, section)
+                    params_d.append(ep_d)
+                    params_t.append(ep_t)
 
-            profiles_d.append(pd_prof)
-            profiles_t.append(pt_prof)
-
-            if pd_prof is not None and pt_prof is not None:
-                ep_d = extract_parameters(pd_prof.distances, pd_prof.elevations,
-                    section.name, section.sector, resolution, face_threshold, berm_threshold)
-                ep_t = extract_parameters(pt_prof.distances, pt_prof.elevations,
-                    section.name, section.sector, resolution, face_threshold, berm_threshold)
-
-                params_d.append(ep_d)
-                params_t.append(ep_t)
-
-                if ep_d.benches and ep_t.benches:
-                    comp = compare_design_vs_asbuilt(ep_d, ep_t, tolerances)
-                    comparisons.extend(comp)
+                    if ep_d.benches and ep_t.benches:
+                        comp = compare_design_vs_asbuilt(ep_d, ep_t, tolerances)
+                        comparisons.extend(comp)
 
         st.session_state.profiles_design = profiles_d
         st.session_state.profiles_topo = profiles_t
         st.session_state.params_design = params_d
         st.session_state.params_topo = params_t
         st.session_state.comparison_results = comparisons
+        st.session_state.processed_sections = sections_to_process
         st.session_state.step = 4
 
         status.text("✅ Análisis completado")
 
-        n_ok = sum(1 for c in comparisons for k in ['height_status','angle_status','berm_status'] if c[k] == "CUMPLE")
-        n_total = len(comparisons) * 3
-        pct = n_ok / n_total * 100 if n_total > 0 else 0
+        n_ok = 0
+        n_total_valid = 0
+        for c in comparisons:
+            for k in ['height_status','angle_status','berm_status']:
+                status = c.get(k)
+                if status and status != "-":
+                    n_total_valid += 1
+                    if status == "CUMPLE" or status == "RAMPA OK":
+                        n_ok += 1
+        
+        pct = n_ok / n_total_valid * 100 if n_total_valid > 0 else 0
 
         cols = st.columns(4)
         cols[0].metric("Secciones procesadas", f"{sum(1 for p in profiles_d if p is not None)}/{total}")
         cols[1].metric("Bancos detectados", len(comparisons))
-        cols[2].metric("Total evaluaciones", n_total)
+        cols[2].metric("Total evaluaciones", n_total_valid)
         cols[3].metric("Cumplimiento global", f"{pct:.1f}%")
 
 # =====================================================
@@ -730,8 +771,20 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
         show_reconciled = st.checkbox(
             "Mostrar perfil conciliado (geometría idealizada detectada)",
             value=True, key="show_reconciled")
+        
+        show_areas = st.checkbox(
+             "Mostrar Áreas (Sobre-excavación / Deuda)",
+             value=False, key="show_areas")
 
-        for i, section in enumerate(st.session_state.sections):
+
+        show_semaphore = st.checkbox(
+             "Visualización Semáforo (Verde=Cumple, Amarillo=Alerta, Rojo=No Cumple)",
+             value=False, key="show_semaphore")
+
+        # Use processed sections for iteration to maintain index alignment
+        display_sections = st.session_state.get('processed_sections', st.session_state.sections)
+
+        for i, section in enumerate(display_sections):
             pd_prof = st.session_state.profiles_design[i]
             pt_prof = st.session_state.profiles_topo[i]
 
@@ -747,11 +800,225 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                 mode='lines', name='Diseño',
                 line=dict(color='royalblue', width=2)))
 
+            # Area Visualization
+            area_over, area_under = 0.0, 0.0
+            if show_areas and pd_prof is not None and pt_prof is not None:
+                a_over, a_under, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(pd_prof, pt_prof)
+                area_over, area_under = a_over, a_under
+                
+                # Plot filled areas
+                # We need to construct polygons or use fill parameters
+                # Plotly fill is 'tozeroy' or 'tonexty'.
+                # Easiest way: Plot one line, then plot the other with fill 'tonexty' only where condition meets?
+                # Actually, standard scatter with fill might be tricky for partial fills.
+                # Improved approach: Create specific traces for Over and Under.
+                
+                # Trace for Under (Deuda) - Topo > Design
+                # We plot Design as base, then Topo where Topo > Design
+                # Use 'fill=tonexty' requires ordering. 
+                # Simpler: Plot Design (Invisible), then plot Topo-masked-Design (Invisible), fill=tonexty? No.
+                
+                # Let's use the interpolated arrays.
+                # Mask for Under
+                mask_u = z_eval_i >= z_ref_i
+                if np.any(mask_u):
+                    fig.add_trace(go.Scatter(
+                        x=np.concatenate([d_i[mask_u], d_i[mask_u][::-1]]),
+                        y=np.concatenate([z_eval_i[mask_u], z_ref_i[mask_u][::-1]]),
+                        fill='toself',
+                        fillcolor='rgba(0,0,255,0.3)', # Blue for Deuda
+                        line=dict(width=0),
+                        name=f'Deuda ({a_under:.1f} m²)',
+                        hoverinfo='skip'
+                    ))
+                
+                # Mask for Over
+                mask_o = z_eval_i < z_ref_i
+                if np.any(mask_o):
+                     fig.add_trace(go.Scatter(
+                        x=np.concatenate([d_i[mask_o], d_i[mask_o][::-1]]),
+                        y=np.concatenate([z_eval_i[mask_o], z_ref_i[mask_o][::-1]]),
+                        fill='toself',
+                        fillcolor='rgba(255,0,0,0.3)', # Red for Over
+                        line=dict(width=0),
+                        name=f'Sobre-exc. ({a_over:.1f} m²)',
+                        hoverinfo='skip'
+                    ))
+
+            # Add Metrics Annotation - REMOVED per user request (confusing average)
+            # But we still need sec_comps and sec_name for the next block
+            sec_name = section.name
+            sec_comps = [c for c in st.session_state.comparison_results if c['section'] == sec_name]
+            
+            
+            # --- Per-Bench Metrics Annotation ---
+            # If we have comparisons, iterate and annotate
+            if sec_comps and 'd_i' in locals() and pd_prof is not None:
+                # We need the full interpolated data if not already computed
+                if not (show_areas and pd_prof is not None and pt_prof is not None):
+                     # Recalculate if it wasn't done above (though we did a partial calc above, 
+                     # we need d_i, z_ref_i, z_eval_i which are returned by calculate_area_between_profiles)
+                     # Actually, the variable scope from previous block might not be available if show_areas was False
+                     # Let's ensure we have the data
+                     a_over_full, a_under_full, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(pd_prof, pt_prof)
+
+                dx = 0.1 # Integration step from geom_utils
+
+                # Prepare data for hover tooltips
+                hover_x = []
+                hover_y = []
+                hover_text = []
+                hover_colors = []
+                hover_symbols = []
+
+                for comp in sec_comps:
+                    c_type = comp.get('type', 'MATCH')
+                    
+                    if c_type == 'MISSING':
+                        bd = comp.get('bench_design')
+                        if bd:
+                            hover_x.append(bd.crest_distance)
+                            hover_y.append(bd.crest_elevation)
+                            hover_text.append(f"<b>Cota {bd.toe_elevation:.0f}</b><br>❌ NO CONSTRUIDO")
+                            hover_colors.append("red")
+                            hover_symbols.append("x")
+                        continue
+
+                    if c_type == 'EXTRA':
+                        bt = comp.get('bench_real')
+                        if bt:
+                            hover_x.append(bt.crest_distance)
+                            hover_y.append(bt.crest_elevation)
+                            hover_text.append(f"<b>Cota {bt.toe_elevation:.0f}</b><br>⚠️ BANCO ADICIONAL")
+                            hover_colors.append("orange")
+                            hover_symbols.append("triangle-up")
+                        continue
+
+                    # valid match
+                    bd = comp.get('bench_design')
+                    if not bd: continue
+                    
+                    # Define range for this bench
+                    # From Toe to Crest (Face) is the critical part for compliance
+                    # But for "Over/Under" of the bench, we might want the whole step (Toe to next Toe)
+                    # Let's use Toe to Crest + Berm Width
+                    
+                    start_dist = bd.toe_distance
+                    # End distance: difficult to know next toe without looking ahead. 
+                    # Approximate as Crest + Berm
+                    end_dist = bd.crest_distance + bd.berm_width
+                    
+                    # Find indices in common grid
+                    # d_i is sorted
+                    idx_start = np.searchsorted(d_i, start_dist)
+                    idx_end = np.searchsorted(d_i, end_dist)
+                    
+                    if idx_end > idx_start:
+                        # Slice arrays
+                        z_ref_slice = z_ref_i[idx_start:idx_end]
+                        z_eval_slice = z_eval_i[idx_start:idx_end]
+                        
+                        # Calculate diff
+                        diff_slice = z_eval_slice - z_ref_slice
+                        
+                        # Areas
+                        a_u_b = np.sum(diff_slice[diff_slice > 0]) * dx
+                        a_o_b = np.sum(np.abs(diff_slice[diff_slice < 0])) * dx
+                        
+                        # Compliance status for this bench (aggregate)
+                        # Consolidate status: if any parameter fails, bench fails
+                        statuses = [comp.get('height_status'), comp.get('angle_status'), comp.get('berm_status')]
+                        if "NO CUMPLE" in statuses or "FALTA RAMPA" in statuses:
+                            b_status = "❌"
+                            color_s = "red"
+                        elif "FUERA DE TOLERANCIA" in statuses or "RAMPA (Desv. Ancho)" in statuses:
+                            b_status = "⚠️"
+                            color_s = "orange"
+                        else:
+                            b_status = "✅"
+                            color_s = "green"
+
+                        # Distance Calculations (Pre-calculated in param_extractor)
+                        d_crest = comp.get('delta_crest')
+                        d_toe = comp.get('delta_toe')
+                        
+                        # Formatting with sign
+                        txt_crest = f"{d_crest:+.2f}m" if d_crest is not None else "N/A"
+                        txt_toe = f"{d_toe:+.2f}m" if d_toe is not None else "N/A"
+                        
+                        # Color coding for deltas
+                        # Use Red if < -0.5 (Overbreak typically), Blue if > 0.5 (Underbreak)
+                        c_crest = "red" if d_crest and d_crest < -0.5 else "blue" if d_crest and d_crest > 0.5 else "black"
+                        c_toe = "red" if d_toe and d_toe < -0.5 else "blue" if d_toe and d_toe > 0.5 else "black"
+
+                        # Add point data
+                        hover_x.append(bd.crest_distance)
+                        hover_y.append(bd.crest_elevation)
+                        hover_text.append(
+                            f"<b>Cota {bd.toe_elevation:.0f}</b> {b_status}<br>"
+                            f"ΔCr: <span style='color:{c_crest}'>{txt_crest}</span><br>"
+                            f"ΔPa: <span style='color:{c_toe}'>{txt_toe}</span>"
+                        )
+                        hover_colors.append(color_s)
+                        hover_symbols.append("circle")
+
+                # Add the trace with hover info
+                if hover_x:
+                    fig.add_trace(go.Scatter(
+                        x=hover_x, y=hover_y,
+                        mode='markers',
+                        name='Info Bancos',
+                        marker=dict(
+                            color=hover_colors,
+                            symbol=hover_symbols,
+                            size=10,
+                            line=dict(color='black', width=1)
+                        ),
+                        text=hover_text,
+                        hoverinfo='text',
+                        hoverlabel=dict(bgcolor="rgba(255, 255, 255, 0.2)", font_size=15)
+                    ))
+
             # Topo profile
-            fig.add_trace(go.Scatter(
-                x=pt_prof.distances, y=pt_prof.elevations,
-                mode='lines', name='Topografía Real',
-                line=dict(color='forestgreen', width=2)))
+            if show_semaphore and pd_prof is not None:
+                # Calculate deviations
+                devs = calculate_profile_deviation(pd_prof, pt_prof)
+                
+                # Base Tolerance (using Height Pos Tolerance as general reference)
+                T = tolerances['bench_height']['pos'] 
+                
+                mask_ok = devs <= T
+                mask_warn = (devs > T) & (devs <= 1.5 * T)
+                mask_nok = devs > 1.5 * T
+                
+                # Connectivity line (faint)
+                fig.add_trace(go.Scatter(
+                     x=pt_prof.distances, y=pt_prof.elevations,
+                     mode='lines', name='Topo (Traza)',
+                     line=dict(color='gray', width=0.5), showlegend=False))
+
+                # Semaphore traces
+                if np.any(mask_ok):
+                    fig.add_trace(go.Scatter(
+                        x=pt_prof.distances[mask_ok], y=pt_prof.elevations[mask_ok],
+                        mode='markers', name=f'Cumple (<{T}m)',
+                        marker=dict(color='#006100', size=3)))
+                if np.any(mask_warn):
+                     fig.add_trace(go.Scatter(
+                        x=pt_prof.distances[mask_warn], y=pt_prof.elevations[mask_warn],
+                        mode='markers', name='Alerta',
+                        marker=dict(color='#FFD700', size=4))) # Gold
+                if np.any(mask_nok):
+                     fig.add_trace(go.Scatter(
+                        x=pt_prof.distances[mask_nok], y=pt_prof.elevations[mask_nok],
+                        mode='markers', name='No Cumple',
+                        marker=dict(color='#FF0000', size=4))) # Red
+
+            else:
+                fig.add_trace(go.Scatter(
+                    x=pt_prof.distances, y=pt_prof.elevations,
+                    mode='lines', name='Topografía Real',
+                    line=dict(color='forestgreen', width=2)))
 
             # Reconciled profiles
             if show_reconciled and i < len(st.session_state.params_design):
@@ -790,7 +1057,10 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
             fig.update_layout(
                 title=f"Sección {section.name} — {section.sector}",
                 xaxis_title="Distancia (m)", yaxis_title="Elevación (m)",
-                height=400, yaxis=dict(scaleanchor="x", scaleratio=1),
+                height=400, 
+                yaxis=dict(scaleanchor="x", scaleratio=1, 
+                           dtick=grid_height, tick0=grid_ref, gridcolor='lightgray'),
+                xaxis=dict(gridcolor='lightgray'),
                 legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
                 margin=dict(l=60, r=20, t=40, b=40),
             )
@@ -815,9 +1085,13 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
             df_display = df.rename(columns=display_cols)
 
             def highlight_status(val):
-                if val == "CUMPLE": return 'background-color: #C6EFCE; color: #006100'
+                val = str(val)
+                if val == "CUMPLE" or "RAMPA OK" in val: return 'background-color: #C6EFCE; color: #006100'
                 elif val == "FUERA DE TOLERANCIA": return 'background-color: #FFEB9C; color: #9C5700'
-                elif val == "NO CUMPLE": return 'background-color: #FFC7CE; color: #9C0006'
+                elif val == "NO CUMPLE" or "FALTA" in val: return 'background-color: #FFC7CE; color: #9C0006'
+                elif val == "NO CONSTRUIDO": return 'background-color: #E0E0E0; color: #555555' # Grey
+                elif val == "EXTRA" or val == "BANCO ADICIONAL": return 'background-color: #E6E6FA; color: #4B0082' # Purple
+                elif "RAMPA" in val: return 'background-color: #E6E6FA; color: #4B0082'
                 return ''
 
             styled = df_display.style.map(highlight_status,
@@ -861,7 +1135,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            devs_h = [r['height_dev'] for r in results]
+            devs_h = [r['height_dev'] for r in results if r['height_dev'] is not None]
             fig_h = go.Figure(go.Histogram(x=devs_h, nbinsx=15, marker_color='royalblue'))
             fig_h.update_layout(title="Distribución Desv. Altura (m)", height=300,
                 xaxis_title="Desviación (m)", yaxis_title="Frecuencia")
@@ -869,7 +1143,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
             fig_h.add_vline(x=tol_h_pos, line_dash="dash", line_color="orange")
             st.plotly_chart(fig_h, use_container_width=True)
         with col2:
-            devs_a = [r['angle_dev'] for r in results]
+            devs_a = [r['angle_dev'] for r in results if r['angle_dev'] is not None]
             fig_a = go.Figure(go.Histogram(x=devs_a, nbinsx=15, marker_color='forestgreen'))
             fig_a.update_layout(title="Distribución Desv. Ángulo Cara (°)", height=300,
                 xaxis_title="Desviación (°)", yaxis_title="Frecuencia")
@@ -877,7 +1151,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
             fig_a.add_vline(x=tol_a_pos, line_dash="dash", line_color="orange")
             st.plotly_chart(fig_a, use_container_width=True)
         with col3:
-            berm_vals = [r['berm_real'] for r in results if r['berm_real'] > 0]
+            berm_vals = [r['berm_real'] for r in results if r['berm_real'] is not None and r['berm_real'] > 0]
             if berm_vals:
                 fig_b = go.Figure(go.Histogram(x=berm_vals, nbinsx=15, marker_color='#FF7F0E'))
                 fig_b.update_layout(title="Distribución Ancho Berma (m)", height=300,
