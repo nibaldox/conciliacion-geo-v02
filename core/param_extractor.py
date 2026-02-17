@@ -262,6 +262,43 @@ def extract_parameters(distances, elevations, section_name, sector,
         for idx, b in enumerate(benches):
             b.bench_number = idx + 1
 
+    # check for trailing berm (flat area after last bench)
+    if len(benches) > 0:
+        last_bench = benches[-1]
+        # Find points after the last toe
+        # We need the original simplified points or distances/elevations
+        # benches stores crest/toe coordinates.
+        # Let's use the input arrays (distances, elevations) to find limits
+        
+        # Last element indices in simplified array were stored in merged_segments but we lost them
+        # We can search in 'distances' array for points > last_bench.toe_distance (assuming scanning direction)
+        
+        # Check if distances increase or decrease
+        if distances[-1] > distances[0]:
+            # Increasing distance
+            mask_after = distances > last_bench.toe_distance + 0.1
+        else:
+            # Decreasing distance
+            mask_after = distances < last_bench.toe_distance - 0.1
+            
+        d_after = distances[mask_after]
+        e_after = elevations[mask_after]
+        
+        if len(d_after) > 1:
+            # Check average slope of this trailing segment
+            slope_deg = np.degrees(np.arctan2(np.abs(e_after[-1] - e_after[0]), np.abs(d_after[-1] - d_after[0])))
+            
+            # If it's flat enough to be a berm (<= berm_threshold)
+            if slope_deg <= berm_threshold:
+                # Calculate horizontal width
+                width = np.abs(d_after[-1] - d_after[0])
+                # Assign to last bench
+                last_bench.berm_width = float(width)
+                
+                # Check for ramp
+                if 15.0 <= width <= 42.0:
+                    last_bench.is_ramp = True
+
     result.benches = benches
     
     # Calculate angles
@@ -409,7 +446,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'section': params_design.section_name,
                 'bench_num': bd.bench_number,
                 'type': 'MATCH',
-                'level': f"{bd.crest_elevation:.0f}",
+                'level': f"{bd.toe_elevation:.0f}",
                 'height_design': round(bd.bench_height, 2),
                 'height_real': round(bt.bench_height, 2),
                 'height_dev': round(height_dev, 2),
@@ -437,7 +474,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'section': params_design.section_name,
                 'bench_num': bd.bench_number,
                 'type': 'MISSING',
-                'level': f"{bd.crest_elevation:.0f}",
+                'level': f"{bd.toe_elevation:.0f}",
                 'height_design': round(bd.bench_height, 2),
                 'height_real': None,
                 'height_dev': None,
@@ -465,7 +502,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'section': params_design.section_name,
                 'bench_num': 999, # Placeholder
                 'type': 'EXTRA',
-                'level': f"{bt.crest_elevation:.0f}",
+                'level': f"{bt.toe_elevation:.0f}",
                 'height_design': None,
                 'height_real': round(bt.bench_height, 2),
                 'height_dev': None,

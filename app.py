@@ -1071,7 +1071,67 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
         import pandas as pd
 
         if st.session_state.comparison_results:
+            
+            # Sorting Options
+            sort_option = st.radio(
+                "Orden de la tabla:", 
+                ["Por Sección (Vertical)", "Por Nivel (Horizontal)"], 
+                horizontal=True,
+                key="table_sort"
+            )
+            
             df = pd.DataFrame(st.session_state.comparison_results)
+
+            # --- Filtering ---
+            with st.expander("🔎 Filtros (Excel-style)", expanded=False):
+                cols_filter = st.columns(3)
+                
+                # Filter by Sector
+                all_sectors = sorted(list(df['sector'].unique()))
+                sel_sectors = cols_filter[0].multiselect("Filtrar por Sector:", all_sectors, default=[], key="filter_sector")
+                
+                # Filter by Level
+                # Convert levels to numeric for sorting just for the list, but use original string for filtering
+                unique_levels = df['level'].unique()
+                # Sort levels numerically descending
+                sorted_levels = sorted(unique_levels, key=lambda x: float(x) if x.replace('.','',1).isdigit() else -9999, reverse=True)
+                sel_levels = cols_filter[1].multiselect("Filtrar por Nivel (Cota):", sorted_levels, default=[], key="filter_level")
+
+                # Filter by Section
+                all_sections = sorted(list(df['section'].unique()))
+                sel_sections = cols_filter[2].multiselect("Filtrar por Sección:", all_sections, default=[], key="filter_section")
+            
+            # Apply Filters
+            if sel_sectors:
+                df = df[df['sector'].isin(sel_sectors)]
+            if sel_levels:
+                df = df[df['level'].isin(sel_levels)]
+            if sel_sections:
+                df = df[df['section'].isin(sel_sections)]
+
+            
+            # Apply sorting
+            if "Por Nivel" in sort_option:
+                # Create a numeric column for sorting levels correctly
+                # 'level' is string "3005", "3005.5", etc.
+                df['sort_level'] = pd.to_numeric(df['level'], errors='coerce').fillna(-9999)
+                # Sort descending (top-down) for mining usually, but ascending might be better for list?
+                # Let's do descending elevation (highest first) -> mimics pit map
+                df = df.sort_values(by=['sort_level', 'section'], ascending=[False, True])
+                
+                # Reorder columns to put Level first
+                cols = ['sector', 'level', 'section', 'bench_num'] + [c for c in df.columns if c not in ['sector', 'level', 'section', 'bench_num', 'sort_level', 'sort_bench']]
+                df = df[cols]
+                
+            else:
+                # Default: Section then Level 
+                # Sort by section name then descending level (top-down within section)
+                df['sort_level'] = pd.to_numeric(df['level'], errors='coerce').fillna(-9999)
+                df = df.sort_values(by=['section', 'sort_level'], ascending=[True, False])
+                
+                # Standard column order
+                cols = ['sector', 'section', 'bench_num', 'level'] + [c for c in df.columns if c not in ['sector', 'section', 'bench_num', 'level', 'sort_level', 'sort_bench']]
+                df = df[cols]
 
             display_cols = {
                 'sector': 'Sector', 'section': 'Sección', 'bench_num': 'Banco',
@@ -1081,6 +1141,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                 'angle_dev': 'Desv. Á', 'angle_status': 'Cumpl. Á',
                 'berm_design': 'B. Diseño', 'berm_real': 'B. Real',
                 'berm_min': 'B. Mínima', 'berm_status': 'Cumpl. B',
+                'delta_crest': 'Δ Cresta', 'delta_toe': 'Δ Pata'
             }
             df_display = df.rename(columns=display_cols)
 
@@ -1090,7 +1151,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                 elif val == "FUERA DE TOLERANCIA": return 'background-color: #FFEB9C; color: #9C5700'
                 elif val == "NO CUMPLE" or "FALTA" in val: return 'background-color: #FFC7CE; color: #9C0006'
                 elif val == "NO CONSTRUIDO": return 'background-color: #E0E0E0; color: #555555' # Grey
-                elif val == "EXTRA" or val == "BANCO ADICIONAL": return 'background-color: #E6E6FA; color: #4B0082' # Purple
+                elif val == "EXTRA" or "ADICIONAL" in val: return 'background-color: #E6E6FA; color: #4B0082' # Purple
                 elif "RAMPA" in val: return 'background-color: #E6E6FA; color: #4B0082'
                 return ''
 
