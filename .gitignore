@@ -6,3 +6,4 @@ __pycache__/
 *.stl
 *.xlsx
 !ejemplo_secciones.json
+frontend/node_modules/

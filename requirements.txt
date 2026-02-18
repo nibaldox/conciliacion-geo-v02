@@ -11,3 +11,7 @@ ezdxf
 python-docx
 matplotlib
 openai
+
+fastapi
+uvicorn
+python-multipart
