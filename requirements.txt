@@ -10,3 +10,4 @@ pandas
 ezdxf
 python-docx
 matplotlib
+openai

@@ -68,6 +68,26 @@ for k, v in defaults.items():
 with st.sidebar:
     st.header("⚙️ Configuración")
 
+    st.subheader("🤖 Asistente IA")
+    ai_enabled = st.checkbox("Habilitar IA", value=False)
+    
+    api_key = ""
+    model_name = "gpt-3.5-turbo"
+    base_url = None
+
+    if ai_enabled:
+        ai_provider = st.selectbox("Proveedor", ["OpenAI", "Local (LM Studio/Ollama)"])
+        
+        if ai_provider == "OpenAI":
+            api_key = st.text_input("OpenAI API Key", type="password")
+            model_name = st.selectbox("Modelo", ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"])
+        else:
+            base_url = st.text_input("Base URL", value="http://localhost:1234/v1")
+            api_key = "lm-studio" # Dummy key for local
+            model_name = st.text_input("Nombre del Modelo", value="local-model")
+    
+    st.divider()
+
     st.subheader("📐 Tolerancias")
     tol_h_neg = st.number_input("Altura banco: Tol. (-) m", value=1.0, step=0.5, key="tol_h_neg")
     tol_h_pos = st.number_input("Altura banco: Tol. (+) m", value=1.5, step=0.5, key="tol_h_pos")
@@ -762,8 +782,8 @@ if st.session_state.step >= 3 and st.session_state.sections:
 if st.session_state.step >= 4 and st.session_state.comparison_results:
     st.header("📊 Paso 4: Resultados")
 
-    tab_profiles, tab_table, tab_dash, tab_export = st.tabs([
-        "📈 Perfiles", "📋 Tabla Detallada", "📊 Dashboard", "💾 Exportar"
+    tab_profiles, tab_table, tab_dash, tab_ai, tab_export = st.tabs([
+        "📈 Perfiles", "📋 Tabla Detallada", "📊 Dashboard", "🤖 Analista IA", "💾 Exportar"
     ])
 
     # --- PERFILES ---
@@ -1220,6 +1240,49 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                 fig_b.add_vline(x=min_berm_width, line_dash="dash", line_color="red",
                     annotation_text="Mínimo", annotation_position="top right")
                 st.plotly_chart(fig_b, use_container_width=True)
+
+    # --- INFORME IA ---
+    with tab_ai:
+        st.subheader("🤖 Informe Ejecutivo (IA)")
+        
+        if not ai_enabled:
+            st.info("Habilita el Asistente IA en la configuración (barra lateral) para generar informes automáticos.")
+        else:
+            if st.button("📝 Generar Informe Ejecutivo", type="primary"):
+                from core.ai_reporter import generate_geotech_report
+                
+                # Prepare stats
+                df_final = pd.DataFrame(st.session_state.comparison_results)
+                
+                if df_final.empty:
+                    st.warning("No hay resultados para analizar.")
+                else:
+                    n_total = len(df_final)
+                    n_compliant_h = len(df_final[df_final['height_status'] == "CUMPLE"])
+                    n_compliant_a = len(df_final[df_final['angle_status'] == "CUMPLE"])
+                    n_compliant_b = len(df_final[df_final['berm_status'] == "CUMPLE"])
+                    
+                    # Convert to simple int/float types for JSON serialization safeness
+                    ai_stats = {
+                        'n_total': int(n_total),
+                        'n_valid': int(len(df_final[df_final['type'] == 'MATCH'])),
+                        'global_stats': {
+                            'Cumplimiento Altura': f"{n_compliant_h}/{n_total} ({n_compliant_h/n_total:.1%})",
+                            'Cumplimiento Ángulo': f"{n_compliant_a}/{n_total} ({n_compliant_a/n_total:.1%})",
+                            'Cumplimiento Berma': f"{n_compliant_b}/{n_total} ({n_compliant_b/n_total:.1%})"
+                        }
+                    }
+                    
+                    st.markdown("### ⏳ Analizando datos y redactando informe...")
+                    report_container = st.empty()
+                    full_report = ""
+                    
+                    # Stream the response
+                    for chunk in generate_geotech_report(ai_stats, api_key, model_name, base_url):
+                        full_report += (chunk or "")
+                        report_container.markdown(full_report + "▌")
+                        
+                    report_container.markdown(full_report)
 
     # --- EXPORTAR ---
     with tab_export:
