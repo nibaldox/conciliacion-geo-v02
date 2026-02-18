@@ -35,15 +35,15 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
         # This is an approximation of the "Green Line" in the user's image
         for b in params_topo.benches:
             # Toe
-            rec_dist.append(b.toe_point[0])
-            rec_elev.append(b.toe_point[1])
+            rec_dist.append(b.toe_distance)
+            rec_elev.append(b.toe_elevation)
             # Crest
-            rec_dist.append(b.crest_point[0])
-            rec_elev.append(b.crest_point[1])
+            rec_dist.append(b.crest_distance)
+            rec_elev.append(b.crest_elevation)
             
             # Draw markers
-            ax.plot(b.toe_point[0], b.toe_point[1], 'go', markersize=4) # Toe marker
-            ax.plot(b.crest_point[0], b.crest_point[1], 'go', markersize=4) # Crest marker
+            ax.plot(b.toe_distance, b.toe_elevation, 'go', markersize=4) # Toe marker
+            ax.plot(b.crest_distance, b.crest_elevation, 'go', markersize=4) # Crest marker
             
             # Annotate?
             # ax.text(b.crest_point[0], b.crest_point[1], f"C{b.bench_number}", fontsize=8)
@@ -54,7 +54,7 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
     # Highlight Design Benches too for reference
     if params_design.benches:
         for b in params_design.benches:
-            ax.plot(b.crest_point[0], b.crest_point[1], 'c.', markersize=6)
+            ax.plot(b.crest_distance, b.crest_elevation, 'c.', markersize=6)
 
     ax.set_title(f"Sección: {params_design.section_name} - {params_design.sector}")
     ax.set_xlabel("Distancia (m)")

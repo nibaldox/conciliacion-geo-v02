@@ -1,6 +1,6 @@
 
+
 import os
-from openai import OpenAI
 import streamlit as st
 
 def generate_geotech_report(stats, api_key, model, base_url=None):
@@ -23,6 +23,7 @@ def generate_geotech_report(stats, api_key, model, base_url=None):
         return
 
     try:
+        from openai import OpenAI
         client = OpenAI(
             api_key=api_key,
             base_url=base_url if base_url else None
