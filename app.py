@@ -1333,7 +1333,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                         sec
                      )
                      
-                     if pd_prof and pt_prof:
+                     if pd_prof and pt_prof and i < len(st.session_state.params_design) and i < len(st.session_state.params_topo):
                          all_data_for_images.append({
                              'section_name': sec.name,
                              'params_design': st.session_state.params_design[i],
