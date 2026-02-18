@@ -1355,14 +1355,14 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
 
         st.divider()
 
-        st.subheader("📐 Exportar Perfiles a DXF")
-        st.write("Genera un archivo DXF con las polilíneas de Diseño y Topografía para cada sección.")
+        st.subheader("📐 Exportar Perfiles a DXF (3D)")
+        st.write("Genera un archivo DXF con polilíneas 3D en coordenadas reales (X, Y, Z) para cada sección.")
         
         if st.button("📊 Generar DXF de Perfiles", type="primary"):
-            with st.spinner("Generando DXF de perfiles..."):
+            with st.spinner("Generando DXF 3D de perfiles..."):
                 import ezdxf
-                import io
                 from core import cut_both_surfaces
+                from core.section_cutter import azimuth_to_direction
                 
                 doc = ezdxf.new('R2010')
                 msp = doc.modelspace()
@@ -1370,10 +1370,10 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                 # Create layers
                 doc.layers.add("DISEÑO", color=5)   # Blue
                 doc.layers.add("TOPO", color=3)      # Green
+                doc.layers.add("ETIQUETAS", color=7)  # White
                 
                 progress_bar = st.progress(0)
                 n_exported = 0
-                y_offset = 0  # Vertical offset to stack sections
                 
                 for i, sec in enumerate(st.session_state.sections):
                     pd_prof, pt_prof = cut_both_surfaces(
@@ -1385,62 +1385,64 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                     if pd_prof and pt_prof:
                         safe_name = sec.name.replace("/", "_").replace("\\", "_")
                         
-                        # Design profile polyline
-                        design_points = list(zip(
-                            pd_prof.distances.tolist(),
-                            [e + y_offset for e in pd_prof.elevations.tolist()]
-                        ))
-                        if len(design_points) > 1:
-                            msp.add_lwpolyline(
-                                design_points,
+                        # Reconstruct 3D coordinates from section geometry
+                        direction = azimuth_to_direction(sec.azimuth)
+                        ox, oy = sec.origin[0], sec.origin[1]
+                        
+                        # Design profile: 3D polyline
+                        design_3d = [
+                            (ox + d * direction[0], oy + d * direction[1], float(e))
+                            for d, e in zip(pd_prof.distances, pd_prof.elevations)
+                        ]
+                        if len(design_3d) > 1:
+                            msp.add_3dpolyline(
+                                design_3d,
                                 dxfattribs={'layer': 'DISEÑO'}
                             )
                         
-                        # Topo profile polyline
-                        topo_points = list(zip(
-                            pt_prof.distances.tolist(),
-                            [e + y_offset for e in pt_prof.elevations.tolist()]
-                        ))
-                        if len(topo_points) > 1:
-                            msp.add_lwpolyline(
-                                topo_points,
+                        # Topo profile: 3D polyline
+                        topo_3d = [
+                            (ox + d * direction[0], oy + d * direction[1], float(e))
+                            for d, e in zip(pt_prof.distances, pt_prof.elevations)
+                        ]
+                        if len(topo_3d) > 1:
+                            msp.add_3dpolyline(
+                                topo_3d,
                                 dxfattribs={'layer': 'TOPO'}
                             )
                         
-                        # Add section label
-                        label_x = min(pd_prof.distances.min(), pt_prof.distances.min()) - 5
-                        label_y = max(pd_prof.elevations.max(), pt_prof.elevations.max()) + y_offset + 2
+                        # Add section label at midpoint
+                        mid_x = ox
+                        mid_y = oy
+                        mid_z = float(max(pd_prof.elevations.max(), pt_prof.elevations.max())) + 3
                         msp.add_text(
                             safe_name,
                             dxfattribs={
                                 'height': 2.0,
-                                'layer': 'DISEÑO',
-                                'insert': (label_x, label_y)
+                                'layer': 'ETIQUETAS',
+                                'insert': (mid_x, mid_y, mid_z)
                             }
                         )
                         
                         n_exported += 1
-                        # Offset next section below (with 50m gap between sections)
-                        y_offset -= (max(pd_prof.elevations.max(), pt_prof.elevations.max()) 
-                                     - min(pd_prof.elevations.min(), pt_prof.elevations.min()) + 50)
                     
                     progress_bar.progress((i + 1) / len(st.session_state.sections))
                 
-                # Save to temp file (ezdxf needs a file path or text stream)
+                # Save to temp file
                 import tempfile
-                tmp_path = os.path.join(tempfile.gettempdir(), "Perfiles_Secciones.dxf")
+                tmp_path = os.path.join(tempfile.gettempdir(), "Perfiles_3D.dxf")
                 doc.saveas(tmp_path)
                 
                 with open(tmp_path, "rb") as f:
                     dxf_bytes = f.read()
                 
                 st.download_button(
-                    label=f"⬇️ Descargar DXF ({n_exported} secciones)",
+                    label=f"⬇️ Descargar DXF 3D ({n_exported} secciones)",
                     data=dxf_bytes,
-                    file_name="Perfiles_Secciones.dxf",
+                    file_name="Perfiles_3D.dxf",
                     mime="application/dxf",
                 )
-            st.success(f"✅ {n_exported} perfiles exportados a DXF exitosamente")
+            st.success(f"✅ {n_exported} perfiles exportados a DXF 3D exitosamente")
 
 # =====================================================
 # FOOTER
