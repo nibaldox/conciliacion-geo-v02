@@ -1356,21 +1356,41 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
         st.divider()
 
         st.subheader("📐 Exportar Perfiles a DXF (3D)")
-        st.write("Genera un archivo DXF con polilíneas 3D en coordenadas reales (X, Y, Z) para cada sección.")
+        st.write("Genera un archivo DXF con polilíneas 3D separadas por cumplimiento, incluyendo perfiles conciliados.")
         
         if st.button("📊 Generar DXF de Perfiles", type="primary"):
             with st.spinner("Generando DXF 3D de perfiles..."):
                 import ezdxf
                 from core import cut_both_surfaces
                 from core.section_cutter import azimuth_to_direction
+                from core.param_extractor import build_reconciled_profile
                 
                 doc = ezdxf.new('R2010')
                 msp = doc.modelspace()
                 
-                # Create layers
-                doc.layers.add("DISEÑO", color=5)   # Blue
-                doc.layers.add("TOPO", color=3)      # Green
-                doc.layers.add("ETIQUETAS", color=7)  # White
+                # Create layers by compliance status
+                doc.layers.add("DISEÑO_CUMPLE", color=3)          # Green
+                doc.layers.add("DISEÑO_NO_CUMPLE", color=1)       # Red
+                doc.layers.add("DISEÑO_FUERA_TOL", color=2)       # Yellow
+                doc.layers.add("TOPO_CUMPLE", color=3)            # Green
+                doc.layers.add("TOPO_NO_CUMPLE", color=1)         # Red
+                doc.layers.add("TOPO_FUERA_TOL", color=2)         # Yellow
+                doc.layers.add("CONCILIADO_DISEÑO", color=5)      # Blue
+                doc.layers.add("CONCILIADO_TOPO", color=6)        # Magenta
+                doc.layers.add("ETIQUETAS", color=7)              # White
+                
+                # Build per-section compliance map
+                comp_results = st.session_state.comparison_results
+                section_status = {}
+                for c in comp_results:
+                    sec = c.get('section', '')
+                    statuses = [c.get('height_status', ''), c.get('angle_status', ''), c.get('berm_status', '')]
+                    if sec not in section_status:
+                        section_status[sec] = 'CUMPLE'
+                    if 'NO CUMPLE' in statuses:
+                        section_status[sec] = 'NO CUMPLE'
+                    elif 'FUERA DE TOLERANCIA' in statuses and section_status[sec] != 'NO CUMPLE':
+                        section_status[sec] = 'FUERA DE TOLERANCIA'
                 
                 progress_bar = st.progress(0)
                 n_exported = 0
@@ -1385,42 +1405,72 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                     if pd_prof and pt_prof:
                         safe_name = sec.name.replace("/", "_").replace("\\", "_")
                         
-                        # Reconstruct 3D coordinates from section geometry
+                        # Determine compliance layer suffix
+                        status = section_status.get(sec.name, 'CUMPLE')
+                        if status == 'NO CUMPLE':
+                            layer_suffix = 'NO_CUMPLE'
+                        elif status == 'FUERA DE TOLERANCIA':
+                            layer_suffix = 'FUERA_TOL'
+                        else:
+                            layer_suffix = 'CUMPLE'
+                        
+                        # Reconstruct 3D coordinates
                         direction = azimuth_to_direction(sec.azimuth)
                         ox, oy = sec.origin[0], sec.origin[1]
                         
-                        # Design profile: 3D polyline
-                        design_3d = [
-                            (ox + d * direction[0], oy + d * direction[1], float(e))
-                            for d, e in zip(pd_prof.distances, pd_prof.elevations)
-                        ]
+                        def to_3d(distances, elevations):
+                            return [
+                                (ox + d * direction[0], oy + d * direction[1], float(e))
+                                for d, e in zip(distances, elevations)
+                            ]
+                        
+                        # Design profile
+                        design_3d = to_3d(pd_prof.distances, pd_prof.elevations)
                         if len(design_3d) > 1:
                             msp.add_3dpolyline(
                                 design_3d,
-                                dxfattribs={'layer': 'DISEÑO'}
+                                dxfattribs={'layer': f'DISEÑO_{layer_suffix}'}
                             )
                         
-                        # Topo profile: 3D polyline
-                        topo_3d = [
-                            (ox + d * direction[0], oy + d * direction[1], float(e))
-                            for d, e in zip(pt_prof.distances, pt_prof.elevations)
-                        ]
+                        # Topo profile
+                        topo_3d = to_3d(pt_prof.distances, pt_prof.elevations)
                         if len(topo_3d) > 1:
                             msp.add_3dpolyline(
                                 topo_3d,
-                                dxfattribs={'layer': 'TOPO'}
+                                dxfattribs={'layer': f'TOPO_{layer_suffix}'}
                             )
                         
-                        # Add section label at midpoint
-                        mid_x = ox
-                        mid_y = oy
+                        # Reconciled Design profile
+                        if i < len(st.session_state.params_design) and st.session_state.params_design[i].benches:
+                            rd, re = build_reconciled_profile(st.session_state.params_design[i].benches)
+                            if len(rd) > 0:
+                                conc_d_3d = to_3d(rd, re)
+                                if len(conc_d_3d) > 1:
+                                    msp.add_3dpolyline(
+                                        conc_d_3d,
+                                        dxfattribs={'layer': 'CONCILIADO_DISEÑO'}
+                                    )
+                        
+                        # Reconciled Topo profile
+                        if i < len(st.session_state.params_topo) and st.session_state.params_topo[i].benches:
+                            rt, ret = build_reconciled_profile(st.session_state.params_topo[i].benches)
+                            if len(rt) > 0:
+                                conc_t_3d = to_3d(rt, ret)
+                                if len(conc_t_3d) > 1:
+                                    msp.add_3dpolyline(
+                                        conc_t_3d,
+                                        dxfattribs={'layer': 'CONCILIADO_TOPO'}
+                                    )
+                        
+                        # Section label
                         mid_z = float(max(pd_prof.elevations.max(), pt_prof.elevations.max())) + 3
+                        label_text = f"{safe_name} [{status}]"
                         msp.add_text(
-                            safe_name,
+                            label_text,
                             dxfattribs={
                                 'height': 2.0,
                                 'layer': 'ETIQUETAS',
-                                'insert': (mid_x, mid_y, mid_z)
+                                'insert': (ox, oy, mid_z)
                             }
                         )
                         
