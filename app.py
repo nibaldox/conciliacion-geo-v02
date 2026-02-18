@@ -1426,14 +1426,17 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                     
                     progress_bar.progress((i + 1) / len(st.session_state.sections))
                 
-                # Save to buffer
-                dxf_buffer = io.BytesIO()
-                doc.write(dxf_buffer)
-                dxf_buffer.seek(0)
+                # Save to temp file (ezdxf needs a file path or text stream)
+                import tempfile
+                tmp_path = os.path.join(tempfile.gettempdir(), "Perfiles_Secciones.dxf")
+                doc.saveas(tmp_path)
+                
+                with open(tmp_path, "rb") as f:
+                    dxf_bytes = f.read()
                 
                 st.download_button(
                     label=f"⬇️ Descargar DXF ({n_exported} secciones)",
-                    data=dxf_buffer.getvalue(),
+                    data=dxf_bytes,
                     file_name="Perfiles_Secciones.dxf",
                     mime="application/dxf",
                 )
