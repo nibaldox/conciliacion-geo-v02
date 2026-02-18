@@ -1424,21 +1424,20 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                                 for d, e in zip(distances, elevations)
                             ]
                         
+                        def draw_3d_polyline(pts, layer):
+                            """Draw a 3D polyline as consecutive LINE entities."""
+                            for j in range(len(pts) - 1):
+                                msp.add_line(pts[j], pts[j+1], dxfattribs={'layer': layer})
+                        
                         # Design profile
                         design_3d = to_3d(pd_prof.distances, pd_prof.elevations)
                         if len(design_3d) > 1:
-                            msp.add_3dpolyline(
-                                design_3d,
-                                dxfattribs={'layer': f'DISEÑO_{layer_suffix}'}
-                            )
+                            draw_3d_polyline(design_3d, f'DISEÑO_{layer_suffix}')
                         
                         # Topo profile
                         topo_3d = to_3d(pt_prof.distances, pt_prof.elevations)
                         if len(topo_3d) > 1:
-                            msp.add_3dpolyline(
-                                topo_3d,
-                                dxfattribs={'layer': f'TOPO_{layer_suffix}'}
-                            )
+                            draw_3d_polyline(topo_3d, f'TOPO_{layer_suffix}')
                         
                         # Reconciled Design profile
                         if i < len(st.session_state.params_design) and st.session_state.params_design[i].benches:
@@ -1446,10 +1445,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                             if len(rd) > 0:
                                 conc_d_3d = to_3d(rd, re)
                                 if len(conc_d_3d) > 1:
-                                    msp.add_3dpolyline(
-                                        conc_d_3d,
-                                        dxfattribs={'layer': 'CONCILIADO_DISEÑO'}
-                                    )
+                                    draw_3d_polyline(conc_d_3d, 'CONCILIADO_DISEÑO')
                         
                         # Reconciled Topo profile
                         if i < len(st.session_state.params_topo) and st.session_state.params_topo[i].benches:
@@ -1457,10 +1453,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                             if len(rt) > 0:
                                 conc_t_3d = to_3d(rt, ret)
                                 if len(conc_t_3d) > 1:
-                                    msp.add_3dpolyline(
-                                        conc_t_3d,
-                                        dxfattribs={'layer': 'CONCILIADO_TOPO'}
-                                    )
+                                    draw_3d_polyline(conc_t_3d, 'CONCILIADO_TOPO')
                         
                         # Section label
                         mid_z = float(max(pd_prof.elevations.max(), pt_prof.elevations.max())) + 3
