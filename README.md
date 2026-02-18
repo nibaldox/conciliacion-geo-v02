@@ -49,6 +49,13 @@ El algoritmo inteligente identifica y calcula:
 *   **Exportación a Excel**: Reporte completo compatible con software minero.
 *   **Gráficos de Perfil**: Exportación de imágenes de alta resolución de cada sección analizada.
 
+### 5. Asistente IA para Reportes 🤖 
+*   **Generación Automática**: Redacción de informes ejecutivos en lenguaje natural.
+*   **Soporte Multi-Modelo**: 
+    *   **Cloud**: OpenAI (GPT-3.5, GPT-4).
+    *   **Local**: Integración con LM Studio / Ollama para privacidad total de datos.
+*   **Análisis Inteligente**: Identificación de tendencias y recomendaciones operativas.
+
 ---
 
 ## 🛠️ Instalación
@@ -95,6 +102,14 @@ El archivo `core/param_extractor.py` contiene la lógica principal. Puedes ajust
 *   **`face_threshold`**: Ángulo mínimo para considerar un segmento como "Cara" (Default: 40°).
 *   **`berm_threshold`**: Ángulo máximo para considerar un segmento como "Berma" (Default: 20°).
 *   **`simplify_epsilon`**: Tolerancia del algoritmo Ramer-Douglas-Peucker para suavizar perfiles ruidosos.
+
+## 🤖 Configuración IA (Agente de Reportes)
+Para habilitar la generación de informes con Inteligencia Artificial:
+1.  Activa el checkbox **"Habilitar Asistente IA"** en la barra lateral.
+2.  Selecciona el Proveedor:
+    *   **OpenAI**: Ingresa tu API Key (no se guarda, solo se usa en sesión).
+    *   **Local**: Asegúrate de tener **LM Studio** u **Ollama** corriendo (ej. `http://localhost:1234/v1`).
+3.  Ve a la pestaña **"🤖 Informe IA"** en Resultados y genera tu reporte.
 
 ## 🤝 Contribución
 
