@@ -79,12 +79,17 @@ def extract_parameters(distances, elevations, section_name, sector,
                        resolution=0.5, face_threshold=40.0,
                        berm_threshold=20.0, max_berm_width=50.0):
     """
-    Extract geotechnical parameters using Vector Simplification (RDP).
+    Extract geotechnical parameters using Slope-Transition Detection.
     
-    1. Simplify profile using Ramer-Douglas-Peucker (epsilon=resolution/2)
+    Improved algorithm:
+    1. Simplify profile using RDP with epsilon = resolution / 2
     2. Compute angles of simplified segments
-    3. Classify and merge segments
-    4. Extract bench geometry
+    3. Smooth angles with moving average (window=3) to reduce noise
+    4. Detect transitions: where smoothed angle crosses face_threshold
+       - Berm→Face crossing = Crest (last flat point)
+       - Face→Berm crossing = Toe (first flat point)
+    5. Build benches from Crest→Toe pairs
+    6. Post-process: merge micro-benches, validate ordering, filter short faces
     """
     result = ExtractionResult(section_name=section_name, sector=sector)
 
@@ -94,225 +99,250 @@ def extract_parameters(distances, elevations, section_name, sector,
     # Prepare points
     points = np.column_stack((distances, elevations))
     
-    # 1. Simplify
-    # Epsilon determines how much "noise" we ignore. 
-    # For accurate crests/toes, we want high precision.
-    epsilon = 0.1  # 10cm tolerance
+    # 1. Simplify with configurable epsilon
+    epsilon = max(resolution / 2.0, 0.05)  # minimum 5cm
     simplified = ramer_douglas_peucker(points, epsilon)
     
-    if len(simplified) < 2:
+    if len(simplified) < 3:
         return result
         
     d_simp = simplified[:, 0]
     e_simp = simplified[:, 1]
+    n_pts = len(d_simp)
     
     # 2. Compute Segment Angles
     dx = np.diff(d_simp)
     dy = np.diff(e_simp)
-    dists = np.sqrt(dx**2 + dy**2)
+    seg_lengths = np.sqrt(dx**2 + dy**2)
     
     # Avoid zero-length segments
-    valid_seg = dists > 1e-4
+    valid_seg = seg_lengths > 1e-4
     if not np.any(valid_seg):
         return result
         
     angles = np.zeros(len(dx))
-    # Angle in degrees (always positive)
+    # Absolute angle in degrees (0° = horizontal, 90° = vertical)
     angles[valid_seg] = np.abs(np.degrees(np.arctan2(dy[valid_seg], dx[valid_seg])))
     
-    # 3. Classify Segments
-    # Use thresholds provided
-    segment_type = np.full(len(angles), 0) # 0=Unknown, 1=Face, 2=Berm
+    # 3. Smooth angles with moving average (window=3) to reduce noise
+    if len(angles) >= 3:
+        smoothed_angles = uniform_filter1d(angles, size=3, mode='nearest')
+    else:
+        smoothed_angles = angles.copy()
     
-    # Strict classification
-    segment_type[angles >= face_threshold] = 1 # Face
-    segment_type[angles <= berm_threshold] = 2 # Berm
+    # 4. Detect Transitions (Slope Crossings)
+    # A segment is "steep" if its smoothed angle >= face_threshold
+    is_steep = smoothed_angles >= face_threshold
     
-    # Merge consecutive segments of same type
-    # For "Unknown" segments, we can try to merge them into neighbors or ignore
-    # Let's simple merge same types.
+    # Find transition points:
+    # - Rising edge (False→True): start of a face → the vertex before is the CREST
+    # - Falling edge (True→False): end of a face → the vertex after is the TOE
     
-    merged_segments = []
-    if len(segment_type) > 0:
-        current_type = segment_type[0]
-        start_idx = 0
-        for i in range(1, len(segment_type)):
-            if segment_type[i] != current_type:
-                merged_segments.append({
-                    'type': current_type,
-                    'start_idx': start_idx, # Index in simplified array
-                    'end_idx': i # Exclusive
-                })
-                current_type = segment_type[i]
-                start_idx = i
-        merged_segments.append({
-            'type': current_type,
-            'start_idx': start_idx,
-            'end_idx': len(segment_type)
-        })
-        
-    # 4. Extract Benches
-    # A bench is usually Berm -> Face (or just Face if it's the bottom and we start there)
-    # We look for Face segments.
-    # Crest is the top point of a face (dist, elev at start of face segment if going left-to-right? 
-    # Wait, distances are sorted? Yes usually distance along section.
-    # If distance increases, and we look at profile:
-    # Face goes DOWN usually? Or UP?
-    # Profile is (Distance, Elevation).
-    # Distance usually from Origin outwards.
-    # Slopes usually go down or up.
-    # Let's assume standard behavior: we just care about the segment geometry.
-    # "Crest" is higher elevation point of face. "Toe" is lower elevation point.
+    crests = []  # List of vertex indices (crest points)
+    toes = []    # List of vertex indices (toe points)
     
+    for i in range(1, len(is_steep)):
+        if is_steep[i] and not is_steep[i-1]:
+            # Rising edge: segment i is steep, segment i-1 was flat
+            # Crest vertex is point i (shared between segment i-1 and segment i)
+            crests.append(i)
+        elif not is_steep[i] and is_steep[i-1]:
+            # Falling edge: segment i is flat, segment i-1 was steep
+            # Toe vertex is point i (shared between segment i-1 and segment i)
+            toes.append(i)
+    
+    # Handle edge case: profile starts steep (no leading berm)
+    if len(is_steep) > 0 and is_steep[0]:
+        crests.insert(0, 0)  # First point is crest
+    
+    # Handle edge case: profile ends steep (no trailing berm)
+    if len(is_steep) > 0 and is_steep[-1]:
+        toes.append(n_pts - 1)  # Last point is toe
+    
+    # 5. Build Benches from Crest→Toe Pairs
+    # Match each crest with the next toe to form a bench face
     benches = []
     bench_num = 0
     
-    for seg in merged_segments:
-        if seg['type'] == 1: # Face
-            # Indices in simplified array
-            idx_start = seg['start_idx']
-            idx_end = seg['end_idx'] # Exclusive, so point index is idx_end
+    crest_idx = 0
+    toe_idx = 0
+    
+    while crest_idx < len(crests) and toe_idx < len(toes):
+        c_vertex = crests[crest_idx]
+        
+        # Find the next toe AFTER this crest
+        while toe_idx < len(toes) and toes[toe_idx] <= c_vertex:
+            toe_idx += 1
+        
+        if toe_idx >= len(toes):
+            break
             
-            # Points defining this face sequence
-            face_pts = simplified[idx_start : idx_end + 1]
+        t_vertex = toes[toe_idx]
+        
+        # Crest and Toe points
+        crest_pt = simplified[c_vertex]
+        toe_pt = simplified[t_vertex]
+        
+        # Determine which is higher (crest) and which is lower (toe)
+        if crest_pt[1] > toe_pt[1]:
+            crest = crest_pt
+            toe = toe_pt
+        else:
+            crest = toe_pt
+            toe = crest_pt
+        
+        bench_height = abs(crest[1] - toe[1])
+        
+        # Filter: minimum bench height
+        if bench_height < 2.0:
+            crest_idx += 1
+            toe_idx += 1
+            continue
+        
+        # Filter: minimum face length (distance between crest and toe)
+        face_length = np.sqrt((crest[0] - toe[0])**2 + (crest[1] - toe[1])**2)
+        if face_length < 1.5:
+            crest_idx += 1
+            toe_idx += 1
+            continue
+        
+        # Calculate weighted average face angle for segments between crest and toe
+        seg_start = min(c_vertex, t_vertex)
+        seg_end = max(c_vertex, t_vertex)
+        
+        if seg_end > seg_start:
+            local_ang = angles[seg_start:seg_end]
+            local_len = seg_lengths[seg_start:seg_end]
             
-            # Start and End of the face "macro-segment"
-            p_start = face_pts[0]
-            p_end = face_pts[-1]
-            
-            # Determine Crest and Toe based on elevation
-            if p_start[1] > p_end[1]:
-                crest = p_start
-                toe = p_end
-            else:
-                crest = p_end
-                toe = p_start
-            
-            bench_height = abs(crest[1] - toe[1])
-            
-            if bench_height < 2.0:
-                continue
-                
-            # Weighted average angle for the face (weighted by segment length)
-            # segs in this face group
-            local_dx = dx[idx_start:idx_end]
-            local_dy = dy[idx_start:idx_end]
-            local_len = dists[idx_start:idx_end]
-            local_ang = angles[idx_start:idx_end]
-            
-            # We filter for only "steep" sub-segments to avoid calculating average with small flat steps if any
+            # Weight by segment length, prefer steep segments
             steep_mask = local_ang > (face_threshold - 10)
-            if np.sum(local_len[steep_mask]) > 0.1:
+            if np.any(steep_mask) and np.sum(local_len[steep_mask]) > 0.1:
                 weighted_angle = np.average(local_ang[steep_mask], weights=local_len[steep_mask])
-            else:
+            elif np.sum(local_len) > 0:
                 weighted_angle = np.average(local_ang, weights=local_len)
-                
-            bench_num += 1
-            benches.append(BenchParams(
-                bench_number=bench_num,
-                crest_elevation=float(crest[1]),
-                crest_distance=float(crest[0]),
-                toe_elevation=float(toe[1]),
-                toe_distance=float(toe[0]),
-                bench_height=float(bench_height),
-                face_angle=float(weighted_angle),
-                berm_width=0.0
-            ))
-
-    # Calculate Berm Widths
-    # Berm is horizontal distance between Toe of Bench N and Crest of Bench N+1 (if N+1 is below N)
-    # Since we sorted by elevation descending:
-    # Bench i is above Bench i+1
-    for i in range(len(benches) - 1):
-        # Distance from toe of upper bench to crest of lower bench
-        # We use 3D distance or horizontal? Usually "Berm Width" is horizontal distance.
-        b_upper = benches[i]
-        b_lower = benches[i+1]
-        
-        # Horizontal dist
-        h_dist = abs(b_upper.toe_distance - b_lower.crest_distance)
-        b_upper.berm_width = float(h_dist)
-        
-        # Ramp Detection: Width 15m - 40m
-        if 15.0 <= b_upper.berm_width <= 42.0:
-            b_upper.is_ramp = True
-
-    # Filter unrealistically large berms (ramps/pit floor)
-    # Similar logic to before but simplified
-    if max_berm_width and max_berm_width > 0 and len(benches) > 1:
-        valid_benches = []
-        # We reconstruct groups based on connectivity
-        current_group = [benches[0]]
-        for i in range(len(benches) - 1):
-            if benches[i].berm_width > max_berm_width:
-                # Break in group
-                # Decide which group to keep? 
-                # Usually we want the main pit wall. 
-                # Let's store groups and pick largest.
-                benches[i].berm_width = 0.0 # Clear berm width for last bench of group
-                valid_benches.append(current_group)
-                current_group = [benches[i+1]]
             else:
-                current_group.append(benches[i+1])
-        valid_benches.append(current_group)
+                weighted_angle = face_threshold
+        else:
+            weighted_angle = face_threshold
+                
+        bench_num += 1
+        benches.append(BenchParams(
+            bench_number=bench_num,
+            crest_elevation=float(crest[1]),
+            crest_distance=float(crest[0]),
+            toe_elevation=float(toe[1]),
+            toe_distance=float(toe[0]),
+            bench_height=float(bench_height),
+            face_angle=float(weighted_angle),
+            berm_width=0.0
+        ))
         
-        # Pick largest group
-        benches = max(valid_benches, key=len)
+        crest_idx += 1
+        toe_idx += 1
+
+    # 6. Post-Processing
+    
+    # 6a. Merge micro-benches (consecutive benches that are too close)
+    if len(benches) > 1:
+        merged = [benches[0]]
+        for i in range(1, len(benches)):
+            prev = merged[-1]
+            curr = benches[i]
+            
+            # Check if they should be merged
+            crest_gap = abs(prev.toe_elevation - curr.crest_elevation)
+            combined_height = prev.crest_elevation - curr.toe_elevation
+            
+            if crest_gap < 2.0 and (prev.bench_height < 3.0 or curr.bench_height < 3.0):
+                # Merge: keep the wider range
+                merged[-1] = BenchParams(
+                    bench_number=prev.bench_number,
+                    crest_elevation=max(prev.crest_elevation, curr.crest_elevation),
+                    crest_distance=prev.crest_distance if prev.crest_elevation >= curr.crest_elevation else curr.crest_distance,
+                    toe_elevation=min(prev.toe_elevation, curr.toe_elevation),
+                    toe_distance=prev.toe_distance if prev.toe_elevation <= curr.toe_elevation else curr.toe_distance,
+                    bench_height=float(abs(max(prev.crest_elevation, curr.crest_elevation) - min(prev.toe_elevation, curr.toe_elevation))),
+                    face_angle=float(np.average([prev.face_angle, curr.face_angle], 
+                                                weights=[prev.bench_height, curr.bench_height])),
+                    berm_width=0.0
+                )
+            else:
+                merged.append(curr)
+        
+        benches = merged
         # Renumber
         for idx, b in enumerate(benches):
             b.bench_number = idx + 1
+    
+    # 6b. Sort benches by elevation (descending crest)
+    benches.sort(key=lambda b: b.crest_elevation, reverse=True)
+    for idx, b in enumerate(benches):
+        b.bench_number = idx + 1
 
-    # check for trailing berm (flat area after last bench)
+    # Calculate Berm Widths
+    for i in range(len(benches) - 1):
+        b_upper = benches[i]
+        b_lower = benches[i+1]
+        h_dist = abs(b_upper.toe_distance - b_lower.crest_distance)
+        b_upper.berm_width = float(h_dist)
+        
+        # Ramp Detection: Width 15m - 42m
+        if 15.0 <= b_upper.berm_width <= 42.0:
+            b_upper.is_ramp = True
+
+    # Filter unrealistically large berms (group breaking)
+    if max_berm_width and max_berm_width > 0 and len(benches) > 1:
+        valid_groups = []
+        current_group = [benches[0]]
+        for i in range(len(benches) - 1):
+            if benches[i].berm_width > max_berm_width:
+                benches[i].berm_width = 0.0
+                valid_groups.append(current_group)
+                current_group = [benches[i+1]]
+            else:
+                current_group.append(benches[i+1])
+        valid_groups.append(current_group)
+        
+        benches = max(valid_groups, key=len)
+        for idx, b in enumerate(benches):
+            b.bench_number = idx + 1
+
+    # Trailing berm detection (flat area after last bench)
     if len(benches) > 0:
         last_bench = benches[-1]
-        # Find points after the last toe
-        # We need the original simplified points or distances/elevations
-        # benches stores crest/toe coordinates.
-        # Let's use the input arrays (distances, elevations) to find limits
         
-        # Last element indices in simplified array were stored in merged_segments but we lost them
-        # We can search in 'distances' array for points > last_bench.toe_distance (assuming scanning direction)
-        
-        # Check if distances increase or decrease
         if distances[-1] > distances[0]:
-            # Increasing distance
             mask_after = distances > last_bench.toe_distance + 0.1
         else:
-            # Decreasing distance
             mask_after = distances < last_bench.toe_distance - 0.1
             
         d_after = distances[mask_after]
         e_after = elevations[mask_after]
         
         if len(d_after) > 1:
-            # Check average slope of this trailing segment
-            slope_deg = np.degrees(np.arctan2(np.abs(e_after[-1] - e_after[0]), np.abs(d_after[-1] - d_after[0])))
+            slope_deg = np.degrees(np.arctan2(
+                np.abs(e_after[-1] - e_after[0]), 
+                np.abs(d_after[-1] - d_after[0])
+            ))
             
-            # If it's flat enough to be a berm (<= berm_threshold)
             if slope_deg <= berm_threshold:
-                # Calculate horizontal width
                 width = np.abs(d_after[-1] - d_after[0])
-                # Assign to last bench
                 last_bench.berm_width = float(width)
-                
-                # Check for ramp
                 if 15.0 <= width <= 42.0:
                     last_bench.is_ramp = True
 
     result.benches = benches
     
-    # Calculate angles
+    # Calculate overall angles
     if len(benches) >= 2:
         top = benches[0]
         bot = benches[-1]
         
-        # Overall: Crest top to Toe bot
         dz = top.crest_elevation - bot.toe_elevation
-        dx = abs(top.crest_distance - bot.toe_distance)
-        if dx > 1e-3:
-            result.overall_angle = float(np.degrees(np.arctan2(abs(dz), dx)))
+        dx_total = abs(top.crest_distance - bot.toe_distance)
+        if dx_total > 1e-3:
+            result.overall_angle = float(np.degrees(np.arctan2(abs(dz), dx_total)))
         
-        # Inter-ramp (approx): same as overall for now unless we detect ramps
         result.inter_ramp_angle = result.overall_angle
     elif len(benches) == 1:
         result.overall_angle = benches[0].face_angle
@@ -360,8 +390,6 @@ def build_reconciled_profile(benches):
         
     return np.array(distances), np.array(elevations)
 
-
-    return comparisons
 
 
 def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
