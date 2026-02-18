@@ -98,7 +98,7 @@ with st.sidebar:
     tol_ir_pos = st.number_input("Áng. Inter-Rampa: Tol. (+) °", value=2.0, step=1.0, key="tol_ir_pos")
 
     st.subheader("🔧 Detección de Bancos")
-    face_threshold = st.slider("Ángulo mínimo cara (°)", 30, 60, 40)
+    face_threshold = st.slider("Ángulo mínimo cara (°)", 0, 90, 40)
     berm_threshold = st.slider("Ángulo máximo berma (°)", 5, 30, 20)
     resolution = st.slider("Resolución de perfil (m)", 0.1, 2.0, 0.5)
 
