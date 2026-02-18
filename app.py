@@ -1353,6 +1353,70 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                 )
             st.success("✅ Imágenes generadas exitosamente")
 
+        st.divider()
+
+        st.subheader("📐 Exportar Datos de Perfiles (CSV)")
+        st.write("Genera un archivo ZIP con los datos numéricos de cada perfil (Distancia, Elevación Diseño, Elevación Topo).")
+        
+        if st.button("📊 Generar CSV de Perfiles", type="primary"):
+            with st.spinner("Generando datos de perfil..."):
+                import zipfile
+                import io
+                from core import cut_both_surfaces
+                
+                zip_buffer = io.BytesIO()
+                progress_bar = st.progress(0)
+                n_exported = 0
+                
+                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for i, sec in enumerate(st.session_state.sections):
+                        pd_prof, pt_prof = cut_both_surfaces(
+                            st.session_state.mesh_design,
+                            st.session_state.mesh_topo,
+                            sec
+                        )
+                        
+                        if pd_prof and pt_prof:
+                            # Interpolate both profiles onto a common distance grid
+                            d_min = max(pd_prof.distances.min(), pt_prof.distances.min())
+                            d_max = min(pd_prof.distances.max(), pt_prof.distances.max())
+                            
+                            if d_max > d_min:
+                                n_points = int((d_max - d_min) / 0.5)  # 0.5m spacing
+                                d_common = np.linspace(d_min, d_max, max(n_points, 10))
+                                
+                                from scipy.interpolate import interp1d
+                                f_design = interp1d(pd_prof.distances, pd_prof.elevations, 
+                                                    kind='linear', bounds_error=False, fill_value=np.nan)
+                                f_topo = interp1d(pt_prof.distances, pt_prof.elevations, 
+                                                  kind='linear', bounds_error=False, fill_value=np.nan)
+                                
+                                e_design = f_design(d_common)
+                                e_topo = f_topo(d_common)
+                                
+                                # Build CSV content
+                                lines = ["Distancia,Elevacion_Diseno,Elevacion_Topo,Diferencia"]
+                                for d, ed, et in zip(d_common, e_design, e_topo):
+                                    diff = et - ed if not (np.isnan(et) or np.isnan(ed)) else ""
+                                    lines.append(f"{d:.3f},{ed:.3f},{et:.3f},{diff if isinstance(diff, str) else f'{diff:.3f}'}")
+                                
+                                csv_content = "\n".join(lines)
+                                safe_name = sec.name.replace("/", "_").replace("\\", "_")
+                                zf.writestr(f"{safe_name}.csv", csv_content)
+                                n_exported += 1
+                        
+                        progress_bar.progress((i + 1) / len(st.session_state.sections))
+                
+                zip_buffer.seek(0)
+                
+                st.download_button(
+                    label=f"⬇️ Descargar Perfiles CSV ({n_exported} secciones)",
+                    data=zip_buffer.getvalue(),
+                    file_name="Perfiles_CSV.zip",
+                    mime="application/zip",
+                )
+            st.success(f"✅ {n_exported} perfiles exportados exitosamente")
+
 # =====================================================
 # FOOTER
 # =====================================================
