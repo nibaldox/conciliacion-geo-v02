@@ -25,36 +25,24 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
     if len(distances_t) > 0:
         ax.plot(distances_t, elevations_t, 'r-', label='Perfil Real (Scan)', linewidth=2, alpha=0.6)
         
-    # 3. Plot Reconciled Segments (Crest -> Toe -> Crest...)
-    # We reconstruct the "interpreted" profile from the extracted parameters
+    # 3. Plot Reconciled Segments using the same function as the Plotly chart
+    from core.param_extractor import build_reconciled_profile
+    
     if params_topo.benches:
-        rec_dist = []
-        rec_elev = []
-        
-        # Collect points: Toe_i -> Crest_i -> Toe_i+1 ...
-        # This is an approximation of the "Green Line" in the user's image
+        rec_dist, rec_elev = build_reconciled_profile(params_topo.benches)
+        if len(rec_dist) > 0:
+            ax.plot(rec_dist, rec_elev, 'g-', label='Conciliado As-Built', linewidth=2.5)
+            
+        # Draw crest/toe markers
         for b in params_topo.benches:
-            # Toe
-            rec_dist.append(b.toe_distance)
-            rec_elev.append(b.toe_elevation)
-            # Crest
-            rec_dist.append(b.crest_distance)
-            rec_elev.append(b.crest_elevation)
-            
-            # Draw markers
-            ax.plot(b.toe_distance, b.toe_elevation, 'go', markersize=4) # Toe marker
-            ax.plot(b.crest_distance, b.crest_elevation, 'go', markersize=4) # Crest marker
-            
-            # Annotate?
-            # ax.text(b.crest_point[0], b.crest_point[1], f"C{b.bench_number}", fontsize=8)
-
-        if rec_dist:
-            ax.plot(rec_dist, rec_elev, 'g-', label='Perfil Conciliado', linewidth=2.5)
-
-    # Highlight Design Benches too for reference
+            ax.plot(b.crest_distance, b.crest_elevation, 'g^', markersize=5)
+            ax.plot(b.toe_distance, b.toe_elevation, 'gv', markersize=5)
+    
+    # Reconciled Design profile
     if params_design.benches:
-        for b in params_design.benches:
-            ax.plot(b.crest_distance, b.crest_elevation, 'c.', markersize=6)
+        rec_d_dist, rec_d_elev = build_reconciled_profile(params_design.benches)
+        if len(rec_d_dist) > 0:
+            ax.plot(rec_d_dist, rec_d_elev, 'b--', label='Conciliado Diseño', linewidth=1.5, alpha=0.7)
 
     ax.set_title(f"Sección: {params_design.section_name} - {params_design.sector}")
     ax.set_xlabel("Distancia (m)")
