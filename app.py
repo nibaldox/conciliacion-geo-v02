@@ -99,7 +99,7 @@ with st.sidebar:
 
     st.subheader("🔧 Detección de Bancos")
     face_threshold = st.slider("Ángulo mínimo cara (°)", 0, 90, 40)
-    berm_threshold = st.slider("Ángulo máximo berma (°)", 5, 30, 20)
+    berm_threshold = st.slider("Ángulo máximo berma (°)", 0, 10, 5)
     resolution = st.slider("Resolución de perfil (m)", 0.1, 2.0, 0.5)
 
     st.subheader("📊 Visualización")

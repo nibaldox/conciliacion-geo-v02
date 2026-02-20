@@ -26,7 +26,7 @@ function App() {
   const [settings, setSettings] = useState({
     resolution: 0.5,
     face_threshold: 40,
-    berm_threshold: 20,
+    berm_threshold: 5,
   });
 
   // Section generation parameters
@@ -238,7 +238,7 @@ function App() {
             onChange={v => setSettings(s => ({ ...s, resolution: v }))} />
           <SliderInput label="Áng. mín. cara (°)" value={settings.face_threshold} min={0} max={90} step={1}
             onChange={v => setSettings(s => ({ ...s, face_threshold: v }))} />
-          <SliderInput label="Áng. máx. berma (°)" value={settings.berm_threshold} min={5} max={30} step={1}
+          <SliderInput label="Áng. máx. berma (°)" value={settings.berm_threshold} min={0} max={10} step={1}
             onChange={v => setSettings(s => ({ ...s, berm_threshold: v }))} />
         </div>
 
