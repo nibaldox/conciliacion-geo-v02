@@ -117,47 +117,213 @@ async def upload_topo(file: UploadFile = File(...)):
     return {"message": "Topo mesh loaded", "vertices": len(store.mesh_topo.vertices)}
 
 
-# ---------------------------------------------------------------------------
-# Sections
-# ---------------------------------------------------------------------------
+@app.post("/api/sections/from-file")
+async def sections_from_file(
+    file: UploadFile = File(...),
+    spacing: float = Form(20.0),
+    length: float = Form(200.0),
+    sector: str = Form("Principal"),
+    az_mode: str = Form("perpendicular"),  # "perpendicular" | "local_slope"
+):
+    """
+    Generate sections from a CSV (X,Y columns) or DXF polyline file.
+    Same as Streamlit's 'Archivo de Coordenadas' tab.
+    """
+    if store.mesh_design is None:
+        raise HTTPException(400, "Upload design mesh first")
 
-@app.post("/api/sections/load")
-async def load_sections(file: UploadFile = File(...)):
-    """Load sections from a JSON file."""
+    import pandas as pd, io as _io
+
+    from core.section_cutter import generate_perpendicular_sections
+
+    fname = (file.filename or "").lower()
     content = await file.read()
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        raise HTTPException(400, "Invalid JSON")
+    polyline = None
 
+    if fname.endswith(".dxf"):
+        tmp = _save_temp_bytes(content, ".dxf")
+        try:
+            polyline = load_dxf_polyline(tmp)
+        finally:
+            os.unlink(tmp)
+        if polyline is None or len(polyline) == 0:
+            raise HTTPException(400, "No polylines found in DXF")
+    else:
+        # CSV / TXT
+        df = pd.read_csv(_io.BytesIO(content), nrows=10000)
+        x_col = next((c for c in df.columns if c.strip().upper() in ("X","ESTE","EAST","E")), None)
+        y_col = next((c for c in df.columns if c.strip().upper() in ("Y","NORTE","NORTH","N")), None)
+        if x_col is None or y_col is None:
+            num_cols = df.select_dtypes(include=[np.number]).columns
+            if len(num_cols) >= 2:
+                x_col, y_col = num_cols[0], num_cols[1]
+            else:
+                raise HTTPException(400, "Could not find X/Y columns")
+        polyline = df[[x_col, y_col]].dropna().values.astype(float)
+
+    if len(polyline) < 2:
+        raise HTTPException(400, "Polyline must have at least 2 points")
+
+    design_mesh = store.mesh_design if az_mode == "local_slope" else None
+    sections = generate_perpendicular_sections(polyline, spacing, length, sector, design_mesh)
+    store.sections = sections
+
+    return {
+        "message": f"{len(sections)} sections generated from file",
+        "n_sections": len(sections),
+        "polyline": polyline.tolist(),
+        "sections": _sections_to_dicts(sections),
+    }
+
+
+@app.post("/api/sections/auto")
+def sections_auto(params: Dict[str, Any]):
+    """
+    Generate sections evenly spaced along a start→end line.
+    Same as Streamlit's 'Automático' tab.
+    """
+    if store.mesh_design is None:
+        raise HTTPException(400, "Upload design mesh first")
+
+    from core.section_cutter import generate_sections_along_crest, compute_local_azimuth
+
+    start = np.array(params["start"])
+    end = np.array(params["end"])
+    n = int(params.get("n_sections", 5))
+    length = float(params.get("length", 200))
+    sector = params.get("sector", "")
+    az_method = params.get("az_method", "perpendicular")  # "perpendicular" | "fixed" | "local_slope"
+    fixed_az = float(params.get("fixed_az", 0))
+
+    az = None
+    if az_method == "fixed":
+        az = fixed_az
+    elif az_method == "local_slope":
+        az = 0.0  # placeholder, overwritten below
+
+    sections = generate_sections_along_crest(
+        store.mesh_design, start, end, n, az, length, sector
+    )
+
+    if az_method == "local_slope":
+        for sec in sections:
+            sec.azimuth = compute_local_azimuth(store.mesh_design, sec.origin)
+
+    store.sections = sections
+    return {
+        "message": f"{len(sections)} sections generated",
+        "sections": _sections_to_dicts(sections),
+    }
+
+
+@app.post("/api/sections/manual")
+def sections_manual(sections_data: List[Dict[str, Any]]):
+    """
+    Set sections from manual input.
+    Same as Streamlit's 'Manual' tab.
+    """
     sections = []
-    for s in data.get("sections", data if isinstance(data, list) else []):
+    for s in sections_data:
         sec = SectionLine(
-            name=s["name"],
+            name=s.get("name", f"S-{len(sections)+1:02d}"),
             origin=np.array(s["origin"]),
-            azimuth=s["azimuth"],
-            length=s["length"],
+            azimuth=float(s["azimuth"]),
+            length=float(s.get("length", 200)),
             sector=s.get("sector", ""),
         )
         sections.append(sec)
-
     store.sections = sections
-    return {"message": f"{len(sections)} sections loaded"}
+    return {"message": f"{len(sections)} sections set", "sections": _sections_to_dicts(sections)}
+
+
+@app.post("/api/sections/add-click")
+def add_section_click(params: Dict[str, Any]):
+    """
+    Add a single section by clicking on the plan view.
+    Same as Streamlit's 'Interactivo (Clic)' tab.
+    """
+    if store.mesh_design is None:
+        raise HTTPException(400, "Upload design mesh first")
+
+    from core.section_cutter import compute_local_azimuth
+
+    origin = np.array(params["origin"])
+    length = float(params.get("length", 200))
+    sector = params.get("sector", "")
+    az_mode = params.get("az_mode", "auto")  # "auto" | "manual"
+    manual_az = float(params.get("azimuth", 0))
+
+    if az_mode == "auto":
+        az = compute_local_azimuth(store.mesh_design, origin)
+    else:
+        az = manual_az
+
+    n = len(store.sections) + 1
+    sec = SectionLine(name=f"S-{n:02d}", origin=origin, azimuth=az, length=length, sector=sector)
+    store.sections.append(sec)
+
+    return {
+        "message": f"Section {sec.name} added",
+        "section": _sections_to_dicts([sec])[0],
+        "total": len(store.sections),
+    }
+
+
+@app.delete("/api/sections")
+def clear_sections():
+    """Clear all sections."""
+    store.sections = []
+    return {"message": "Sections cleared"}
 
 
 @app.get("/api/sections")
 def get_sections():
     """Get all loaded sections."""
+    return _sections_to_dicts(store.sections)
+
+
+@app.get("/api/mesh/bounds")
+def get_mesh_bounds_api():
+    """Get mesh bounds and vertices for plan view scatter."""
+    if store.mesh_design is None:
+        raise HTTPException(400, "Upload design mesh first")
+
+    from core.mesh_handler import get_mesh_bounds
+    bd = get_mesh_bounds(store.mesh_design)
+
+    # Return subsampled vertices for plan view (max 8000 points)
+    verts = store.mesh_design.vertices
+    step = max(1, len(verts) // 8000)
+    sub = verts[::step]
+
+    return {
+        "bounds": bd,
+        "vertices": {
+            "x": sub[:, 0].tolist(),
+            "y": sub[:, 1].tolist(),
+            "z": sub[:, 2].tolist(),
+        },
+    }
+
+
+def _sections_to_dicts(sections):
     return [
         {
             "name": s.name,
             "origin": s.origin.tolist(),
-            "azimuth": s.azimuth,
+            "azimuth": round(s.azimuth, 2),
             "length": s.length,
             "sector": s.sector,
         }
-        for s in store.sections
+        for s in sections
     ]
+
+
+def _save_temp_bytes(content: bytes, suffix: str) -> str:
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "wb") as f:
+        f.write(content)
+    return tmp
 
 
 # ---------------------------------------------------------------------------
