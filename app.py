@@ -1080,7 +1080,7 @@ if st.session_state.step >= 4 and st.session_state.comparison_results:
                 height=400, 
                 yaxis=dict(scaleanchor="x", scaleratio=1, 
                            dtick=grid_height, tick0=grid_ref, gridcolor='lightgray'),
-                xaxis=dict(gridcolor='lightgray'),
+                xaxis=dict(dtick=1, showgrid=True, gridcolor='rgba(255,255,255,0.15)', gridwidth=1),
                 legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
                 margin=dict(l=60, r=20, t=40, b=40),
             )
