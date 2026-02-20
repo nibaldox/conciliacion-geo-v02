@@ -731,11 +731,14 @@ if st.session_state.step >= 3 and st.session_state.sections:
             params_d = [None] * total
             params_t = [None] * total
             comparisons = []
+            # Extract state to local variables to avoid Streamlit ThreadContext errors in workers
+            local_mesh_design = st.session_state.mesh_design
+            local_mesh_topo = st.session_state.mesh_topo
             
             def process_single(args):
                 i, section = args
-                pd_prof = cut_mesh_with_section(st.session_state.mesh_design, section)
-                pt_prof = cut_mesh_with_section(st.session_state.mesh_topo, section)
+                pd_prof = cut_mesh_with_section(local_mesh_design, section)
+                pt_prof = cut_mesh_with_section(local_mesh_topo, section)
                 
                 ep_d, ep_t, comp = None, None, []
                 if pd_prof is not None and pt_prof is not None:
