@@ -350,7 +350,7 @@ def update_tolerances(tolerances: Dict[str, Any]):
 
 @app.post("/api/process")
 def process_all():
-    """Cut all sections, extract parameters, and compare."""
+    """Cut all sections, extract parameters, and compare (multithreaded)."""
     if store.mesh_design is None or store.mesh_topo is None:
         raise HTTPException(400, "Upload both meshes first")
     if not store.sections:
@@ -360,34 +360,34 @@ def process_all():
     ft = store.settings.get("face_threshold", 40.0)
     bt = store.settings.get("berm_threshold", 20.0)
 
-    store.params_design = []
-    store.params_topo = []
+    store.params_design = [None] * len(store.sections)
+    store.params_topo = [None] * len(store.sections)
     store.comparison_results = []
 
-    for sec in store.sections:
-        pd_prof, pt_prof = cut_both_surfaces(
-            store.mesh_design, store.mesh_topo, sec
-        )
+    def process_section(args):
+        i, sec = args
+        pd_prof, pt_prof = cut_both_surfaces(store.mesh_design, store.mesh_topo, sec)
         if pd_prof and pt_prof:
-            p_d = extract_parameters(
-                pd_prof.distances, pd_prof.elevations,
-                sec.name, sec.sector, res, ft, bt,
-            )
-            p_t = extract_parameters(
-                pt_prof.distances, pt_prof.elevations,
-                sec.name, sec.sector, res, ft, bt,
-            )
-            store.params_design.append(p_d)
-            store.params_topo.append(p_t)
-
-            comps = compare_design_vs_asbuilt(
-                p_d, p_t, store.tolerances
-            )
-            store.comparison_results.extend(comps)
+            p_d = extract_parameters(pd_prof.distances, pd_prof.elevations, sec.name, sec.sector, res, ft, bt)
+            p_t = extract_parameters(pt_prof.distances, pt_prof.elevations, sec.name, sec.sector, res, ft, bt)
+            comps = compare_design_vs_asbuilt(p_d, p_t, store.tolerances)
+            return i, sec, p_d, p_t, comps
         else:
-            # Empty placeholder so indices stay aligned
-            store.params_design.append(ExtractionResult(sec.name, sec.sector))
-            store.params_topo.append(ExtractionResult(sec.name, sec.sector))
+            p_d_empty = ExtractionResult(sec.name, sec.sector)
+            p_t_empty = ExtractionResult(sec.name, sec.sector)
+            return i, sec, p_d_empty, p_t_empty, []
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    comps_list = []
+    # Use max_workers=None to let it pick (min(32, os.cpu_count() + 4))
+    with ThreadPoolExecutor() as executor:
+        for i, sec, p_d, p_t, comps in executor.map(process_section, enumerate(store.sections)):
+            store.params_design[i] = p_d
+            store.params_topo[i] = p_t
+            comps_list.extend(comps)
+
+    store.comparison_results = comps_list
 
     return {
         "message": "Processing complete",

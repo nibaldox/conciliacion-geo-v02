@@ -724,29 +724,49 @@ if st.session_state.step >= 3 and st.session_state.sections:
             comparisons = []
     
             total = len(sections_to_process)
-    
-            for i, section in enumerate(sections_to_process):
-                status.text(f"Procesando sección {section.name} ({i+1}/{total})...")
-                progress.progress((i + 1) / total)
-
+            
+            # Prepare lists to preserve order
+            profiles_d = [None] * total
+            profiles_t = [None] * total
+            params_d = [None] * total
+            params_t = [None] * total
+            comparisons = []
+            
+            def process_single(args):
+                i, section = args
                 pd_prof = cut_mesh_with_section(st.session_state.mesh_design, section)
                 pt_prof = cut_mesh_with_section(st.session_state.mesh_topo, section)
-
-                profiles_d.append(pd_prof)
-                profiles_t.append(pt_prof)
-
+                
+                ep_d, ep_t, comp = None, None, []
                 if pd_prof is not None and pt_prof is not None:
                     ep_d = extract_parameters(pd_prof.distances, pd_prof.elevations,
                         section.name, section.sector, resolution, face_threshold, berm_threshold)
                     ep_t = extract_parameters(pt_prof.distances, pt_prof.elevations,
                         section.name, section.sector, resolution, face_threshold, berm_threshold)
-
-                    params_d.append(ep_d)
-                    params_t.append(ep_t)
-
                     if ep_d.benches and ep_t.benches:
                         comp = compare_design_vs_asbuilt(ep_d, ep_t, tolerances)
+                        
+                return i, pd_prof, pt_prof, ep_d, ep_t, comp
+
+            from concurrent.futures import ThreadPoolExecutor
+            
+            status.text(f"Procesando {total} secciones en paralelo...")
+            
+            completed = 0
+            with ThreadPoolExecutor() as executor:
+                # We use map to maintain order easily, though as_completed could update UI smoother
+                for i, pd_prof, pt_prof, ep_d, ep_t, comp in executor.map(process_single, enumerate(sections_to_process)):
+                    profiles_d[i] = pd_prof
+                    profiles_t[i] = pt_prof
+                    
+                    if ep_d and ep_t:
+                        params_d[i] = ep_d
+                        params_t[i] = ep_t
                         comparisons.extend(comp)
+                        
+                    completed += 1
+                    status.text(f"Procesando sección {sections_to_process[i].name} ({completed}/{total})...")
+                    progress.progress(completed / total)
 
         st.session_state.profiles_design = profiles_d
         st.session_state.profiles_topo = profiles_t
