@@ -17,5 +17,6 @@ __all__ = [
     'load_mesh', 'get_mesh_bounds', 'mesh_to_plotly', 'decimate_mesh',
     'load_dxf_polyline', 'SectionLine', 'cut_mesh_with_section',
     'cut_both_surfaces', 'extract_parameters', 'compare_design_vs_asbuilt',
+    'build_reconciled_profile',
     'generate_word_report', 'generate_section_images_zip',
 ]

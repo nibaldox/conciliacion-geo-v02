@@ -311,9 +311,14 @@ def extract_parameters(distances, elevations, section_name, sector,
         dx = abs(top.crest_distance - bot.toe_distance)
         if dx > 1e-3:
             result.overall_angle = float(np.degrees(np.arctan2(abs(dz), dx)))
-        
-        # Inter-ramp (approx): same as overall for now unless we detect ramps
-        result.inter_ramp_angle = result.overall_angle
+
+        # Inter-ramp: same geometry but subtract horizontal distance occupied by ramps.
+        # Ramps add horizontal traversal without contributing proportionally to height,
+        # so excluding them yields a steeper (more representative) slope angle.
+        ramp_horiz = sum(b.berm_width for b in benches if b.is_ramp)
+        ir_horiz = max(dx - ramp_horiz, dx * 0.05)  # floor at 5% of total to avoid /0
+        if ir_horiz > 1e-3:
+            result.inter_ramp_angle = float(np.degrees(np.arctan2(abs(dz), ir_horiz)))
     elif len(benches) == 1:
         result.overall_angle = benches[0].face_angle
         result.inter_ramp_angle = benches[0].face_angle
@@ -359,9 +364,6 @@ def build_reconciled_profile(benches):
         elevations.append(bench.toe_elevation)
         
     return np.array(distances), np.array(elevations)
-
-
-    return comparisons
 
 
 def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
