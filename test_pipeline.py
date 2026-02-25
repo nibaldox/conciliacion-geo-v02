@@ -186,10 +186,14 @@ def run_test():
         print(f"   Cumplimiento: {pct:.1f}%")
         
         for c in comparisons:
+            h = f"{c['height_dev']:+.2f}m" if c['height_dev'] is not None else "N/A"
+            a = f"{c['angle_dev']:+.1f}°" if c['angle_dev'] is not None else "N/A"
+            b = f"{c['berm_real']:.1f}m" if c['berm_real'] is not None else "N/A"
+            bmin = f"{c['berm_min']:.0f}m" if c['berm_min'] is not None else "N/A"
             print(f"   {c['section']}-B{c['bench_num']}: "
-                  f"H={c['height_dev']:+.2f}m [{c['height_status']}] | "
-                  f"Á={c['angle_dev']:+.1f}° [{c['angle_status']}] | "
-                  f"B={c['berm_real']:.1f}m (min={c['berm_min']:.0f}m) [{c['berm_status']}]")
+                  f"H={h} [{c['height_status']}] | "
+                  f"Á={a} [{c['angle_status']}] | "
+                  f"B={b} (min={bmin}) [{c['berm_status']}]")
         
         # Exportar
         output = "/tmp/test_conciliacion.xlsx"
