@@ -564,7 +564,13 @@ def export_excel():
     from core.excel_writer import export_results
 
     tmp = os.path.join(tempfile.gettempdir(), "conciliacion.xlsx")
-    export_results(store.comparison_results, tmp, store.tolerances)
+    export_results(
+        store.comparison_results,
+        store.params_design,
+        store.params_topo,
+        store.tolerances,
+        tmp,
+    )
 
     return FileResponse(
         tmp,
