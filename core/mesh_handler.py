@@ -70,6 +70,13 @@ def load_dxf_polyline(file_path):
     Returns: np.ndarray of shape (N, 2) with X, Y coordinates.
     """
     try:
+        import ezdxf
+    except ImportError:
+        raise ImportError(
+            "ezdxf es requerido para cargar archivos DXF. "
+            "Instálalo con `pip install ezdxf`."
+        )
+    try:
         doc = ezdxf.readfile(file_path)
         msp = doc.modelspace()
         

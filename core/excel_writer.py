@@ -215,6 +215,8 @@ def _write_interramp_sheet(wb, params_design, params_topo):
     for i in range(n):
         pd = params_design[i]
         pt = params_topo[i]
+        if pd is None or pt is None:
+            continue
         row = i + 2
         ws.cell(row=row, column=1, value=pd.section_name).border = THIN_BORDER
         ws.cell(row=row, column=2, value=pd.sector).border = THIN_BORDER
