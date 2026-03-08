@@ -12,6 +12,11 @@ from core.param_extractor import (
 )
 from core.excel_writer import export_results
 from core.report_generator import generate_word_report, generate_section_images_zip
+from core.radar_simulator import (
+    RadarParams, ViewshedResult, RadarCandidate,
+    compute_viewshed, find_radar_locations,
+    sample_polygon_on_mesh, polygon_from_text, polygon_from_csv_bytes,
+)
 
 __all__ = [
     'load_mesh', 'get_mesh_bounds', 'mesh_to_plotly', 'decimate_mesh',
@@ -19,4 +24,7 @@ __all__ = [
     'cut_both_surfaces', 'extract_parameters', 'compare_design_vs_asbuilt',
     'build_reconciled_profile',
     'generate_word_report', 'generate_section_images_zip',
+    'RadarParams', 'ViewshedResult', 'RadarCandidate',
+    'compute_viewshed', 'find_radar_locations',
+    'sample_polygon_on_mesh', 'polygon_from_text', 'polygon_from_csv_bytes',
 ]
