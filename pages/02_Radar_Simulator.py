@@ -260,10 +260,10 @@ def _polygon_input_widget(key_prefix: str, bounds: dict) -> Polygon | None:
 
     else:  # Bounding box
         if bounds:
-            cx = (bounds["x_min"] + bounds["x_max"]) / 2
-            cy = (bounds["y_min"] + bounds["y_max"]) / 2
-            dx = (bounds["x_max"] - bounds["x_min"]) * 0.15
-            dy = (bounds["y_max"] - bounds["y_min"]) * 0.15
+            cx = (bounds["xmin"] + bounds["xmax"]) / 2
+            cy = (bounds["ymin"] + bounds["ymax"]) / 2
+            dx = (bounds["xmax"] - bounds["xmin"]) * 0.15
+            dy = (bounds["ymax"] - bounds["ymin"]) * 0.15
         else:
             cx, cy, dx, dy = 0.0, 0.0, 200.0, 200.0
 
@@ -336,9 +336,9 @@ if mesh is not None and bounds is not None:
         st.success(
             f"✅ Malla cargada — "
             f"{bounds['n_faces']:,} caras · "
-            f"E: {bounds['x_min']:.0f}–{bounds['x_max']:.0f} m · "
-            f"N: {bounds['y_min']:.0f}–{bounds['y_max']:.0f} m · "
-            f"Z: {bounds['z_min']:.0f}–{bounds['z_max']:.0f} m"
+            f"E: {bounds['xmin']:.0f}–{bounds['xmax']:.0f} m · "
+            f"N: {bounds['ymin']:.0f}–{bounds['ymax']:.0f} m · "
+            f"Z: {bounds['zmin']:.0f}–{bounds['zmax']:.0f} m"
         )
 
     st.markdown("---")
@@ -361,8 +361,8 @@ if mesh is not None and bounds is not None:
         with lcol:
             st.subheader("Parámetros del radar")
 
-            cx = (bounds["x_min"] + bounds["x_max"]) / 2
-            cy = (bounds["y_min"] + bounds["y_max"]) / 2
+            cx = (bounds["xmin"] + bounds["xmax"]) / 2
+            cy = (bounds["ymin"] + bounds["ymax"]) / 2
 
             radar_x = st.number_input(
                 "X — Este (m)", value=float(cx), format="%.2f", key="vs_x"
@@ -442,7 +442,7 @@ if mesh is not None and bounds is not None:
                     prev_fig = go.Figure()
                     prev_fig.add_trace(_mesh_plotly_trace(mesh))
                     prev_fig.add_trace(go.Scatter3d(
-                        x=[cx], y=[cy], z=[bounds["z_max"] + 5],
+                        x=[cx], y=[cy], z=[bounds["zmax"] + 5],
                         mode="markers+text",
                         marker=dict(symbol="diamond", size=10, color="yellow",
                                     line=dict(color="black", width=2)),
