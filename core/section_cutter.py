@@ -50,12 +50,7 @@ def cut_mesh_with_section(mesh, section):
         return None
 
     # Collect all intersection points
-    points = []
-    for segment in lines:
-        for point in segment:
-            points.append(point)
-
-    points = np.array(points)
+    points = np.vstack([pt for seg in lines for pt in seg])
 
     # Project onto section direction to get distance along section
     origin_2d = section.origin
@@ -82,9 +77,8 @@ def cut_mesh_with_section(mesh, section):
     unique_dists, inv = np.unique(rounded, return_inverse=True)
     unique_elevs = np.zeros(len(unique_dists))
     counts = np.zeros(len(unique_dists))
-    for idx, uid in enumerate(inv):
-        unique_elevs[uid] += elevs[idx]
-        counts[uid] += 1
+    np.add.at(unique_elevs, inv, elevs)
+    np.add.at(counts, inv, 1)
     unique_elevs /= counts
 
     return ProfileResult(distances=unique_dists, elevations=unique_elevs)

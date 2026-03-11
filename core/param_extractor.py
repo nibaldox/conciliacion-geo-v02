@@ -384,15 +384,11 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     if n_d == 0 and n_t == 0:
         return []
 
-    # Create Cost Matrix (Absolute Elevation Difference)
+    # Create Cost Matrix (Absolute Elevation Difference) — vectorized
     # Rows: Design, Cols: Topo
-    cost_matrix = np.zeros((n_d, n_t))
-    
-    for i, bd in enumerate(benches_design):
-        bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
-        for j, bt in enumerate(benches_topo):
-            bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
-            cost_matrix[i, j] = abs(bd_z - bt_z)
+    bd_elevs = np.array([(b.crest_elevation + b.toe_elevation) / 2 for b in benches_design])
+    bt_elevs = np.array([(b.crest_elevation + b.toe_elevation) / 2 for b in benches_topo])
+    cost_matrix = np.abs(bd_elevs[:, None] - bt_elevs[None, :])
             
     # Solve Assignment Problem (Minimize total elevation difference)
     row_ind, col_ind = linear_sum_assignment(cost_matrix)

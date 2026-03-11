@@ -30,22 +30,16 @@ def _load_dxf(filepath):
     # or we can just dump all triangles and let trimesh.merge_vertices handle it
     
     tri_verts = []
-    
+
     for e in raw_faces:
         # 3DFACE has 4 corners (0, 1, 2, 3)
         # If 3 and 2 are same, it's a triangle.
-        v = list(e.dxf.vtx0), list(e.dxf.vtx1), list(e.dxf.vtx2), list(e.dxf.vtx3)
-        
+        v = [list(e.dxf.vtx0), list(e.dxf.vtx1), list(e.dxf.vtx2), list(e.dxf.vtx3)]
         # Triangle 1: 0-1-2
-        tri_verts.append(v[0])
-        tri_verts.append(v[1])
-        tri_verts.append(v[2])
-        
+        tri_verts.extend(v[:3])
         # Triangle 2: 2-3-0 (if 3 != 2)
         if v[3] != v[2]:
-            tri_verts.append(v[2])
-            tri_verts.append(v[3])
-            tri_verts.append(v[0])
+            tri_verts.extend([v[2], v[3], v[0]])
             
     if not tri_verts:
          # Try POLYLINE/MESH? most mining software uses 3DFACE

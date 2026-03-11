@@ -30,7 +30,13 @@ def render_step1() -> None:
             type=["stl", "obj", "ply", "dxf"], key="topo_file")
 
     if file_design and file_topo:
-        _load_meshes(file_design, file_topo)
+        fingerprint_d = (file_design.name, file_design.size)
+        fingerprint_t = (file_topo.name, file_topo.size)
+        if (st.session_state.get('_fp_design') != fingerprint_d or
+                st.session_state.get('_fp_topo') != fingerprint_t):
+            _load_meshes(file_design, file_topo)
+            st.session_state['_fp_design'] = fingerprint_d
+            st.session_state['_fp_topo'] = fingerprint_t
 
     if st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None:
         _render_3d_view()
@@ -78,6 +84,9 @@ def _load_meshes(file_design, file_topo) -> None:
                 f"Z: [{bt['zmin']:.1f}, {bt['zmax']:.1f}]")
 
         st.session_state.step = max(st.session_state.step, 2)
+        # Invalidar caché de mallas decimadas al cargar nuevas
+        st.session_state.pop('_dec_design', None)
+        st.session_state.pop('_dec_topo', None)
 
     except Exception as e:
         st.error(f"Error al cargar: {e}")
@@ -91,8 +100,11 @@ def _render_3d_view() -> None:
     with st.expander("🌐 Vista 3D de Superficies", expanded=False):
         with st.spinner("Generando vista 3D..."):
             fig = go.Figure()
-            md = decimate_mesh(st.session_state.mesh_design, 30000)
-            mt = decimate_mesh(st.session_state.mesh_topo, 30000)
+            if '_dec_design' not in st.session_state:
+                st.session_state['_dec_design'] = decimate_mesh(st.session_state.mesh_design, 30000)
+                st.session_state['_dec_topo'] = decimate_mesh(st.session_state.mesh_topo, 30000)
+            md = st.session_state['_dec_design']
+            mt = st.session_state['_dec_topo']
             fig.add_trace(mesh_to_plotly(md, "Diseño", "royalblue", 1.0))
             fig.add_trace(mesh_to_plotly(mt, "Topografía Real", "forestgreen", 1.0))
 

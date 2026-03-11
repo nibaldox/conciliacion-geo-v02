@@ -135,13 +135,13 @@ def _write_summary_sheet(wb, comparisons, tolerances, project_info):
                        "Total", "% Cumpl."])
         row += 1
 
+        # Only MATCH benches have actual measured values; MISSING/EXTRA
+        # don't carry height/angle/berm measurements so they must not
+        # inflate the denominator.
+        match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
         for key, label in [('height_status', 'Altura de banco'),
                            ('angle_status', 'Angulo de cara'),
                            ('berm_status', 'Ancho de berma')]:
-            # Only MATCH benches have actual measured values; MISSING/EXTRA
-            # don't carry height/angle/berm measurements so they must not
-            # inflate the denominator.
-            match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
             total = len(match_comps)
             n_ok = sum(1 for c in match_comps if c[key] == "CUMPLE")
             n_warn = sum(1 for c in match_comps
