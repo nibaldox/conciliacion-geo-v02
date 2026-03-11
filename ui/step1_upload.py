@@ -62,10 +62,19 @@ def _load_meshes(file_design, file_topo) -> None:
             f_topo = f.name
 
         with st.spinner("Cargando superficies..."):
-            st.session_state.mesh_design = load_mesh(f_design)
-            st.session_state.mesh_topo = load_mesh(f_topo)
-            st.session_state.bounds_design = get_mesh_bounds(st.session_state.mesh_design)
-            st.session_state.bounds_topo = get_mesh_bounds(st.session_state.mesh_topo)
+            try:
+                st.session_state.mesh_design = load_mesh(f_design)
+                st.session_state.bounds_design = get_mesh_bounds(st.session_state.mesh_design)
+            except Exception as e:
+                st.error(f"❌ Error al cargar el archivo de **diseño** ({file_design.name}): {e}")
+                return
+
+            try:
+                st.session_state.mesh_topo = load_mesh(f_topo)
+                st.session_state.bounds_topo = get_mesh_bounds(st.session_state.mesh_topo)
+            except Exception as e:
+                st.error(f"❌ Error al cargar el archivo de **topografía** ({file_topo.name}): {e}")
+                return
 
         col1, col2 = st.columns(2)
         with col1:
@@ -75,6 +84,10 @@ def _load_meshes(file_design, file_topo) -> None:
                 f"X: [{bd['xmin']:.1f}, {bd['xmax']:.1f}] | "
                 f"Y: [{bd['ymin']:.1f}, {bd['ymax']:.1f}] | "
                 f"Z: [{bd['zmin']:.1f}, {bd['zmax']:.1f}]")
+            z_range = bd['zmax'] - bd['zmin']
+            xy_range = min(bd['xmax'] - bd['xmin'], bd['ymax'] - bd['ymin'])
+            if xy_range > 0 and z_range < xy_range * 0.001:
+                st.warning("⚠️ Rango de elevación muy pequeño en el diseño — ¿las coordenadas están en mm?")
         with col2:
             bt = st.session_state.bounds_topo
             st.success(f"✅ Topografía cargada: {bt['n_faces']:,} caras, {bt['n_vertices']:,} vértices")
@@ -82,6 +95,10 @@ def _load_meshes(file_design, file_topo) -> None:
                 f"X: [{bt['xmin']:.1f}, {bt['xmax']:.1f}] | "
                 f"Y: [{bt['ymin']:.1f}, {bt['ymax']:.1f}] | "
                 f"Z: [{bt['zmin']:.1f}, {bt['zmax']:.1f}]")
+            z_range = bt['zmax'] - bt['zmin']
+            xy_range = min(bt['xmax'] - bt['xmin'], bt['ymax'] - bt['ymin'])
+            if xy_range > 0 and z_range < xy_range * 0.001:
+                st.warning("⚠️ Rango de elevación muy pequeño en la topografía — ¿las coordenadas están en mm?")
 
         st.session_state.step = max(st.session_state.step, 2)
         # Invalidar caché de mallas decimadas al cargar nuevas
@@ -89,7 +106,7 @@ def _load_meshes(file_design, file_topo) -> None:
         st.session_state.pop('_dec_topo', None)
 
     except Exception as e:
-        st.error(f"Error al cargar: {e}")
+        st.error(f"❌ Error inesperado al procesar archivos: {e}")
     finally:
         for tmp in (f_design, f_topo):
             if tmp and os.path.exists(tmp):

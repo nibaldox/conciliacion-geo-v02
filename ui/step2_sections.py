@@ -269,6 +269,11 @@ def _render_tab_manual() -> None:
             cols2 = st.columns(4)
             ox = cols2[0].number_input("Origen X", value=float(cx), format="%.1f", key=f"sox_{i}")
             oy = cols2[1].number_input("Origen Y", value=float(cy), format="%.1f", key=f"soy_{i}")
+            if (bd and not (bd['xmin'] <= ox <= bd['xmax'] and bd['ymin'] <= oy <= bd['ymax'])):
+                st.warning(
+                    f"⚠️ Origen fuera del área del diseño "
+                    f"(X: {bd['xmin']:.0f}–{bd['xmax']:.0f}, "
+                    f"Y: {bd['ymin']:.0f}–{bd['ymax']:.0f})")
 
             if auto_az_manual:
                 az = compute_local_azimuth(st.session_state.mesh_design, np.array([ox, oy]))

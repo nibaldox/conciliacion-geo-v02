@@ -21,30 +21,46 @@ def render_tab_dashboard(config: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_kpi_metrics(results) -> None:
-    cols = st.columns(3)
-    for col, (key, label) in zip(cols, [
+    # Only MATCH benches have measured values — use them for parameter compliance
+    match = [r for r in results if r.get('type') == 'MATCH']
+    missing = sum(1 for r in results if r.get('type') == 'MISSING')
+    extra = sum(1 for r in results if r.get('type') == 'EXTRA')
+    n_match = len(match)
+
+    cols = st.columns(4)
+    for col, (key, label) in zip(cols[:3], [
         ('height_status', 'Altura de Banco'),
         ('angle_status', 'Ángulo de Cara'),
         ('berm_status', 'Ancho de Berma'),
     ]):
-        total = len(results)
-        cumple = sum(1 for r in results if r[key] == "CUMPLE")
-        pct = cumple / total * 100 if total > 0 else 0
-        col.metric(label, f"{pct:.0f}%", f"{cumple}/{total} cumplen")
+        cumple = sum(1 for r in match if r[key] == "CUMPLE")
+        pct = cumple / n_match * 100 if n_match > 0 else 0
+        col.metric(label, f"{pct:.0f}%", f"{cumple}/{n_match} cumplen")
+
+    # Cobertura constructiva: ¿qué % de bancos del diseño fueron construidos?
+    n_design = n_match + missing
+    coverage = n_match / n_design * 100 if n_design > 0 else 0
+    delta_txt = f"{missing} no construidos, {extra} extra" if (missing or extra) else "Cobertura completa"
+    cols[3].metric("Cobertura Constructiva", f"{coverage:.0f}%", delta_txt)
 
 
 def _render_stacked_bar(results) -> None:
-    status_counts = {'Parámetro': [], 'CUMPLE': [], 'FUERA DE TOLERANCIA': [], 'NO CUMPLE': []}
+    match = [r for r in results if r.get('type') == 'MATCH']
+    missing = sum(1 for r in results if r.get('type') == 'MISSING')
+    extra = sum(1 for r in results if r.get('type') == 'EXTRA')
+
+    status_counts = {'Parámetro': [], 'CUMPLE': [], 'FUERA DE TOLERANCIA': [], 'NO CUMPLE': [], 'NO CONSTRUIDO / EXTRA': []}
     for key, label in [
         ('height_status', 'Altura'),
         ('angle_status', 'Ángulo Cara'),
         ('berm_status', 'Berma'),
     ]:
         status_counts['Parámetro'].append(label)
-        status_counts['CUMPLE'].append(sum(1 for r in results if r[key] == "CUMPLE"))
+        status_counts['CUMPLE'].append(sum(1 for r in match if r[key] == "CUMPLE"))
         status_counts['FUERA DE TOLERANCIA'].append(
-            sum(1 for r in results if r[key] == "FUERA DE TOLERANCIA"))
-        status_counts['NO CUMPLE'].append(sum(1 for r in results if r[key] == "NO CUMPLE"))
+            sum(1 for r in match if r[key] == "FUERA DE TOLERANCIA"))
+        status_counts['NO CUMPLE'].append(sum(1 for r in match if r[key] == "NO CUMPLE"))
+        status_counts['NO CONSTRUIDO / EXTRA'].append(missing + extra)
 
     df_status = pd.DataFrame(status_counts)
     fig_bar = go.Figure([
@@ -54,6 +70,8 @@ def _render_stacked_bar(results) -> None:
                y=df_status['FUERA DE TOLERANCIA'], marker_color='#9C5700'),
         go.Bar(name='NO CUMPLE', x=df_status['Parámetro'], y=df_status['NO CUMPLE'],
                marker_color='#9C0006'),
+        go.Bar(name='NO CONSTRUIDO / EXTRA', x=df_status['Parámetro'],
+               y=df_status['NO CONSTRUIDO / EXTRA'], marker_color='#888888'),
     ])
     fig_bar.update_layout(barmode='stack', title="Cumplimiento por Parámetro",
                           height=350, margin=dict(l=40, r=20, t=40, b=40))

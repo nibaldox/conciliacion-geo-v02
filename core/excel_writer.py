@@ -346,6 +346,53 @@ def _write_sector_summary(wb, comparisons):
     _auto_width(ws)
 
 
+def _write_ramp_sheet(wb, comparisons, tolerances):
+    """Create the Rampas sheet with detected ramp data and gradient evaluation."""
+    ws = wb.create_sheet("Rampas")
+
+    tol_rg = tolerances.get('ramp_gradient', {})
+    design_grad = tol_rg.get('design', 10.0)
+
+    ws.cell(row=1, column=1,
+            value="EVALUACION DE RAMPAS").font = Font(bold=True, size=14, color="2F5496")
+    ws.cell(row=2, column=1, value=f"Gradiente de diseño de referencia: {design_grad:.1f}%").font = Font(italic=True)
+
+    headers = [
+        "Sector", "Sección", "Banco", "Nivel (m)",
+        "Ancho Diseño (m)", "Ancho Real (m)",
+        "Gradiente Real (%)", "Gradiente Diseño (%)",
+        "Desv. Gradiente (%)", "Estado Gradiente",
+    ]
+    _write_header(ws, 4, headers)
+
+    row = 5
+    ramp_comps = [c for c in comparisons
+                  if c.get('ramp_gradient_real') is not None or c.get('ramp_gradient_design') is not None]
+
+    for comp in ramp_comps:
+        grad_real = comp.get('ramp_gradient_real')
+        grad_ref = comp.get('ramp_gradient_ref') or design_grad
+        grad_dev = round(grad_real - grad_ref, 1) if grad_real is not None else None
+
+        values = [
+            comp['sector'], comp['section'], comp['bench_num'], comp['level'],
+            comp.get('berm_design'), comp.get('berm_real'),
+            grad_real, grad_ref, grad_dev,
+            comp.get('ramp_gradient_status', '-'),
+        ]
+        for col_idx, val in enumerate(values, 1):
+            cell = ws.cell(row=row, column=col_idx, value=val)
+            cell.border = THIN_BORDER
+            if col_idx == 10:
+                _apply_status_style(cell)
+        row += 1
+
+    if row == 5:
+        ws.cell(row=5, column=1, value="Sin rampas detectadas en los resultados.")
+
+    _auto_width(ws)
+
+
 def export_results(comparisons, params_design, params_topo,
                    tolerances, output_path, project_info=None):
     """Export comparison results to a formatted Excel workbook."""
@@ -355,9 +402,10 @@ def export_results(comparisons, params_design, params_topo,
     wb = openpyxl.Workbook()
 
     _write_summary_sheet(wb, comparisons, tolerances, project_info)
-    _write_sector_summary(wb, comparisons) # New Executive Summary
+    _write_sector_summary(wb, comparisons)
     _write_bench_sheet(wb, comparisons)
     _write_interramp_sheet(wb, params_design, params_topo)
+    _write_ramp_sheet(wb, comparisons, tolerances)
     _write_dashboard_sheet(wb, comparisons)
 
     wb.save(output_path)

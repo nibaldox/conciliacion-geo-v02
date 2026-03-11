@@ -19,6 +19,7 @@ class BenchParams:
     face_angle: float
     berm_width: float
     is_ramp: bool = False
+    berm_gradient: float = 0.0  # Slope of berm/ramp in %
 
 
 @dataclass
@@ -232,8 +233,13 @@ def extract_parameters(distances, elevations, section_name, sector,
         # Horizontal dist
         h_dist = abs(b_upper.toe_distance - b_lower.crest_distance)
         b_upper.berm_width = float(h_dist)
-        
-        # Ramp Detection: Width 15m - 40m
+
+        # Berm/ramp gradient (slope %)
+        elev_diff = abs(b_upper.toe_elevation - b_lower.crest_elevation)
+        if h_dist > 0:
+            b_upper.berm_gradient = round(elev_diff / h_dist * 100, 1)
+
+        # Ramp Detection: Width 15m - 42m
         if 15.0 <= b_upper.berm_width <= 42.0:
             b_upper.is_ramp = True
 
@@ -295,6 +301,11 @@ def extract_parameters(distances, elevations, section_name, sector,
                 # Assign to last bench
                 last_bench.berm_width = float(width)
                 
+                # Trailing berm gradient
+                if len(d_after) > 1 and width > 0:
+                    e_diff = abs(e_after[-1] - e_after[0])
+                    last_bench.berm_gradient = round(e_diff / width * 100, 1)
+
                 # Check for ramp
                 if 15.0 <= width <= 42.0:
                     last_bench.is_ramp = True
@@ -393,8 +404,13 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     # Solve Assignment Problem (Minimize total elevation difference)
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
     
-    # Threshold for valid match (e.g. half bench height ~8m)
-    match_threshold = 8.0
+    # Dynamic match threshold: ~60% of average bench height, min 5m
+    all_benches = benches_design + benches_topo
+    if all_benches:
+        avg_height = np.mean([b.bench_height for b in all_benches])
+        match_threshold = max(5.0, avg_height * 0.6)
+    else:
+        match_threshold = 8.0
     
     matched_design_indices = set()
     matched_topo_indices = set()
@@ -428,6 +444,15 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
             else:
                 berm_status = "NO CUMPLE"
             
+            # Ramp gradient evaluation
+            tol_rg = tolerances.get('ramp_gradient', {})
+            ramp_grad_design = tol_rg.get('design', 10.0)
+            ramp_grad_status = "-"
+            if bt.is_ramp and bt.berm_gradient > 0:
+                grad_dev = bt.berm_gradient - ramp_grad_design
+                ramp_grad_status = _evaluate_status(
+                    grad_dev, tol_rg.get('neg', 0.0), tol_rg.get('pos', 2.0))
+
             # Override status if it's a detected ramp
             if bt.is_ramp:
                 berm_status = "RAMPA DETECTADA"
@@ -457,6 +482,10 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': round(bt.berm_width, 2),
                 'berm_min': min_berm,
                 'berm_status': berm_status,
+                'ramp_gradient_design': round(bd.berm_gradient, 1) if bd.is_ramp else None,
+                'ramp_gradient_real': round(bt.berm_gradient, 1) if bt.is_ramp else None,
+                'ramp_gradient_ref': ramp_grad_design,
+                'ramp_gradient_status': ramp_grad_status,
                 'delta_crest': round(bt.crest_distance - bd.crest_distance, 2),
                 'delta_toe': round(bt.toe_distance - bd.toe_distance, 2),
                 'bench_design': bd,
@@ -485,6 +514,10 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': None,
                 'berm_min': None,
                 'berm_status': "FALTA BANCO",
+                'ramp_gradient_design': None,
+                'ramp_gradient_real': None,
+                'ramp_gradient_ref': None,
+                'ramp_gradient_status': "-",
                 'delta_crest': None,
                 'delta_toe': None,
                 'bench_design': bd,
@@ -513,7 +546,11 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': round(bt.berm_width, 2),
                 'berm_min': None,
                 'berm_status': "BANCO ADICIONAL",
-                'delta_crest': None, # Meaningless without design? Or could compare to "nearest"? Keep None.
+                'ramp_gradient_design': None,
+                'ramp_gradient_real': round(bt.berm_gradient, 1) if bt.is_ramp else None,
+                'ramp_gradient_ref': None,
+                'ramp_gradient_status': "-",
+                'delta_crest': None,
                 'delta_toe': None,
                 'bench_design': None,
                 'bench_real': bt,

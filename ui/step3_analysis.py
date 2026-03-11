@@ -64,6 +64,7 @@ def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
     face_threshold = config['face_threshold']
     berm_threshold = config['berm_threshold']
     tolerances = config['tolerances']
+    max_berm_width = config.get('max_berm_width', 50.0)
 
     progress = st.progress(0)
     status = st.empty()
@@ -76,20 +77,31 @@ def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
 
         ep_d = ep_t = None
         comp = []
+        if pd_prof is None or pt_prof is None:
+            missing = "diseño" if pd_prof is None else "topografía"
+            if pd_prof is None and pt_prof is None:
+                missing = "diseño ni topografía"
+            # Store warning to surface in UI (thread-safe via return value)
+            return i, pd_prof, pt_prof, ep_d, ep_t, comp, (
+                f"⚠️ Sección **{section.name}**: sin intersección con {missing}. "
+                "Verifica el azimut, origen y longitud de la sección.")
         if pd_prof is not None and pt_prof is not None:
             ep_d = extract_parameters(
                 pd_prof.distances, pd_prof.elevations,
-                section.name, section.sector, resolution, face_threshold, berm_threshold)
+                section.name, section.sector, resolution, face_threshold, berm_threshold,
+                max_berm_width=max_berm_width)
             ep_t = extract_parameters(
                 pt_prof.distances, pt_prof.elevations,
-                section.name, section.sector, resolution, face_threshold, berm_threshold)
+                section.name, section.sector, resolution, face_threshold, berm_threshold,
+                max_berm_width=max_berm_width)
             if ep_d.benches and ep_t.benches:
                 comp = compare_design_vs_asbuilt(ep_d, ep_t, tolerances)
-        return i, pd_prof, pt_prof, ep_d, ep_t, comp
+        return i, pd_prof, pt_prof, ep_d, ep_t, comp, None
 
     completed = 0
+    warnings_list = []
     with ThreadPoolExecutor() as executor:
-        for i, pd_prof, pt_prof, ep_d, ep_t, comp in executor.map(
+        for i, pd_prof, pt_prof, ep_d, ep_t, comp, warn in executor.map(
                 _process_single, enumerate(sections_to_process)):
             profiles_d[i] = pd_prof
             profiles_t[i] = pt_prof
@@ -97,10 +109,15 @@ def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
                 params_d[i] = ep_d
                 params_t[i] = ep_t
                 comparisons.extend(comp)
+            if warn:
+                warnings_list.append(warn)
             completed += 1
             status.text(
                 f"Procesando sección {sections_to_process[i].name} ({completed}/{total})...")
             progress.progress(completed / total)
+
+    for w in warnings_list:
+        st.warning(w)
 
     status.text("✅ Análisis completado")
     return {
