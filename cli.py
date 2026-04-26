@@ -7,18 +7,17 @@ Uso:
 """
 import argparse
 import json
-import sys
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent))
 from core import (
     load_mesh, get_mesh_bounds,
     SectionLine, cut_mesh_with_section,
     extract_parameters, compare_design_vs_asbuilt, export_results,
     generate_word_report,
 )
+from core.config import DETECTION, TOLERANCES, DEFAULTS
 from core.section_cutter import generate_sections_along_crest
 
 
@@ -39,19 +38,19 @@ def parse_args():
     parser.add_argument("--n", type=int, default=5, help="Número de secciones")
     parser.add_argument("--azimuth", type=float, default=None, help="Azimut de corte (°). Si no se indica, es perpendicular a la línea.")
     parser.add_argument("--auto-azimuth", action="store_true", help="[NO RECOMENDADO] Usar pendiente local del diseño (ruidoso)")
-    parser.add_argument("--length", type=float, default=200.0, help="Longitud de secciones (m)")
+    parser.add_argument("--length", type=float, default=DEFAULTS.section_length, help="Longitud de secciones (m)")
     parser.add_argument("--sector", default="General", help="Nombre del sector")
     
     # Tolerancias
-    parser.add_argument("--tol-height", default="1.0,1.5", help="Tolerancia altura '-,+' en m")
-    parser.add_argument("--tol-angle", default="5.0,5.0", help="Tolerancia ángulo cara '-,+' en °")
-    parser.add_argument("--min-berm", type=float, default=6.0, help="Berma mínima (m)")
-    parser.add_argument("--tol-ir", default="3.0,2.0", help="Tolerancia inter-rampa '-,+' en °")
+    parser.add_argument("--tol-height", default=f"{TOLERANCES.bench_height['neg']},{TOLERANCES.bench_height['pos']}", help="Tolerancia altura '-,+' en m")
+    parser.add_argument("--tol-angle", default=f"{TOLERANCES.face_angle['neg']},{TOLERANCES.face_angle['pos']}", help="Tolerancia ángulo cara '-,+' en °")
+    parser.add_argument("--min-berm", type=float, default=TOLERANCES.berm_width['min'], help="Berma mínima (m)")
+    parser.add_argument("--tol-ir", default=f"{TOLERANCES.inter_ramp_angle['neg']},{TOLERANCES.inter_ramp_angle['pos']}", help="Tolerancia inter-rampa '-,+' en °")
     
     # Detección
-    parser.add_argument("--face-threshold", type=float, default=40.0, help="Ángulo mínimo cara (°)")
-    parser.add_argument("--berm-threshold", type=float, default=20.0, help="Ángulo máximo berma (°)")
-    parser.add_argument("--resolution", type=float, default=0.5, help="Resolución de perfil (m)")
+    parser.add_argument("--face-threshold", type=float, default=DETECTION.face_threshold, help="Ángulo mínimo cara (°)")
+    parser.add_argument("--berm-threshold", type=float, default=DETECTION.berm_threshold, help="Ángulo máximo berma (°)")
+    parser.add_argument("--resolution", type=float, default=DETECTION.profile_resolution, help="Resolución de perfil (m)")
     
     # Info proyecto
     parser.add_argument("--project", default="", help="Nombre del proyecto")
@@ -76,7 +75,7 @@ def load_sections_from_json(filepath):
             name=s["name"],
             origin=np.array(s["origin"]),
             azimuth=s["azimuth"],
-            length=s.get("length", 200.0),
+            length=s.get("length", DEFAULTS.section_length),
             sector=s.get("sector", ""),
         ))
     return sections
@@ -91,7 +90,7 @@ def main():
         'face_angle': parse_tolerance(args.tol_angle),
         'berm_width': {'min': args.min_berm},
         'inter_ramp_angle': parse_tolerance(args.tol_ir),
-        'overall_angle': {'neg': 2.0, 'pos': 2.0},
+        'overall_angle': {'neg': TOLERANCES.overall_angle['neg'], 'pos': TOLERANCES.overall_angle['pos']},
     }
     
     # Cargar superficies

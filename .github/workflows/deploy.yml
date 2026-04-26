@@ -1,0 +1,27 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment }}
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Deploy via SSH
+        run: |
+          echo "Deploy to ${{ github.event.inputs.environment }}"
+          echo "Add your deployment commands here"
+          echo "Example: ssh user@server 'cd /app && docker compose pull && docker compose up -d'"

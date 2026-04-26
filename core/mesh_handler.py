@@ -3,9 +3,10 @@
 import trimesh
 import numpy as np
 import plotly.graph_objects as go
+from typing import Dict, Any, Optional
 
 
-def _load_dxf(filepath):
+def _load_dxf(filepath: str) -> trimesh.Trimesh:
     """Load 3D faces from a DXF file using ezdxf."""
     try:
         import ezdxf
@@ -64,7 +65,7 @@ def _load_dxf(filepath):
     return mesh
 
 
-def load_dxf_polyline(file_path):
+def load_dxf_polyline(file_path: str) -> np.ndarray:
     """
     Load the first POLYLINE or LWPOLYLINE found in a DXF file.
     Returns: np.ndarray of shape (N, 2) with X, Y coordinates.
@@ -102,7 +103,7 @@ def load_dxf_polyline(file_path):
         return np.array([])
 
 
-def load_mesh(filepath):
+def load_mesh(filepath: str) -> trimesh.Trimesh:
     """Load a 3D surface mesh from STL, OBJ, PLY, or DXF file."""
     if str(filepath).lower().endswith('.dxf'):
         mesh = _load_dxf(filepath)
@@ -121,7 +122,7 @@ def load_mesh(filepath):
     return mesh
 
 
-def get_mesh_bounds(mesh):
+def get_mesh_bounds(mesh: trimesh.Trimesh) -> Dict[str, Any]:
     """Get bounding box and statistics for a mesh."""
     bounds = mesh.bounds  # [[xmin, ymin, zmin], [xmax, ymax, zmax]]
     center = mesh.centroid
@@ -135,7 +136,7 @@ def get_mesh_bounds(mesh):
     }
 
 
-def _vertex_clustering(mesh, target_faces):
+def _vertex_clustering(mesh: trimesh.Trimesh, target_faces: int) -> trimesh.Trimesh:
     """
     Decimate via vertex clustering: group nearby vertices into grid cells,
     merge them, and rebuild faces. Preserves mesh connectivity.
@@ -184,7 +185,7 @@ def _vertex_clustering(mesh, target_faces):
     return trimesh.Trimesh(vertices=new_verts, faces=new_faces)
 
 
-def decimate_mesh(mesh, target_faces):
+def decimate_mesh(mesh: trimesh.Trimesh, target_faces: int) -> trimesh.Trimesh:
     """Reduce mesh face count for visualization performance."""
     if len(mesh.faces) <= target_faces:
         return mesh
@@ -194,7 +195,7 @@ def decimate_mesh(mesh, target_faces):
         return _vertex_clustering(mesh, target_faces)
 
 
-def mesh_to_plotly(mesh, name, color, opacity):
+def mesh_to_plotly(mesh: trimesh.Trimesh, name: str, color: str, opacity: float) -> go.Mesh3d:
     """Convert a trimesh mesh to a plotly Mesh3d trace."""
     vertices = mesh.vertices
     faces = mesh.faces

@@ -2,8 +2,27 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.env.local
 .venv/
 *.stl
 *.xlsx
+*.db
 !ejemplo_secciones.json
+
+# Node
 frontend/node_modules/
+web/node_modules/
+web/dist/
+
+# Python
+*.egg-info/
+conciliacion_geotecnica.egg-info/
+
+# Data (SQLite, temp files)
+data/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+.opencode/

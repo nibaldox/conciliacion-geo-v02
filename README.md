@@ -1,9 +1,10 @@
 
 # ⛏️ Conciliación Geotécnica: Diseño vs As-Built
 
-![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.28%2B-ff4b4b)
-![Plotly](https://img.shields.io/badge/Plotly-5.18%2B-3f4f75)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)
+![React](https://img.shields.io/badge/React-19-61DAFB)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 Herramienta avanzada para la conciliación geotécnica en minería a cielo abierto. Permite comparar superficies de diseño (fases) con levantamientos topográficos reales (As-Built) mediante el análisis automático de perfiles transversales.
@@ -19,6 +20,87 @@ Herramienta avanzada para la conciliación geotécnica en minería a cielo abier
 |:-----------------------:|:-------------------:|
 | ![Section Definition](printscr/section-definition.png) | ![Parameter Settings](printscr/parameter-settings.png) |
 | *Generación automática y manual de secciones de corte* | *Configuración de parámetros de detección (RDP, ángulos)* |
+
+---
+
+## 🏗️ Web App v2
+
+La versión 2 introduce una arquitectura moderna **React + FastAPI** que reemplaza la interfaz Streamlit legacy con una aplicación web de alto rendimiento.
+
+### Arquitectura
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  React 19 + TypeScript  (Vite)                          │
+│  ┌───────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ │
+│  │  CesiumJS  │ │ Plotly.js│ │TanStack   │ │ Zustand  │ │
+│  │  3D View   │ │ Profiles │ │Table+Query│ │  State   │ │
+│  └─────┬──────┘ └────┬─────┘ └─────┬─────┘ └────┬─────┘ │
+│        └──────────────┴────────────┴─────────────┘       │
+│                          │  HTTP / REST                   │
+├──────────────────────────┼────────────────────────────────┤
+│  FastAPI  (Python)       │                                │
+│  ┌───────────┐ ┌────────┴──────┐ ┌──────────────────┐    │
+│  │  Routers   │ │ Core Library  │ │   SQLite DB      │    │
+│  │  /sessions │ │ mesh_handler  │ │   (sessions)     │    │
+│  │  /meshes   │ │ section_cutter│ │                  │    │
+│  │  /sections │ │ param_extract │ └──────────────────┘    │
+│  │  /export   │ │ excel_writer  │                         │
+│  └───────────┘ │ report_gen    │                         │
+│                └───────────────┘                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| Frontend | React 19 | UI framework |
+| Frontend | TypeScript | Type safety |
+| Frontend | Vite 6 | Build tool & dev server |
+| Frontend | Tailwind CSS v4 | Utility-first styling |
+| Frontend | CesiumJS | 3D terrain visualization |
+| Frontend | Plotly.js | Interactive profile charts |
+| Frontend | TanStack Table | Data grid with sorting/filtering |
+| Frontend | TanStack Query | Server state management |
+| Frontend | Zustand | Client state management |
+| Backend | FastAPI | REST API framework |
+| Backend | SQLite | Session persistence |
+| Backend | trimesh | 3D mesh processing |
+| Backend | OpenAI / LM Studio | AI report generation |
+
+---
+
+## 🚀 Quick Start
+
+### Docker (Production)
+
+```bash
+docker compose up --build
+```
+
+Frontend at `http://localhost:5173`, API at `http://localhost:8000`.
+
+### Development (Local)
+
+```bash
+# 1. Backend
+pip install -e .
+uvicorn api.main:app --reload --port 8000
+
+# 2. Frontend (separate terminal)
+cd web && npm install && npm run dev
+```
+
+Or use the convenience script:
+
+```bash
+./dev.sh
+```
+
+### API Documentation
+
+Swagger UI available at `http://localhost:8000/docs` when the backend is running.
 
 ---
 
@@ -49,9 +131,9 @@ El algoritmo inteligente identifica y calcula:
 *   **Exportación a Excel**: Reporte completo compatible con software minero.
 *   **Gráficos de Perfil**: Exportación de imágenes de alta resolución de cada sección analizada.
 
-### 5. Asistente IA para Reportes 🤖 
+### 5. Asistente IA para Reportes 🤖
 *   **Generación Automática**: Redacción de informes ejecutivos en lenguaje natural.
-*   **Soporte Multi-Modelo**: 
+*   **Soporte Multi-Modelo**:
     *   **Cloud**: OpenAI (GPT-3.5, GPT-4).
     *   **Local**: Integración con LM Studio / Ollama para privacidad total de datos.
 *   **Análisis Inteligente**: Identificación de tendencias y recomendaciones operativas.
@@ -75,9 +157,33 @@ El algoritmo inteligente identifica y calcula:
 3.  **Instalar dependencias:**
     ```bash
     pip install -r requirements.txt
+    # o bien, instalar el paquete en modo desarrollo:
+    pip install -e .
+    ```
+
+4.  **Frontend (Web App v2):**
+    ```bash
+    cd web
+    npm install
     ```
 
 ## ▶️ Uso
+
+### Web App v2 (React + FastAPI)
+
+```bash
+# Start both servers
+./dev.sh
+
+# Or manually:
+uvicorn api.main:app --reload --port 8000   # Backend
+cd web && npm run dev                        # Frontend
+```
+
+### Legacy Streamlit
+
+<details>
+<summary>Streamlit UI (v1 legacy)</summary>
 
 Ejecuta la aplicación con Streamlit:
 
@@ -87,7 +193,23 @@ streamlit run app.py
 
 La aplicación se abrirá automáticamente en tu navegador predeterminado (usualmente en `http://localhost:8501`).
 
-### Flujo de Trabajo Típico:
+</details>
+
+### Línea de Comandos (CLI)
+
+```bash
+# Generación automática de secciones
+python cli.py --design diseno.stl --topo topo.stl --auto --start "1000,2000" --end "1500,2000" --n 10 --azimuth 0 --length 200
+
+# Con archivo JSON de secciones
+python cli.py --design diseno.stl --topo topo.stl --config ejemplo_secciones.json
+
+# Con tolerancias personalizadas y reporte Word
+python cli.py --design diseno.stl --topo topo.stl --config secciones.json \
+  --tol-height "1.0,1.5" --tol-angle "5.0,5.0" --report Reporte.docx
+```
+
+### Flujo de Trabajo Típico (UI)
 1.  **Cargar Superficies**: Sube tus archivos `.stl` de Diseño y Topografía.
 2.  **Definir Secciones**: Sube un archivo CSV/DXF con las líneas de corte, o dibújalas interactivamente.
 3.  **Procesar**: Haz clic en "Ejecutar Análisis".
@@ -96,12 +218,47 @@ La aplicación se abrirá automáticamente en tu navegador predeterminado (usual
 
 ---
 
-## ⚙️ Configuración Avanzada
+## ⚙️ Configuración
 
-El archivo `core/param_extractor.py` contiene la lógica principal. Puedes ajustar:
-*   **`face_threshold`**: Ángulo mínimo para considerar un segmento como "Cara" (Default: 40°).
-*   **`berm_threshold`**: Ángulo máximo para considerar un segmento como "Berma" (Default: 20°).
-*   **`simplify_epsilon`**: Tolerancia del algoritmo Ramer-Douglas-Peucker para suavizar perfiles ruidosos.
+### Parámetros de Detección (ajustables en la UI)
+
+| Parámetro | Default | Descripción |
+|-----------|---------|-------------|
+| `face_threshold` | 40° | Ángulo mínimo para clasificar un segmento como "Cara" |
+| `berm_threshold` | 20° | Ángulo máximo para clasificar un segmento como "Berma" |
+| `simplify_epsilon` | — | Tolerancia RDP para suavizar perfiles ruidosos |
+
+### Tolerancias de Cumplimiento (configurables por parámetro)
+
+| Parámetro | Tolerancia Default |
+|-----------|-------------------|
+| Altura de banco | ±1.0 / +1.5 m |
+| Ángulo de cara | ±5.0° |
+| Ancho de berma | mín. 6.0 m |
+| Ángulo inter-rampa | −3.0° / +2.0° |
+
+**Estado triad**: CUMPLE / FUERA DE TOLERANCIA (hasta 1.5× tolerancia) / NO CUMPLE (>1.5× tolerancia).
+
+---
+
+## 🧪 Desarrollo
+
+```bash
+pytest tests/ -v                    # Suite de tests unitarios
+python test_pipeline.py             # Test de integración con datos sintéticos
+uvicorn api.main:app --reload       # API de desarrollo (:8000)
+cd web && npm run dev               # Frontend de desarrollo (:5173)
+```
+
+### Convenciones
+
+- **Código**: Inglés (variables, funciones, docstrings)
+- **UI/labels**: Español
+- **Unidades**: metros (m), grados (°), porcentaje (%)
+- **Coordenadas**: Este (X), Norte (Y), Elevación (Z) — sistema minero estándar
+- **Azimut**: Grados desde Norte, sentido horario (N=0°, E=90°, S=180°, W=270°)
+
+---
 
 ## 🤖 Configuración IA (Agente de Reportes)
 Para habilitar la generación de informes con Inteligencia Artificial:
@@ -117,7 +274,7 @@ Para habilitar la generación de informes con Inteligencia Artificial:
 
 ## 📄 Licencia
 
-Este proyecto está bajo la Licencia MIT. Consulta el archivo `LICENSE` para más detalles.
+Este proyecto es de uso privado. Todos los derechos reservados.
 
 ---
 *Desarrollado con ❤️ para la minería moderna.*

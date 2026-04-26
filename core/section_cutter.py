@@ -2,6 +2,7 @@
 
 import numpy as np
 from dataclasses import dataclass
+from typing import List, Optional
 import trimesh
 
 
@@ -22,13 +23,13 @@ class ProfileResult:
     elevations: np.ndarray
 
 
-def azimuth_to_direction(azimuth_deg):
+def azimuth_to_direction(azimuth_deg: float) -> np.ndarray:
     """Convert azimuth (degrees from North, clockwise) to 2D direction vector."""
     az_rad = np.radians(azimuth_deg)
     return np.array([np.sin(az_rad), np.cos(az_rad)])
 
 
-def cut_mesh_with_section(mesh, section):
+def cut_mesh_with_section(mesh: trimesh.Trimesh, section: SectionLine) -> Optional[ProfileResult]:
     """
     Cut a mesh with a vertical plane defined by a SectionLine.
     Returns a ProfileResult with distances and elevations, or None.
@@ -90,14 +91,16 @@ def cut_mesh_with_section(mesh, section):
     return ProfileResult(distances=unique_dists, elevations=unique_elevs)
 
 
-def cut_both_surfaces(mesh_design, mesh_topo, section):
+def cut_both_surfaces(mesh_design: trimesh.Trimesh, mesh_topo: trimesh.Trimesh,
+                      section: SectionLine) -> tuple[Optional[ProfileResult], Optional[ProfileResult]]:
     """Cut both design and topo meshes with the same section."""
     pd = cut_mesh_with_section(mesh_design, section)
     pt = cut_mesh_with_section(mesh_topo, section)
     return pd, pt
 
 
-def compute_local_azimuth(design_mesh, point_xy, radius=50.0):
+def compute_local_azimuth(design_mesh: trimesh.Trimesh, point_xy: np.ndarray,
+                          radius: float = 50.0) -> float:
     """
     Compute the steepest descent azimuth at a point on the DESIGN mesh surface.
     Fits a plane to nearby vertices and returns the downhill direction.
@@ -145,9 +148,11 @@ def compute_local_azimuth(design_mesh, point_xy, radius=50.0):
     return float(azimuth)
 
 
-def generate_sections_along_crest(mesh, start_point, end_point, n_sections,
-                                  section_azimuth=None, section_length=200.0,
-                                  sector_name=""):
+def generate_sections_along_crest(mesh: trimesh.Trimesh, start_point: np.ndarray,
+                                   end_point: np.ndarray, n_sections: int,
+                                   section_azimuth: Optional[float] = None,
+                                   section_length: float = 200.0,
+                                   sector_name: str = "") -> List[SectionLine]:
     """
     Generate evenly spaced sections along a line (e.g., pit crest).
     If section_azimuth is None, computes azimuth perpendicular to the line (Right Hand Rule).
@@ -176,8 +181,9 @@ def generate_sections_along_crest(mesh, start_point, end_point, n_sections,
     return sections
 
 
-def generate_perpendicular_sections(points, spacing, section_length,
-                                    sector_name="", design_mesh=None):
+def generate_perpendicular_sections(points: np.ndarray, spacing: float,
+                                     section_length: float, sector_name: str = "",
+                                     design_mesh: Optional[trimesh.Trimesh] = None) -> List[SectionLine]:
     """
     Generate sections perpendicular to a polyline at specified spacing.
 

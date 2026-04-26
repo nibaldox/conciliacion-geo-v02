@@ -1,8 +1,13 @@
 """Export comparison results to formatted Excel workbook."""
 
+from typing import List, Dict, Any, Optional
+
 import openpyxl
+from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
+from openpyxl.cell.cell import Cell
 
 
 # Style constants
@@ -30,7 +35,7 @@ FILL_PURPLE = PatternFill(start_color="E6E6FA", end_color="E6E6FA", fill_type="s
 FONT_PURPLE = Font(color="4B0082")
 
 
-def _apply_status_style(cell):
+def _apply_status_style(cell: Cell) -> None:
     """Apply conditional formatting based on status text."""
     val = cell.value
     if val == "CUMPLE":
@@ -50,7 +55,7 @@ def _apply_status_style(cell):
         cell.font = FONT_PURPLE
 
 
-def _write_header(ws, row, headers):
+def _write_header(ws: Worksheet, row: int, headers: List[str]) -> None:
     """Write a styled header row."""
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=row, column=col, value=header)
@@ -60,7 +65,7 @@ def _write_header(ws, row, headers):
         cell.border = THIN_BORDER
 
 
-def _auto_width(ws):
+def _auto_width(ws: Worksheet) -> None:
     """Auto-adjust column widths."""
     for col_cells in ws.columns:
         max_len = 0
@@ -71,7 +76,8 @@ def _auto_width(ws):
         ws.column_dimensions[col_letter].width = min(max_len + 3, 25)
 
 
-def _write_summary_sheet(wb, comparisons, tolerances, project_info):
+def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
+                          tolerances: Dict[str, Any], project_info: Dict[str, str]) -> None:
     """Create the Resumen sheet."""
     ws = wb.active
     ws.title = "Resumen"
@@ -167,7 +173,7 @@ def _write_summary_sheet(wb, comparisons, tolerances, project_info):
     _auto_width(ws)
 
 
-def _write_bench_sheet(wb, comparisons):
+def _write_bench_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
     """Create the Bancos detail sheet."""
     ws = wb.create_sheet("Bancos")
 
@@ -200,7 +206,7 @@ def _write_bench_sheet(wb, comparisons):
     _auto_width(ws)
 
 
-def _write_interramp_sheet(wb, params_design, params_topo):
+def _write_interramp_sheet(wb: Workbook, params_design: List[Any], params_topo: List[Any]) -> None:
     """Create the Inter-Rampa sheet."""
     ws = wb.create_sheet("Inter-Rampa")
 
@@ -230,7 +236,7 @@ def _write_interramp_sheet(wb, params_design, params_topo):
     _auto_width(ws)
 
 
-def _write_dashboard_sheet(wb, comparisons):
+def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
     """Create a simple Dashboard summary sheet."""
     ws = wb.create_sheet("Dashboard")
 
@@ -290,7 +296,7 @@ def _write_dashboard_sheet(wb, comparisons):
     _auto_width(ws)
 
 
-def _write_sector_summary(wb, comparisons):
+def _write_sector_summary(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
     """Create Executive Summary by Sector."""
     ws = wb.create_sheet("Resumen Ejecutivo")
     
@@ -346,8 +352,9 @@ def _write_sector_summary(wb, comparisons):
     _auto_width(ws)
 
 
-def export_results(comparisons, params_design, params_topo,
-                   tolerances, output_path, project_info=None):
+def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
+                   params_topo: List[Any], tolerances: Dict[str, Any],
+                   output_path: str, project_info: Optional[Dict[str, str]] = None) -> None:
     """Export comparison results to a formatted Excel workbook."""
     if project_info is None:
         project_info = {}

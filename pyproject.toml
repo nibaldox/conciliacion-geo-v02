@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "conciliacion-geotecnica"
+version = "0.2.0"
+description = "Herramienta para conciliación geotécnica de taludes en minería a cielo abierto"
+requires-python = ">=3.10"
+dependencies = [
+    "trimesh",
+    "fast_simplification",
+    "numpy",
+    "scipy",
+    "shapely",
+    "openpyxl",
+    "streamlit",
+    "plotly",
+    "pandas",
+    "ezdxf",
+    "python-docx",
+    "matplotlib",
+    "openai",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+]
+
+[project.scripts]
+conciliacion = "cli:main"
+
+[tool.setuptools.packages.find]
+include = ["core*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand colors */
+  --color-mine-blue: #2F5496;
+  --color-mine-green: #2E7D32;
+  --color-mine-yellow: #F9A825;
+  --color-mine-red: #C62828;
+  --color-mine-gray: #757575;
+
+  /* Status colors - backgrounds */
+  --status-ok: #C6EFCE;
+  --status-ok-text: #006100;
+  --status-warn: #FFEB9C;
+  --status-warn-text: #9C5700;
+  --status-nok: #FFC7CE;
+  --status-nok-text: #9C0006;
+  --status-missing: #E0E0E0;
+  --status-missing-text: #555555;
+  --status-extra: #E6E6FA;
+  --status-extra-text: #4B0082;
+}
+
+/* Base styles */
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  @apply bg-gray-50 text-gray-900 antialiased;
+}
+
+/* Step wizard active step */
+.step-active {
+  @apply bg-mine-blue text-white;
+}
+
+.step-complete {
+  @apply bg-mine-green text-white;
+}
+
+.step-pending {
+  @apply bg-gray-200 text-gray-500;
+}
+
+/* Status badges */
+.badge-ok {
+  background-color: var(--status-ok);
+  color: var(--status-ok-text);
+}
+
+.badge-warn {
+  background-color: var(--status-warn);
+  color: var(--status-warn-text);
+}
+
+.badge-nok {
+  background-color: var(--status-nok);
+  color: var(--status-nok-text);
+}
+
+.badge-missing {
+  background-color: var(--status-missing);
+  color: var(--status-missing-text);
+}
+
+.badge-extra {
+  background-color: var(--status-extra);
+  color: var(--status-extra-text);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}

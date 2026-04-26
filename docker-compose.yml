@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - conciliacion-data:/app/data
+    environment:
+      - DATABASE_URL=sqlite:///./data/conciliacion.db
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile-web
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  conciliacion-data:

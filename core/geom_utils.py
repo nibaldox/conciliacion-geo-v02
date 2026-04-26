@@ -2,8 +2,10 @@
 
 import numpy as np
 from scipy.spatial import cKDTree
+from typing import Any
 
-def calculate_profile_deviation(profile_ref, profile_eval):
+
+def calculate_profile_deviation(profile_ref: Any, profile_eval: Any) -> np.ndarray:
     """
     Calculate the minimum 2D Euclidean distance from each point in profile_eval
     to the closest point in profile_ref.
@@ -35,7 +37,7 @@ def calculate_profile_deviation(profile_ref, profile_eval):
     return distances
 
 
-def calculate_area_between_profiles(profile_ref, profile_eval):
+def calculate_area_between_profiles(profile_ref: Any, profile_eval: Any) -> tuple[float, float, np.ndarray, np.ndarray, np.ndarray]:
     """
     Calculate area between two profiles (Design vs As-Built).
     Returns:
