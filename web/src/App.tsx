@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Suspense, useState } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Step1Content } from './components/mesh/Step1Content';
@@ -7,6 +7,7 @@ import { SectionWizard } from './components/sections/SectionWizard';
 import { Step3Content } from './components/analysis/Step3Content';
 import { Step4Content } from './components/results/Step4Content';
 import { useSession } from './stores/session';
+import { useTheme } from './stores/theme';
 
 const STEPS_MAP = {
   1: Step1Content,
@@ -39,6 +40,17 @@ function App() {
       },
     },
   }));
+
+  const { isDark } = useTheme();
+
+  // Apply dark class to root element
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDark]);
 
   return (
     <QueryClientProvider client={queryClient}>

@@ -220,9 +220,10 @@ export function Mesh3DViewer() {
     return (
       <div
         data-slot="mesh-3d-viewer"
-        className="flex items-center justify-center h-full min-h-[400px] bg-slate-900 rounded-xl border border-slate-700"
+        className="flex items-center justify-center h-full min-h-[400px] rounded-xl"
+        style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}
       >
-        <div className="flex flex-col items-center gap-3 text-red-400">
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-mine-red)' }}>
           <div className="text-3xl">⚠️</div>
           <p className="text-sm text-center px-4">{error}</p>
         </div>
@@ -235,9 +236,10 @@ export function Mesh3DViewer() {
     return (
       <div
         data-slot="mesh-3d-viewer"
-        className="flex items-center justify-center h-full min-h-[400px] bg-slate-900 rounded-xl border border-slate-700"
+        className="flex items-center justify-center h-full min-h-[400px] rounded-xl"
+        style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}
       >
-        <div className="flex flex-col items-center gap-3 text-slate-400">
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="animate-spin text-2xl">⏳</div>
           <p className="text-sm">Cargando vista 3D…</p>
         </div>
@@ -250,9 +252,10 @@ export function Mesh3DViewer() {
     return (
       <div
         data-slot="mesh-3d-viewer"
-        className="flex items-center justify-center h-full min-h-[400px] bg-slate-900 rounded-xl border border-slate-700"
+        className="flex items-center justify-center h-full min-h-[400px] rounded-xl"
+        style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}
       >
-        <div className="flex flex-col items-center gap-3 text-slate-400">
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="text-3xl">🌐</div>
           <p className="text-sm text-center">
             Cargue superficies para ver la vista 3D
@@ -266,7 +269,8 @@ export function Mesh3DViewer() {
   return (
     <div
       data-slot="mesh-3d-viewer"
-      className="h-full min-h-[400px] w-full rounded-xl overflow-hidden border border-slate-700"
+      className="h-full min-h-[400px] w-full rounded-xl overflow-hidden"
+      style={{ border: '1px solid var(--color-border)' }}
     >
       <div ref={containerRef} className="w-full h-full" style={{ minHeight: '400px' }} />
     </div>

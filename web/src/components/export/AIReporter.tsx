@@ -182,18 +182,18 @@ export function AIReporter() {
   return (
     <div className="space-y-5">
       {/* Options panel */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-        <h4 className="text-sm font-semibold text-gray-800 mb-3">
+      <div className="rounded-xl shadow-sm p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
           Configuración del Modelo IA
         </h4>
 
         {/* Provider toggle */}
         <div className="flex gap-4 items-end">
           <div className="flex-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
               Proveedor
             </label>
-            <div className="flex rounded-lg border border-gray-300 overflow-hidden">
+            <div className="flex rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
               {(['ollama', 'lmstudio'] as AIProvider[]).map((prov) => {
                 const available = prov === 'ollama' ? ollamaAvailable : lmstudioAvailable;
                 const loading = providersLoading;
@@ -201,16 +201,15 @@ export function AIReporter() {
                   <button
                     key={prov}
                     onClick={() => handleProviderChange(prov)}
-                    className={`
-                      flex-1 px-3 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5
-                      ${options.provider === prov
-                        ? 'bg-mine-blue text-white'
-                        : 'bg-white text-gray-600 hover:bg-gray-50'
-                      }
-                    `}
+                    className="flex-1 px-3 py-2 text-sm font-medium transition-colors flex items-center justify-center gap-1.5"
+                    style={options.provider === prov
+                      ? { backgroundColor: 'var(--color-mine-blue)', color: '#fff' }
+                      : { backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)' }
+                    }
                   >
                     <span
-                      className={`inline-block w-2 h-2 rounded-full ${loading ? 'bg-gray-300 animate-pulse' : available ? 'bg-green-400' : 'bg-red-400'}`}
+                      className="inline-block w-2 h-2 rounded-full"
+                      style={loading ? { backgroundColor: 'var(--color-border-strong)', animation: 'pulse 1.5s infinite' } : available ? { backgroundColor: 'var(--color-mine-green)' } : { backgroundColor: 'var(--color-mine-red)' }}
                       title={loading ? 'Detectando...' : available ? 'Disponible' : 'No disponible'}
                     />
                     {PROVIDER_LABELS[prov]}
@@ -222,14 +221,14 @@ export function AIReporter() {
 
           {/* Model selector */}
           <div className="flex-1">
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
               Modelo
             </label>
             <select
               value={options.model}
               onChange={(e) => setOptions((prev) => ({ ...prev, model: e.target.value }))}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white
-                         focus:ring-2 focus:ring-mine-blue/20 focus:border-mine-blue outline-none"
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             >
               {detectedModels.length > 0 ? (
                 detectedModels.map((m) => (
@@ -251,10 +250,8 @@ export function AIReporter() {
               <button
                 onClick={handleGenerate}
                 disabled={!anyProviderAvailable || !options.model}
-                className="px-5 py-2.5 bg-gradient-to-r from-mine-blue to-blue-600 text-white rounded-lg
-                           text-sm font-semibold shadow-md hover:shadow-lg transition-all
-                           hover:scale-[1.02] active:scale-[0.98] flex items-center gap-2
-                           disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-md"
+                className="px-5 py-2.5 text-white rounded-lg text-sm font-semibold shadow-md transition-all hover:shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--color-mine-blue)' }}
               >
                 <span>✨</span>
                 Generar Informe con IA
@@ -262,9 +259,8 @@ export function AIReporter() {
             ) : (
               <button
                 onClick={handleStop}
-                className="px-5 py-2.5 bg-red-500 text-white rounded-lg
-                           text-sm font-semibold hover:bg-red-600 transition-colors
-                           flex items-center gap-2"
+                className="px-5 py-2.5 text-white rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+                style={{ backgroundColor: 'var(--color-mine-red)' }}
               >
                 <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -278,20 +274,20 @@ export function AIReporter() {
 
         {/* No providers available — install instructions */}
         {!anyProviderAvailable && !providersLoading && (
-          <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-            <p className="font-semibold mb-2">No se detectaron proveedores de IA locales.</p>
-            <p className="mb-1">Instala al menos uno para generar informes:</p>
+          <div className="mt-4 rounded-lg p-4 text-sm" style={{ backgroundColor: 'var(--status-warn-bg)', border: '1px solid var(--status-warn-border)' }}>
+            <p className="font-semibold mb-2" style={{ color: 'var(--status-warn-text)' }}>No se detectaron proveedores de IA locales.</p>
+            <p className="mb-1" style={{ color: 'var(--status-warn-text)' }}>Instala al menos uno para generar informes:</p>
             <ul className="list-disc list-inside space-y-1 ml-2">
-              <li>
+              <li style={{ color: 'var(--status-warn-text)' }}>
                 <strong>Ollama:</strong>{' '}
-                <code className="bg-amber-100 px-1.5 py-0.5 rounded text-xs">
+                <code className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--status-warn-border)' }}>
                   curl -fsSL https://ollama.com/install.sh | sh && ollama pull llama3.1:8b
                 </code>
               </li>
-              <li>
+              <li style={{ color: 'var(--status-warn-text)' }}>
                 <strong>LM Studio:</strong>{' '}
                 Descarga desde{' '}
-                <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer" className="underline">
+                <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--status-warn-text)', textDecoration: 'underline' }}>
                   lmstudio.ai
                 </a>{' '}
                 y habilita el servidor local.
@@ -303,12 +299,12 @@ export function AIReporter() {
 
       {/* Error state */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between">
-          <p className="text-sm text-red-600 font-medium">{error}</p>
+        <div className="rounded-xl p-4 flex items-center justify-between" style={{ backgroundColor: 'var(--status-nok-bg)', border: '1px solid var(--status-nok-border)' }}>
+          <p className="text-sm font-medium" style={{ color: 'var(--status-nok-text)' }}>{error}</p>
           <button
             onClick={handleRetry}
-            className="px-3 py-1.5 bg-red-500 text-white rounded-lg text-xs font-medium
-                       hover:bg-red-600 transition-colors"
+            className="px-3 py-1.5 text-white rounded-lg text-xs font-medium"
+            style={{ backgroundColor: 'var(--color-mine-red)' }}
           >
             Reintentar
           </button>
@@ -317,27 +313,27 @@ export function AIReporter() {
 
       {/* Report display */}
       {(hasContent || isGenerating) && (
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+        <div className="rounded-xl shadow-sm" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           {/* Header */}
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-gray-800">
+          <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--color-border)' }}>
+            <h4 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
               Informe Generado
             </h4>
             {isGenerating && (
               <div className="flex items-center gap-1.5">
-                <span className="inline-block w-1.5 h-1.5 bg-mine-blue rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="inline-block w-1.5 h-1.5 bg-mine-blue rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="inline-block w-1.5 h-1.5 bg-mine-blue rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                <span className="text-xs text-gray-500 ml-1">Generando...</span>
+                <span className="inline-block w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-mine-blue)', animationDelay: '0ms' }} />
+                <span className="inline-block w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-mine-blue)', animationDelay: '150ms' }} />
+                <span className="inline-block w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-mine-blue)', animationDelay: '300ms' }} />
+                <span className="text-xs ml-1" style={{ color: 'var(--color-text-muted)' }}>Generando...</span>
               </div>
             )}
           </div>
 
           {/* Markdown content */}
-          <div className="p-5 prose prose-sm max-w-none prose-headings:text-gray-800 prose-p:text-gray-700 prose-li:text-gray-700">
-            <ReactMarkdown>{report}</ReactMarkdown>
+          <div className="p-5 prose prose-sm max-w-none">
+            <ReactMarkdown style={{ color: 'var(--color-text-primary)' }}>{report}</ReactMarkdown>
             {isGenerating && (
-              <span className="inline-block w-0.5 h-4 bg-mine-blue animate-pulse align-text-bottom ml-0.5" />
+              <span className="inline-block w-0.5 h-4 animate-pulse align-text-bottom ml-0.5" style={{ backgroundColor: 'var(--color-mine-blue)' }} />
             )}
           </div>
         </div>
@@ -348,15 +344,15 @@ export function AIReporter() {
         <div className="flex gap-3 justify-end">
           <button
             onClick={handleCopy}
-            className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600
-                       hover:bg-gray-50 transition-colors flex items-center gap-2"
+            className="px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             📋 Copiar al portapapeles
           </button>
           <button
             onClick={handleDownload}
-            className="px-4 py-2.5 bg-mine-blue text-white rounded-lg text-sm font-medium
-                       hover:bg-blue-700 transition-colors flex items-center gap-2"
+            className="px-4 py-2.5 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            style={{ backgroundColor: 'var(--color-mine-blue)' }}
           >
             💾 Descargar
           </button>

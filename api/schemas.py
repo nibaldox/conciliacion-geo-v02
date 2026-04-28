@@ -150,3 +150,18 @@ class UploadResponse(BaseModel):
     n_vertices: int
     n_faces: int
     bounds: Dict[str, float]
+
+
+class ContourLine(BaseModel):
+    """A single contour level with one or more line segments."""
+
+    elevation: float
+    segments: List[List[List[float]]]  # List of polylines, each [[x,y], [x,y], ...]
+
+
+class ContourResponse(BaseModel):
+    bounds: Dict[str, float]
+    elevation_min: float
+    elevation_max: float
+    interval: float
+    lines: List[ContourLine]

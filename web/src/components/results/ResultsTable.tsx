@@ -90,75 +90,93 @@ export function ResultsTable() {
       // Height group
       {
         accessorKey: 'height_design',
-        header: 'Alt. Diseño',
+        header: 'Alt. Diseño (m)',
         size: 90,
-        cell: ({ getValue }) => formatMeters(getValue<number | null>()),
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'height_real',
-        header: 'Alt. Real',
+        header: 'Alt. Real (m)',
         size: 90,
-        cell: ({ getValue }) => formatMeters(getValue<number | null>()),
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'height_dev',
-        header: 'Alt. Desv.',
+        header: 'Desv. (m)',
         size: 90,
-        cell: ({ getValue }) => formatDeviation(getValue<number | null>()),
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'height_status',
-        header: 'Alt. Estado',
+        header: 'Estado',
         size: 110,
         cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
       },
       // Angle group
       {
         accessorKey: 'angle_design',
-        header: 'Áng. Diseño',
+        header: 'Áng. Diseño (°)',
         size: 90,
-        cell: ({ getValue }) => formatDegrees(getValue<number | null>()),
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatDegrees(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'angle_real',
-        header: 'Áng. Real',
+        header: 'Áng. Real (°)',
         size: 90,
-        cell: ({ getValue }) => formatDegrees(getValue<number | null>()),
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatDegrees(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'angle_dev',
-        header: 'Áng. Desv.',
+        header: 'Desv. (°)',
         size: 90,
-        cell: ({ getValue }) => formatDeviation(getValue<number | null>()),
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'angle_status',
-        header: 'Áng. Estado',
+        header: 'Estado',
         size: 110,
         cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
       },
       // Berm group
       {
         accessorKey: 'berm_design',
-        header: 'Berma Diseño',
-        size: 100,
-        cell: ({ getValue }) => formatMeters(getValue<number | null>()),
+        header: 'Berma D. (m)',
+        size: 90,
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'berm_real',
-        header: 'Berma Real',
-        size: 100,
-        cell: ({ getValue }) => formatMeters(getValue<number | null>()),
+        header: 'Berma R. (m)',
+        size: 90,
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'berm_min',
-        header: 'Berma Mín.',
-        size: 100,
-        cell: ({ getValue }) => formatMeters(getValue<number | null>()),
+        header: 'Mín. (m)',
+        size: 90,
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        ),
       },
       {
         accessorKey: 'berm_status',
-        header: 'Berma Estado',
+        header: 'Estado',
         size: 110,
         cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
       },
@@ -181,8 +199,8 @@ export function ResultsTable() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64 gap-3 text-gray-500">
-        <svg className="animate-spin h-5 w-5 text-mine-blue" viewBox="0 0 24 24" fill="none">
+      <div className="flex items-center justify-center h-64 gap-3" style={{ color: 'var(--color-text-muted)' }}>
+        <svg className="animate-spin h-5 w-5" style={{ color: 'var(--color-mine-blue)' }} viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
@@ -193,7 +211,7 @@ export function ResultsTable() {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64 text-red-500 text-sm">
+      <div className="flex items-center justify-center h-64 text-sm" style={{ color: '#ef4444' }}>
         Error al cargar los resultados
       </div>
     );
@@ -201,7 +219,7 @@ export function ResultsTable() {
 
   if (filteredData.length === 0) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-64 text-sm" style={{ color: 'var(--color-text-muted)' }}>
         No hay resultados disponibles. Ejecuta el procesamiento primero.
       </div>
     );
@@ -209,16 +227,16 @@ export function ResultsTable() {
 
   return (
     <div className="space-y-3">
-      <div className="overflow-x-auto border border-gray-200 rounded-lg">
+      <div className="overflow-x-auto rounded-lg shadow-sm" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id} className="bg-gray-50 border-b border-gray-200">
+              <tr key={headerGroup.id} style={{ backgroundColor: 'var(--color-surface-muted)', borderBottom: '2px solid var(--color-border)' }}>
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2.5 text-left text-xs font-semibold text-gray-600 whitespace-nowrap cursor-pointer hover:bg-gray-100 select-none"
-                    style={{ width: header.getSize() }}
+                    className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap cursor-pointer select-none"
+                    style={{ width: header.getSize(), color: 'var(--color-text-secondary)' }}
                     onClick={header.column.getToggleSortingHandler()}
                   >
                     <div className="flex items-center gap-1">
@@ -237,14 +255,17 @@ export function ResultsTable() {
             {table.getRowModel().rows.map((row, i) => (
               <tr
                 key={row.id}
-                className={`border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                  i % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'
-                }`}
+                className="transition-colors"
+                style={{
+                  backgroundColor: i % 2 === 0 ? 'var(--color-surface)' : 'var(--color-surface-muted)',
+                  borderBottom: '1px solid var(--color-border)',
+                }}
               >
                 {row.getVisibleCells().map((cell) => (
                   <td
                     key={cell.id}
-                    className="px-3 py-2 text-gray-700 whitespace-nowrap"
+                    className="px-3 py-2 whitespace-nowrap"
+                    style={{ color: 'var(--color-text-primary)' }}
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
@@ -256,41 +277,45 @@ export function ResultsTable() {
       </div>
 
       {/* Pagination controls */}
-      <div className="flex items-center justify-between text-sm text-gray-600">
+      <div className="flex items-center justify-between text-sm px-1" style={{ color: 'var(--color-text-muted)' }}>
         <div className="flex items-center gap-2">
           <span>
             Página {table.getState().pagination.pageIndex + 1} de{' '}
             {table.getPageCount()}
           </span>
-          <span className="text-gray-400">|</span>
+          <span style={{ color: 'var(--color-border-strong)' }}>|</span>
           <span>{filteredData.length} resultados</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => table.setPageIndex(0)}
             disabled={!table.getCanPreviousPage()}
-            className="px-2 py-1 rounded border border-gray-300 text-xs hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             «
           </button>
           <button
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
-            className="px-2 py-1 rounded border border-gray-300 text-xs hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             ‹
           </button>
           <button
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
-            className="px-2 py-1 rounded border border-gray-300 text-xs hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             ›
           </button>
           <button
             onClick={() => table.setPageIndex(table.getPageCount() - 1)}
             disabled={!table.getCanNextPage()}
-            className="px-2 py-1 rounded border border-gray-300 text-xs hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             »
           </button>

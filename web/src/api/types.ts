@@ -163,3 +163,16 @@ export interface VerticesResponse {
   y: number[];
   z: number[];
 }
+
+export interface ContourLine {
+  elevation: number;
+  segments: number[][][];  // [polyline][point][x or y]
+}
+
+export interface ContourData {
+  bounds: Record<string, number>;
+  elevation_min: number;
+  elevation_max: number;
+  interval: number;
+  lines: ContourLine[];
+}

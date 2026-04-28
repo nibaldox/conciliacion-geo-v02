@@ -45,13 +45,13 @@ export function ExportPanel() {
   return (
     <div className="space-y-5">
       {/* Project info form */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-        <h4 className="text-sm font-semibold text-gray-800 mb-3">
+      <div className="rounded-xl shadow-sm p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
           Información del Proyecto
         </h4>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
               Proyecto
             </label>
             <input
@@ -59,11 +59,12 @@ export function ExportPanel() {
               value={form.project}
               onChange={(e) => handleFieldChange('project', e.target.value)}
               placeholder="Nombre del proyecto"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mine-blue/20 focus:border-mine-blue outline-none"
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
               Autor
             </label>
             <input
@@ -71,11 +72,12 @@ export function ExportPanel() {
               value={form.author}
               onChange={(e) => handleFieldChange('author', e.target.value)}
               placeholder="Nombre del autor"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mine-blue/20 focus:border-mine-blue outline-none"
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
               Operación
             </label>
             <input
@@ -83,11 +85,12 @@ export function ExportPanel() {
               value={form.operation}
               onChange={(e) => handleFieldChange('operation', e.target.value)}
               placeholder="Nombre de la operación"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mine-blue/20 focus:border-mine-blue outline-none"
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
               Fase
             </label>
             <input
@@ -95,7 +98,8 @@ export function ExportPanel() {
               value={form.phase}
               onChange={(e) => handleFieldChange('phase', e.target.value)}
               placeholder="Fase del proyecto"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-mine-blue/20 focus:border-mine-blue outline-none"
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
         </div>
@@ -135,7 +139,7 @@ export function ExportPanel() {
 
       {/* Error feedback */}
       {(exportExcel.isError || exportWord.isError || exportDxf.isError || exportImages.isError) && (
-        <p className="text-xs text-red-500 text-center">
+        <p className="text-xs text-center" style={{ color: 'var(--color-mine-red)' }}>
           Error al exportar. Verifica que existan resultados procesados.
         </p>
       )}
@@ -162,17 +166,14 @@ function ExportButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`
-        flex flex-col items-center gap-2 px-4 py-4 rounded-xl border border-gray-200 shadow-sm
-        transition-all duration-200
-        ${disabled
-          ? 'bg-gray-50 text-gray-400 cursor-not-allowed'
-          : 'bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 hover:shadow-md active:scale-[0.98]'
-        }
-      `}
+      className="flex flex-col items-center gap-2 px-4 py-4 rounded-xl shadow-sm transition-all duration-200"
+      style={disabled
+        ? { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', cursor: 'not-allowed', border: '1px solid var(--color-border)' }
+        : { backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }
+      }
     >
       {loading ? (
-        <svg className="animate-spin h-6 w-6 text-mine-blue" viewBox="0 0 24 24" fill="none">
+        <svg className="animate-spin h-6 w-6" style={{ color: 'var(--color-mine-blue)' }} viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>

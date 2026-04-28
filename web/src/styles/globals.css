@@ -1,85 +1,116 @@
 @import "tailwindcss";
 
+/* ── Dark mode selector (must be first) ────────────────────── */
+@custom-variant dark &;
+
+/* ── Theme tokens — Light mode ───────────────────────────────── */
 @theme {
-  /* Brand colors */
   --color-mine-blue: #2F5496;
   --color-mine-green: #2E7D32;
   --color-mine-yellow: #F9A825;
   --color-mine-red: #C62828;
   --color-mine-gray: #757575;
 
-  /* Status colors - backgrounds */
-  --status-ok: #C6EFCE;
-  --status-ok-text: #006100;
-  --status-warn: #FFEB9C;
-  --status-warn-text: #9C5700;
-  --status-nok: #FFC7CE;
-  --status-nok-text: #9C0006;
-  --status-missing: #E0E0E0;
-  --status-missing-text: #555555;
-  --status-extra: #E6E6FA;
-  --status-extra-text: #4B0082;
+  --color-surface: #ffffff;
+  --color-surface-raised: #f9fafb;
+  --color-surface-muted: #f3f4f6;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+  --color-text-primary: #111827;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #9ca3af;
+
+  --status-ok-bg: #ecfdf5;
+  --status-ok-text: #065f46;
+  --status-ok-border: #a7f3d0;
+  --status-warn-bg: #fffbeb;
+  --status-warn-text: #92400e;
+  --status-warn-border: #fde68a;
+  --status-nok-bg: #fef2f2;
+  --status-nok-text: #991b1b;
+  --status-nok-border: #fecaca;
+  --status-missing-bg: #f9fafb;
+  --status-missing-text: #4b5563;
+  --status-missing-border: #e5e7eb;
+  --status-extra-bg: #f5f3ff;
+  --status-extra-text: #4c1d95;
+  --status-extra-border: #ddd6fe;
 }
 
-/* Base styles */
+/* ── Theme tokens — Dark mode ────────────────────────────────── */
+.dark {
+  --color-surface: #0f0f0f;
+  --color-surface-raised: #171717;
+  --color-surface-muted: #1f1f1f;
+  --color-border: #2e2e2e;
+  --color-border-strong: #404040;
+  --color-text-primary: #e5e5e5;
+  --color-text-secondary: #a3a3a3;
+  --color-text-muted: #6b6b6b;
+
+  --status-ok-bg: #052e16;
+  --status-ok-text: #86efac;
+  --status-ok-border: #166534;
+  --status-warn-bg: #1c1400;
+  --status-warn-text: #fde047;
+  --status-warn-border: #854d0e;
+  --status-nok-bg: #1c0505;
+  --status-nok-text: #fca5a5;
+  --status-nok-border: #991b1b;
+  --status-missing-bg: #1a1a1a;
+  --status-missing-text: #a3a3a3;
+  --status-missing-border: #404040;
+  --status-extra-bg: #1e1b4b;
+  --status-extra-text: #c4b5fd;
+  --status-extra-border: #4c1d95;
+}
+
+/* ── Base styles ─────────────────────────────────────────────── */
 body {
   font-family: system-ui, -apple-system, sans-serif;
-  @apply bg-gray-50 text-gray-900 antialiased;
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  antialiased: antialiased;
 }
 
-/* Step wizard active step */
-.step-active {
-  @apply bg-mine-blue text-white;
-}
-
-.step-complete {
-  @apply bg-mine-green text-white;
-}
-
-.step-pending {
-  @apply bg-gray-200 text-gray-500;
-}
-
-/* Status badges */
+/* ── Status badges ────────────────────────────────────────────── */
 .badge-ok {
-  background-color: var(--status-ok);
+  background-color: var(--status-ok-bg);
   color: var(--status-ok-text);
+  border: 1px solid var(--status-ok-border);
 }
 
 .badge-warn {
-  background-color: var(--status-warn);
+  background-color: var(--status-warn-bg);
   color: var(--status-warn-text);
+  border: 1px solid var(--status-warn-border);
 }
 
 .badge-nok {
-  background-color: var(--status-nok);
+  background-color: var(--status-nok-bg);
   color: var(--status-nok-text);
+  border: 1px solid var(--status-nok-border);
 }
 
 .badge-missing {
-  background-color: var(--status-missing);
+  background-color: var(--status-missing-bg);
   color: var(--status-missing-text);
+  border: 1px solid var(--status-missing-border);
 }
 
 .badge-extra {
-  background-color: var(--status-extra);
+  background-color: var(--status-extra-bg);
   color: var(--status-extra-text);
+  border: 1px solid var(--status-extra-border);
 }
 
-/* Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
+/* ── Scrollbar — light ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--color-surface-muted); }
+::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 
-::-webkit-scrollbar-track {
-  @apply bg-gray-100;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-gray-300 rounded-full;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-400;
-}
+/* ── Step wizard ─────────────────────────────────────────────── */
+.step-active { background-color: var(--color-mine-blue); color: #fff; }
+.step-complete { background-color: var(--color-mine-green); color: #fff; }
+.step-pending { background-color: var(--color-surface-muted); color: var(--color-text-muted); }

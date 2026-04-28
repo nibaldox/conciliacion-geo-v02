@@ -159,9 +159,10 @@ export function PlanView({ onPointClick }: PlanViewProps) {
     return (
       <div
         data-slot="plan-view"
-        className="flex items-center justify-center h-full min-h-[400px] bg-gray-50 rounded-xl border border-gray-200"
+        className="flex items-center justify-center h-full min-h-[400px] rounded-xl"
+        style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}
       >
-        <div className="flex flex-col items-center gap-3 text-gray-400">
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="animate-spin text-2xl">⏳</div>
           <p className="text-sm">Cargando vértices…</p>
         </div>
@@ -174,9 +175,10 @@ export function PlanView({ onPointClick }: PlanViewProps) {
     return (
       <div
         data-slot="plan-view"
-        className="flex items-center justify-center h-full min-h-[400px] bg-gray-50 rounded-xl border border-gray-200"
+        className="flex items-center justify-center h-full min-h-[400px] rounded-xl"
+        style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}
       >
-        <div className="flex flex-col items-center gap-3 text-gray-400">
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="text-3xl">🗺️</div>
           <p className="text-sm text-center">
             Cargue superficies para ver la vista en planta

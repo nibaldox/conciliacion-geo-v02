@@ -8,7 +8,7 @@ Endpoints:
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 import api.database as db
 import api.schemas as schemas
@@ -71,15 +71,16 @@ def _get_default_settings() -> dict:
 # GET /settings
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
-def get_settings():
+def get_settings(request: Request):
     """
     Return current settings merged with core defaults.
 
     DB values override defaults; any missing key falls back to the
     corresponding value from core.config.
     """
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
     defaults = _get_default_settings()
 
     stored = db.get_settings(session_id)
@@ -104,15 +105,16 @@ def get_settings():
 # PUT /settings
 # ---------------------------------------------------------------------------
 
+
 @router.put("")
-def update_settings(body: schemas.SettingsResponse):
+def update_settings(request: Request, body: schemas.SettingsResponse):
     """
     Update process and tolerance settings.
 
     Accepts partial updates — only keys present in the body are changed;
     other settings retain their current values.
     """
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     # Get existing settings or defaults
     existing = db.get_settings(session_id) or _get_default_settings()

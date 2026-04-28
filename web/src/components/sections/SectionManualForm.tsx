@@ -69,23 +69,23 @@ export function SectionManualForm() {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left py-2 px-2 font-semibold text-gray-600 w-24">
+            <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
+              <th className="text-left py-2 px-2 font-semibold w-24" style={{ color: 'var(--color-text-secondary)' }}>
                 Nombre
               </th>
-              <th className="text-left py-2 px-2 font-semibold text-gray-600">
+              <th className="text-left py-2 px-2 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 Origen X
               </th>
-              <th className="text-left py-2 px-2 font-semibold text-gray-600">
+              <th className="text-left py-2 px-2 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 Origen Y
               </th>
-              <th className="text-left py-2 px-2 font-semibold text-gray-600 w-24">
+              <th className="text-left py-2 px-2 font-semibold w-24" style={{ color: 'var(--color-text-secondary)' }}>
                 Azimuth (°)
               </th>
-              <th className="text-left py-2 px-2 font-semibold text-gray-600 w-28">
+              <th className="text-left py-2 px-2 font-semibold w-28" style={{ color: 'var(--color-text-secondary)' }}>
                 Longitud (m)
               </th>
-              <th className="text-left py-2 px-2 font-semibold text-gray-600 w-28">
+              <th className="text-left py-2 px-2 font-semibold w-28" style={{ color: 'var(--color-text-secondary)' }}>
                 Sector
               </th>
               <th className="w-20" />
@@ -93,13 +93,14 @@ export function SectionManualForm() {
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50/50">
+              <tr key={idx} className="transition-colors" style={{ borderBottom: '1px solid var(--color-border)' }}>
                 <td className="py-1.5 px-2">
                   <input
                     type="text"
                     value={row.name}
                     onChange={(e) => updateField(idx, 'name', e.target.value)}
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+                    className="w-full rounded px-2 py-1.5 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                   />
                 </td>
                 <td className="py-1.5 px-2">
@@ -114,7 +115,8 @@ export function SectionManualForm() {
                         parseFloat(e.target.value) || 0,
                       )
                     }
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+                    className="w-full rounded px-2 py-1.5 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                     placeholder="0.0"
                   />
                 </td>
@@ -130,7 +132,8 @@ export function SectionManualForm() {
                         parseFloat(e.target.value) || 0,
                       )
                     }
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+                    className="w-full rounded px-2 py-1.5 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                     placeholder="0.0"
                   />
                 </td>
@@ -146,7 +149,8 @@ export function SectionManualForm() {
                         parseFloat(e.target.value) || 0,
                       )
                     }
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+                    className="w-full rounded px-2 py-1.5 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                   />
                 </td>
                 <td className="py-1.5 px-2">
@@ -162,7 +166,8 @@ export function SectionManualForm() {
                         parseFloat(e.target.value) || 200,
                       )
                     }
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+                    className="w-full rounded px-2 py-1.5 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                   />
                 </td>
                 <td className="py-1.5 px-2">
@@ -170,7 +175,8 @@ export function SectionManualForm() {
                     type="text"
                     value={row.sector}
                     onChange={(e) => updateField(idx, 'sector', e.target.value)}
-                    className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+                    className="w-full rounded px-2 py-1.5 text-sm outline-none"
+                    style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                     placeholder="Ej: Norte"
                   />
                 </td>
@@ -179,7 +185,8 @@ export function SectionManualForm() {
                     type="button"
                     onClick={() => removeRow(idx)}
                     disabled={rows.length <= 1}
-                    className="text-mine-red hover:text-red-700 disabled:text-gray-300 disabled:cursor-not-allowed text-xs font-medium transition-colors"
+                    className="text-xs font-medium transition-colors disabled:cursor-not-allowed"
+                    style={{ color: rows.length <= 1 ? 'var(--color-text-muted)' : 'var(--color-mine-red)' }}
                     title="Eliminar fila"
                   >
                     Eliminar
@@ -196,7 +203,8 @@ export function SectionManualForm() {
         <button
           type="button"
           onClick={addRow}
-          className="px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
         >
           + Agregar Fila
         </button>
@@ -204,7 +212,8 @@ export function SectionManualForm() {
         <button
           type="submit"
           disabled={mutation.isPending || rows.length === 0}
-          className="px-5 py-2.5 bg-mine-blue text-white rounded-lg font-medium text-sm shadow-sm hover:bg-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-5 py-2.5 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ backgroundColor: 'var(--color-mine-blue)' }}
         >
           {mutation.isPending ? (
             <span className="flex items-center gap-2">
@@ -217,13 +226,13 @@ export function SectionManualForm() {
         </button>
 
         {mutation.isError && (
-          <p className="text-sm text-mine-red">
+          <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
             Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudieron guardar las secciones'}
           </p>
         )}
 
         {successCount !== null && (
-          <p className="text-sm text-mine-green font-medium">
+          <p className="text-sm font-medium" style={{ color: 'var(--color-mine-green)' }}>
             Se guardaron {successCount} secciones correctamente
           </p>
         )}

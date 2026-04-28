@@ -21,22 +21,26 @@ export function AppLayout({ children }: AppLayoutProps) {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gray-50">
+    <div className="h-screen flex flex-col" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
       <Header />
       <StepNav />
       
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
           {/* Step title */}
-          <div className="px-6 py-3 bg-white border-b border-gray-100">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Paso {currentStep}: {getStepTitle()}
-            </h2>
+          <div className="px-6 py-3 border-b shrink-0" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
+            <div className="max-w-7xl mx-auto">
+              <h2 style={{ color: 'var(--color-text-primary)' }} className="text-xl font-semibold">
+                Paso {currentStep}: {getStepTitle()}
+              </h2>
+            </div>
           </div>
           
           {/* Content area */}
-          <div className="flex-1 overflow-auto p-6">
-            {children}
+          <div className="flex-1 overflow-auto p-6 min-h-0" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
+            <div className="max-w-7xl mx-auto h-full">
+              {children}
+            </div>
           </div>
         </div>
       </main>

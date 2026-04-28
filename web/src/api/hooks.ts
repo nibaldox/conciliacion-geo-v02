@@ -15,6 +15,7 @@ import type {
   BenchParams,
   SettingsResponse,
   VerticesResponse,
+  ContourData,
 } from './types';
 
 // ─── Meshes ────────────────────────────────────────────────
@@ -57,6 +58,14 @@ export function useDeleteMesh() {
   return useMutation({
     mutationFn: (meshId: string) => client.delete(`/meshes/${meshId}`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['meshes'] }),
+  });
+}
+
+export function useMeshContours(meshId: string | null, interval = 15.0) {
+  return useQuery({
+    queryKey: ['mesh-contours', meshId, interval],
+    queryFn: () => client.get<ContourData>(`/meshes/${meshId}/contours`, { params: { interval } }).then(r => r.data),
+    enabled: !!meshId,
   });
 }
 

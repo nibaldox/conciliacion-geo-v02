@@ -13,11 +13,12 @@ export function LoadingSpinner({ size = 'md', message }: LoadingSpinnerProps) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-8">
       <div
-        className={`animate-spin rounded-full ${SIZE_CLASSES[size]} border-b-2 border-mine-blue`}
+        className={`animate-spin rounded-full ${SIZE_CLASSES[size]} border-b-2`}
         role="status"
         aria-label={message ?? 'Cargando'}
+        style={{ borderColor: 'var(--color-mine-blue)', borderTopColor: 'transparent' }}
       />
-      {message && <p className="text-sm text-gray-500">{message}</p>}
+      {message && <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{message}</p>}
     </div>
   );
 }

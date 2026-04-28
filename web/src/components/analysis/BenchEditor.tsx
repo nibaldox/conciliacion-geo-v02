@@ -33,8 +33,8 @@ function EditableCell({ value, onChange }: { value: number; onChange: (v: number
       step="0.1"
       value={value.toFixed(2)}
       onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-      className="w-20 px-2 py-1 border border-gray-300 rounded text-xs text-center
-                 focus:ring-2 focus:ring-mine-blue/20 focus:border-mine-blue outline-none"
+      className="w-20 px-2 py-1 rounded text-xs text-center outline-none"
+      style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
     />
   );
 }
@@ -42,7 +42,7 @@ function EditableCell({ value, onChange }: { value: number; onChange: (v: number
 function ReadOnlyCell({ value, format }: { value: number; format: 'meters' | 'degrees' }) {
   const display = format === 'meters' ? formatMeters(value) : formatDegrees(value);
   return (
-    <span className="text-xs text-gray-700 font-mono">{display}</span>
+    <span className="text-xs font-mono" style={{ color: 'var(--color-text-secondary)' }}>{display}</span>
   );
 }
 
@@ -100,7 +100,7 @@ export function BenchEditor() {
 
   if (!selectedSection) {
     return (
-      <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-48 text-sm" style={{ color: 'var(--color-text-muted)' }}>
         Selecciona una sección para editar bancos.
       </div>
     );
@@ -108,7 +108,7 @@ export function BenchEditor() {
 
   if (!profile && !benches) {
     return (
-      <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-48 text-sm" style={{ color: 'var(--color-text-muted)' }}>
         Sin datos de perfil disponibles. Ejecuta el procesamiento primero.
       </div>
     );
@@ -116,7 +116,7 @@ export function BenchEditor() {
 
   if (!benches || benches.length === 0) {
     return (
-      <div className="flex items-center justify-center h-48 text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-48 text-sm" style={{ color: 'var(--color-text-muted)' }}>
         No se detectaron bancos en esta sección.
       </div>
     );
@@ -127,26 +127,24 @@ export function BenchEditor() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h4 className="text-sm font-semibold text-gray-800">
+          <h4 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
             Editor de Bancos
           </h4>
-          <p className="text-xs text-gray-500 mt-0.5">
-            Sección: <span className="font-medium text-gray-700">{profile?.section_name ?? selectedSection}</span>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+            Sección: <span className="font-medium" style={{ color: 'var(--color-text-secondary)' }}>{profile?.section_name ?? selectedSection}</span>
             {profile?.sector && (
-              <> — Sector: <span className="font-medium text-gray-700">{profile.sector}</span></>
+              <> — Sector: <span className="font-medium" style={{ color: 'var(--color-text-secondary)' }}>{profile.sector}</span></>
             )}
           </p>
         </div>
         <button
           onClick={handleRecalculate}
           disabled={!hasChanges || updateReconciled.isPending}
-          className={`
-            px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2
-            ${hasChanges && !updateReconciled.isPending
-              ? 'bg-mine-blue text-white hover:bg-blue-700 shadow-sm'
-              : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-            }
-          `}
+          className="px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2"
+          style={hasChanges && !updateReconciled.isPending
+            ? { backgroundColor: 'var(--color-mine-blue)', color: '#fff' }
+            : { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', cursor: 'not-allowed' }
+          }
         >
           {updateReconciled.isPending ? (
             <>
@@ -163,39 +161,41 @@ export function BenchEditor() {
       </div>
 
       {/* Bench table */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="rounded-xl shadow-sm overflow-hidden" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
-              <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-3 py-2.5 text-xs font-semibold text-gray-600">Banco</th>
-                <th className="px-3 py-2.5 text-xs font-semibold text-gray-600" colSpan={2}>Cresta</th>
-                <th className="px-3 py-2.5 text-xs font-semibold text-gray-600" colSpan={2}>Toe</th>
-                <th className="px-3 py-2.5 text-xs font-semibold text-gray-600">Altura</th>
-                <th className="px-3 py-2.5 text-xs font-semibold text-gray-600">Ángulo</th>
-                <th className="px-3 py-2.5 text-xs font-semibold text-gray-600">Berma</th>
+              <tr style={{ backgroundColor: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)' }}>
+                <th className="px-3 py-2.5 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Banco</th>
+                <th className="px-3 py-2.5 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }} colSpan={2}>Cresta</th>
+                <th className="px-3 py-2.5 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }} colSpan={2}>Toe</th>
+                <th className="px-3 py-2.5 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Altura</th>
+                <th className="px-3 py-2.5 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Ángulo</th>
+                <th className="px-3 py-2.5 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>Berma</th>
               </tr>
-              <tr className="bg-gray-50/50 border-b border-gray-100">
+              <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
                 <th className="px-3 py-1" />
-                <th className="px-3 py-1 text-xs font-medium text-gray-500">Dist (m)</th>
-                <th className="px-3 py-1 text-xs font-medium text-gray-500">Elev (m)</th>
-                <th className="px-3 py-1 text-xs font-medium text-gray-500">Dist (m)</th>
-                <th className="px-3 py-1 text-xs font-medium text-gray-500">Elev (m)</th>
+                <th className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>Dist (m)</th>
+                <th className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>Elev (m)</th>
+                <th className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>Dist (m)</th>
+                <th className="px-3 py-1 text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>Elev (m)</th>
                 <th className="px-3 py-1" />
                 <th className="px-3 py-1" />
                 <th className="px-3 py-1" />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody>
               {benches.map((bench, i) => {
                 const derived = computed[i];
                 return (
-                  <tr key={bench.bench_number} className="hover:bg-gray-50/50">
+                  <tr key={bench.bench_number}>
                     <td className="px-3 py-2">
-                      <span className={`
-                        inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold
-                        ${bench.is_ramp ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}
-                      `}>
+                      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold"
+                        style={bench.is_ramp
+                          ? { backgroundColor: 'var(--status-warn-bg)', color: 'var(--status-warn-text)' }
+                          : { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-secondary)' }
+                        }
+                      >
                         {bench.bench_number}
                       </span>
                     </td>
@@ -245,12 +245,12 @@ export function BenchEditor() {
 
       {/* Status feedback */}
       {updateReconciled.isError && (
-        <p className="text-xs text-red-500 text-center">
+        <p className="text-xs text-center" style={{ color: 'var(--color-mine-red)' }}>
           Error al actualizar. Verifica la conexión con el servidor.
         </p>
       )}
       {updateReconciled.isSuccess && !hasChanges && (
-        <p className="text-xs text-green-600 text-center">
+        <p className="text-xs text-center" style={{ color: 'var(--color-mine-green)' }}>
           ✓ Bancos actualizados correctamente.
         </p>
       )}

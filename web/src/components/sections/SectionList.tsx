@@ -78,8 +78,8 @@ export function SectionList() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12 text-gray-400">
-        <span className="animate-spin inline-block w-5 h-5 border-2 border-gray-300 border-t-mine-blue rounded-full mr-3" />
+      <div className="flex items-center justify-center py-12" style={{ color: 'var(--color-text-muted)' }}>
+        <span className="animate-spin inline-block w-5 h-5 border-2 rounded-full mr-3" style={{ borderColor: 'var(--color-border)', borderTopColor: 'var(--color-mine-blue)' }} />
         Cargando secciones...
       </div>
     );
@@ -90,10 +90,10 @@ export function SectionList() {
   // Empty state
   if (items.length === 0) {
     return (
-      <div className="text-center py-12 bg-gray-50 rounded-lg border border-gray-100">
+      <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <span className="text-4xl block mb-3">&#128203;</span>
-        <p className="text-gray-500 text-sm">No hay secciones definidas</p>
-        <p className="text-gray-400 text-xs mt-1">
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No hay secciones definidas</p>
+        <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
           Use las opciones de arriba para generar secciones
         </p>
       </div>
@@ -105,10 +105,10 @@ export function SectionList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold text-gray-700">
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
             Secciones Definidas
           </h3>
-          <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full bg-mine-blue text-white text-xs font-bold">
+          <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-mine-blue)' }}>
             {items.length}
           </span>
         </div>
@@ -116,14 +116,11 @@ export function SectionList() {
         <button
           onClick={handleClearAll}
           disabled={clearMutation.isPending}
-          className={`
-            px-3 py-1.5 rounded-lg text-xs font-medium transition-colors
-            ${confirmClear
-              ? 'bg-mine-red text-white hover:bg-red-700'
-              : 'text-mine-red hover:bg-red-50 border border-red-200'
-            }
-            disabled:opacity-50 disabled:cursor-not-allowed
-          `}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={confirmClear
+            ? { backgroundColor: 'var(--color-mine-red)', color: '#fff' }
+            : { color: 'var(--color-mine-red)', border: '1px solid var(--color-mine-red)' }
+          }
         >
           {clearMutation.isPending
             ? 'Eliminando...'
@@ -134,26 +131,26 @@ export function SectionList() {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto border border-gray-200 rounded-lg">
+      <div className="overflow-x-auto rounded-lg" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">
+            <tr style={{ backgroundColor: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)' }}>
+              <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 Nombre
               </th>
-              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">
+              <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 Origen
               </th>
-              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">
+              <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 Azimuth
               </th>
-              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">
+              <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 Longitud
               </th>
-              <th className="text-left py-2.5 px-3 font-semibold text-gray-600">
+              <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 Sector
               </th>
-              <th className="text-right py-2.5 px-3 font-semibold text-gray-600 w-28">
+              <th className="text-right py-2.5 px-3 font-semibold w-28" style={{ color: 'var(--color-text-secondary)' }}>
                 Acciones
               </th>
             </tr>
@@ -167,7 +164,7 @@ export function SectionList() {
                 return (
                   <tr
                     key={section.id}
-                    className="border-b border-gray-100 bg-blue-50/50"
+                    style={{ backgroundColor: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)' }}
                   >
                     <td className="py-2 px-3">
                       <input
@@ -176,7 +173,8 @@ export function SectionList() {
                         onChange={(e) =>
                           updateEditField('name', e.target.value)
                         }
-                        className="w-full rounded border border-mine-blue/30 px-2 py-1 text-sm focus:border-mine-blue outline-none"
+                        className="w-full rounded px-2 py-1 text-sm outline-none"
+                        style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                       />
                     </td>
                     <td className="py-2 px-3">
@@ -186,7 +184,8 @@ export function SectionList() {
                           step="any"
                           value={editState.form.origin[0] || ''}
                           onChange={(e) => updateOrigin(0, e.target.value)}
-                          className="w-20 rounded border border-mine-blue/30 px-2 py-1 text-sm focus:border-mine-blue outline-none"
+                          className="w-20 rounded px-2 py-1 text-sm outline-none"
+                          style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                           placeholder="X"
                         />
                         <input
@@ -194,7 +193,8 @@ export function SectionList() {
                           step="any"
                           value={editState.form.origin[1] || ''}
                           onChange={(e) => updateOrigin(1, e.target.value)}
-                          className="w-20 rounded border border-mine-blue/30 px-2 py-1 text-sm focus:border-mine-blue outline-none"
+                          className="w-20 rounded px-2 py-1 text-sm outline-none"
+                          style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                           placeholder="Y"
                         />
                       </div>
@@ -210,7 +210,8 @@ export function SectionList() {
                             parseFloat(e.target.value) || 0,
                           )
                         }
-                        className="w-20 rounded border border-mine-blue/30 px-2 py-1 text-sm focus:border-mine-blue outline-none"
+                        className="w-20 rounded px-2 py-1 text-sm outline-none"
+                        style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                       />
                     </td>
                     <td className="py-2 px-3">
@@ -225,7 +226,8 @@ export function SectionList() {
                             parseFloat(e.target.value) || 200,
                           )
                         }
-                        className="w-20 rounded border border-mine-blue/30 px-2 py-1 text-sm focus:border-mine-blue outline-none"
+                        className="w-20 rounded px-2 py-1 text-sm outline-none"
+                        style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                       />
                     </td>
                     <td className="py-2 px-3">
@@ -235,7 +237,8 @@ export function SectionList() {
                         onChange={(e) =>
                           updateEditField('sector', e.target.value)
                         }
-                        className="w-full rounded border border-mine-blue/30 px-2 py-1 text-sm focus:border-mine-blue outline-none"
+                        className="w-full rounded px-2 py-1 text-sm outline-none"
+                        style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                       />
                     </td>
                     <td className="py-2 px-3 text-right">
@@ -243,13 +246,15 @@ export function SectionList() {
                         <button
                           onClick={saveEdit}
                           disabled={updateMutation.isPending}
-                          className="px-2 py-1 text-xs font-medium text-mine-green hover:bg-green-50 rounded transition-colors disabled:opacity-50"
+                          className="px-2 py-1 text-xs font-medium rounded transition-colors disabled:opacity-50"
+                          style={{ color: 'var(--color-mine-green)' }}
                         >
                           Guardar
                         </button>
                         <button
                           onClick={cancelEdit}
-                          className="px-2 py-1 text-xs font-medium text-gray-500 hover:bg-gray-100 rounded transition-colors"
+                          className="px-2 py-1 text-xs font-medium rounded transition-colors"
+                          style={{ color: 'var(--color-text-muted)' }}
                         >
                           Cancelar
                         </button>
@@ -262,35 +267,38 @@ export function SectionList() {
               return (
                 <tr
                   key={section.id}
-                  className="border-b border-gray-100 hover:bg-gray-50/50 transition-colors"
+                  className="transition-colors"
+                  style={{ borderBottom: '1px solid var(--color-border)' }}
                 >
-                  <td className="py-2.5 px-3 font-medium text-gray-800">
+                  <td className="py-2.5 px-3 font-medium" style={{ color: 'var(--color-text-primary)' }}>
                     {section.name}
                   </td>
-                  <td className="py-2.5 px-3 text-gray-600 font-mono text-xs">
+                  <td className="py-2.5 px-3 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {section.origin[0].toFixed(1)}, {section.origin[1].toFixed(1)}
                   </td>
-                  <td className="py-2.5 px-3 text-gray-600">
+                  <td className="py-2.5 px-3" style={{ color: 'var(--color-text-secondary)' }}>
                     {section.azimuth.toFixed(1)}°
                   </td>
-                  <td className="py-2.5 px-3 text-gray-600">
+                  <td className="py-2.5 px-3" style={{ color: 'var(--color-text-secondary)' }}>
                     {section.length.toFixed(1)}m
                   </td>
-                  <td className="py-2.5 px-3 text-gray-600">
+                  <td className="py-2.5 px-3" style={{ color: 'var(--color-text-secondary)' }}>
                     {section.sector || '—'}
                   </td>
                   <td className="py-2.5 px-3 text-right">
                     <div className="flex justify-end gap-1">
                       <button
                         onClick={() => startEdit(section)}
-                        className="px-2 py-1 text-xs font-medium text-mine-blue hover:bg-blue-50 rounded transition-colors"
+                        className="px-2 py-1 text-xs font-medium rounded transition-colors"
+                        style={{ color: 'var(--color-mine-blue)' }}
                       >
                         Editar
                       </button>
                       <button
                         onClick={() => handleDelete(section.id)}
                         disabled={deleteMutation.isPending}
-                        className="px-2 py-1 text-xs font-medium text-mine-red hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+                        className="px-2 py-1 text-xs font-medium rounded transition-colors disabled:opacity-50"
+                        style={{ color: 'var(--color-mine-red)' }}
                       >
                         Eliminar
                       </button>

@@ -2,8 +2,8 @@ import { lazy } from 'react';
 
 // Lazy load heavy components to reduce initial bundle
 
-export const LazyPlanView = lazy(() =>
-  import('./mesh/PlanView').then(m => ({ default: m.PlanView }))
+export const LazyContourChart = lazy(() =>
+  import('./mesh/ContourChart').then(m => ({ default: m.ContourChart }))
 );
 
 export const LazyMesh3DViewer = lazy(() =>

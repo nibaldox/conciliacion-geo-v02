@@ -68,11 +68,13 @@ export function SectionFileUpload() {
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => inputRef.current?.click()}
-        className={`
-          relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all
-          ${isDragging ? 'border-mine-blue bg-blue-50' : 'border-gray-300 hover:border-mine-blue/50 hover:bg-gray-50'}
-          ${file ? 'border-mine-green bg-green-50/30' : ''}
-        `}
+        className="relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all"
+        style={isDragging
+          ? { borderColor: 'var(--color-mine-blue)', backgroundColor: 'var(--color-surface-muted)' }
+          : file
+            ? { borderColor: 'var(--color-mine-green)', backgroundColor: 'var(--status-ok-bg)' }
+            : { borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }
+        }
       >
         <input
           ref={inputRef}
@@ -86,8 +88,8 @@ export function SectionFileUpload() {
           <div className="flex items-center justify-center gap-3">
             <span className="text-2xl">&#128196;</span>
             <div className="text-left">
-              <p className="text-sm font-medium text-gray-800">{file.name}</p>
-              <p className="text-xs text-gray-500">
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{file.name}</p>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                 {(file.size / 1024).toFixed(1)} KB
               </p>
             </div>
@@ -97,7 +99,8 @@ export function SectionFileUpload() {
                 e.stopPropagation();
                 clearFile();
               }}
-              className="ml-4 text-mine-red hover:text-red-700 text-xs font-medium"
+              className="ml-4 text-xs font-medium"
+              style={{ color: 'var(--color-mine-red)' }}
             >
               Quitar
             </button>
@@ -105,10 +108,10 @@ export function SectionFileUpload() {
         ) : (
           <div>
             <span className="text-3xl mb-3 block">&#128228;</span>
-            <p className="text-sm font-medium text-gray-700">
+            <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
               Arrastra un archivo aquí o haz clic para seleccionar
             </p>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
               Formatos: CSV, TXT, DXF
             </p>
           </div>
@@ -118,7 +121,7 @@ export function SectionFileUpload() {
       {/* Settings */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             Espaciamiento (m)
           </label>
           <input
@@ -127,12 +130,13 @@ export function SectionFileUpload() {
             step="any"
             value={spacing}
             onChange={(e) => setSpacing(parseFloat(e.target.value) || 20)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             Longitud (m)
           </label>
           <input
@@ -141,31 +145,34 @@ export function SectionFileUpload() {
             step="any"
             value={length}
             onChange={(e) => setLength(parseFloat(e.target.value) || 200)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             Sector
           </label>
           <input
             type="text"
             value={sector}
             onChange={(e) => setSector(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             placeholder="Ej: Norte"
           />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             Método de Azimuth
           </label>
           <select
             value={azMode}
             onChange={(e) => setAzMode(e.target.value as AzMode)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none bg-white"
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           >
             <option value="perpendicular">Perpendicular a la cresta</option>
             <option value="local_slope">Pendiente local del diseño</option>
@@ -178,7 +185,8 @@ export function SectionFileUpload() {
         <button
           type="submit"
           disabled={!file || mutation.isPending}
-          className="px-5 py-2.5 bg-mine-blue text-white rounded-lg font-medium text-sm shadow-sm hover:bg-blue-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-5 py-2.5 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ backgroundColor: 'var(--color-mine-blue)' }}
         >
           {mutation.isPending ? (
             <span className="flex items-center gap-2">
@@ -191,13 +199,13 @@ export function SectionFileUpload() {
         </button>
 
         {mutation.isError && (
-          <p className="text-sm text-mine-red">
+          <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
             Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudieron generar las secciones'}
           </p>
         )}
 
         {mutation.isSuccess && (
-          <p className="text-sm text-mine-green font-medium">
+          <p className="text-sm font-medium" style={{ color: 'var(--color-mine-green)' }}>
             Secciones generadas desde archivo correctamente
           </p>
         )}

@@ -16,37 +16,37 @@ export function ProcessProgress() {
     <div className="w-full max-w-xl space-y-3">
       {/* Progress text */}
       {isProcessing && (
-        <p className="text-sm text-gray-600 text-center">
+        <p className="text-sm text-center" style={{ color: 'var(--color-text-secondary)' }}>
           Procesando sección <span className="font-semibold">{current ?? '...'}</span> de{' '}
           <span className="font-semibold">{total}</span>...
         </p>
       )}
 
       {isComplete && (
-        <p className="text-sm text-green-600 text-center font-medium">
+        <p className="text-sm text-center font-medium" style={{ color: 'var(--status-ok-text)' }}>
           ✓ Procesamiento completado — {status.n_results} resultados generados
         </p>
       )}
 
       {status.status === 'error' && (
-        <p className="text-sm text-red-600 text-center font-medium">
+        <p className="text-sm text-center font-medium" style={{ color: 'var(--status-nok-text)' }}>
           Error durante el procesamiento
         </p>
       )}
 
       {/* Progress bar */}
-      <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+      <div className="w-full rounded-full h-3 overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
         <div
-          className={`
-            h-full rounded-full transition-all duration-500 ease-out
-            ${isComplete ? 'bg-mine-green' : isProcessing ? 'bg-mine-blue' : 'bg-mine-red'}
-          `}
-          style={{ width: `${progressPct}%` }}
+          className="h-full rounded-full transition-all duration-500 ease-out"
+          style={{
+            width: `${progressPct}%`,
+            backgroundColor: isComplete ? 'var(--color-mine-green)' : isProcessing ? 'var(--color-mine-blue)' : 'var(--color-mine-red)'
+          }}
         />
       </div>
 
       {/* Progress numbers */}
-      <div className="flex justify-between text-xs text-gray-400">
+      <div className="flex justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
         <span>{completed} / {total} secciones</span>
         <span>{Math.round(progressPct)}%</span>
       </div>

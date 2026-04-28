@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import trimesh
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 import api.database as db
 import api.schemas as schemas
@@ -30,6 +30,7 @@ from core import (
 )
 from core.section_cutter import azimuth_to_direction
 from core.param_extractor import BenchParams, ExtractionResult
+from core.config import DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
 router = APIRouter(prefix="/process", tags=["process"])
 
@@ -37,6 +38,7 @@ router = APIRouter(prefix="/process", tags=["process"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_mesh_from_db(session_id: str, mesh_type: str) -> trimesh.Trimesh:
     """Load a mesh from the database BLOB via a temporary file."""
@@ -129,8 +131,9 @@ def _get_session_id(request_state) -> str:
 # POST /process — Run full pipeline
 # ---------------------------------------------------------------------------
 
+
 @router.post("")
-def run_process(body: Optional[schemas.ProcessSettings] = None):
+def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None):
     """
     Run the full geotechnical reconciliation pipeline:
     cut all sections → extract parameters → compare design vs as-built.
@@ -138,7 +141,7 @@ def run_process(body: Optional[schemas.ProcessSettings] = None):
     Uses ThreadPoolExecutor for parallel section processing.
     Results and extraction cache are persisted to the database.
     """
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     # Validate preconditions
     sections_raw = db.get_sections(session_id)
@@ -164,9 +167,19 @@ def run_process(body: Optional[schemas.ProcessSettings] = None):
         process_cfg.update(body_dict.get("process", {}))
         tolerances.update(body_dict.get("tolerances", {}))
 
+    # Fall back to DEFAULT_TOLERANCES if no tolerances were provided
+    if not tolerances:
+        tolerances = {
+            "bench_height": DEFAULT_TOLERANCES.bench_height,
+            "face_angle": DEFAULT_TOLERANCES.face_angle,
+            "berm_width": DEFAULT_TOLERANCES.berm_width,
+            "inter_ramp_angle": DEFAULT_TOLERANCES.inter_ramp_angle,
+            "overall_angle": DEFAULT_TOLERANCES.overall_angle,
+        }
+
     resolution = process_cfg.get("resolution", 0.5)
-    face_threshold = process_cfg.get("face_threshold", 40.0)
-    berm_threshold = process_cfg.get("berm_threshold", 20.0)
+    face_threshold = process_cfg.get("face_threshold", DETECTION.face_threshold)
+    berm_threshold = process_cfg.get("berm_threshold", DETECTION.berm_threshold)
 
     # Reconstruct SectionLine objects
     sections = [_section_from_dict(s) for s in sections_raw]
@@ -186,14 +199,22 @@ def run_process(body: Optional[schemas.ProcessSettings] = None):
             pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
             if pd_prof is not None and pt_prof is not None:
                 p_d = extract_parameters(
-                    pd_prof.distances, pd_prof.elevations,
-                    sec.name, sec.sector,
-                    resolution, face_threshold, berm_threshold,
+                    pd_prof.distances,
+                    pd_prof.elevations,
+                    sec.name,
+                    sec.sector,
+                    resolution,
+                    face_threshold,
+                    berm_threshold,
                 )
                 p_t = extract_parameters(
-                    pt_prof.distances, pt_prof.elevations,
-                    sec.name, sec.sector,
-                    resolution, face_threshold, berm_threshold,
+                    pt_prof.distances,
+                    pt_prof.elevations,
+                    sec.name,
+                    sec.sector,
+                    resolution,
+                    face_threshold,
+                    berm_threshold,
                 )
                 comps = compare_design_vs_asbuilt(p_d, p_t, tolerances)
                 return idx, sec, p_d, p_t, comps
@@ -216,21 +237,23 @@ def run_process(body: Optional[schemas.ProcessSettings] = None):
             params_topo_list[idx] = p_t
             comparison_results.extend(comps)
             completed += 1
-            db.update_process_status(
-                session_id, "processing", completed, len(sections)
-            )
+            db.update_process_status(session_id, "processing", completed, len(sections))
 
     # Persist results
     # Save extraction cache for each section
     for idx, sec in enumerate(sections):
         if params_design_list[idx] is not None:
             db.save_extraction(
-                session_id, sec.name, "design",
+                session_id,
+                sec.name,
+                "design",
                 _extraction_to_dict(params_design_list[idx]),
             )
         if params_topo_list[idx] is not None:
             db.save_extraction(
-                session_id, sec.name, "topo",
+                session_id,
+                sec.name,
+                "topo",
                 _extraction_to_dict(params_topo_list[idx]),
             )
 
@@ -254,10 +277,11 @@ def run_process(body: Optional[schemas.ProcessSettings] = None):
 # GET /process/status
 # ---------------------------------------------------------------------------
 
+
 @router.get("/status")
-def get_status():
+def get_status(request: Request):
     """Return the current processing status for the session."""
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
     raw = db.get_process_status(session_id)
     n_results = db.get_results_count(session_id)
     return schemas.ProcessStatus(
@@ -273,10 +297,11 @@ def get_status():
 # GET /process/results — List all comparison results
 # ---------------------------------------------------------------------------
 
+
 @router.get("/results")
-def get_results(section: Optional[str] = None):
+def get_results(request: Request, section: Optional[str] = None):
     """Return all comparison results, optionally filtered by section."""
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
     results = db.get_results(session_id, section=section)
     return results
 
@@ -285,15 +310,16 @@ def get_results(section: Optional[str] = None):
 # GET /profiles/{section_id}
 # ---------------------------------------------------------------------------
 
+
 @router.get("/profiles/{section_id}")
-def get_profile(section_id: int):
+def get_profile(request: Request, section_id: int):
     """
     Return profile data for a section by its index in the sections list.
 
     Includes raw design/topo profiles, reconciled profiles from the
     extraction cache, and bench data for interactive editing.
     """
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     sections_raw = db.get_sections(session_id)
     if section_id < 0 or section_id >= len(sections_raw):
@@ -359,8 +385,11 @@ def get_profile(section_id: int):
 # PUT /results/{section_id}/reconciled — Interactive bench editing
 # ---------------------------------------------------------------------------
 
+
 @router.put("/results/{section_id}/reconciled")
-def update_reconciled(section_id: int, body: List[schemas.BenchParamsSchema]):
+def update_reconciled(
+    request: Request, section_id: int, body: List[schemas.BenchParamsSchema]
+):
     """
     Update benches after drag & drop editing in the UI.
 
@@ -368,7 +397,7 @@ def update_reconciled(section_id: int, body: List[schemas.BenchParamsSchema]):
     (height, angle, berm width), re-runs comparison for this section,
     and returns the updated reconciled profile.
     """
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     sections_raw = db.get_sections(session_id)
     if section_id < 0 or section_id >= len(sections_raw):
@@ -386,7 +415,8 @@ def update_reconciled(section_id: int, body: List[schemas.BenchParamsSchema]):
 
     for i, bench_update in enumerate(body):
         update_dict = (
-            bench_update.model_dump() if hasattr(bench_update, "model_dump")
+            bench_update.model_dump()
+            if hasattr(bench_update, "model_dump")
             else bench_update.dict()
         )
         if i < len(benches):

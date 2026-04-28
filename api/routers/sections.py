@@ -32,6 +32,7 @@ router = APIRouter(prefix="/sections", tags=["sections"])
 # Session dependency
 # ---------------------------------------------------------------------------
 
+
 def get_session_id(request: Request) -> str:
     """Extract session_id set by the session middleware."""
     return request.state.session_id
@@ -40,6 +41,7 @@ def get_session_id(request: Request) -> str:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_mesh_from_blob(mesh_data: bytes, filename: str):
     """Load a trimesh from database BLOB via a temporary file."""
@@ -59,7 +61,9 @@ def _section_to_dict(sec: SectionLine) -> dict:
     """Convert a SectionLine dataclass to a JSON-friendly dict for DB storage."""
     return {
         "name": sec.name,
-        "origin": sec.origin.tolist() if hasattr(sec.origin, "tolist") else list(sec.origin),
+        "origin": sec.origin.tolist()
+        if hasattr(sec.origin, "tolist")
+        else list(sec.origin),
         "azimuth": round(float(sec.azimuth), 2),
         "length": float(sec.length),
         "sector": sec.sector,
@@ -111,10 +115,12 @@ def _load_sections(session_id: str) -> List[dict]:
 # Pydantic models for request bodies
 # ---------------------------------------------------------------------------
 
+
 class SectionAutoParams(BaseModel):
     """Parameters for auto-generating sections along a crest line."""
-    start: List[float]       # [x, y]
-    end: List[float]         # [x, y]
+
+    start: List[float]  # [x, y]
+    end: List[float]  # [x, y]
     n_sections: int = 5
     length: float = 200.0
     sector: str = ""
@@ -124,8 +130,9 @@ class SectionAutoParams(BaseModel):
 
 class SectionCreate(BaseModel):
     """Single section definition."""
+
     name: Optional[str] = None
-    origin: List[float]      # [x, y]
+    origin: List[float]  # [x, y]
     azimuth: float
     length: float = 200.0
     sector: str = ""
@@ -133,10 +140,11 @@ class SectionCreate(BaseModel):
 
 class SectionClickParams(BaseModel):
     """Parameters for adding a section by click on plan view."""
-    origin: List[float]      # [x, y]
+
+    origin: List[float]  # [x, y]
     length: float = 200.0
     sector: str = ""
-    az_mode: str = "auto"    # "auto" | "manual"
+    az_mode: str = "auto"  # "auto" | "manual"
     azimuth: Optional[float] = None
 
 
@@ -144,10 +152,11 @@ class SectionClickParams(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("")
 def list_sections(request: Request):
     """Return all sections for the current session."""
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     sections = _load_sections(session_id)
     return [_section_to_response(i, s) for i, s in enumerate(sections)]
 
@@ -162,7 +171,7 @@ def sections_auto(request: Request, params: SectionAutoParams):
     - **fixed**: all sections use ``fixed_az``.
     - **local_slope**: compute azimuth from design mesh slope at each section origin.
     """
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     design_mesh = _get_design_mesh(session_id)
 
     start = np.array(params.start, dtype=float)
@@ -198,7 +207,7 @@ def sections_auto(request: Request, params: SectionAutoParams):
 @router.post("/manual")
 def sections_manual(request: Request, sections_data: List[SectionCreate]):
     """Set sections from manual input (replaces any existing sections)."""
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     sections: List[SectionLine] = []
     for idx, s in enumerate(sections_data):
         sec = SectionLine(
@@ -226,7 +235,7 @@ def add_section_click(request: Request, params: SectionClickParams):
     If ``az_mode`` is ``"auto"``, computes azimuth from the design mesh slope.
     Appends to existing sections.
     """
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     origin = np.array(params.origin, dtype=float)
     length = params.length
     sector = params.sector
@@ -274,7 +283,7 @@ async def sections_from_file(
     Parses the uploaded file as a polyline, then calls
     ``generate_perpendicular_sections()``.
     """
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     design_mesh = _get_design_mesh(session_id)
 
     spacing_f = float(spacing)
@@ -304,7 +313,11 @@ async def sections_from_file(
             None,
         )
         y_col = next(
-            (c for c in df.columns if c.strip().upper() in ("Y", "NORTE", "NORTH", "N")),
+            (
+                c
+                for c in df.columns
+                if c.strip().upper() in ("Y", "NORTE", "NORTH", "N")
+            ),
             None,
         )
         if x_col is None or y_col is None:
@@ -328,7 +341,9 @@ async def sections_from_file(
     stored = _load_sections(session_id)
     return {
         "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
-        "polyline": polyline.tolist() if hasattr(polyline, "tolist") else list(polyline),
+        "polyline": polyline.tolist()
+        if hasattr(polyline, "tolist")
+        else list(polyline),
     }
 
 
@@ -339,7 +354,7 @@ def update_section(request: Request, section_id: str, body: SectionCreate):
 
     Replaces the section at the given index with new data.
     """
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     sections = _load_sections(session_id)
 
     try:
@@ -348,7 +363,9 @@ def update_section(request: Request, section_id: str, body: SectionCreate):
         raise HTTPException(400, "section_id must be an integer index")
 
     if idx < 0 or idx >= len(sections):
-        raise HTTPException(404, f"Section index {idx} out of range (0-{len(sections) - 1})")
+        raise HTTPException(
+            404, f"Section index {idx} out of range (0-{len(sections) - 1})"
+        )
 
     # Preserve original name if not provided
     updated = {
@@ -367,7 +384,7 @@ def update_section(request: Request, section_id: str, body: SectionCreate):
 @router.delete("/{section_id}")
 def delete_section(request: Request, section_id: str):
     """Delete a single section by its index-based ID."""
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     sections = _load_sections(session_id)
 
     try:
@@ -376,7 +393,9 @@ def delete_section(request: Request, section_id: str):
         raise HTTPException(400, "section_id must be an integer index")
 
     if idx < 0 or idx >= len(sections):
-        raise HTTPException(404, f"Section index {idx} out of range (0-{len(sections) - 1})")
+        raise HTTPException(
+            404, f"Section index {idx} out of range (0-{len(sections) - 1})"
+        )
 
     removed = sections.pop(idx)
     db.save_sections(session_id, sections)
@@ -390,6 +409,6 @@ def delete_section(request: Request, section_id: str):
 @router.delete("")
 def clear_sections(request: Request):
     """Clear all sections for the current session."""
-    session_id = get_session_id(request)
+    session_id = db.get_or_create_session(get_session_id(request))
     db.save_sections(session_id, [])
     return {"message": "All sections cleared"}

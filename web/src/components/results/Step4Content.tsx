@@ -27,24 +27,20 @@ export function Step4Content() {
   const { prevStep } = useSession();
 
   return (
-    <div className="flex flex-col h-full gap-5">
+    <div className="flex flex-col h-full gap-4 min-h-0">
       {/* Tab bar */}
-      <div className="flex gap-2" role="tablist" aria-label="Vistas de resultados">
+      <div className="flex gap-2 shrink-0 overflow-x-auto" role="tablist" aria-label="Vistas de resultados">
         {RESULT_TABS.map((tab) => (
           <button
             key={tab.key}
             role="tab"
             aria-selected={activeTab === tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`
-              px-4 py-2.5 rounded-lg text-sm font-medium transition-all
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue focus-visible:ring-offset-2
-              ${
-                activeTab === tab.key
-                  ? 'bg-mine-blue text-white shadow-sm'
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }
-            `}
+            className="shrink-0 px-4 py-2.5 rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue focus-visible:ring-offset-2"
+            style={activeTab === tab.key
+              ? { backgroundColor: 'var(--color-mine-blue)', color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }
+              : { backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }
+            }
           >
             <span className="mr-1.5">{tab.icon}</span>
             {tab.label}
@@ -53,13 +49,19 @@ export function Step4Content() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-auto">
         {activeTab === 'profiles' && (
-          <div className="space-y-4">
-            <SectionSelector />
-            <Suspense fallback={<LoadingSpinner message="Cargando perfiles…" />}>
-              <LazyProfileChart />
-            </Suspense>
+          <div className="space-y-4 h-full flex flex-col min-h-0">
+            <div className="shrink-0">
+              <SectionSelector />
+            </div>
+            <div className="flex-1 min-h-0 bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+              <Suspense fallback={<LoadingSpinner message="Cargando perfiles…" />}>
+                <div className="max-w-4xl mx-auto" style={{ height: '400px' }}>
+                  <LazyProfileChart />
+                </div>
+              </Suspense>
+            </div>
           </div>
         )}
 
@@ -91,10 +93,11 @@ export function Step4Content() {
       </div>
 
       {/* Navigation */}
-      <div className="flex justify-start pt-1 pb-1">
+      <div className="flex justify-start pt-1 pb-1 shrink-0">
         <button
           onClick={prevStep}
-          className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
+          style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
         >
           ← Anterior
         </button>

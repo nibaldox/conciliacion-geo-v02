@@ -13,7 +13,7 @@ import tempfile
 from typing import Any, Dict, List, Optional
 
 import numpy as np
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 import api.database as db
@@ -38,15 +38,17 @@ router = APIRouter(prefix="/export", tags=["export"])
 # GET /export/excel
 # ---------------------------------------------------------------------------
 
+
 @router.get("/excel")
 def export_excel(
+    request: Request,
     project: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
     operation: Optional[str] = Query(None),
     phase: Optional[str] = Query(None),
 ):
     """Export comparison results to a formatted Excel workbook."""
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     results = db.get_results(session_id)
     if not results:
@@ -67,22 +69,30 @@ def export_excel(
         design_ext = db.get_extraction(session_id, sec_name, "design")
         if design_ext:
             benches_d = [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-            params_design.append(ExtractionResult(
-                section_name=sec_name, sector=sector, benches=benches_d,
-                inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0),
-                overall_angle=design_ext.get("overall_angle", 0.0),
-            ))
+            params_design.append(
+                ExtractionResult(
+                    section_name=sec_name,
+                    sector=sector,
+                    benches=benches_d,
+                    inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0),
+                    overall_angle=design_ext.get("overall_angle", 0.0),
+                )
+            )
         else:
             params_design.append(ExtractionResult(section_name=sec_name, sector=sector))
 
         topo_ext = db.get_extraction(session_id, sec_name, "topo")
         if topo_ext:
             benches_t = [_dict_to_bench(b) for b in topo_ext.get("benches", [])]
-            params_topo.append(ExtractionResult(
-                section_name=sec_name, sector=sector, benches=benches_t,
-                inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0),
-                overall_angle=topo_ext.get("overall_angle", 0.0),
-            ))
+            params_topo.append(
+                ExtractionResult(
+                    section_name=sec_name,
+                    sector=sector,
+                    benches=benches_t,
+                    inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0),
+                    overall_angle=topo_ext.get("overall_angle", 0.0),
+                )
+            )
         else:
             params_topo.append(ExtractionResult(section_name=sec_name, sector=sector))
 
@@ -108,15 +118,17 @@ def export_excel(
 # GET /export/word
 # ---------------------------------------------------------------------------
 
+
 @router.get("/word")
 def export_word(
+    request: Request,
     project: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
     operation: Optional[str] = Query(None),
     phase: Optional[str] = Query(None),
 ):
     """Export a full Word report with summary tables and section plots."""
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     results = db.get_results(session_id)
     if not results:
@@ -140,37 +152,47 @@ def export_word(
 
         benches_d = (
             [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-            if design_ext else []
+            if design_ext
+            else []
         )
         benches_t = (
-            [_dict_to_bench(b) for b in topo_ext.get("benches", [])]
-            if topo_ext else []
+            [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
         )
 
         p_design = ExtractionResult(
-            section_name=sec.name, sector=sec.sector, benches=benches_d,
-            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0) if design_ext else 0.0,
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_d,
+            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
+            if design_ext
+            else 0.0,
             overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
         )
         p_topo = ExtractionResult(
-            section_name=sec.name, sector=sec.sector, benches=benches_t,
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_t,
             inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
             overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
         )
 
-        all_data.append({
-            "section_name": sec.name,
-            "params_design": p_design,
-            "params_topo": p_topo,
-            "profile_d": (
-                (pd_prof.distances, pd_prof.elevations)
-                if pd_prof is not None else (np.array([]), np.array([]))
-            ),
-            "profile_t": (
-                (pt_prof.distances, pt_prof.elevations)
-                if pt_prof is not None else (np.array([]), np.array([]))
-            ),
-        })
+        all_data.append(
+            {
+                "section_name": sec.name,
+                "params_design": p_design,
+                "params_topo": p_topo,
+                "profile_d": (
+                    (pd_prof.distances, pd_prof.elevations)
+                    if pd_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+                "profile_t": (
+                    (pt_prof.distances, pt_prof.elevations)
+                    if pt_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+            }
+        )
 
     project_info = {
         "project": project or "",
@@ -193,10 +215,11 @@ def export_word(
 # GET /export/dxf — Migrated from api/main.py lines 576-658
 # ---------------------------------------------------------------------------
 
+
 @router.get("/dxf")
-def export_dxf():
+def export_dxf(request: Request):
     """Export profiles as 3D DXF with compliance layers."""
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     try:
         mesh_design = _load_mesh_from_db(session_id, "design")
@@ -237,7 +260,10 @@ def export_dxf():
             section_status[sec_name] = "CUMPLE"
         if "NO CUMPLE" in statuses:
             section_status[sec_name] = "NO CUMPLE"
-        elif "FUERA DE TOLERANCIA" in statuses and section_status[sec_name] != "NO CUMPLE":
+        elif (
+            "FUERA DE TOLERANCIA" in statuses
+            and section_status[sec_name] != "NO CUMPLE"
+        ):
             section_status[sec_name] = "FUERA DE TOLERANCIA"
 
     sections_raw = db.get_sections(session_id)
@@ -253,9 +279,8 @@ def export_dxf():
         ox, oy = sec.origin[0], sec.origin[1]
 
         status = section_status.get(sec.name, "CUMPLE")
-        suffix = (
-            {"NO CUMPLE": "NO_CUMPLE", "FUERA DE TOLERANCIA": "FUERA_TOL"}
-            .get(status, "CUMPLE")
+        suffix = {"NO CUMPLE": "NO_CUMPLE", "FUERA DE TOLERANCIA": "FUERA_TOL"}.get(
+            status, "CUMPLE"
         )
 
         def _to_3d(dists, elevs):
@@ -314,10 +339,11 @@ def export_dxf():
 # GET /export/images
 # ---------------------------------------------------------------------------
 
+
 @router.get("/images")
-def export_images():
+def export_images(request: Request):
     """Export section plot images as a ZIP file."""
-    session_id = db.get_or_create_session()
+    session_id = db.get_or_create_session(request.state.session_id)
 
     results = db.get_results(session_id)
     if not results:
@@ -340,37 +366,47 @@ def export_images():
 
         benches_d = (
             [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-            if design_ext else []
+            if design_ext
+            else []
         )
         benches_t = (
-            [_dict_to_bench(b) for b in topo_ext.get("benches", [])]
-            if topo_ext else []
+            [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
         )
 
         p_design = ExtractionResult(
-            section_name=sec.name, sector=sec.sector, benches=benches_d,
-            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0) if design_ext else 0.0,
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_d,
+            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
+            if design_ext
+            else 0.0,
             overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
         )
         p_topo = ExtractionResult(
-            section_name=sec.name, sector=sec.sector, benches=benches_t,
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_t,
             inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
             overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
         )
 
-        all_data.append({
-            "section_name": sec.name,
-            "params_design": p_design,
-            "params_topo": p_topo,
-            "profile_d": (
-                (pd_prof.distances, pd_prof.elevations)
-                if pd_prof is not None else (np.array([]), np.array([]))
-            ),
-            "profile_t": (
-                (pt_prof.distances, pt_prof.elevations)
-                if pt_prof is not None else (np.array([]), np.array([]))
-            ),
-        })
+        all_data.append(
+            {
+                "section_name": sec.name,
+                "params_design": p_design,
+                "params_topo": p_topo,
+                "profile_d": (
+                    (pd_prof.distances, pd_prof.elevations)
+                    if pd_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+                "profile_t": (
+                    (pt_prof.distances, pt_prof.elevations)
+                    if pt_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+            }
+        )
 
     zip_buffer = generate_section_images_zip(all_data)
 

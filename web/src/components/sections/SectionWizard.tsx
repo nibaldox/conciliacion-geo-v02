@@ -44,24 +44,20 @@ export function SectionWizard() {
   const showPlanView = activeTab === 'click';
 
   return (
-    <div className="flex flex-col h-full gap-5">
+    <div className="flex flex-col h-full gap-4">
       {/* Tab bar */}
-      <div className="flex gap-2 overflow-x-auto" role="tablist" aria-label="Método de creación de secciones">
+      <div className="flex gap-2 overflow-x-auto shrink-0" role="tablist" aria-label="Método de creación de secciones">
         {TABS.map((tab) => (
           <button
             key={tab.key}
             role="tab"
             aria-selected={activeTab === tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`
-              shrink-0 px-4 py-2.5 rounded-lg text-sm font-medium transition-all
-              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue focus-visible:ring-offset-2
-              ${
-                activeTab === tab.key
-                  ? 'bg-mine-blue text-white shadow-sm'
-                  : 'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
-              }
-            `}
+            className="shrink-0 px-4 py-2.5 rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue focus-visible:ring-offset-2"
+            style={activeTab === tab.key
+              ? { backgroundColor: 'var(--color-mine-blue)', color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }
+              : { backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }
+            }
           >
             <span className="mr-1.5">{tab.icon}</span>
             {tab.label}
@@ -70,9 +66,9 @@ export function SectionWizard() {
       </div>
 
       {/* Main content area — split when click tab is active */}
-      <div className={`flex-1 min-h-0 ${showPlanView ? 'flex gap-5' : ''}`}>
+      <div className={`flex-1 min-h-0 flex gap-5 ${showPlanView ? '' : 'flex-col'}`}>
         {/* Form panel */}
-        <div className={`bg-white rounded-xl border border-gray-200 p-5 overflow-auto ${showPlanView ? 'w-2/5 shrink-0' : ''}`}>
+        <div className={`rounded-xl p-5 overflow-auto ${showPlanView ? 'w-2/5 shrink-0' : 'flex-1'}`} style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
           {activeTab === 'auto' && <SectionAutoForm />}
           {activeTab === 'manual' && <SectionManualForm />}
           {activeTab === 'click' && (
@@ -82,36 +78,35 @@ export function SectionWizard() {
         </div>
 
         {/* PlanView panel — only visible when click tab is active */}
-        {showPlanView && (
-          <div className="flex-1 min-h-[400px] rounded-xl overflow-hidden border border-gray-200 bg-gray-50">
+        {!showPlanView ? null : (
+          <div className="flex-1 min-h-[400px] rounded-xl overflow-hidden shrink-0" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
             <PlanView onPointClick={clickHandler ? handlePlanClick : undefined} />
           </div>
         )}
       </div>
 
       {/* Existing sections list — uses dedicated SectionList component */}
-      <SectionList />
+      <div className="shrink-0 max-h-64 overflow-auto">
+        <SectionList />
+      </div>
 
       {/* Navigation */}
-      <div className="flex items-center justify-between pt-1 pb-1">
+      <div className="flex items-center justify-between pt-1 pb-1 shrink-0">
         <button
           onClick={prevStep}
-          className="px-5 py-2.5 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+          className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
+          style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
         >
           ← Anterior
         </button>
         <button
           onClick={nextStep}
           disabled={sectionCount === 0}
-          className={`
-            px-6 py-2.5 rounded-lg font-medium text-sm transition-all
-            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue focus-visible:ring-offset-2
-            ${
-              sectionCount > 0
-                ? 'bg-mine-blue text-white shadow-md hover:bg-blue-800 active:scale-[0.98]'
-                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-            }
-          `}
+          className="px-6 py-2.5 rounded-lg font-medium text-sm transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue focus-visible:ring-offset-2"
+          style={sectionCount > 0
+            ? { backgroundColor: 'var(--color-mine-blue)', color: '#fff', boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }
+            : { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', cursor: 'not-allowed' }
+          }
         >
           Siguiente →
         </button>

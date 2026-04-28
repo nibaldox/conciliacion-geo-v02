@@ -25,19 +25,6 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
   const label = type === 'design' ? 'Diseño' : 'Topografía';
   const borderColor = type === 'design' ? 'blue' : 'green';
 
-  // Build dynamic class sets based on mesh type
-  const idleBorder = borderColor === 'blue'
-    ? 'border-blue-300 hover:border-blue-400'
-    : 'border-green-300 hover:border-green-400';
-  const dragBorder = borderColor === 'blue'
-    ? 'border-blue-500 bg-blue-50'
-    : 'border-green-500 bg-green-50';
-  const accentBg = borderColor === 'blue'
-    ? 'bg-blue-50 text-blue-800'
-    : 'bg-green-50 text-green-800';
-  const iconAccent = borderColor === 'blue' ? 'text-blue-400' : 'text-green-400';
-  const ringColor = borderColor === 'blue' ? 'focus-visible:ring-blue-400' : 'focus-visible:ring-green-400';
-
   const handleFile = useCallback(
     (file: File) => {
       const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -90,16 +77,17 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
     return (
       <div
         data-slot="mesh-upload-zone"
-        className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 transition-colors ${accentBg} min-h-[220px]`}
+        className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 transition-colors min-h-[220px]"
+        style={{ borderColor: 'var(--color-border)' }}
       >
-        <div className="animate-spin text-3xl mb-3 {iconAccent}">⏳</div>
+        <div className="animate-spin text-3xl mb-3" style={{ color: 'var(--color-mine-blue)' }}>⏳</div>
         <p className="text-sm font-medium">Subiendo {label}…</p>
         <p className="text-xs mt-1 opacity-70">
           {upload.variables?.file.name ?? ''}
         </p>
         {/* Simple indeterminate progress bar */}
-        <div className="w-full max-w-[200px] h-1.5 bg-gray-200 rounded-full mt-4 overflow-hidden">
-          <div className="h-full bg-mine-blue rounded-full animate-pulse w-2/3" />
+        <div className="w-full max-w-[200px] h-1.5 rounded-full mt-4 overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
+          <div className="h-full rounded-full animate-pulse w-2/3" style={{ backgroundColor: 'var(--color-mine-blue)' }} />
         </div>
       </div>
     );
@@ -110,19 +98,20 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
     return (
       <div
         data-slot="mesh-upload-zone"
-        className="flex flex-col items-center justify-center rounded-xl border-2 border-solid p-6 bg-white min-h-[220px]"
+        className="flex flex-col items-center justify-center rounded-xl border-2 border-solid p-6 min-h-[220px]"
+        style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-mine-green)' }}
       >
         {/* Green check */}
-        <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center mb-3">
-          <span className="text-green-600 text-lg font-bold">&#10003;</span>
+        <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3" style={{ backgroundColor: 'var(--status-ok-bg)' }}>
+          <span className="text-lg font-bold" style={{ color: 'var(--status-ok-text)' }}>&#10003;</span>
         </div>
-        <p className="text-sm font-semibold text-gray-800">{label}</p>
-        <p className="text-xs text-gray-500 mt-1 truncate max-w-[180px]" title={meshInfo.filename}>
+        <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{label}</p>
+        <p className="text-xs mt-1 truncate max-w-[180px]" style={{ color: 'var(--color-text-muted)' }} title={meshInfo.filename}>
           {meshInfo.filename}
         </p>
 
         {/* Stats */}
-        <div className="flex gap-4 mt-3 text-xs text-gray-500">
+        <div className="flex gap-4 mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
           <span title="Vértices">
             △ {meshInfo.n_vertices.toLocaleString()}
           </span>
@@ -137,14 +126,35 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
           )}
         </div>
 
-        {/* Remove button */}
-        <button
-          onClick={handleRemove}
-          disabled={removeMesh.isPending}
-          className={`mt-4 text-xs text-red-500 hover:text-red-700 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 ${ringColor} rounded px-2 py-0.5 disabled:opacity-50`}
-        >
-          {removeMesh.isPending ? 'Eliminando…' : 'Eliminar'}
-        </button>
+        {/* Action buttons */}
+        <div className="flex gap-3 mt-4">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="text-xs underline underline-offset-2 focus-visible:outline-none rounded px-2 py-0.5"
+            style={{ color: 'var(--color-mine-blue)' }}
+          >
+            Reemplazar
+          </button>
+          <button
+            onClick={handleRemove}
+            disabled={removeMesh.isPending}
+            className="text-xs underline underline-offset-2 focus-visible:outline-none rounded px-2 py-0.5 disabled:opacity-50"
+            style={{ color: 'var(--color-mine-red)' }}
+          >
+            {removeMesh.isPending ? 'Eliminando…' : 'Eliminar'}
+          </button>
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_MIME}
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleFile(file);
+            e.target.value = '';
+          }}
+        />
       </div>
     );
   }
@@ -162,23 +172,22 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click();
       }}
-      className={`
-        flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6
-        cursor-pointer transition-all min-h-[220px]
-        focus-visible:outline-none ${ringColor} focus-visible:ring-2
-        ${isDragging ? dragBorder : `${idleBorder} bg-white hover:shadow-md`}
-      `}
+      className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 cursor-pointer transition-all min-h-[220px] focus-visible:outline-none"
+      style={isDragging
+        ? { borderColor: 'var(--color-mine-blue)', backgroundColor: 'var(--color-surface-muted)' }
+        : { borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }
+      }
     >
-      <div className={`text-4xl mb-3 ${iconAccent}`}>
+      <div className="text-4xl mb-3" style={{ color: borderColor === 'blue' ? 'var(--color-mine-blue)' : 'var(--color-mine-green)' }}>
         {type === 'design' ? '📐' : '🏔️'}
       </div>
-      <p className={`font-medium ${isDragging ? '' : 'text-gray-700'}`}>
+      <p className="font-medium" style={{ color: isDragging ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
         {label}
       </p>
-      <p className="text-xs text-gray-400 mt-1">
+      <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
         Arrastre o haga clic para seleccionar
       </p>
-      <p className="text-xs text-gray-400 mt-0.5">
+      <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
         STL / OBJ / PLY / DXF
       </p>
       <input
@@ -189,7 +198,6 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) handleFile(file);
-          // Reset so the same file can be re-selected
           e.target.value = '';
         }}
       />
@@ -221,7 +229,7 @@ export function MeshUpload() {
 
       {/* File size hint */}
       {!bothUploaded && (
-        <p className="text-xs text-gray-400 text-center">
+        <p className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
           Máximo 500 MB por archivo. Los archivos .stl y .xlsx están excluidos del repositorio.
         </p>
       )}

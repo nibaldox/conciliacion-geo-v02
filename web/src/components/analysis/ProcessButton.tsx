@@ -29,14 +29,11 @@ export function ProcessButton() {
         <button
           onClick={handleProcess}
           disabled={isProcessing || isPending}
-          className={`
-            px-8 py-4 rounded-xl font-semibold text-lg shadow-lg
-            transition-all duration-200 flex items-center gap-3
-            ${(isProcessing || isPending)
-              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-              : 'bg-mine-blue text-white hover:bg-blue-800 hover:shadow-xl active:scale-[0.98]'
-            }
-          `}
+          className="px-8 py-4 rounded-xl font-semibold text-lg shadow-lg transition-all duration-200 flex items-center gap-3"
+          style={isProcessing || isPending
+            ? { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', cursor: 'not-allowed' }
+            : { backgroundColor: 'var(--color-mine-blue)', color: '#fff' }
+          }
         >
           {(isProcessing || isPending) && (
             <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none">
@@ -50,12 +47,12 @@ export function ProcessButton() {
 
       {/* Complete state */}
       {isComplete && (
-        <div className="flex flex-col items-center gap-2 px-8 py-4 bg-green-50 rounded-xl border border-green-200">
-          <div className="flex items-center gap-2 text-green-700 font-semibold text-lg">
+        <div className="flex flex-col items-center gap-2 px-8 py-4 rounded-xl" style={{ backgroundColor: 'var(--status-ok-bg)', border: '1px solid var(--status-ok-border)' }}>
+          <div className="flex items-center gap-2 font-semibold text-lg" style={{ color: 'var(--status-ok-text)' }}>
             <span className="text-2xl">✓</span>
             Procesamiento Completo
           </div>
-          <p className="text-sm text-green-600">
+          <p className="text-sm" style={{ color: 'var(--status-ok-text)', opacity: 0.8 }}>
             {status?.n_results ?? 0} resultados generados
           </p>
         </div>
@@ -63,16 +60,17 @@ export function ProcessButton() {
 
       {/* Error state */}
       {isError && (
-        <div className="flex flex-col items-center gap-3 px-8 py-4 bg-red-50 rounded-xl border border-red-200">
-          <div className="text-red-700 font-semibold text-lg">
+        <div className="flex flex-col items-center gap-3 px-8 py-4 rounded-xl" style={{ backgroundColor: 'var(--status-nok-bg)', border: '1px solid var(--status-nok-border)' }}>
+          <div className="font-semibold text-lg" style={{ color: 'var(--status-nok-text)' }}>
             Error en el procesamiento
           </div>
-          <p className="text-sm text-red-600">
+          <p className="text-sm" style={{ color: 'var(--status-nok-text)', opacity: 0.8 }}>
             Hubo un error al procesar las secciones. Intenta nuevamente.
           </p>
           <button
             onClick={handleProcess}
-            className="px-6 py-2 bg-mine-red text-white rounded-lg font-medium hover:bg-red-700 transition-colors"
+            className="px-6 py-2 text-white rounded-lg font-medium transition-colors"
+            style={{ backgroundColor: 'var(--color-mine-red)' }}
           >
             Reintentar
           </button>

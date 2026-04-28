@@ -1,19 +1,50 @@
-import Plot from 'react-plotly.js';
+import { useRef, useEffect, useState } from 'react';
+import {
+  Chart,
+  CategoryScale,
+  LinearScale,
+  LineElement,
+  PointElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+  type ChartDataset,
+  type ScaleOptionsByType,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
 import { useProfile } from '../../api/hooks';
 import { useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
+import { useTheme } from '../../stores/theme';
+
+Chart.register(CategoryScale, LinearScale, LineElement, PointElement, Title, Tooltip, Legend, Filler);
 
 export function ProfileChart() {
   const { selectedSection } = useSession();
   const { data: profile, isLoading, error } = useProfile(selectedSection);
   const { data: sections } = useSections();
+  const { isDark } = useTheme();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [chartHeight, setChartHeight] = useState(400);
+
+  useEffect(() => {
+    const updateHeight = () => {
+      if (containerRef.current) {
+        const width = containerRef.current.offsetWidth;
+        setChartHeight(Math.min(width, 600));
+      }
+    };
+    updateHeight();
+    window.addEventListener('resize', updateHeight);
+    return () => window.removeEventListener('resize', updateHeight);
+  }, []);
 
   const sectionMeta = sections?.find((s) => s.id === selectedSection);
 
-  // Loading state
   if (!selectedSection) {
     return (
-      <div className="flex items-center justify-center h-96 text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-96" style={{ color: 'var(--color-text-muted)' }}>
         Selecciona una sección para ver el perfil
       </div>
     );
@@ -21,11 +52,8 @@ export function ProfileChart() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-96 gap-3 text-gray-500">
-        <svg className="animate-spin h-5 w-5 text-mine-blue" viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
+      <div className="flex items-center justify-center h-96 gap-3" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: 'var(--color-mine-blue)', borderTopColor: 'transparent' }} />
         Cargando perfil...
       </div>
     );
@@ -33,7 +61,7 @@ export function ProfileChart() {
 
   if (error || !profile) {
     return (
-      <div className="flex items-center justify-center h-96 text-red-500 text-sm">
+      <div className="flex items-center justify-center h-96" style={{ color: '#ef4444' }}>
         Error al cargar el perfil de la sección
       </div>
     );
@@ -46,106 +74,180 @@ export function ProfileChart() {
 
   if (!hasDesign && !hasTopo) {
     return (
-      <div className="flex items-center justify-center h-96 text-gray-400 text-sm">
+      <div className="flex items-center justify-center h-96" style={{ color: 'var(--color-text-muted)' }}>
         Sin datos de perfil disponibles para esta sección
       </div>
     );
   }
 
-  const traces: Plotly.Data[] = [];
+  const title = [
+    profile.section_name,
+    sectionMeta ? `${sectionMeta.azimuth.toFixed(1)}°` : '',
+    profile.sector || '',
+  ].filter(Boolean).join(' — ');
+
+  const textColor = isDark ? '#a3a3a3' : '#6b7280';
+  const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+
+  const datasets: ChartDataset<'line'>[] = [];
 
   if (hasDesign) {
-    traces.push({
-      x: profile.design!.distances,
-      y: profile.design!.elevations,
-      type: 'scatter',
-      mode: 'lines',
-      name: 'Diseño',
-      line: { color: '#2F5496', width: 2.5, dash: 'solid' as const },
+    datasets.push({
+      label: 'Diseño',
+      data: profile.design!.elevations,
+      borderColor: '#2F5496',
+      backgroundColor: 'rgba(47,84,150,0.08)',
+      borderWidth: 2.5,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0,
+      fill: false,
     });
   }
 
   if (hasTopo) {
-    traces.push({
-      x: profile.topo!.distances,
-      y: profile.topo!.elevations,
-      type: 'scatter',
-      mode: 'lines',
-      name: 'Topografía',
-      line: { color: '#2E7D32', width: 2.5, dash: 'solid' as const },
+    datasets.push({
+      label: 'Topografía',
+      data: profile.topo!.elevations,
+      borderColor: '#2E7D32',
+      backgroundColor: 'rgba(46,125,50,0.08)',
+      borderWidth: 2.5,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      tension: 0,
+      fill: false,
     });
   }
 
   if (hasRecDesign) {
-    traces.push({
-      x: profile.reconciled_design!.distances,
-      y: profile.reconciled_design!.elevations,
-      type: 'scatter',
-      mode: 'lines',
-      name: 'Diseño (Reconciliado)',
-      line: { color: '#2F5496', width: 1.5, dash: 'dash' as const },
+    datasets.push({
+      label: 'Diseño (Reconciliado)',
+      data: profile.reconciled_design!.elevations,
+      borderColor: '#2F5496',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderDash: [5, 5],
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      tension: 0,
+      fill: false,
     });
   }
 
   if (hasRecTopo) {
-    traces.push({
-      x: profile.reconciled_topo!.distances,
-      y: profile.reconciled_topo!.elevations,
-      type: 'scatter',
-      mode: 'lines',
-      name: 'Topografía (Reconciliada)',
-      line: { color: '#2E7D32', width: 1.5, dash: 'dash' as const },
+    datasets.push({
+      label: 'Topografía (Reconciliada)',
+      data: profile.reconciled_topo!.elevations,
+      borderColor: '#2E7D32',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderDash: [5, 5],
+      pointRadius: 0,
+      pointHoverRadius: 3,
+      tension: 0,
+      fill: false,
     });
   }
 
-  const title = [
-    profile.section_name,
-    sectionMeta ? `Az: ${sectionMeta.azimuth.toFixed(1)}°` : '',
-    profile.sector ? `Sector: ${profile.sector}` : '',
-  ]
-    .filter(Boolean)
-    .join(' — ');
+  const labels = hasDesign
+    ? profile.design!.distances
+    : hasTopo
+    ? profile.topo!.distances
+    : [];
+
+  const chartData = {
+    labels,
+    datasets,
+  };
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+    plugins: {
+      legend: {
+        position: 'bottom' as const,
+        labels: {
+          color: textColor,
+          font: { size: 11, family: 'system-ui, sans-serif' },
+          boxWidth: 30,
+          padding: 16,
+          usePointStyle: true,
+          pointStyle: 'line',
+        },
+      },
+      title: {
+        display: true,
+        text: title,
+        color: isDark ? '#e5e5e5' : '#374151',
+        font: { size: 13, weight: '500' as const, family: 'system-ui, sans-serif' },
+        padding: { bottom: 20 },
+      },
+      tooltip: {
+        backgroundColor: isDark ? '#1f1f1f' : '#fff',
+        titleColor: isDark ? '#e5e5e5' : '#111',
+        bodyColor: isDark ? '#a3a3a3' : '#374151',
+        borderColor: isDark ? '#2e2e2e' : '#e5e7eb',
+        borderWidth: 1,
+        padding: 10,
+        displayColors: true,
+        callbacks: {
+          title: (items: any[]) => `${items[0].label} m`,
+          label: (item: any) => `${item.dataset.label}: ${item.raw} m`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        type: 'linear' as const,
+        title: {
+          display: true,
+          text: 'Distancia (m)',
+          color: textColor,
+          font: { size: 11 },
+        },
+        grid: {
+          color: gridColor,
+        },
+        ticks: {
+          color: textColor,
+          font: { size: 10 },
+        },
+        border: {
+          color: isDark ? '#2e2e2e' : '#e5e7eb',
+        },
+      },
+      y: {
+        title: {
+          display: true,
+          text: 'Elevación (m)',
+          color: textColor,
+          font: { size: 11 },
+        },
+        grid: {
+          color: gridColor,
+        },
+        ticks: {
+          color: textColor,
+          font: { size: 10 },
+        },
+        border: {
+          color: isDark ? '#2e2e2e' : '#e5e7eb',
+        },
+      },
+    },
+    interaction: {
+      mode: 'index' as const,
+      intersect: false,
+    },
+  };
 
   return (
-    <div className="w-full">
-      <Plot
-        data={traces}
-        layout={{
-          title: {
-            text: title,
-            font: { size: 14, color: '#333' },
-          },
-          xaxis: {
-            title: { text: 'Distancia (m)', font: { size: 12 } },
-            gridcolor: '#e5e7eb',
-            zerolinecolor: '#d1d5db',
-          },
-          yaxis: {
-            title: { text: 'Elevación (m)', font: { size: 12 } },
-            gridcolor: '#e5e7eb',
-            zerolinecolor: '#d1d5db',
-          },
-          legend: {
-            orientation: 'h' as const,
-            y: -0.15,
-            x: 0.5,
-            xanchor: 'center' as const,
-            font: { size: 11 },
-          },
-          margin: { t: 50, r: 30, b: 80, l: 60 },
-          paper_bgcolor: 'white',
-          plot_bgcolor: 'white',
-          autosize: true,
-          height: 450,
-        }}
-        config={{
-          responsive: true,
-          scrollZoom: true,
-          displayModeBar: true,
-          modeBarButtonsToRemove: ['toImage'],
-          displaylogo: false,
-        }}
-        style={{ width: '100%' }}
+    <div ref={containerRef} className="w-full" style={{ height: chartHeight }}>
+      <Line
+        data={chartData}
+        options={chartOptions}
+        style={{ width: '100%', height: '100%' }}
       />
     </div>
   );

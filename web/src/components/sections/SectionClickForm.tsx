@@ -43,13 +43,13 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
   return (
     <div className="space-y-5">
       {/* Instructions */}
-      <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+      <div className="flex items-center gap-3 p-4 rounded-lg" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <span className="text-2xl">&#x1F4CD;</span>
         <div>
-          <p className="text-sm font-medium text-blue-800">
+          <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
             Haga clic en la vista en planta para agregar secciones
           </p>
-          <p className="text-xs text-blue-600 mt-0.5">
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
             Configure los parámetros abajo y luego haga clic en el mapa.
           </p>
         </div>
@@ -58,7 +58,7 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
       {/* Settings */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             Longitud (m)
           </label>
           <input
@@ -67,31 +67,34 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
             step="any"
             value={length}
             onChange={(e) => setLength(parseFloat(e.target.value) || 200)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             Sector
           </label>
           <input
             type="text"
             value={sector}
             onChange={(e) => setSector(e.target.value)}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             placeholder="Ej: Norte"
           />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             Modo Azimuth
           </label>
           <select
             value={azMode}
             onChange={(e) => setAzMode(e.target.value as 'auto' | 'manual')}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none bg-white"
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           >
             <option value="auto">Automático</option>
             <option value="manual">Manual</option>
@@ -100,7 +103,7 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
 
         {azMode === 'manual' && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
               Azimuth (°)
             </label>
             <input
@@ -110,7 +113,8 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
               step="any"
               value={azimuth}
               onChange={(e) => setAzimuth(parseFloat(e.target.value) || 0)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-mine-blue focus:ring-1 focus:ring-mine-blue outline-none"
+              className="w-full rounded-md px-3 py-2 text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
         )}
@@ -119,23 +123,23 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
       {/* Status */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-mine-blue text-white text-sm font-bold">
+          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full text-white text-sm font-bold" style={{ backgroundColor: 'var(--color-mine-blue)' }}>
             {sections?.length ?? 0}
           </span>
-          <span className="text-sm text-gray-600">
+          <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             secciones agregadas
           </span>
         </div>
 
         {mutation.isPending && (
-          <span className="flex items-center gap-2 text-sm text-mine-blue">
-            <span className="animate-spin inline-block w-4 h-4 border-2 border-mine-blue/30 border-t-mine-blue rounded-full" />
+          <span className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-mine-blue)' }}>
+            <span className="animate-spin inline-block w-4 h-4 border-2 rounded-full" style={{ borderColor: 'var(--color-mine-blue)', borderTopColor: 'transparent' }} />
             Agregando...
           </span>
         )}
 
         {mutation.isError && (
-          <p className="text-sm text-mine-red">
+          <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
             Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudo agregar la sección'}
           </p>
         )}
