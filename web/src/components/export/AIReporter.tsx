@@ -331,7 +331,9 @@ export function AIReporter() {
 
           {/* Markdown content */}
           <div className="p-5 prose prose-sm max-w-none">
-            <ReactMarkdown style={{ color: 'var(--color-text-primary)' }}>{report}</ReactMarkdown>
+            <div style={{ color: 'var(--color-text-primary)' }}>
+              <ReactMarkdown>{report}</ReactMarkdown>
+            </div>
             {isGenerating && (
               <span className="inline-block w-0.5 h-4 animate-pulse align-text-bottom ml-0.5" style={{ backgroundColor: 'var(--color-mine-blue)' }} />
             )}

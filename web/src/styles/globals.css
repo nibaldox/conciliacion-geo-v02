@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
 /* ── Dark mode selector (must be first) ────────────────────── */
 @custom-variant dark &;
@@ -67,10 +68,11 @@
 
 /* ── Base styles ─────────────────────────────────────────────── */
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Plus Jakarta Sans', 'Outfit', system-ui, -apple-system, sans-serif;
   background-color: var(--color-surface);
   color: var(--color-text-primary);
-  antialiased: antialiased;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Status badges ────────────────────────────────────────────── */
@@ -102,6 +104,59 @@ body {
   background-color: var(--status-extra-bg);
   color: var(--status-extra-text);
   border: 1px solid var(--status-extra-border);
+}
+
+/* ── Glassmorphism and Premium UI utilities ───────────────────── */
+.glass-card {
+  background-color: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(229, 231, 235, 0.6);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.dark .glass-card {
+  background-color: rgba(23, 23, 23, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(64, 64, 64, 0.4);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(47, 84, 150, 0.4);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.08);
+}
+
+.dark .glass-card:hover {
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.5);
+}
+
+.glass-panel {
+  background-color: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border);
+}
+
+.dark .glass-panel {
+  background-color: rgba(15, 15, 15, 0.75);
+  border-color: var(--color-border);
+}
+
+.gradient-title {
+  background: linear-gradient(135deg, var(--color-mine-blue) 0%, #1e40af 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.dark .gradient-title {
+  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 /* ── Scrollbar — light ───────────────────────────────────────── */

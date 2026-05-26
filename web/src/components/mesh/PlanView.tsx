@@ -57,7 +57,7 @@ export function PlanView({ onPointClick }: PlanViewProps) {
         name: 'Diseño',
         hovertemplate:
           'Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m<extra>Diseño</extra>',
-        text: designVerts.z.map((z) => Number(z.toFixed(1))),
+        text: designVerts.z.map((z) => z.toFixed(1)),
       });
     }
 
@@ -85,7 +85,7 @@ export function PlanView({ onPointClick }: PlanViewProps) {
         name: 'Topografía',
         hovertemplate:
           'Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m<extra>Topografía</extra>',
-        text: topoVerts.z.map((z) => Number(z.toFixed(1))),
+        text: topoVerts.z.map((z) => z.toFixed(1)),
       });
     }
 

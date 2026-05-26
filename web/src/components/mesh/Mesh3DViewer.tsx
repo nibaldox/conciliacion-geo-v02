@@ -17,7 +17,6 @@ import type { SectionResponse, VerticesResponse } from '../../api/types';
 
 const DESIGN_COLOR = Color.fromCssColorString('#3b82f6').withAlpha(0.85); // blue
 const TOPO_COLOR = Color.fromCssColorString('#22c55e').withAlpha(0.85);   // green
-const SECTION_COLOR = Color.fromCssColorString('#ef4444').withAlpha(0.9); // red
 const POINT_PIXEL_SIZE = 3;
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -69,7 +68,7 @@ export function Mesh3DViewer() {
   const pointsRef = useRef<PointPrimitiveCollection | null>(null);
   const linesRef = useRef<PolylineCollection | null>(null);
 
-  const { designMeshId, topoMeshId } = useSession();
+  const { designMeshId, topoMeshId, selectedSection } = useSession();
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
   const { data: sections } = useSections();
@@ -100,13 +99,13 @@ export function Mesh3DViewer() {
         // Dark background
         skyBox: false as unknown as undefined,
         skyAtmosphere: false as unknown as undefined,
-      });
+      } as any);
 
       // Remove default credit container clutter
       (viewer.cesiumWidget.creditContainer as HTMLElement).style.display = 'none';
 
       // Set dark background
-      viewer.scene.backgroundColor = Color.fromCssColorString('#1e293b');
+      viewer.scene.backgroundColor = Color.fromCssColorString('#0f172a'); // Deep dark Slate-900
 
       // Use flat terrain — no Cesium ion needed
       viewer.terrainProvider = new EllipsoidTerrainProvider();
@@ -172,13 +171,46 @@ export function Mesh3DViewer() {
 
     for (const sec of sections) {
       const [start, end] = sectionEndpoints(sec);
+      const isSelected = selectedSection === sec.name;
       lines.add({
         positions: [start, end],
-        width: 2,
-        color: SECTION_COLOR,
+        width: isSelected ? 4 : 2,
+        color: isSelected
+          ? Color.fromCssColorString('#f43f5e').withAlpha(1.0)  // Glowing electric rose for active
+          : Color.fromCssColorString('#ef4444').withAlpha(0.35), // Muted red for inactive
       });
     }
-  }, [sections]);
+  }, [sections, selectedSection]);
+
+  // ── Camera: smooth flyTo selected section ──
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !sections || !selectedSection) return;
+
+    const sec = sections.find((s) => s.name === selectedSection);
+    if (!sec) return;
+
+    const [start, end] = sectionEndpoints(sec);
+    const midPoint = new Cartesian3(
+      (start.x + end.x) / 2,
+      (start.y + end.y) / 2,
+      (start.z + end.z) / 2
+    );
+
+    viewer.camera.flyTo({
+      destination: new Cartesian3(
+        midPoint.x + sec.length * 0.4,
+        midPoint.y - sec.length * 0.4,
+        midPoint.z + sec.length * 0.6
+      ),
+      orientation: {
+        heading: CesiumMath.toRadians(45),
+        pitch: CesiumMath.toRadians(-45),
+        roll: 0,
+      },
+      duration: 1.2,
+    });
+  }, [selectedSection, sections]);
 
   // ── Camera: auto-fit to data bounds ──
   const combinedVerts = useMemo(() => {
@@ -194,7 +226,8 @@ export function Mesh3DViewer() {
 
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || !combinedVerts || combinedVerts.x.length === 0) return;
+    // Don't override camera position if a section is already selected and focused
+    if (!viewer || !combinedVerts || combinedVerts.x.length === 0 || selectedSection) return;
 
     const center = dataCenter(combinedVerts);
     const radius = boundingRadius(combinedVerts, center);
@@ -213,7 +246,7 @@ export function Mesh3DViewer() {
       },
       duration: 1.5,
     });
-  }, [combinedVerts]);
+  }, [combinedVerts, selectedSection]);
 
   // ── Error state ──
   if (error) {

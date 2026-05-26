@@ -208,7 +208,7 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
 /* ─── Main MeshUpload Component ──────────────────────────── */
 
 export function MeshUpload() {
-  const { designMeshId, topoMeshId, setDesignMeshId, setTopoMeshId, nextStep } = useSession();
+  const { designMeshId, topoMeshId, setDesignMeshId, setTopoMeshId } = useSession();
   const bothUploaded = !!designMeshId && !!topoMeshId;
 
   return (

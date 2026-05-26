@@ -10,7 +10,6 @@ import {
   Legend,
   Filler,
   type ChartDataset,
-  type ScaleOptionsByType,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { useProfile } from '../../api/hooks';
@@ -164,7 +163,6 @@ export function ProfileChart() {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-    plugins: {
       legend: {
         position: 'bottom' as const,
         labels: {
@@ -180,7 +178,7 @@ export function ProfileChart() {
         display: true,
         text: title,
         color: isDark ? '#e5e5e5' : '#374151',
-        font: { size: 13, weight: '500' as const, family: 'system-ui, sans-serif' },
+        font: { size: 13, weight: 500, family: 'system-ui, sans-serif' },
         padding: { bottom: 20 },
       },
       tooltip: {

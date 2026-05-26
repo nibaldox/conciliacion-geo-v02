@@ -256,8 +256,10 @@ def extract_parameters(distances, elevations, section_name, sector,
                 current_group.append(benches[i+1])
         valid_benches.append(current_group)
         
-        # Pick largest group
-        benches = max(valid_benches, key=len)
+        # Consolidate all groups instead of picking only the largest
+        benches = []
+        for group in valid_benches:
+            benches.extend(group)
         # Renumber
         for idx, b in enumerate(benches):
             b.bench_number = idx + 1
@@ -384,35 +386,69 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     if n_d == 0 and n_t == 0:
         return []
 
-    # Create Cost Matrix (Absolute Elevation Difference)
+    # Create Cost Matrix (Weighted 2D Euclidean Distance between Bench Centroids)
     # Rows: Design, Cols: Topo
     cost_matrix = np.zeros((n_d, n_t))
     
     for i, bd in enumerate(benches_design):
         bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
+        bd_x = (bd.crest_distance + bd.toe_distance) / 2
         for j, bt in enumerate(benches_topo):
             bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
-            cost_matrix[i, j] = abs(bd_z - bt_z)
+            bt_x = (bt.crest_distance + bt.toe_distance) / 2
+            # 2D Euclidean distance: Z has 1.5x weight for vertical priority, X has 1.0x weight
+            cost_matrix[i, j] = np.sqrt(1.5 * (bd_z - bt_z)**2 + 1.0 * (bd_x - bt_x)**2)
             
-    # Solve Assignment Problem (Minimize total elevation difference)
+    # Solve Assignment Problem (Minimize total 2D distance cost)
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
     
-    # Threshold for valid match (e.g. half bench height ~8m)
+    # Threshold for valid match (e.g. vertical difference < 8.0m)
     match_threshold = 8.0
     
-    matched_design_indices = set()
-    matched_topo_indices = set()
+    # Gather valid match candidates
+    candidates = []
+    for r, c in zip(row_ind, col_ind):
+        bd = benches_design[r]
+        bt = benches_topo[c]
+        bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
+        bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
+        diff_z = abs(bd_z - bt_z)
+        if diff_z < match_threshold:
+            candidates.append((r, c, cost_matrix[r, c]))
+            
+    # Sort candidates by design index r to enforce sequential monotonicity
+    candidates.sort(key=lambda x: x[0])
+    
+    # Resolve cross-matching conflicts greedily based on cost
+    valid_matches = []
+    for cand in candidates:
+        r, c, cost = cand
+        # Since candidates are sorted by r, any already accepted match v has v_r < r.
+        # Therefore, to be monotonic, we must have v_c < c.
+        # Any match v with c <= v_c is a cross-matching violation!
+        conflicts = [v for v in valid_matches if c <= v[1]]
+        if not conflicts:
+            valid_matches.append(cand)
+        else:
+            total_conflict_cost = sum(x[2] for x in conflicts)
+            if cost < total_conflict_cost:
+                # Replace conflicting matches with the better one
+                valid_matches = [x for x in valid_matches if x not in conflicts]
+                valid_matches.append(cand)
+                
+    # Sort final matches by design index r
+    valid_matches.sort(key=lambda x: x[0])
+    
+    matched_design_indices = {r for r, c, _ in valid_matches}
+    matched_topo_indices = {c for r, c, _ in valid_matches}
+    design_to_topo = {r: c for r, c, _ in valid_matches}
     
     # Process Matches
-    for r, c in zip(row_ind, col_ind):
-        diff = cost_matrix[r, c]
-        if diff < match_threshold:
-            # Valid Match
+    for r in range(n_d):
+        if r in matched_design_indices:
+            c = design_to_topo[r]
             bd = benches_design[r]
             bt = benches_topo[c]
-            
-            matched_design_indices.add(r)
-            matched_topo_indices.add(c)
             
             # --- Comparison Logic ---
             height_dev = bt.bench_height - bd.bench_height
@@ -517,7 +553,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': round(bt.berm_width, 2),
                 'berm_min': None,
                 'berm_status': "BANCO ADICIONAL",
-                'delta_crest': None, # Meaningless without design? Or could compare to "nearest"? Keep None.
+                'delta_crest': None,
                 'delta_toe': None,
                 'bench_design': None,
                 'bench_real': bt,
