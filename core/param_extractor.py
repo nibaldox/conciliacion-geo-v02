@@ -19,6 +19,7 @@ class BenchParams:
     face_angle: float
     berm_width: float
     is_ramp: bool = False
+    group_break: bool = False
 
 
 @dataclass
@@ -245,17 +246,14 @@ def extract_parameters(distances, elevations, section_name, sector,
         current_group = [benches[0]]
         for i in range(len(benches) - 1):
             if benches[i].berm_width > max_berm_width:
-                # Break in group
-                # Decide which group to keep? 
-                # Usually we want the main pit wall. 
-                # Let's store groups and pick largest.
-                benches[i].berm_width = 0.0 # Clear berm width for last bench of group
+                # Break in group — mark last bench as group end, keep its berm_width intact
+                benches[i].group_break = True
                 valid_benches.append(current_group)
                 current_group = [benches[i+1]]
             else:
                 current_group.append(benches[i+1])
         valid_benches.append(current_group)
-        
+
         # Consolidate all groups instead of picking only the largest
         benches = []
         for group in valid_benches:
@@ -457,19 +455,16 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
             tol_h = tolerances['bench_height']
             tol_a = tolerances['face_angle']
             tol_b = tolerances['berm_width']
-            
+
             min_berm = tol_b.get('min', 0.0)
-            if bt.berm_width == 0.0 and bd.berm_width == 0.0:
+
+            if bd.group_break and bt.group_break:
                 berm_status = "CUMPLE"
-            elif bt.berm_width >= min_berm:
-                berm_status = "CUMPLE"
-            elif bt.berm_width >= min_berm * 0.8:
-                berm_status = "FUERA DE TOLERANCIA"
-            else:
+            elif bd.group_break:
+                berm_status = "FALTA BANCO"
+            elif bt.group_break:
                 berm_status = "NO CUMPLE"
-            
-            # Override status if it's a detected ramp
-            if bt.is_ramp:
+            elif bt.is_ramp:
                 berm_status = "RAMPA DETECTADA"
                 if bd.is_ramp or bd.berm_width > 15.0:
                     if abs(bt.berm_width - bd.berm_width) < 3.0:
@@ -478,6 +473,14 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                         berm_status = "RAMPA (Desv. Ancho)"
             elif bd.is_ramp:
                 berm_status = "FALTA RAMPA"
+            elif bt.berm_width == 0.0 and bd.berm_width == 0.0:
+                berm_status = "CUMPLE"
+            elif bt.berm_width >= min_berm:
+                berm_status = "CUMPLE"
+            elif bt.berm_width >= min_berm * 0.8:
+                berm_status = "FUERA DE TOLERANCIA"
+            else:
+                berm_status = "NO CUMPLE"
             
             comparisons.append({
                 'sector': params_design.sector,

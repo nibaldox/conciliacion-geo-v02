@@ -104,6 +104,12 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
                 text=f"B{bench.bench_number}",
                 showarrow=True, arrowhead=2,
                 font=dict(size=10, color="red"))
+            fig.add_annotation(
+                x=bench.toe_distance, y=bench.toe_elevation,
+                text=f"Pa{bench.bench_number}",
+                showarrow=True, arrowhead=2,
+                font=dict(size=9, color="darkred"),
+                ax=20, ay=0)
 
     if show_pozos and blast_tolerance is not None:
         _add_blast_holes(fig, section, blast_tolerance)
