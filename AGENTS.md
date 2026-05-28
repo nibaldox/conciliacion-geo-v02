@@ -1,291 +1,150 @@
-# AGENTS.md — Conciliación Geotécnica v02
+# AGENTS.md
 
-## Proyecto
+## Project
 
-Herramienta de conciliación automática de parámetros geotécnicos para taludes en minería a cielo abierto.
-Compara superficies 3D de diseño vs topografía real (STL), genera secciones transversales y evalúa cumplimiento contra tolerancias.
+Geotechnical reconciliation tool for open-pit mine slopes. Compares 3D design surfaces vs as-built topography (STL/OBJ/DXF), generates cross-sections, extracts bench parameters, evaluates compliance against tolerances.
 
-**Stack Backend**: Python 3.10+, Streamlit, FastAPI, trimesh, numpy, scipy, plotly, openpyxl
-**Stack Frontend**: React 19, Vite, CesiumJS, TypeScript
-**Deploy**: Streamlit Community Cloud + FastAPI backend
+**Stack**: Python 3.10+, Streamlit, FastAPI, trimesh, numpy, scipy, plotly, openpyxl
+**Web frontend**: React 19, Vite 6, TypeScript, Tailwind CSS 4, CesiumJS, Chart.js, Zustand, TanStack Query/Table
+**Deploy**: Docker Compose (FastAPI + nginx for React) — `docker-compose.yml`
 
 ---
 
-## Build/Lint/Test Commands
+## Commands
 
 ```bash
-# Instalar dependencias (necesita libspatialindex-dev)
-pip install -r requirements.txt
+# Install Python deps (system lib needed: libspatialindex-dev / brew install spatialindex)
+pip install -r requirements.txt          # Streamlit + all deps
+pip install -r requirements-api.txt      # FastAPI-only subset
+pip install -e .                         # editable install (uses pyproject.toml)
 
-# Test de integración (superficies sintéticas, crea STL en /tmp/)
-python test_pipeline.py
+# Tests
+python -m pytest tests/ -v --tb=short               # unit tests (pytest, pythonpath="." in pyproject.toml)
+python test_pipeline.py                              # integration test with synthetic surfaces
+python -m pytest tests/test_param_extractor.py::TestParamExtractor::test_extract_parameters -v
 
-# Unit tests
-pytest tests/ -v
-
-# Un solo test
-pytest tests/test_param_extractor.py::TestParamExtractor::test_extract_parameters -v
-pytest tests/test_api.py::TestMeshUpload::test_upload_design -v
-
-# Lanzar Streamlit
+# Streamlit UI
 streamlit run app.py
 
-# API dev server
-uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+# FastAPI backend (for web frontend)
+uvicorn api.main:app --reload --port 8000
+
+# Web frontend (from web/)
+cd web && npm ci && npm run dev          # dev server :5173, proxies /api → :8000
+cd web && npm run build                  # tsc + vite build
+cd web && npx tsc --noEmit               # typecheck only
+
+# Start both backend + frontend
+bash dev.sh
 
 # CLI batch
 python cli.py --design diseno.stl --topo topo.stl --auto --start "1000,2000" --end "1500,2000" --n 10 --azimuth 0 --length 200
 python cli.py --design diseno.stl --topo topo.stl --config ejemplo_secciones.json
 ```
 
-**No hay linting configurado** (sin flake8, black, isort, mypy, pre-commit). El código sigue convenciones implícitas.
+No Python linter/formatter configured. Web frontend has ESLint (`npm run lint` in `web/`).
 
 ---
 
-## Code Style Guidelines
+## Architecture
 
-### Idioma
-- **Código**: Inglés (variables, funciones, docstrings en inglés)
-- **Interfaz/Labels**: Español
+Three interfaces share the same `core/` package:
 
-### Convenciones de Nomenclatura
-| Elemento | Convención | Ejemplo |
-|----------|------------|---------|
-| Funciones | snake_case | `load_mesh`, `cut_mesh_with_section` |
-| Clases/Dataclasses | PascalCase | `SectionLine`, `ProfileResult`, `BenchParams` |
-| Constantes | UPPER_SNAKE_CASE | `HEADER_FILL`, `FILL_OK` |
-| Módulos | snake_case | `mesh_handler.py`, `section_cutter.py` |
+- **Streamlit** (`app.py` + `ui/` modules) — monolithic interactive UI, primary interface
+- **React + FastAPI** (`web/` + `api/`) — decoupled frontend; Vite/React/TypeScript app calls FastAPI REST API
+- **CLI** (`cli.py`) — batch automation
 
-### Imports
-```python
-# Siempre desde core, nunca desde submodules
-from core import load_mesh, SectionLine, cut_mesh_with_section, extract_parameters
-
-# Ejemplo completo de orden
-import logging
-import numpy as np
-from dataclasses import dataclass, field
-from typing import List, Optional
-from scipy.interpolate import interp1d
-from core import extract_parameters
-```
-
-### Type Hints
-- Usar en firmas de funciones públicas
-- `np.ndarray` para arrays
-```python
-def azimuth_to_direction(azimuth_deg: float) -> np.ndarray:
-    ...
-```
-
-### Docstrings
-- Google-style
-```python
-def cut_mesh_with_section(mesh, section):
-    """Cut a mesh with a vertical section plane.
-
-    Args:
-        mesh: trimesh mesh object
-        section: SectionLine defining the cut plane
-
-    Returns:
-        ProfileData with distances and elevations
-    """
-```
-
-### Dataclasses
-```python
-from dataclasses import dataclass, field
-
-@dataclass
-class BenchParams:
-    bench_number: int
-    crest_elevation: float
-    toe_elevation: float
-    face_angle: float
-    berm_width: float
-    is_ramp: bool = False
-    ramp_gradient: Optional[float] = None
-
-# Configuración inmutable via frozen
-@dataclass(frozen=True)
-class DefaultTolerances:
-    bench_height: float = 15.0
-    face_angle: float = 5.0
-```
-
-### Logging y Error Handling
-```python
-# Logging por módulo
-logger = logging.getLogger(__name__)
-
-# Retornar None en fallo; except Exception: con comentario cuando es intencional
-try:
-    mesh = _load_dxf(filepath)
-except Exception as e:
-    logger.warning(f"ezdxf fallback: {e}")
-    mesh = trimesh.load(filepath)
-```
-
----
-
-## Project Structure
+### Directories
 
 ```
-├── app.py                    # Entry point Streamlit (wizard de 4 pasos)
-├── cli.py                    # CLI para automatización batch
-├── api/                      # FastAPI backend
-│   ├── main.py               # App factory + CORS + session middleware
-│   ├── database.py           # SQLite session management
-│   ├── schemas.py            # Pydantic models
-│   └── routers/             # /meshes, /sections, /process, /export, /settings, /ai
-├── core/                     # Lógica de negocio (importar desde core, NO de submodules)
-│   ├── mesh_handler.py        # Carga STL/OBJ/PLY/DXF → trimesh
-│   ├── section_cutter.py     # SectionLine dataclass, cut_mesh_with_section
-│   ├── param_extractor.py    # Detección bancos, RDP simplification
-│   ├── config.py             # Frozen dataclasses para defaults
-│   ├── excel_writer.py       # Exportación Excel formateado
-│   ├── report_generator.py   # Word report + ZIP de imágenes
-│   ├── geom_utils.py         # Cálculos de desviación de perfil
-│   ├── ai_reporter.py        # Integración OpenAI/LM Studio
-│   └── ai_service.py
-├── ui/                       # Componentes Streamlit
-│   ├── tabs/                 # Dashboard, profiles, table, export, AI report
-│   └── components/          # Upload, sidebar, processing, results, sections, viz
-├── web/                      # Frontend React (alternative location)
-├── frontend/                 # Frontend alternative
-├── tests/                    # pytest test suite
-│   ├── conftest.py          # Fixtures: pit_mesh_design, pit_mesh_asbuilt, sample_sections
-│   ├── test_section_cutter.py
-│   ├── test_param_extractor.py
-│   ├── test_comparison.py
-│   ├── test_mesh_handler.py
-│   └── test_api.py          # 24 tests de endpoints
-└── test_pipeline.py          # Test de integración con superficies sintéticas
+core/          Business logic — import from core, NEVER from submodules
+api/           FastAPI backend (modular: main.py + routers/)
+  routers/       meshes, sections, process, export, settings, ai
+  database.py    SQLite session management
+  schemas.py     Pydantic models
+app/           Streamlit app (refactored modules)
+ui/            Streamlit UI components (step1_upload, step2_sections, ...)
+web/           React frontend (TypeScript, CesiumJS, Tailwind)
+  src/
+    api/          client.ts, hooks.ts, types.ts
+    components/   mesh/, sections/, analysis/, results/, export/, layout/
+    stores/       session.ts (zustand), theme.ts
+tests/         pytest suite (conftest.py + 5 test modules)
 ```
 
----
+### Pipeline
 
-## Domain Conventions
-
-### Coordenadas
-- **Este (X)**, **Norte (Y)**, **Elevación (Z)** — sistema minero estándar
-
-### Azimut
-- Grados desde Norte, sentido horario
-- N=0°, E=90°, S=180°, W=270°
-
-### Unidades
-- Metros (m), grados (°), porcentaje (%) para gradientes
-
-### Tolerancias de Diseño (referencia)
-| Parámetro | Valor | Tolerancia |
-|-----------|-------|------------|
-| Altura banco | 15 m | -1.0 / +1.5 m |
-| Ángulo cara | 70° | ±5° |
-| Ancho berma | 9 m | -1.0 / +2.0 m |
-| Ángulo inter-rampa | 48° | -3° / +2° |
-| Ángulo global | 42° | ±2° |
-
-### Evaluación tripartita
-- **CUMPLE**: dentro de tolerancia
-- **FUERA DE TOLERANCIA**: hasta 1.5x la tolerancia
-- **NO CUMPLE**: excede 1.5x la tolerancia
-
----
-
-## Patrones Clave
-
-### Imports (REGLA CRÍTICA)
-```python
-# ✅ CORRECTO
-from core import load_mesh, SectionLine, extract_parameters
-
-# ❌ INCORRECTO
-from core.mesh_handler import load_mesh
-```
-
-### Session State (Streamlit)
-```python
-_DEFAULTS = {
-    'mesh_design': None, 'mesh_topo': None,
-    'step': 1, 'sections': [], ...
-}
-for _k, _v in _DEFAULTS.items():
-    if _k not in st.session_state:
-        st.session_state[_k] = _v
-```
-
-### Parallel Processing (ThreadPoolExecutor)
-```python
-# Nunca pasar objetos Streamlit a workers
-def process_section(section, mesh):
-    # trabajo pesado que no toca Streamlit
-    return result
-
-# En app.py:
-with ThreadPoolExecutor(max_workers=4) as executor:
-    futures = [executor.submit(process_section, s, mesh_copy) for s in sections]
-    results = [f.result() for f in futures]
-```
-
-### Definición de Sección
-```python
-@dataclass
-class SectionLine:
-    name: str
-    origin: np.ndarray  # [X, Y]
-    azimuth: float     # degrees from North, clockwise
-    length: float
-    sector: str = ""
-```
-
-### API Session (FastAPI)
-- Header `X-Session-ID` → `request.state.session_id`
-- Middleware asigna session_id en cada request
-
-### Pipeline de Procesamiento
 1. `load_mesh(filepath)` → trimesh mesh
-2. `cut_mesh_with_section(mesh, section)` → ProfileData
-3. `extract_parameters(distances, elevations)` → ExtractionResult
-4. `compare_design_vs_asbuilt(ep_d, ep_t, tolerances)` → ComparisonResult
-5. `export_results(...)` → Excel
+2. `cut_mesh_with_section(mesh, section)` → ProfileResult (distances, elevations)
+3. `extract_parameters(distances, elevations)` → ExtractionResult (benches, angles)
+4. `compare_design_vs_asbuilt(params_d, params_t, tolerances)` → list of comparison dicts
+5. `export_results(...)` → Excel / Word / DXF
+
+### API routes
+
+All mounted under `/api/v1/*`. Session via `X-Session-ID` header (middleware auto-assigns UUID). Key endpoints: `/meshes/upload`, `/sections/*`, `/process`, `/results`, `/export/excel`, `/export/dxf`.
+
+### Web frontend
+
+- Vite dev server proxies `/api` → `localhost:8000`
+- CesiumJS assets copied from `node_modules/cesium` to `public/Cesium` via custom Vite plugin
+- Path alias: `@` → `src/`
+- E2E tests: Playwright (`web/e2e/`)
 
 ---
 
-## Test Fixtures (tests/conftest.py)
+## CI
+
+`.github/workflows/ci.yml` runs on push to main/develop and PRs to main:
+1. **Backend tests**: Python 3.12, `pip install -r requirements-api.txt && pip install -e .`, then `pytest` + `test_pipeline.py`
+2. **Frontend build**: Node 20, `npm ci` in `web/`, `tsc --noEmit`, `npm run build`
+3. **Docker build**: builds `Dockerfile-api` and `Dockerfile-web` (only on push to main)
+
+---
+
+## Key Conventions
+
+- **Code language**: English (variables, functions, docstrings)
+- **UI language**: Spanish (labels, titles, user-facing strings)
+- **Units**: meters, degrees, percentage (gradients)
+- **Coordinates**: X=East, Y=North, Z=Elevation (mining standard)
+- **Azimuth**: degrees from North, clockwise (N=0, E=90, S=180, W=270)
+- **No comments in code** unless explicitly requested
+- **Git commits**: conventional `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
+- No "Co-Authored-By" or AI attribution in commits
+
+### Imports (critical rule)
 
 ```python
-@pytest.fixture()
-def pit_mesh_design():  # Synthetic pit, no noise
-
-@pytest.fixture()
-def pit_mesh_asbuilt():  # Synthetic pit, noise_std=0.3m
-
-@pytest.fixture()
-def sample_sections(pit_mesh_design):  # 5 auto-generated sections
-
-@pytest.fixture()
-def sample_tolerances():  # Standard tolerance dict
-
-@pytest.fixture()
-def mesh_stl_temp(pit_mesh_design):  # Temp file, auto-cleanup
+from core import load_mesh, SectionLine, extract_parameters   # correct
+from core.mesh_handler import load_mesh                        # wrong
 ```
 
----
+### Bench evaluation
 
-## Problemas Conocidos
-
-No modificar sin instrucción explícita:
-
-- ⚠️ Detección de bermas con anchos irrealistas (>50m) en superficies sintéticas
-- ⚠️ Rampas no detectadas automáticamente en el extractor
-- ⚠️ Secciones cerca del borde de malla pueden producir perfiles incompletos
+Three-tier: CUMPLE (within tolerance) → FUERA DE TOLERANCIA (up to 1.5x) → NO CUMPLE (exceeds 1.5x).
+Bench matching uses Hungarian algorithm on elevation (`scipy.optimize.linear_sum_assignment`).
 
 ---
 
-## Convenciones Git
+## Configuration
 
-- Commits convencionales: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`
-- No usar "Co-Authored-By" ni atribuciones AI
-- No hacer build después de cambios
+`core/config.py` has frozen dataclasses with all defaults: `Tolerances`, `DetectionDefaults`, `PipelineDefaults`, `VisualizationDefaults`, `RampDetection`.
+
+`packages.txt` lists `libspatialindex-dev` (system dep for rtree, needed for AABB spatial filtering on large meshes).
+
+`.streamlit/config.toml` sets `maxUploadSize = 500` MB.
+
+---
+
+## Known Pitfalls
+
+- `rtree` requires `libspatialindex` system library. Without it, large mesh operations fail. On macOS: `brew install spatialindex`.
+- `.gitignore` excludes `.stl` and `.xlsx` — test meshes and outputs won't be committed.
+- API session store uses SQLite (`api/database.py`) — improved from in-memory but still single-machine.
+- Berm detection can produce unrealistic widths (>50m) on flat areas. Partially filtered by `max_berm_width=50`.
+- Ramp detection is partial (width range 15-42m). The "Rampas" Excel sheet may need manual input.
+- Sections near mesh edges can produce incomplete profiles with no user warning.
+- `frontend/` directory exists alongside `web/` — `web/` is the active React frontend. `frontend/` is an older/alternative version.
+- `app.py` (root) still exists but the Streamlit app is also split into `app/` package with `app/app.py`.
+- `api/main_legacy.py` is the old monolithic API — the active one is `api/main.py` with routers.

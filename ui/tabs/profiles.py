@@ -1,11 +1,14 @@
 """
-Results tab: cross-section profiles with semaphore, area fill, and bench annotations.
+Results tab: cross-section profiles with semaphore, area fill, bench annotations,
+and blast-hole overlay.
 """
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from core import build_reconciled_profile
+from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles
 
 
@@ -19,6 +22,18 @@ def render_tab_profiles(config: dict) -> None:
     show_semaphore = st.checkbox(
         "Visualización Semáforo (Verde=Cumple, Amarillo=Alerta, Rojo=No Cumple)",
         value=False, key="show_semaphore")
+
+    show_pozos = st.checkbox(
+        "Mostrar Pozos de Tronadura",
+        value=True, key="show_pozos_profile")
+
+    blast_tolerance = None
+    if show_pozos and st.session_state.get('blast_df_clean') is not None:
+        blast_tolerance = st.number_input(
+            "Tolerancia perpendicular pozos (m)",
+            value=10.0, min_value=1.0, max_value=50.0, step=1.0,
+            key="blast_tol_profile",
+            help="Distancia máxima del pozo a la línea de sección para incluirlo en el perfil")
 
     display_sections = st.session_state.get('processed_sections', st.session_state.sections)
 
@@ -35,6 +50,8 @@ def render_tab_profiles(config: dict) -> None:
             show_areas=show_areas,
             show_semaphore=show_semaphore,
             show_reconciled=show_reconciled,
+            show_pozos=show_pozos,
+            blast_tolerance=blast_tolerance,
             config=config)
 
         st.plotly_chart(fig, use_container_width=True)
@@ -45,28 +62,25 @@ def render_tab_profiles(config: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _build_profile_figure(i, section, pd_prof, pt_prof,
-                           show_areas, show_semaphore, show_reconciled, config):
+                           show_areas, show_semaphore, show_reconciled,
+                           show_pozos, blast_tolerance, config):
     fig = go.Figure()
 
-    # Design profile
     fig.add_trace(go.Scatter(
         x=pd_prof.distances, y=pd_prof.elevations,
         mode='lines', name='Diseño',
         line=dict(color='royalblue', width=2)))
 
-    # Compute interpolated arrays (needed for areas and bench annotations)
     a_over, a_under, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(pd_prof, pt_prof)
 
     if show_areas:
         _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under)
 
-    # Bench annotations
     sec_name = section.name
     sec_comps = [c for c in st.session_state.comparison_results if c['section'] == sec_name]
     if sec_comps:
         _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i)
 
-    # Topo / semaphore
     if show_semaphore:
         _add_semaphore_traces(fig, pd_prof, pt_prof, config)
     else:
@@ -75,7 +89,6 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
             mode='lines', name='Topografía Real',
             line=dict(color='forestgreen', width=2)))
 
-    # Reconciled profiles
     if show_reconciled and i < len(st.session_state.params_design):
         _add_reconciled_trace(fig, st.session_state.params_design[i].benches,
                               color='royalblue', label='Conciliado Diseño', dash='dash')
@@ -84,7 +97,6 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
         _add_reconciled_trace(fig, st.session_state.params_topo[i].benches,
                               color='#FF7F0E', label='Conciliado As-Built', dash='solid', width=2.5)
 
-    # Bench labels on topo
     if i < len(st.session_state.params_topo):
         for bench in st.session_state.params_topo[i].benches:
             fig.add_annotation(
@@ -92,6 +104,9 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
                 text=f"B{bench.bench_number}",
                 showarrow=True, arrowhead=2,
                 font=dict(size=10, color="red"))
+
+    if show_pozos and blast_tolerance is not None:
+        _add_blast_holes(fig, section, blast_tolerance)
 
     grid_height = config['grid_height']
     grid_ref = config['grid_ref']
@@ -237,3 +252,94 @@ def _add_reconciled_trace(fig, benches, color, label, dash, width=1.5):
             x=rd, y=re, mode='lines+markers', name=label,
             line=dict(color=color, width=width, dash=dash),
             marker=dict(size=5 if width == 1.5 else 6, symbol='diamond', color=color)))
+
+
+def _add_blast_holes(fig, section, tolerance: float) -> None:
+    df_blast = st.session_state.get('blast_df_clean')
+    if df_blast is None or df_blast.empty:
+        return
+
+    projected = proyectar_pozos_en_seccion(
+        df_blast,
+        origin=section.origin,
+        azimuth=section.azimuth,
+        length=section.length,
+        tolerance=tolerance,
+    )
+
+    if projected.empty:
+        return
+
+    kg_col = _find_blast_col(projected, ['Kilos_Cargados_real', 'Kilos_Cargados'])
+    malla_col = _find_blast_col(projected, ['holes_polygon', 'Nombre_Malla_Original'])
+    label_col = _find_blast_col(projected, ['label_pozo'])
+
+    x_holes, y_holes = [], []
+    texts, colors = [], []
+
+    for _, row in projected.iterrows():
+        d = row['dist_along']
+        z_c = row['Z_collar']
+        z_t = row['Z_toe']
+
+        x_holes.extend([d, d, None])
+        y_holes.extend([z_c, z_t, None])
+
+        label = str(row[label_col]) if label_col else ''
+        malla = str(row[malla_col]) if malla_col else ''
+        kg = f"{row[kg_col]:.0f} kg" if kg_col and pd.notna(row[kg_col]) else ''
+        texts.append(f"{label}<br>{malla}<br>{kg}")
+
+        if kg_col and pd.notna(row[kg_col]):
+            colors.append(row[kg_col])
+        else:
+            colors.append(0)
+
+    fig.add_trace(go.Scatter(
+        x=x_holes, y=y_holes,
+        mode='lines',
+        line=dict(color='rgba(255,100,0,0.5)', width=1.5),
+        name=f'Pozos ({len(projected)})',
+        hoverinfo='skip',
+        showlegend=True,
+    ))
+
+    collar_x = projected['dist_along'].values
+    collar_z = projected['Z_collar'].values
+
+    if kg_col and len(set(colors)) > 1:
+        marker = dict(
+            size=5,
+            color=colors,
+            colorscale='Hot',
+            showscale=True,
+            colorbar=dict(title="kg", x=1.0, len=0.4),
+        )
+    else:
+        marker = dict(size=5, color='darkorange')
+
+    hover_labels = projected.apply(
+        lambda r: (
+            f"{r[label_col] if label_col else ''}<br>"
+            f"{r[malla_col] if malla_col else ''}<br>"
+            f"Collar: {r['Z_collar']:.0f}m | Toe: {r['Z_toe']:.0f}m<br>"
+            f"Largo: {r['Len']:.1f}m"
+            + (f" | {r[kg_col]:.0f}kg" if kg_col and pd.notna(r[kg_col]) else '')
+        ), axis=1)
+
+    fig.add_trace(go.Scatter(
+        x=collar_x, y=collar_z,
+        mode='markers',
+        marker=marker,
+        name='Collars',
+        text=hover_labels,
+        hoverinfo='text',
+        showlegend=False,
+    ))
+
+
+def _find_blast_col(df, candidates: list[str]):
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None

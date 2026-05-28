@@ -1,6 +1,9 @@
 """
-Aplicación Streamlit para Conciliación Geotécnica: Diseño vs As-Built
-Carga superficies STL, genera secciones, extrae parámetros y exporta a Excel.
+Conciliación Geotécnica v02 — Main router.
+
+Provides sidebar navigation between application modules:
+  - Conciliación Geotécnica (existing 4-step workflow + multi-file lines)
+  - Análisis de Tronadura (Drill & Blast 3D visualization)
 """
 import sys
 from pathlib import Path
@@ -9,11 +12,9 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from ui.sidebar import render_sidebar
-from ui.step1_upload import render_step1
-from ui.step2_sections import render_step2
-from ui.step3_analysis import render_step3
-from ui.step4_results import render_step4
+from ui.modulo_conciliacion import render_modulo_conciliacion
+from ui.modulo_tronadura import render_modulo_tronadura
+from ui.ref_lines import render_ref_lines_uploader
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -35,13 +36,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown(
-    '<div class="main-title">⛏️ Conciliación Geotécnica: Diseño vs As-Built</div>',
-    unsafe_allow_html=True)
-st.markdown(
-    '<div class="subtitle">Extracción automática de parámetros desde superficies 3D (STL)</div>',
-    unsafe_allow_html=True)
-
 # ---------------------------------------------------------------------------
 # Session state defaults
 # ---------------------------------------------------------------------------
@@ -52,37 +46,41 @@ _DEFAULTS = {
     'params_design': [], 'params_topo': [],
     'comparison_results': [], 'step': 1,
     'clicked_sections': [],
+    'ref_line_traces': {},
+    'blast_df_clean': None,
 }
 for _k, _v in _DEFAULTS.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
 
 # ---------------------------------------------------------------------------
-# Render
+# Navigation
 # ---------------------------------------------------------------------------
-config = render_sidebar()
+modulo = st.sidebar.radio(
+    "Módulo",
+    ["⛏️ Conciliación Geotécnica", "💥 Análisis de Tronadura"],
+    label_visibility="collapsed",
+)
 
-# Pass grid_ref into session state so step1 contour view can read it
-st.session_state['_grid_ref'] = config['grid_ref']
+st.sidebar.divider()
+with st.sidebar:
+    render_ref_lines_uploader()
 
-render_step1()
+st.markdown(
+    f'<div class="main-title">{modulo}</div>',
+    unsafe_allow_html=True,
+)
 
-if st.session_state.step >= 2:
-    render_step2()
+if modulo == "⛏️ Conciliación Geotécnica":
+    st.markdown(
+        '<div class="subtitle">Extracción automática de parámetros desde superficies 3D (STL)</div>',
+        unsafe_allow_html=True,
+    )
+    render_modulo_conciliacion()
 
-if st.session_state.step >= 3 and st.session_state.sections:
-    render_step3(config)
-
-if st.session_state.step >= 4 and st.session_state.comparison_results:
-    render_step4(config)
-
-# ---------------------------------------------------------------------------
-# Footer
-# ---------------------------------------------------------------------------
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666; font-size: 0.8rem;">
-    Conciliación Geotécnica v1.1 | Herramienta de análisis Diseño vs As-Built<br>
-    Parámetros: Banco 15m | Cara 65°-75° | Berma 8-10m
-</div>
-""", unsafe_allow_html=True)
+elif modulo == "💥 Análisis de Tronadura":
+    st.markdown(
+        '<div class="subtitle">Visualización 3D de pozos de voladura (Drill & Blast)</div>',
+        unsafe_allow_html=True,
+    )
+    render_modulo_tronadura()

@@ -1,0 +1,30 @@
+﻿uniqid,no usar
+id_rajo,no usar
+id_malla_opit,no usar
+Nombre_Malla_Original,informacion de la tronadura estructurada de la siguiente forma fase_banco_mallas tronadas separadaras por un guion (ej. 04-05-06)_fecha entre parentesis
+Nombre_Rajo,nombre del rajo
+Blast,conjunto de mallas tronadas en la misma fecha
+Nombre_Banco,cota del banco
+Nombre_Fase,nombre de la fase
+id_pozo,no usar
+numero,no usar
+label_pozo,conjunto de identificador del pozo-numero de malla
+label2_pozo,
+Latitud_Geo,coordenada X
+Longitud_Geo,coordenada Y
+Kilos_Cargados_real,Kilos_Cargados_real
+Nombre,nombre del explosivo cargado
+fecha_tronadura,"fecha de tronadura, el horario que aparece no corresponde con la realidad por lo que solo se debe considerar el dia"
+Inclinacion_real,Inclinacion_real
+Azimuth_real,Azimuth_real
+diametro,diametro en milimetros
+diametro_pulgada,diametro en pulgadas
+longitud_real,longitud real perforada reportada en sistema
+stemming_real,taco utilizado en el pozo de tronadura
+Longitud_teo,longitud del pozo planificada
+water_level,nivel de agua detectado dentro del pozo de tronadura al momento de cargar el explosivo
+number_primes,numero de primas utilizadas en el pozo de tronadura
+camion,no utilizar
+holes_dateUpdated,no utilizar
+holes_polygon,nombre de la malla de tronadura
+mes_tronadura,no utiulizar
