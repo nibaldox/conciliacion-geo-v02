@@ -29,6 +29,7 @@ def render_tab_table() -> None:
         'delta_crest': 'Δ Cresta', 'delta_toe': 'Δ Pata',
     }
     df_display = df.rename(columns=display_cols)
+    df_display = _format_numeric(df_display)
     styled = df_display.style.map(
         _highlight_status, subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
     st.dataframe(styled, use_container_width=True, height=400)
@@ -79,6 +80,20 @@ def _apply_sorting(df: pd.DataFrame, sort_option: str) -> pd.DataFrame:
 
     rest = [c for c in df.columns if c not in ordered + ['sort_level', 'sort_bench']]
     return df[ordered + rest]
+
+
+def _format_numeric(df: pd.DataFrame) -> pd.DataFrame:
+    numeric_cols = [
+        'H. Diseño', 'H. Real', 'Desv. H',
+        'Á. Diseño', 'Á. Real', 'Desv. Á',
+        'B. Diseño', 'B. Real', 'B. Mínima',
+        'Δ Cresta', 'Δ Pata',
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda x: f"{x:.2f}" if isinstance(x, (int, float)) and x is not None else x)
+    return df
 
 
 def _highlight_status(val: str) -> str:

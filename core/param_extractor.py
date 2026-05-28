@@ -220,47 +220,11 @@ def extract_parameters(distances, elevations, section_name, sector,
                 berm_width=0.0
             ))
 
-    # Calculate Berm Widths
-    # Berm is horizontal distance between Toe of Bench N and Crest of Bench N+1 (if N+1 is below N)
-    # Since we sorted by elevation descending:
-    # Bench i is above Bench i+1
-    for i in range(len(benches) - 1):
-        # Distance from toe of upper bench to crest of lower bench
-        # We use 3D distance or horizontal? Usually "Berm Width" is horizontal distance.
-        b_upper = benches[i]
-        b_lower = benches[i+1]
-        
-        # Horizontal dist
-        h_dist = abs(b_upper.toe_distance - b_lower.crest_distance)
-        b_upper.berm_width = float(h_dist)
-        
-        # Ramp Detection: Width 15m - 40m
-        if 15.0 <= b_upper.berm_width <= 42.0:
-            b_upper.is_ramp = True
-
-    # Filter unrealistically large berms (ramps/pit floor)
-    # Similar logic to before but simplified
-    if max_berm_width and max_berm_width > 0 and len(benches) > 1:
-        valid_benches = []
-        # We reconstruct groups based on connectivity
-        current_group = [benches[0]]
-        for i in range(len(benches) - 1):
-            if benches[i].berm_width > max_berm_width:
-                # Break in group — mark last bench as group end, keep its berm_width intact
-                benches[i].group_break = True
-                valid_benches.append(current_group)
-                current_group = [benches[i+1]]
-            else:
-                current_group.append(benches[i+1])
-        valid_benches.append(current_group)
-
-        # Consolidate all groups instead of picking only the largest
-        benches = []
-        for group in valid_benches:
-            benches.extend(group)
-        # Renumber
-        for idx, b in enumerate(benches):
-            b.bench_number = idx + 1
+    _compute_berm_widths_from_profile(
+        benches, simplified, d_simp, e_simp,
+        berm_threshold=berm_threshold,
+        max_berm_width=max_berm_width,
+    )
 
     # check for trailing berm (flat area after last bench)
     if len(benches) > 0:
@@ -324,6 +288,65 @@ def extract_parameters(distances, elevations, section_name, sector,
         result.inter_ramp_angle = benches[0].face_angle
 
     return result
+
+
+def _compute_berm_widths_from_profile(
+    benches, simplified, d_simp, e_simp,
+    berm_threshold=20.0, max_berm_width=50.0
+):
+    """Compute berm widths directly from the simplified profile.
+
+    For each pair of consecutive benches, searches the simplified profile
+    between toe_distance[i] and crest_distance[i+1] for the flat (berm)
+    segment and returns its horizontal span. Falls back to the simple
+    |toe - crest| only when the profile-based search fails.
+    """
+    if len(benches) < 2:
+        return
+
+    for i in range(len(benches) - 1):
+        b_upper = benches[i]
+        b_lower = benches[i + 1]
+
+        d_toe = b_upper.toe_distance
+        d_crest = b_lower.crest_distance
+
+        d_min = min(d_toe, d_crest)
+        d_max = max(d_toe, d_crest)
+
+        mask = (d_simp >= d_min) & (d_simp <= d_max)
+        seg_d = d_simp[mask]
+        seg_e = e_simp[mask]
+
+        berm_width = None
+
+        if len(seg_d) >= 2:
+            dx_seg = np.diff(seg_d)
+            dy_seg = np.diff(seg_e)
+            seg_lens = np.sqrt(dx_seg**2 + dy_seg**2)
+            valid = seg_lens > 1e-4
+            if np.any(valid):
+                seg_angles = np.abs(np.degrees(np.arctan2(
+                    dy_seg[valid], dx_seg[valid])))
+                flat_mask = seg_angles <= berm_threshold
+                if np.any(flat_mask):
+                    flat_indices = np.where(valid)[0][flat_mask]
+                    flat_start_d = seg_d[flat_indices[0]]
+                    flat_end_d = seg_d[flat_indices[-1] + 1]
+                    raw_width = abs(flat_end_d - flat_start_d)
+                    if raw_width <= 20.0:
+                        berm_width = raw_width
+
+        if berm_width is None:
+            berm_width = abs(d_toe - d_crest)
+
+        b_upper.berm_width = float(berm_width)
+
+        if 15.0 <= b_upper.berm_width <= 42.0:
+            b_upper.is_ramp = True
+
+        if max_berm_width and b_upper.berm_width > max_berm_width:
+            b_upper.group_break = True
 
 
 def _evaluate_status(deviation, tol_neg, tol_pos):
