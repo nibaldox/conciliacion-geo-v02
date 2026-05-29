@@ -41,7 +41,7 @@ def render_tab_table() -> None:
 
 def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
     with st.expander("🔎 Filtros (Excel-style)", expanded=False):
-        cols_filter = st.columns(3)
+        cols_filter = st.columns(4)
 
         all_sectors = sorted(df['sector'].unique().tolist())
         sel_sectors = cols_filter[0].multiselect(
@@ -59,12 +59,18 @@ def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
         sel_sections = cols_filter[2].multiselect(
             "Filtrar por Sección:", all_sections, default=[], key="filter_section")
 
+        all_benches = sorted(df['bench_num'].unique().tolist())
+        sel_benches = cols_filter[3].multiselect(
+            "Filtrar por Banco:", all_benches, default=[], key="filter_bench")
+
     if sel_sectors:
         df = df[df['sector'].isin(sel_sectors)]
     if sel_levels:
         df = df[df['level'].isin(sel_levels)]
     if sel_sections:
         df = df[df['section'].isin(sel_sections)]
+    if sel_benches:
+        df = df[df['bench_num'].isin(sel_benches)]
     return df
 
 
