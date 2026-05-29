@@ -96,9 +96,16 @@ def _render_tab_file() -> None:
     st.caption(f"Se generarán **{len(preview_sections)} secciones** cada {spacing_file:.0f}m")
 
     if st.button("✅ Aplicar Secciones desde Archivo", type="primary", key="apply_file"):
-        st.session_state.sections = preview_sections
+        if not st.session_state.get('sections'):
+            st.session_state.sections = []
+        added_count = 0
+        for sec in preview_sections:
+            new_num = len(st.session_state.sections) + 1
+            sec.name = f"S-{new_num:02d}"
+            st.session_state.sections.append(sec)
+            added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
-        st.success(f"✅ {len(preview_sections)} secciones aplicadas")
+        st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
 def _parse_coord_file(coord_file):
@@ -357,4 +364,11 @@ def _sections_to_rows(sections) -> list:
 def _render_sections_table() -> None:
     if st.session_state.sections:
         st.subheader("📋 Secciones Definidas")
-        st.dataframe(_sections_to_rows(st.session_state.sections), use_container_width=True)
+        cols_tbl = st.columns([5, 1])
+        with cols_tbl[0]:
+            st.dataframe(_sections_to_rows(st.session_state.sections), use_container_width=True)
+        with cols_tbl[1]:
+            if st.button("🗑️ Limpiar Secciones", key="clear_all_sections_btn", type="secondary"):
+                st.session_state.sections = []
+                st.session_state.clicked_sections = []
+                st.rerun()
