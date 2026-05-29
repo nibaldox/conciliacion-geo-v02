@@ -29,27 +29,32 @@ def render_step1() -> None:
             "Cargar Topografía (STL, OBJ, PLY, DXF)",
             type=["stl", "obj", "ply", "dxf"], key="topo_file")
 
-    # Clear meshes if files are removed
-    if not file_design or not file_topo:
-        st.session_state.mesh_design = None
-        st.session_state.mesh_topo = None
-        st.session_state.bounds_design = None
-        st.session_state.bounds_topo = None
-        st.session_state.decimated_mesh_design = None
-        st.session_state.decimated_mesh_topo = None
-        st.session_state.mesh_design_file_name = None
-        st.session_state.mesh_design_file_size = None
-        st.session_state.mesh_topo_file_name = None
-        st.session_state.mesh_topo_file_size = None
-        st.session_state.step = 1
-    else:
-        # Check if files changed
+    has_meshes = st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None
+
+    if has_meshes:
+        st.info("📦 Las superficies ya están cargadas en memoria. Puedes continuar al Paso 2 o subir nuevos archivos para reemplazarlas.")
+        if st.button("🧹 Limpiar superficies cargadas", type="secondary"):
+            st.session_state.mesh_design = None
+            st.session_state.mesh_topo = None
+            st.session_state.bounds_design = None
+            st.session_state.bounds_topo = None
+            st.session_state.decimated_mesh_design = None
+            st.session_state.decimated_mesh_topo = None
+            st.session_state.mesh_design_file_name = None
+            st.session_state.mesh_design_file_size = None
+            st.session_state.mesh_topo_file_name = None
+            st.session_state.mesh_topo_file_size = None
+            st.session_state.step = 1
+            st.rerun()
+
+    # Load meshes if new files are uploaded
+    if file_design and file_topo:
         d_changed = (st.session_state.get('mesh_design_file_name') != file_design.name or
                      st.session_state.get('mesh_design_file_size') != file_design.size)
         t_changed = (st.session_state.get('mesh_topo_file_name') != file_topo.name or
                      st.session_state.get('mesh_topo_file_size') != file_topo.size)
 
-        if d_changed or t_changed or st.session_state.mesh_design is None or st.session_state.mesh_topo is None:
+        if d_changed or t_changed or not has_meshes:
             _load_meshes(file_design, file_topo)
 
     if st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None:
