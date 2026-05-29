@@ -79,46 +79,69 @@ def render_modulo_tronadura() -> None:
         with tab_3d:
             # --- Filtering Panel ---
             with st.expander("🔎 Filtros de Tronadura", expanded=False):
-                f_cols = st.columns(4)
-
-                malla_col = find_df_column(df_clean, ['holes_polygon', 'Nombre_Malla_Original'], raise_error=False)
-                if malla_col:
-                    all_mallas = sorted(df_clean[malla_col].dropna().unique().tolist())
-                    sel_mallas = f_cols[0].multiselect("Filtrar por Malla:", all_mallas, default=[])
-                else:
-                    sel_mallas = []
-
+                malla_col = find_df_column(df_clean, ['Nombre_Malla_Original'], raise_error=False)
+                poligono_col = find_df_column(df_clean, ['holes_polygon'], raise_error=False)
                 banco_col = find_df_column(df_clean, ['Nombre_Banco', 'Banco'], raise_error=False)
+                kg_col = find_df_column(df_clean, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+
+                # Determine dynamic column allocation for filters
+                filter_cols = []
+                if malla_col:
+                    filter_cols.append("malla")
+                if poligono_col:
+                    filter_cols.append("poligono")
                 if banco_col:
-                    all_bancos = sorted(df_clean[banco_col].dropna().unique().tolist())
-                    sel_bancos = f_cols[1].multiselect("Filtrar por Banco:", all_bancos, default=[])
-                else:
-                    sel_bancos = []
+                    filter_cols.append("banco")
+                filter_cols.append("len")
+                if kg_col:
+                    filter_cols.append("kg")
+
+                f_cols = st.columns(len(filter_cols))
+                col_idx = 0
+
+                sel_mallas = []
+                if malla_col:
+                    all_mallas = sorted(df_clean[malla_col].dropna().astype(str).unique().tolist())
+                    sel_mallas = f_cols[col_idx].multiselect("Filtrar por Malla (Grid):", all_mallas, default=[])
+                    col_idx += 1
+
+                sel_poligonos = []
+                if poligono_col:
+                    all_poligonos = sorted(df_clean[poligono_col].dropna().astype(str).unique().tolist())
+                    sel_poligonos = f_cols[col_idx].multiselect("Filtrar por Polígono:", all_poligonos, default=[])
+                    col_idx += 1
+
+                sel_bancos = []
+                if banco_col:
+                    all_bancos = sorted(df_clean[banco_col].dropna().astype(str).unique().tolist())
+                    sel_bancos = f_cols[col_idx].multiselect("Filtrar por Banco:", all_bancos, default=[])
+                    col_idx += 1
 
                 min_len = float(df_clean['Len'].min())
                 max_len = float(df_clean['Len'].max())
                 if min_len < max_len:
-                    sel_len = f_cols[2].slider("Profundidad (m):", min_len, max_len, (min_len, max_len))
+                    sel_len = f_cols[col_idx].slider("Profundidad (m):", min_len, max_len, (min_len, max_len))
                 else:
                     sel_len = (min_len, max_len)
+                col_idx += 1
 
-                kg_col = find_df_column(df_clean, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+                sel_kg = None
                 if kg_col:
                     min_kg = float(df_clean[kg_col].fillna(0).min())
                     max_kg = float(df_clean[kg_col].fillna(0).max())
                     if min_kg < max_kg:
-                        sel_kg = f_cols[3].slider("Explosivo (Kg):", min_kg, max_kg, (min_kg, max_kg))
+                        sel_kg = f_cols[col_idx].slider("Explosivo (Kg):", min_kg, max_kg, (min_kg, max_kg))
                     else:
                         sel_kg = (min_kg, max_kg)
-                else:
-                    sel_kg = None
 
             # Apply filters
             df_filtered = df_clean.copy()
             if sel_mallas and malla_col:
-                df_filtered = df_filtered[df_filtered[malla_col].isin(sel_mallas)]
+                df_filtered = df_filtered[df_filtered[malla_col].astype(str).isin(sel_mallas)]
+            if sel_poligonos and poligono_col:
+                df_filtered = df_filtered[df_filtered[poligono_col].astype(str).isin(sel_poligonos)]
             if sel_bancos and banco_col:
-                df_filtered = df_filtered[df_filtered[banco_col].isin(sel_bancos)]
+                df_filtered = df_filtered[df_filtered[banco_col].astype(str).isin(sel_bancos)]
             if sel_len:
                 df_filtered = df_filtered[(df_filtered['Len'] >= sel_len[0]) & (df_filtered['Len'] <= sel_len[1])]
             if sel_kg and kg_col:
@@ -139,14 +162,53 @@ def render_modulo_tronadura() -> None:
                     f"{df_filtered['Len'].mean():.1f} m",
                 )
 
-                # Custom 3D coloring option
-                col_c1, col_c2 = st.columns(2)
-                color_by = col_c1.selectbox(
-                    "Colorear pozos en 3D por:",
-                    ["Carga Explosiva (Kg)"] if kg_col else [] + ["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"],
-                    index=0
-                )
-                show_energy_grid = col_c2.checkbox("Mostrar Densidad de Energía 3D (Modelo de Daño)", value=False)
+                # Custom 3D coloring and options expander
+                with st.expander("🎨 Opciones de Visualización 3D", expanded=True):
+                    col_v1, col_v2, col_v3 = st.columns(3)
+
+                    color_options = []
+                    if kg_col:
+                        color_options.append("Carga Explosiva (Kg)")
+                    if malla_col:
+                        color_options.append("Mallas de Tronadura (Grid)")
+                    if poligono_col:
+                        color_options.append("Polígonos Tronados")
+                    color_options.extend(["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"])
+
+                    color_by = col_v1.selectbox(
+                        "Colorear pozos en 3D por:",
+                        color_options,
+                        index=0
+                    )
+
+                    # Expanded continuous colorscale selector
+                    all_colorscales = [
+                        "Inferno", "Hot", "Viridis", "Plasma", "Magma", "Cividis",
+                        "Rainbow", "Jet", "Earth", "YlOrRd", "RdBu", "Spectral",
+                        "Coolwarm", "Electric", "Bluered", "Greens", "Reds", "Blues"
+                    ]
+                    colorscale_disabled = (color_by in ["Mallas de Tronadura (Grid)", "Polígonos Tronados"])
+                    sel_colorscale = col_v2.selectbox(
+                        "Paleta de Colores (Continuos):",
+                        all_colorscales,
+                        index=0,
+                        disabled=colorscale_disabled
+                    )
+
+                    show_energy_grid = col_v3.checkbox("⚡ Mostrar Densidad de Energía 3D (IDW)", value=False)
+
+                    show_design_mesh = False
+                    show_topo_mesh = False
+                    has_d_mesh = st.session_state.get('mesh_design') is not None
+                    has_t_mesh = st.session_state.get('mesh_topo') is not None
+
+                    if has_d_mesh or has_t_mesh:
+                        st.markdown("**Superficies 3D de Referencia:**")
+                        col_m1, col_m2 = st.columns(2)
+                        if has_d_mesh:
+                            show_design_mesh = col_m1.checkbox("🔵 Mostrar Superficie de Diseño (Transparente)", value=False)
+                        if has_t_mesh:
+                            show_topo_mesh = col_m2.checkbox("🟢 Mostrar Topografía Real (As-Built Transparente)", value=False)
 
                 # Reconstruct x_lines, y_lines, z_lines dynamically for filtered set
                 import numpy as np
@@ -174,7 +236,11 @@ def render_modulo_tronadura() -> None:
                     filt_z[j + 1] = zt[i]
                     filt_z[j + 2] = None
 
-                _render_3d(df_filtered, filt_x, filt_y, filt_z, color_by, show_energy_grid)
+                _render_3d(
+                    df_filtered, filt_x, filt_y, filt_z, color_by,
+                    show_energy_grid, sel_colorscale,
+                    show_design_mesh, show_topo_mesh
+                )
 
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
                     st.dataframe(df_filtered, use_container_width=True)
@@ -343,60 +409,92 @@ def _read_uploaded(uploaded) -> "pd.DataFrame":
     return pd.read_csv(io.StringIO(content))
 
 
-def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False) -> None:
+def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
     fig = go.Figure()
 
     add_ref_lines_3d(fig, z_value=float(df['Z_collar'].max()) + 5)
 
-    fig.add_trace(go.Scatter3d(
-        x=x_lines, y=y_lines, z=z_lines,
-        mode='lines',
-        line=dict(color='rgba(150,150,150,0.5)', width=2),
-        name='Trayectorias',
-        hoverinfo='skip',
-    ))
+    malla_col = find_df_column(df, ['Nombre_Malla_Original'], raise_error=False)
+    poligono_col = find_df_column(df, ['holes_polygon'], raise_error=False)
 
-    # Determine colors and scales based on choice
-    kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+    # 1. Overlay 3D Meshes transparently if requested
+    if show_design_mesh:
+        md = st.session_state.get('decimated_mesh_design')
+        if md is None and st.session_state.get('mesh_design') is not None:
+            from core import decimate_mesh
+            md = decimate_mesh(st.session_state.mesh_design, 30000)
+            st.session_state.decimated_mesh_design = md
+        if md is not None:
+            from core import mesh_to_plotly
+            fig.add_trace(mesh_to_plotly(md, "Superficie Diseño", "royalblue", 0.35))
 
-    if color_by == "Carga Explosiva (Kg)" and kg_col:
-        colors = df[kg_col].values.astype(float)
-        colorscale = 'Hot'
-        title = "kg"
-    elif color_by == "Profundidad (m)":
-        colors = df['Len'].values
-        colorscale = 'Viridis'
-        title = "m (Largo)"
-    elif color_by == "Inclinación (°)":
-        colors = df['Incl'].values
-        colorscale = 'Portland'
-        title = "Grados (°)"
-    else:  # Elevación Collar
-        colors = df['Z_collar'].values
-        colorscale = 'Plasma'
-        title = "Collar Z"
+    if show_topo_mesh:
+        mt = st.session_state.get('decimated_mesh_topo')
+        if mt is None and st.session_state.get('mesh_topo') is not None:
+            from core import decimate_mesh
+            mt = decimate_mesh(st.session_state.mesh_topo, 30000)
+            st.session_state.decimated_mesh_topo = mt
+        if mt is not None:
+            from core import mesh_to_plotly
+            fig.add_trace(mesh_to_plotly(mt, "Topografía Real", "forestgreen", 0.35))
 
-    marker = dict(
-        size=4,
-        color=colors,
-        colorscale=colorscale,
-        showscale=True,
-        colorbar=dict(title=title, x=1.0, len=0.6),
-    )
+    # 2. Render blast holes
+    if color_by == "Mallas de Tronadura (Grid)" and malla_col:
+        # --- Discrete Categorical Coloring by Malla (Grid) ---
+        unique_vals = sorted(df[malla_col].dropna().astype(str).unique().tolist())
+        _plot_discrete_traces(fig, df, malla_col, unique_vals, "Malla")
+    elif color_by == "Polígonos Tronados" and poligono_col:
+        # --- Discrete Categorical Coloring by Blasted Polygon ---
+        unique_vals = sorted(df[poligono_col].dropna().astype(str).unique().tolist())
+        _plot_discrete_traces(fig, df, poligono_col, unique_vals, "Polígono")
+    else:
+        # --- Continuous Parametric Coloring ---
+        fig.add_trace(go.Scatter3d(
+            x=x_lines, y=y_lines, z=z_lines,
+            mode='lines',
+            line=dict(color='rgba(150,150,150,0.5)', width=2),
+            name='Trayectorias',
+            hoverinfo='skip',
+        ))
 
-    fig.add_trace(go.Scatter3d(
-        x=df['X'].values,
-        y=df['Y'].values,
-        z=df['Z_collar'].values,
-        mode='markers',
-        marker=marker,
-        name='Collars',
-        hovertemplate='X: %{x:.1f}<br>Y: %{y:.1f}<br>Z: %{z:.1f}<extra>Collar</extra>',
-    ))
+        # Determine colors and scales based on choice
+        kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+
+        if color_by == "Carga Explosiva (Kg)" and kg_col:
+            colors = df[kg_col].values.astype(float)
+            title = "kg"
+        elif color_by == "Profundidad (m)":
+            colors = df['Len'].values
+            title = "m (Largo)"
+        elif color_by == "Inclinación (°)":
+            colors = df['Incl'].values
+            title = "Grados (°)"
+        else:  # Elevación Collar
+            colors = df['Z_collar'].values
+            title = "Collar Z"
+
+        marker = dict(
+            size=4,
+            color=colors,
+            colorscale=sel_colorscale,
+            showscale=True,
+            colorbar=dict(title=title, x=1.0, len=0.6),
+        )
+
+        fig.add_trace(go.Scatter3d(
+            x=df['X'].values,
+            y=df['Y'].values,
+            z=df['Z_collar'].values,
+            mode='markers',
+            marker=marker,
+            name='Collars',
+            hovertemplate='X: %{x:.1f}<br>Y: %{y:.1f}<br>Z: %{z:.1f}<extra>Collar</extra>',
+        ))
 
     # --- Volumetric Energy Density Grid (IDW 3D) ---
     if show_energy_grid:
         import numpy as np
+        kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
         # 1. Bounding box
         x_min, x_max = float(df['X'].min()), float(df['X'].max())
         y_min, y_max = float(df['Y'].min()), float(df['Y'].max())
@@ -457,6 +555,61 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
+
+def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: list[str], label_prefix: str) -> None:
+    color_cycle = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
+    import numpy as np
+
+    for idx, val_name in enumerate(unique_vals):
+        df_sub = df[df[category_col].astype(str) == val_name]
+        color = color_cycle[idx % len(color_cycle)]
+
+        # Reconstruct lines for just this subset
+        n_s = len(df_sub)
+        m_x = np.empty(n_s * 3, dtype=object)
+        m_y = np.empty(n_s * 3, dtype=object)
+        m_z = np.empty(n_s * 3, dtype=object)
+
+        xc = df_sub['X'].values
+        yc = df_sub['Y'].values
+        zc = df_sub['Z_collar'].values
+        xt = df_sub['X_toe'].values
+        yt = df_sub['Y_toe'].values
+        zt = df_sub['Z_toe'].values
+
+        for i in range(n_s):
+            j = i * 3
+            m_x[j] = xc[i]
+            m_x[j + 1] = xt[i]
+            m_x[j + 2] = None
+            m_y[j] = yc[i]
+            m_y[j + 1] = yt[i]
+            m_y[j + 2] = None
+            m_z[j] = zc[i]
+            m_z[j + 1] = zt[i]
+            m_z[j + 2] = None
+
+        # Add trajectories
+        fig.add_trace(go.Scatter3d(
+            x=m_x, y=m_y, z=m_z,
+            mode='lines',
+            line=dict(color=color, width=2),
+            name=f"Trayectorias {val_name}",
+            hoverinfo='skip',
+            showlegend=False,
+        ))
+
+        # Add collars
+        fig.add_trace(go.Scatter3d(
+            x=df_sub['X'].values,
+            y=df_sub['Y'].values,
+            z=df_sub['Z_collar'].values,
+            mode='markers',
+            marker=dict(size=4, color=color),
+            name=f"{label_prefix}: {val_name}",
+            hovertemplate=f"{label_prefix}: {val_name}<br>X: %{{x:.1f}}<br>Y: %{{y:.1f}}<br>Z: %{{z:.1f}}<extra></extra>",
+        ))
 
 
 
