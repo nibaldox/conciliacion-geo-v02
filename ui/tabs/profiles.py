@@ -144,15 +144,40 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
     if show_pozos and blast_tolerance is not None:
         _add_blast_holes(fig, section, blast_tolerance)
 
+    # Calculate default zoom range centered on the profiles
+    all_d = np.concatenate([pd_prof.distances, pt_prof.distances])
+    all_z = np.concatenate([pd_prof.elevations, pt_prof.elevations])
+    valid_d = all_d[np.isfinite(all_d)]
+    valid_z = all_z[np.isfinite(all_z)]
+    
+    x_range = None
+    z_range = None
+    if len(valid_d) > 0 and len(valid_z) > 0:
+        xmin, xmax = float(np.min(valid_d)), float(np.max(valid_d))
+        zmin, zmax = float(np.min(valid_z)), float(np.max(valid_z))
+        x_pad = max((xmax - xmin) * 0.05, 5.0)
+        z_pad = max((zmax - zmin) * 0.05, 5.0)
+        x_range = [xmin - x_pad, xmax + x_pad]
+        z_range = [zmin - z_pad, zmax + z_pad]
+
     grid_height = config['grid_height']
     grid_ref = config['grid_ref']
+    
+    xaxis_dict = dict(gridcolor='lightgray')
+    yaxis_dict = dict(scaleanchor="x", scaleratio=1,
+                      dtick=grid_height, tick0=grid_ref, gridcolor='lightgray')
+                      
+    if x_range is not None:
+        xaxis_dict['range'] = x_range
+    if z_range is not None:
+        yaxis_dict['range'] = z_range
+
     fig.update_layout(
         title=f"Sección {section.name} — {section.sector}",
         xaxis_title="Distancia (m)", yaxis_title="Elevación (m)",
         height=400,
-        yaxis=dict(scaleanchor="x", scaleratio=1,
-                   dtick=grid_height, tick0=grid_ref, gridcolor='lightgray'),
-        xaxis=dict(gridcolor='lightgray'),
+        yaxis=yaxis_dict,
+        xaxis=xaxis_dict,
         legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
         margin=dict(l=60, r=20, t=40, b=40),
     )
