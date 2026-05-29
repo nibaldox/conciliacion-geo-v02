@@ -13,28 +13,24 @@ from core import (
     build_reconciled_profile,
 )
 from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles
+from ui.tabs.blast_correlation import render_tab_blast_correlation
 
 
 def render_results_section(config: dict):
-    """Render the results UI (5 tabs: profiles, table, dashboard, AI, export).
-
-    Args:
-        config: dict with keys ai_enabled, api_key, model_name, base_url,
-                tolerances, grid_height, grid_ref, project_info,
-                face_threshold, berm_threshold, resolution.
-    """
     if st.session_state.step < 4 or not st.session_state.comparison_results:
         return
 
     st.header("📊 Paso 4: Resultados")
 
-    tab_profiles, tab_table, tab_dash, tab_ai, tab_export = st.tabs([
-        "📈 Perfiles", "📋 Tabla Detallada", "📊 Dashboard", "🤖 Analista IA", "💾 Exportar"
+    tab_profiles, tab_table, tab_dash, tab_corr, tab_ai, tab_export = st.tabs([
+        "📈 Perfiles", "📋 Tabla Detallada", "📊 Dashboard", "💥 Correlación Voladura", "🤖 Analista IA", "💾 Exportar"
     ])
 
     _render_tab_profiles(tab_profiles, config)
     _render_tab_table(tab_table)
     _render_tab_dashboard(tab_dash, config)
+    with tab_corr:
+        render_tab_blast_correlation(config)
     _render_tab_ai(tab_ai, config)
     _render_tab_export(tab_export, config)
 

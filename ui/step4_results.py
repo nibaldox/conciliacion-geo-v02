@@ -8,15 +8,15 @@ from ui.tabs.table import render_tab_table
 from ui.tabs.dashboard import render_tab_dashboard
 from ui.tabs.ai_report import render_tab_ai
 from ui.tabs.export import render_tab_export
+from ui.tabs.blast_correlation import render_tab_blast_correlation
 
 
 def render_step4(config: dict) -> None:
-    """Render Paso 4: results with five sub-tabs."""
     st.header("📊 Paso 4: Resultados")
 
-    tab_profiles, tab_table, tab_dash, tab_ai, tab_export = st.tabs([
+    tab_profiles, tab_table, tab_dash, tab_corr, tab_ai, tab_export = st.tabs([
         "📈 Perfiles", "📋 Tabla Detallada", "📊 Dashboard",
-        "🤖 Analista IA", "💾 Exportar"])
+        "💥 Correlación Voladura", "🤖 Analista IA", "💾 Exportar"])
 
     with tab_profiles:
         render_tab_profiles(config)
@@ -24,6 +24,8 @@ def render_step4(config: dict) -> None:
         render_tab_table()
     with tab_dash:
         render_tab_dashboard(config)
+    with tab_corr:
+        render_tab_blast_correlation(config)
     with tab_ai:
         render_tab_ai(config)
     with tab_export:
