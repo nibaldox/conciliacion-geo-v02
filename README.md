@@ -113,7 +113,14 @@ Esta aplicación automatiza el flujo de trabajo de conciliación geotécnica, re
 *   Visualización interactiva de nubes de puntos y mallas trianguladas.
 *   Alineación automática de sistemas de coordenadas.
 
-### 2. Extracción Automática de Parámetros
+### 2. Definición Flexible y Acumulativa de Secciones
+*   **Carga Multi-Archivo Acumulativa**: Soporte para la carga sucesiva de múltiples archivos DXF/CSV en memoria de forma acumulada y concurrente.
+*   **Sufijos de Sector Automáticos**: Los perfiles adoptan sufijos basados en el nombre de archivo origen (ej. `S01-f9`, `S02-f10`), facilitando la comparación paralela de múltiples sectores y fases de la mina sin colisiones.
+*   **Trazabilidad Espacial**: Columna `"Archivo"` integrada en la tabla de secciones del Paso 2 para conocer de manera unívoca la procedencia de cada línea de corte.
+*   **Métodos de Entrada**: Archivos de coordenadas, interactivo por clic en plano 3D, coordenadas manuales y equiespaciadas automáticas a lo largo de una línea de cresta.
+*   **Herramienta de Reinicio**: Botón `"Limpiar Secciones"` para vaciar el pool acumulativo e iniciar nuevas evaluaciones limpias al instante.
+
+### 3. Extracción Automática de Parámetros
 El algoritmo inteligente identifica y calcula:
 *   **Altura de Banco**: Distancia vertical entre pata y cresta.
 *   **Ancho de Berma**: Distancia horizontal entre pata superior y cresta inferior.
@@ -121,17 +128,27 @@ El algoritmo inteligente identifica y calcula:
 *   **Ángulo Inter-rampa**: Pendiente global entre bancos.
 *   **Detección de Rampas**: Identificación automática de rampas basada en anchos de berma (15m - 42m).
 
-### 3. Conciliación Diseño vs Real
+### 4. Conciliación Diseño vs Real
 *   **Matching Inteligente**: Algoritmo húngaro para emparejar bancos de diseño con los reales basado en elevación.
 *   **Semáforos de Cumplimiento**: Visualización rápida de desviaciones (Verde/Amarillo/Rojo) según tolerancias configurables.
 *   **Cálculo de Volúmenes**: Estimación de áreas de corte (sobre-excavación) y relleno (bancos colgados) por sección.
 
-### 4. Reportabilidad
-*   **Tablas Interactivas**: Filtrado por Sector, Nivel y Sección. Ordenamiento flexible.
-*   **Exportación a Excel**: Reporte completo compatible con software minero.
-*   **Gráficos de Perfil**: Exportación de imágenes de alta resolución de cada sección analizada.
+### 5. Ergonomía Visual en Perfiles Cross-Section
+*   **Grilla Multicolumna Dinámica**: Selector en pantalla para visualizar perfiles en 1, 2 o 3 columnas de forma adaptativa, minimizando el scrolling vertical.
+*   **Cabecera de Mandos Compacta**: Mandos de control (área, semáforo, pozos, perfiles) reestructurados horizontalmente en una cabecera de 5 columnas para aprovechar al máximo el espacio de la aplicación.
+*   **Encuadre Bounding Box y Relación 1:1**: Centrado simétrico inteligente con un 5% de margen (padding) focalizado en el talud, forzando una escala geométrica estricta de 1:1 en pantalla.
+*   **Leyendas Simplificadas**: Caja de leyendas despejada de contaminación visual, ocultando trazas auxiliares (Deuda, Sobre-excavación, Info Bancos, Semáforos, Pozos) para reflejar únicamente las series clave: `Diseño`, `Topografía Real` y `Conciliado As-Built`.
 
-### 5. Asistente IA para Reportes 🤖
+### 6. Reportabilidad y Exportación de Alta Fidelidad
+*   **Tablas Interactivas**: Filtrado por Sector, Nivel y Sección. Ordenamiento flexible con coloreado de cumplimiento.
+*   **Exportación a Excel**: Reporte de parámetros y perforaciones compatible con software minero.
+*   **Generador de Informes Word (.docx) Dinámico**:
+    *   **Filtrado Integrado en Reportes**: El informe de Word y el ZIP de imágenes leen los filtros activos de la tabla (Sector, Nivel, Sección, Banco) en tiempo real.
+    *   **Exclusión de Secciones Vacías**: Omite secciones de la mina que no coincidan con la selección activa, generando un reporte Word enfocado únicamente en la zona buscada.
+    *   **Coherencia de Grilla e Imágenes**: Los gráficos exportados en Word y ZIP se alinean exactamente con la cota de referencia (`grid_ref`) y la altura de banco (`grid_height`) configuradas, preservando la escala y vistas seleccionadas.
+    *   **Anotaciones Focalizadas**: Muestra rótulos de bancos (`B1`, `Pa1`) de Matplotlib únicamente sobre las cotas filtradas.
+
+### 7. Asistente IA para Reportes 🤖
 *   **Generación Automática**: Redacción de informes ejecutivos en lenguaje natural.
 *   **Soporte Multi-Modelo**:
     *   **Cloud**: OpenAI (GPT-3.5, GPT-4).
