@@ -82,6 +82,7 @@ def render_modulo_tronadura() -> None:
                 malla_col = find_df_column(df_clean, ['Nombre_Malla_Original'], raise_error=False)
                 poligono_col = find_df_column(df_clean, ['holes_polygon'], raise_error=False)
                 banco_col = find_df_column(df_clean, ['Nombre_Banco', 'Banco'], raise_error=False)
+                fase_col = find_df_column(df_clean, ['Nombre_Fase', 'Fase'], raise_error=False)
                 kg_col = find_df_column(df_clean, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
 
                 # Determine dynamic column allocation for filters
@@ -92,6 +93,8 @@ def render_modulo_tronadura() -> None:
                     filter_cols.append("poligono")
                 if banco_col:
                     filter_cols.append("banco")
+                if fase_col:
+                    filter_cols.append("fase")
                 filter_cols.append("len")
                 if kg_col:
                     filter_cols.append("kg")
@@ -115,6 +118,12 @@ def render_modulo_tronadura() -> None:
                 if banco_col:
                     all_bancos = sorted(df_clean[banco_col].dropna().astype(str).unique().tolist())
                     sel_bancos = f_cols[col_idx].multiselect("Filtrar por Banco:", all_bancos, default=[])
+                    col_idx += 1
+
+                sel_fases = []
+                if fase_col:
+                    all_fases = sorted(df_clean[fase_col].dropna().astype(str).unique().tolist())
+                    sel_fases = f_cols[col_idx].multiselect("Filtrar por Fase:", all_fases, default=[])
                     col_idx += 1
 
                 min_len = float(df_clean['Len'].min())
@@ -142,6 +151,8 @@ def render_modulo_tronadura() -> None:
                 df_filtered = df_filtered[df_filtered[poligono_col].astype(str).isin(sel_poligonos)]
             if sel_bancos and banco_col:
                 df_filtered = df_filtered[df_filtered[banco_col].astype(str).isin(sel_bancos)]
+            if sel_fases and fase_col:
+                df_filtered = df_filtered[df_filtered[fase_col].astype(str).isin(sel_fases)]
             if sel_len:
                 df_filtered = df_filtered[(df_filtered['Len'] >= sel_len[0]) & (df_filtered['Len'] <= sel_len[1])]
             if sel_kg and kg_col:
@@ -173,6 +184,8 @@ def render_modulo_tronadura() -> None:
                         color_options.append("Mallas de Tronadura (Grid)")
                     if poligono_col:
                         color_options.append("Polígonos Tronados")
+                    if fase_col:
+                        color_options.append("Fase")
                     color_options.extend(["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"])
 
                     color_by = col_v1.selectbox(
@@ -187,7 +200,7 @@ def render_modulo_tronadura() -> None:
                         "Rainbow", "Jet", "Earth", "YlOrRd", "RdBu", "Spectral",
                         "Coolwarm", "Electric", "Bluered", "Greens", "Reds", "Blues"
                     ]
-                    colorscale_disabled = (color_by in ["Mallas de Tronadura (Grid)", "Polígonos Tronados"])
+                    colorscale_disabled = (color_by in ["Mallas de Tronadura (Grid)", "Polígonos Tronados", "Fase"])
                     sel_colorscale = col_v2.selectbox(
                         "Paleta de Colores (Continuos):",
                         all_colorscales,
@@ -416,6 +429,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
 
     malla_col = find_df_column(df, ['Nombre_Malla_Original'], raise_error=False)
     poligono_col = find_df_column(df, ['holes_polygon'], raise_error=False)
+    fase_col = find_df_column(df, ['Nombre_Fase', 'Fase'], raise_error=False)
 
     # 1. Overlay 3D Meshes transparently if requested
     if show_design_mesh:
@@ -447,6 +461,10 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         # --- Discrete Categorical Coloring by Blasted Polygon ---
         unique_vals = sorted(df[poligono_col].dropna().astype(str).unique().tolist())
         _plot_discrete_traces(fig, df, poligono_col, unique_vals, "Polígono")
+    elif color_by == "Fase" and fase_col:
+        # --- Discrete Categorical Coloring by Fase ---
+        unique_vals = sorted(df[fase_col].dropna().astype(str).unique().tolist())
+        _plot_discrete_traces(fig, df, fase_col, unique_vals, "Fase")
     else:
         # --- Continuous Parametric Coloring ---
         fig.add_trace(go.Scatter3d(
