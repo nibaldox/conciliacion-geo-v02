@@ -64,6 +64,9 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
     az_col = find_df_column(df_work, ['Azimuth_real', 'Azimuth', 'Azimut'])
     len_col = find_df_column(df_work, ['longitud_real', 'Longitud', 'Length', 'Profundidad'])
 
+    if z_col:
+        df_work['Banco_Original'] = df_work[z_col]
+
     df_work = df_work.rename(columns={
         x_col: 'X', y_col: 'Y', z_col: 'Z_collar',
         incl_col: 'Incl', az_col: 'Az', len_col: 'Len',

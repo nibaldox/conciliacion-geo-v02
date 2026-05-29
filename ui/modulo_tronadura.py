@@ -81,7 +81,7 @@ def render_modulo_tronadura() -> None:
             with st.expander("🔎 Filtros de Tronadura", expanded=False):
                 malla_col = find_df_column(df_clean, ['Nombre_Malla_Original'], raise_error=False)
                 poligono_col = find_df_column(df_clean, ['holes_polygon'], raise_error=False)
-                banco_col = find_df_column(df_clean, ['Nombre_Banco', 'Banco'], raise_error=False)
+                banco_col = find_df_column(df_clean, ['Banco_Original', 'Nombre_Banco', 'Banco'], raise_error=False)
                 fase_col = find_df_column(df_clean, ['Nombre_Fase', 'Fase'], raise_error=False)
                 kg_col = find_df_column(df_clean, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
 
@@ -186,6 +186,8 @@ def render_modulo_tronadura() -> None:
                         color_options.append("Polígonos Tronados")
                     if fase_col:
                         color_options.append("Fase")
+                    if banco_col:
+                        color_options.append("Banco")
                     color_options.extend(["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"])
 
                     color_by = col_v1.selectbox(
@@ -200,7 +202,7 @@ def render_modulo_tronadura() -> None:
                         "Rainbow", "Jet", "Earth", "YlOrRd", "RdBu", "Spectral",
                         "Coolwarm", "Electric", "Bluered", "Greens", "Reds", "Blues"
                     ]
-                    colorscale_disabled = (color_by in ["Mallas de Tronadura (Grid)", "Polígonos Tronados", "Fase"])
+                    colorscale_disabled = (color_by in ["Mallas de Tronadura (Grid)", "Polígonos Tronados", "Fase", "Banco"])
                     sel_colorscale = col_v2.selectbox(
                         "Paleta de Colores (Continuos):",
                         all_colorscales,
@@ -430,6 +432,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
     malla_col = find_df_column(df, ['Nombre_Malla_Original'], raise_error=False)
     poligono_col = find_df_column(df, ['holes_polygon'], raise_error=False)
     fase_col = find_df_column(df, ['Nombre_Fase', 'Fase'], raise_error=False)
+    banco_col = find_df_column(df, ['Banco_Original', 'Nombre_Banco', 'Banco'], raise_error=False)
 
     # 1. Overlay 3D Meshes transparently if requested
     if show_design_mesh:
@@ -465,6 +468,10 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         # --- Discrete Categorical Coloring by Fase ---
         unique_vals = sorted(df[fase_col].dropna().astype(str).unique().tolist())
         _plot_discrete_traces(fig, df, fase_col, unique_vals, "Fase")
+    elif color_by == "Banco" and banco_col:
+        # --- Discrete Categorical Coloring by Banco ---
+        unique_vals = sorted(df[banco_col].dropna().astype(str).unique().tolist())
+        _plot_discrete_traces(fig, df, banco_col, unique_vals, "Banco")
     else:
         # --- Continuous Parametric Coloring ---
         fig.add_trace(go.Scatter3d(
