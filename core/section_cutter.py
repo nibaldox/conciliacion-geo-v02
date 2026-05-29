@@ -8,12 +8,12 @@ import trimesh
 
 @dataclass
 class SectionLine:
-    """A vertical section defined by origin, azimuth and length."""
     name: str
     origin: np.ndarray
     azimuth: float
     length: float
     sector: str = ""
+    file_name: str = ""
 
 
 @dataclass

@@ -92,17 +92,29 @@ def _render_tab_file() -> None:
     preview_sections = generate_perpendicular_sections(
         polyline, spacing_file, length_file, sector_file, design_mesh=auto_mesh)
 
+    import os
+    file_base, _ = os.path.splitext(coord_file.name)
+    for j, sec in enumerate(preview_sections):
+        sec.file_name = coord_file.name
+        sec.name = f"S{j+1:02d}-{file_base}"
+
     _render_file_preview(polyline, preview_sections)
     st.caption(f"Se generarán **{len(preview_sections)} secciones** cada {spacing_file:.0f}m")
 
     if st.button("✅ Aplicar Secciones desde Archivo", type="primary", key="apply_file"):
         if not st.session_state.get('sections'):
             st.session_state.sections = []
+        existing_names = {s.name for s in st.session_state.sections}
         added_count = 0
         for sec in preview_sections:
-            new_num = len(st.session_state.sections) + 1
-            sec.name = f"S-{new_num:02d}"
+            target_name = sec.name
+            if target_name in existing_names:
+                col_idx = 1
+                while f"{target_name}_{col_idx}" in existing_names:
+                    col_idx += 1
+                sec.name = f"{target_name}_{col_idx}"
             st.session_state.sections.append(sec)
+            existing_names.add(sec.name)
             added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
         st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
@@ -354,7 +366,7 @@ def _render_tab_auto() -> None:
 
 def _sections_to_rows(sections) -> list:
     return [
-        {"Nombre": s.name, "Sector": s.sector,
+        {"Nombre": s.name, "Archivo": getattr(s, 'file_name', ''), "Sector": s.sector,
          "Origen X": f"{s.origin[0]:.1f}", "Origen Y": f"{s.origin[1]:.1f}",
          "Azimut (°)": f"{s.azimuth:.1f}", "Longitud (m)": f"{s.length:.1f}"}
         for s in sections
