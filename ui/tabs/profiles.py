@@ -112,6 +112,11 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
 
     if show_semaphore:
         _add_semaphore_traces(fig, pd_prof, pt_prof, config)
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='lines', name='Topografía Real',
+            line=dict(color='forestgreen', width=2),
+            showlegend=True))
     else:
         fig.add_trace(go.Scatter(
             x=pt_prof.distances, y=pt_prof.elevations,
@@ -120,12 +125,14 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
 
     if show_reconciled and i < len(st.session_state.params_design):
         _add_reconciled_trace(fig, st.session_state.params_design[i].benches,
-                              color='royalblue', label='Conciliado Diseño', dash='dash')
+                               color='royalblue', label='Conciliado Diseño', dash='dash',
+                               showlegend=False)
 
     if show_reconciled and i < len(st.session_state.params_topo):
         _add_reconciled_trace(fig, st.session_state.params_topo[i].benches,
-                              color='#FF7F0E', label='Conciliado As-Built', dash='solid', width=2.5,
-                              show_berm_width=True, comparison_results=sec_comps)
+                               color='#FF7F0E', label='Conciliado As-Built', dash='solid', width=2.5,
+                               show_berm_width=True, comparison_results=sec_comps,
+                               showlegend=True)
 
     if i < len(st.session_state.params_topo):
         for bench in st.session_state.params_topo[i].benches:
@@ -191,7 +198,8 @@ def _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under):
             x=np.concatenate([d_i[mask_u], d_i[mask_u][::-1]]),
             y=np.concatenate([z_eval_i[mask_u], z_ref_i[mask_u][::-1]]),
             fill='toself', fillcolor='rgba(0,0,255,0.3)',
-            line=dict(width=0), name=f'Deuda ({a_under:.1f} m²)', hoverinfo='skip'))
+            line=dict(width=0), name=f'Deuda ({a_under:.1f} m²)', hoverinfo='skip',
+            showlegend=False))
 
     mask_o = z_eval_i < z_ref_i
     if np.any(mask_o):
@@ -199,7 +207,8 @@ def _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under):
             x=np.concatenate([d_i[mask_o], d_i[mask_o][::-1]]),
             y=np.concatenate([z_eval_i[mask_o], z_ref_i[mask_o][::-1]]),
             fill='toself', fillcolor='rgba(255,0,0,0.3)',
-            line=dict(width=0), name=f'Sobre-exc. ({a_over:.1f} m²)', hoverinfo='skip'))
+            line=dict(width=0), name=f'Sobre-exc. ({a_over:.1f} m²)', hoverinfo='skip',
+            showlegend=False))
 
 
 def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
@@ -273,7 +282,8 @@ def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
             marker=dict(color=hover_colors, symbol=hover_symbols, size=10,
                         line=dict(color='black', width=1)),
             text=hover_text, hoverinfo='text',
-            hoverlabel=dict(bgcolor="rgba(255, 255, 255, 0.2)", font_size=15)))
+            hoverlabel=dict(bgcolor="rgba(255, 255, 255, 0.2)", font_size=15),
+            showlegend=False))
 
 
 def _add_semaphore_traces(fig, pd_prof, pt_prof, config):
@@ -293,26 +303,30 @@ def _add_semaphore_traces(fig, pd_prof, pt_prof, config):
         fig.add_trace(go.Scatter(
             x=pt_prof.distances[mask_ok], y=pt_prof.elevations[mask_ok],
             mode='markers', name=f'Cumple (<{T}m)',
-            marker=dict(color='#006100', size=3)))
+            marker=dict(color='#006100', size=3),
+            showlegend=False))
     if np.any(mask_warn):
         fig.add_trace(go.Scatter(
             x=pt_prof.distances[mask_warn], y=pt_prof.elevations[mask_warn],
             mode='markers', name='Alerta',
-            marker=dict(color='#FFD700', size=4)))
+            marker=dict(color='#FFD700', size=4),
+            showlegend=False))
     if np.any(mask_nok):
         fig.add_trace(go.Scatter(
             x=pt_prof.distances[mask_nok], y=pt_prof.elevations[mask_nok],
             mode='markers', name='No Cumple',
-            marker=dict(color='#FF0000', size=4)))
+            marker=dict(color='#FF0000', size=4),
+            showlegend=False))
 
 
-def _add_reconciled_trace(fig, benches, color, label, dash, width=1.5, show_berm_width=False, comparison_results=None):
+def _add_reconciled_trace(fig, benches, color, label, dash, width=1.5, show_berm_width=False, comparison_results=None, showlegend=True):
     rd, re = build_reconciled_profile(benches)
     if len(rd) > 0:
         fig.add_trace(go.Scatter(
             x=rd, y=re, mode='lines+markers', name=label,
             line=dict(color=color, width=width, dash=dash),
-            marker=dict(size=5 if width == 1.5 else 6, symbol='diamond', color=color)))
+            marker=dict(size=5 if width == 1.5 else 6, symbol='diamond', color=color),
+            showlegend=showlegend))
         if show_berm_width and comparison_results is not None:
             _add_berm_width_indicators(fig, benches, comparison_results)
 
@@ -422,7 +436,7 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
         line=dict(color='rgba(255,100,0,0.5)', width=1.5),
         name=f'Pozos ({len(projected)})',
         hoverinfo='skip',
-        showlegend=True,
+        showlegend=False,
     ))
 
     collar_x = projected['dist_along'].values
