@@ -302,7 +302,7 @@ def _render_tab_table(tab):
 
         # --- Filtering ---
         with st.expander("🔎 Filtros (Excel-style)", expanded=False):
-            cols_filter = st.columns(3)
+            cols_filter = st.columns(4)
 
             all_sectors = sorted(list(df['sector'].unique()))
             sel_sectors = cols_filter[0].multiselect("Filtrar por Sector:", all_sectors, default=[], key="filter_sector")
@@ -314,12 +314,17 @@ def _render_tab_table(tab):
             all_sections = sorted(list(df['section'].unique()))
             sel_sections = cols_filter[2].multiselect("Filtrar por Sección:", all_sections, default=[], key="filter_section")
 
+            all_benches = sorted(list(df['bench_num'].unique()))
+            sel_benches = cols_filter[3].multiselect("Filtrar por Banco:", all_benches, default=[], key="filter_bench")
+
         if sel_sectors:
             df = df[df['sector'].isin(sel_sectors)]
         if sel_levels:
             df = df[df['level'].isin(sel_levels)]
         if sel_sections:
             df = df[df['section'].isin(sel_sections)]
+        if sel_benches:
+            df = df[df['bench_num'].isin(sel_benches)]
 
         # Apply sorting
         if "Por Nivel" in sort_option:
