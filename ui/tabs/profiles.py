@@ -13,30 +13,52 @@ from core.geom_utils import calculate_profile_deviation, calculate_area_between_
 
 
 def render_tab_profiles(config: dict) -> None:
-    show_reconciled = st.checkbox(
-        "Mostrar perfil conciliado (geometría idealizada detectada)",
-        value=True, key="show_reconciled")
-    show_areas = st.checkbox(
-        "Mostrar Áreas (Sobre-excavación / Deuda)",
-        value=False, key="show_areas")
-    show_semaphore = st.checkbox(
-        "Visualización Semáforo (Verde=Cumple, Amarillo=Alerta, Rojo=No Cumple)",
-        value=False, key="show_semaphore")
-
-    show_pozos = st.checkbox(
-        "Mostrar Pozos de Tronadura",
-        value=True, key="show_pozos_profile")
-
-    blast_tolerance = None
-    if show_pozos and st.session_state.get('blast_df_clean') is not None:
-        blast_tolerance = st.number_input(
-            "Tolerancia perpendicular pozos (m)",
-            value=10.0, min_value=1.0, max_value=50.0, step=1.0,
-            key="blast_tol_profile",
-            help="Distancia máxima del pozo a la línea de sección para incluirlo en el perfil")
+    # 5-column layout for control parameters (compact layout)
+    ctrl_cols = st.columns(5)
+    
+    with ctrl_cols[0]:
+        show_reconciled = st.checkbox(
+            "Mostrar perfil conciliado",
+            value=True, key="show_reconciled",
+            help="Muestra la geometría idealizada detectada")
+            
+    with ctrl_cols[1]:
+        show_areas = st.checkbox(
+            "Mostrar Áreas",
+            value=False, key="show_areas",
+            help="Rellena áreas de sobre-excavación y deuda de material")
+            
+    with ctrl_cols[2]:
+        show_semaphore = st.checkbox(
+            "Semáforo (Cumplimiento)",
+            value=False, key="show_semaphore",
+            help="Verde=Cumple, Amarillo=Alerta, Rojo=No Cumple")
+            
+    with ctrl_cols[3]:
+        show_pozos = st.checkbox(
+            "Mostrar Pozos de Tronadura",
+            value=True, key="show_pozos_profile",
+            help="Superpone los pozos de perforación y tronadura")
+        blast_tolerance = None
+        if show_pozos and st.session_state.get('blast_df_clean') is not None:
+            blast_tolerance = st.number_input(
+                "Tolerancia pozos (m)",
+                value=10.0, min_value=1.0, max_value=50.0, step=1.0,
+                key="blast_tol_profile",
+                help="Distancia máxima a la línea de sección")
+                
+    with ctrl_cols[4]:
+        num_cols = st.selectbox(
+            "Columnas en pantalla",
+            [1, 2, 3],
+            index=2, # default to 3 columns
+            key="profile_grid_cols",
+            help="Ajusta el número de columnas para optimizar el espacio")
 
     display_sections = st.session_state.get('processed_sections', st.session_state.sections)
 
+    # Filter valid sections/profiles first
+    valid_plots = []
     for i, section in enumerate(display_sections):
         pd_prof = st.session_state.profiles_design[i]
         pt_prof = st.session_state.profiles_topo[i]
@@ -44,17 +66,24 @@ def render_tab_profiles(config: dict) -> None:
         if pd_prof is None or pt_prof is None:
             st.warning(f"⚠️ Sección {section.name}: sin intersección con una o ambas superficies")
             continue
+        valid_plots.append((i, section, pd_prof, pt_prof))
 
-        fig = _build_profile_figure(
-            i, section, pd_prof, pt_prof,
-            show_areas=show_areas,
-            show_semaphore=show_semaphore,
-            show_reconciled=show_reconciled,
-            show_pozos=show_pozos,
-            blast_tolerance=blast_tolerance,
-            config=config)
-
-        st.plotly_chart(fig, use_container_width=True)
+    # Render dynamic grid rows
+    for j in range(0, len(valid_plots), num_cols):
+        cols = st.columns(num_cols)
+        for col_idx in range(num_cols):
+            if j + col_idx < len(valid_plots):
+                i, section, pd_prof, pt_prof = valid_plots[j + col_idx]
+                with cols[col_idx]:
+                    fig = _build_profile_figure(
+                        i, section, pd_prof, pt_prof,
+                        show_areas=show_areas,
+                        show_semaphore=show_semaphore,
+                        show_reconciled=show_reconciled,
+                        show_pozos=show_pozos,
+                        blast_tolerance=blast_tolerance,
+                        config=config)
+                    st.plotly_chart(fig, use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
