@@ -11,9 +11,50 @@ def render_tab_dashboard(config: dict) -> None:
     if not results:
         return
 
-    _render_kpi_metrics(results)
-    _render_stacked_bar(results)
-    _render_deviation_histograms(results, config)
+    import pandas as pd
+    df = pd.DataFrame(results)
+
+    with st.expander("🔎 Filtros (Excel-style)", expanded=False):
+        cols_filter = st.columns(4)
+
+        all_sectors = sorted(df['sector'].unique().tolist())
+        sel_sectors = cols_filter[0].multiselect(
+            "Filtrar por Sector:", all_sectors, default=[], key="filter_sector_dash")
+
+        unique_levels = df['level'].unique()
+        sorted_levels = sorted(
+            unique_levels,
+            key=lambda x: float(x) if str(x).replace('.', '', 1).isdigit() else -9999,
+            reverse=True)
+        sel_levels = cols_filter[1].multiselect(
+            "Filtrar por Nivel (Cota):", sorted_levels, default=[], key="filter_level_dash")
+
+        all_sections = sorted(df['section'].unique().tolist())
+        sel_sections = cols_filter[2].multiselect(
+            "Filtrar por Sección:", all_sections, default=[], key="filter_section_dash")
+
+        all_benches = sorted(df['bench_num'].unique().tolist())
+        sel_benches = cols_filter[3].multiselect(
+            "Filtrar por Banco:", all_benches, default=[], key="filter_bench_dash")
+
+    if sel_sectors:
+        df = df[df['sector'].isin(sel_sectors)]
+    if sel_levels:
+        df = df[df['level'].isin(sel_levels)]
+    if sel_sections:
+        df = df[df['section'].isin(sel_sections)]
+    if sel_benches:
+        df = df[df['bench_num'].isin(sel_benches)]
+
+    filtered_results = df.to_dict('records')
+
+    if not filtered_results:
+        st.warning("⚠️ No hay resultados que coincidan con los filtros seleccionados.")
+        return
+
+    _render_kpi_metrics(filtered_results)
+    _render_stacked_bar(filtered_results)
+    _render_deviation_histograms(filtered_results, config)
 
 
 # ---------------------------------------------------------------------------

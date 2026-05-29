@@ -377,6 +377,51 @@ def _render_tab_table(tab):
 def _render_tab_dashboard(tab, config: dict):
     with tab:
         results = st.session_state.comparison_results
+        if not results:
+            return
+
+        import pandas as pd
+        df = pd.DataFrame(results)
+
+        # --- Filtering ---
+        with st.expander("🔎 Filtros (Excel-style)", expanded=False):
+            cols_filter = st.columns(4)
+
+            all_sectors = sorted(df['sector'].unique().tolist())
+            sel_sectors = cols_filter[0].multiselect(
+                "Filtrar por Sector:", all_sectors, default=[], key="filter_sector_dash")
+
+            unique_levels = df['level'].unique()
+            sorted_levels = sorted(
+                unique_levels,
+                key=lambda x: float(x) if str(x).replace('.', '', 1).isdigit() else -9999,
+                reverse=True)
+            sel_levels = cols_filter[1].multiselect(
+                "Filtrar por Nivel (Cota):", sorted_levels, default=[], key="filter_level_dash")
+
+            all_sections = sorted(df['section'].unique().tolist())
+            sel_sections = cols_filter[2].multiselect(
+                "Filtrar por Sección:", all_sections, default=[], key="filter_section_dash")
+
+            all_benches = sorted(df['bench_num'].unique().tolist())
+            sel_benches = cols_filter[3].multiselect(
+                "Filtrar por Banco:", all_benches, default=[], key="filter_bench_dash")
+
+        if sel_sectors:
+            df = df[df['sector'].isin(sel_sectors)]
+        if sel_levels:
+            df = df[df['level'].isin(sel_levels)]
+        if sel_sections:
+            df = df[df['section'].isin(sel_sections)]
+        if sel_benches:
+            df = df[df['bench_num'].isin(sel_benches)]
+
+        filtered_results = df.to_dict('records')
+
+        if not filtered_results:
+            st.warning("⚠️ No hay resultados que coincidan con los filtros seleccionados.")
+            return
+
         tolerances = config['tolerances']
         min_berm_width = tolerances['berm_width']['min']
 
@@ -386,19 +431,18 @@ def _render_tab_dashboard(tab, config: dict):
             ('angle', 'angle_status', 'Ángulo de Cara'),
             ('berm', 'berm_status', 'Ancho de Berma'),
         ]):
-            total = len(results)
-            cumple = sum(1 for r in results if r[key] == "CUMPLE")
+            total = len(filtered_results)
+            cumple = sum(1 for r in filtered_results if r[key] == "CUMPLE")
             pct = cumple / total * 100 if total > 0 else 0
             col.metric(label, f"{pct:.0f}%", f"{cumple}/{total} cumplen")
 
         status_counts = {'Parámetro': [], 'CUMPLE': [], 'FUERA DE TOLERANCIA': [], 'NO CUMPLE': []}
         for key, label in [('height_status', 'Altura'), ('angle_status', 'Ángulo Cara'), ('berm_status', 'Berma')]:
             status_counts['Parámetro'].append(label)
-            status_counts['CUMPLE'].append(sum(1 for r in results if r[key] == "CUMPLE"))
-            status_counts['FUERA DE TOLERANCIA'].append(sum(1 for r in results if r[key] == "FUERA DE TOLERANCIA"))
-            status_counts['NO CUMPLE'].append(sum(1 for r in results if r[key] == "NO CUMPLE"))
+            status_counts['CUMPLE'].append(sum(1 for r in filtered_results if r[key] == "CUMPLE"))
+            status_counts['FUERA DE TOLERANCIA'].append(sum(1 for r in filtered_results if r[key] == "FUERA DE TOLERANCIA"))
+            status_counts['NO CUMPLE'].append(sum(1 for r in filtered_results if r[key] == "NO CUMPLE"))
 
-        import pandas as pd
         df_status = pd.DataFrame(status_counts)
         fig_bar = go.Figure()
         fig_bar.add_trace(go.Bar(name='CUMPLE', x=df_status['Parámetro'], y=df_status['CUMPLE'],
@@ -418,7 +462,7 @@ def _render_tab_dashboard(tab, config: dict):
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            devs_h = [r['height_dev'] for r in results if r['height_dev'] is not None]
+            devs_h = [r['height_dev'] for r in filtered_results if r['height_dev'] is not None]
             fig_h = go.Figure(go.Histogram(x=devs_h, nbinsx=15, marker_color='royalblue'))
             fig_h.update_layout(title="Distribución Desv. Altura (m)", height=300,
                                 xaxis_title="Desviación (m)", yaxis_title="Frecuencia")
@@ -426,7 +470,7 @@ def _render_tab_dashboard(tab, config: dict):
             fig_h.add_vline(x=tol_h_pos, line_dash="dash", line_color="orange")
             st.plotly_chart(fig_h, use_container_width=True)
         with col2:
-            devs_a = [r['angle_dev'] for r in results if r['angle_dev'] is not None]
+            devs_a = [r['angle_dev'] for r in filtered_results if r['angle_dev'] is not None]
             fig_a = go.Figure(go.Histogram(x=devs_a, nbinsx=15, marker_color='forestgreen'))
             fig_a.update_layout(title="Distribución Desv. Ángulo Cara (°)", height=300,
                                 xaxis_title="Desviación (°)", yaxis_title="Frecuencia")
@@ -434,7 +478,7 @@ def _render_tab_dashboard(tab, config: dict):
             fig_a.add_vline(x=tol_a_pos, line_dash="dash", line_color="orange")
             st.plotly_chart(fig_a, use_container_width=True)
         with col3:
-            berm_vals = [r['berm_real'] for r in results if r['berm_real'] is not None and r['berm_real'] > 0]
+            berm_vals = [r['berm_real'] for r in filtered_results if r['berm_real'] is not None and r['berm_real'] > 0]
             if berm_vals:
                 fig_b = go.Figure(go.Histogram(x=berm_vals, nbinsx=15, marker_color='#FF7F0E'))
                 fig_b.update_layout(title="Distribución Ancho Berma (m)", height=300,
