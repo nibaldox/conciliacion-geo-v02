@@ -290,7 +290,7 @@ def render_modulo_tronadura() -> None:
             ))
             fig_pas.add_vline(x=0.5, line_dash="dash", line_color="green", annotation_text="Óptimo Mín (0.5m)")
             fig_pas.add_vline(x=1.5, line_dash="dash", line_color="green", annotation_text="Óptimo Máx (1.5m)")
-            fig_pas.add_vline(x=0.0, line_solid="solid", line_color="red", annotation_text="Nivel Piso (0.0m)")
+            fig_pas.add_vline(x=0.0, line_dash="solid", line_color="red", annotation_text="Nivel Piso (0.0m)")
             fig_pas.update_layout(
                 title="Distribución de Pasaduras (m)",
                 xaxis_title="Pasadura (m)",
