@@ -9,49 +9,138 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 import numpy as np
 
-def create_section_plot(params_design, params_topo, distances_d, elevations_d, distances_t, elevations_t):
-    """
-    Generate a matplotlib figure for a section comparison.
-    Overlay detected benches (Crests/Toes) to show 'Reconciled Profile'.
-    Returns: BytesIO object containing the image.
-    """
-    fig, ax = plt.subplots(figsize=(12, 7))
-    
-    # 1. Plot Design (Baseline)
+def create_section_plot(params_design, params_topo, distances_d, elevations_d, distances_t, elevations_t,
+                        plot_options=None, section=None, df_pozos=None, filtered_bench_nums=None):
+    if plot_options is None:
+        plot_options = {}
+    show_reconciled = plot_options.get('show_reconciled', True)
+    show_areas = plot_options.get('show_areas', False)
+    show_semaphore = plot_options.get('show_semaphore', False)
+    show_pozos = plot_options.get('show_pozos', False)
+    blast_tolerance = plot_options.get('blast_tolerance', 10.0)
+    grid_height = plot_options.get('grid_height', 15.0)
+    grid_ref = plot_options.get('grid_ref', 0.0)
+    tolerances = plot_options.get('tolerances', {})
+    if not tolerances:
+        tolerances = {'bench_height': {'pos': 1.5}}
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
     if len(distances_d) > 0:
-        ax.plot(distances_d, elevations_d, 'c-', label='Diseño', linewidth=1.5, alpha=0.7)
-        
-    # 2. Plot As-Built (Real)
+        ax.plot(distances_d, elevations_d, color='royalblue', label='Diseño', linewidth=2)
+
+    class ProfileHolder:
+        def __init__(self, d, e):
+            self.distances = np.array(d)
+            self.elevations = np.array(e)
+
+    pd_prof = ProfileHolder(distances_d, elevations_d)
+    pt_prof = ProfileHolder(distances_t, elevations_t)
+
+    if show_areas and len(distances_d) > 0 and len(distances_t) > 0:
+        from core.geom_utils import calculate_area_between_profiles
+        a_over, a_under, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(pd_prof, pt_prof)
+        mask_u = z_eval_i >= z_ref_i
+        if np.any(mask_u):
+            ax.fill_between(d_i, z_ref_i, z_eval_i, where=mask_u, facecolor='blue', alpha=0.3)
+        mask_o = z_eval_i < z_ref_i
+        if np.any(mask_o):
+            ax.fill_between(d_i, z_ref_i, z_eval_i, where=mask_o, facecolor='red', alpha=0.3)
+
     if len(distances_t) > 0:
-        ax.plot(distances_t, elevations_t, 'r-', label='Perfil Real (Scan)', linewidth=2, alpha=0.6)
-        
-    # 3. Plot Reconciled Segments using the same function as the Plotly chart
-    from core.param_extractor import build_reconciled_profile
-    
-    if params_topo.benches:
-        rec_dist, rec_elev = build_reconciled_profile(params_topo.benches)
-        if len(rec_dist) > 0:
-            ax.plot(rec_dist, rec_elev, 'g-', label='Conciliado As-Built', linewidth=2.5)
+        if show_semaphore:
+            ax.plot(distances_t, elevations_t, color='gray', linewidth=0.5, alpha=0.7)
+            from core.geom_utils import calculate_profile_deviation
+            devs = calculate_profile_deviation(pd_prof, pt_prof)
+            T = tolerances.get('bench_height', {}).get('pos', 1.5)
             
-        # Draw crest/toe markers
-        for b in params_topo.benches:
-            ax.plot(b.crest_distance, b.crest_elevation, 'g^', markersize=5)
-            ax.plot(b.toe_distance, b.toe_elevation, 'gv', markersize=5)
-    
-    # Reconciled Design profile
-    if params_design.benches:
-        rec_d_dist, rec_d_elev = build_reconciled_profile(params_design.benches)
-        if len(rec_d_dist) > 0:
-            ax.plot(rec_d_dist, rec_d_elev, 'b--', label='Conciliado Diseño', linewidth=1.5, alpha=0.7)
+            mask_ok = devs <= T
+            mask_warn = (devs > T) & (devs <= 1.5 * T)
+            mask_nok = devs > 1.5 * T
+
+            if np.any(mask_ok):
+                ax.scatter(distances_t[mask_ok], elevations_t[mask_ok], color='#006100', s=10, zorder=5)
+            if np.any(mask_warn):
+                ax.scatter(distances_t[mask_warn], elevations_t[mask_warn], color='#FFD700', s=12, zorder=5)
+            if np.any(mask_nok):
+                ax.scatter(distances_t[mask_nok], elevations_t[mask_nok], color='#FF0000', s=12, zorder=5)
+            
+            ax.plot([], [], color='forestgreen', linewidth=2, label='Topografía Real')
+        else:
+            ax.plot(distances_t, elevations_t, color='forestgreen', label='Topografía Real', linewidth=2)
+
+    from core.param_extractor import build_reconciled_profile
+    if show_reconciled:
+        if params_topo and params_topo.benches:
+            rec_dist, rec_elev = build_reconciled_profile(params_topo.benches)
+            if len(rec_dist) > 0:
+                ax.plot(rec_dist, rec_elev, color='#FF7F0E', label='Conciliado As-Built', linewidth=2.5, zorder=4)
+                for b in params_topo.benches:
+                    ax.plot(b.crest_distance, b.crest_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
+                    ax.plot(b.toe_distance, b.toe_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
+
+        if params_design and params_design.benches:
+            rec_d_dist, rec_d_elev = build_reconciled_profile(params_design.benches)
+            if len(rec_d_dist) > 0:
+                ax.plot(rec_d_dist, rec_d_elev, color='royalblue', linestyle='--', linewidth=1.5, alpha=0.7)
+
+    if params_topo and params_topo.benches:
+        for bench in params_topo.benches:
+            if filtered_bench_nums is not None and bench.bench_number not in filtered_bench_nums:
+                continue
+            ax.annotate(f"B{bench.bench_number}", xy=(bench.crest_distance, bench.crest_elevation),
+                        xytext=(-8, 8), textcoords='offset points',
+                        arrowprops=dict(arrowstyle="->", color="red", alpha=0.6),
+                        fontsize=8, color="red")
+            ax.annotate(f"Pa{bench.bench_number}", xy=(bench.toe_distance, bench.toe_elevation),
+                        xytext=(8, -8), textcoords='offset points',
+                        arrowprops=dict(arrowstyle="->", color="darkred", alpha=0.6),
+                        fontsize=7, color="darkred")
+
+    if show_pozos and df_pozos is not None and not df_pozos.empty and section is not None:
+        from core.calculo_tronadura import proyectar_pozos_en_seccion
+        projected = proyectar_pozos_en_seccion(
+            df_pozos,
+            origin=section.origin,
+            azimuth=section.azimuth,
+            length=section.length,
+            tolerance=blast_tolerance,
+        )
+        if not projected.empty:
+            for _, row in projected.iterrows():
+                d_c = row['dist_along']
+                d_t = row['dist_along_toe'] if 'dist_along_toe' in row else d_c
+                z_c = row['Z_collar']
+                z_t = row['Z_toe']
+                ax.plot([d_c, d_t], [z_c, z_t], color='orange', linestyle='-', linewidth=1.5, alpha=0.5, zorder=3)
+                ax.scatter(d_c, z_c, color='darkorange', s=15, zorder=4)
+
+    all_d = np.concatenate([distances_d, distances_t])
+    all_z = np.concatenate([elevations_d, elevations_t])
+    valid_d = all_d[np.isfinite(all_d)]
+    valid_z = all_z[np.isfinite(all_z)]
+
+    if len(valid_d) > 0 and len(valid_z) > 0:
+        xmin, xmax = float(np.min(valid_d)), float(np.max(valid_d))
+        zmin, zmax = float(np.min(valid_z)), float(np.max(valid_z))
+        x_pad = max((xmax - xmin) * 0.05, 5.0)
+        z_pad = max((zmax - zmin) * 0.05, 5.0)
+        ax.set_xlim(xmin - x_pad, xmax + x_pad)
+        ax.set_ylim(zmin - z_pad, zmax + z_pad)
+
+        if grid_height is not None and grid_height > 0:
+            y_ticks = np.arange(np.floor((zmin - z_pad - grid_ref) / grid_height) * grid_height + grid_ref,
+                                np.ceil((zmax + z_pad - grid_ref) / grid_height) * grid_height + grid_ref + grid_height,
+                                grid_height)
+            ax.set_yticks(y_ticks)
 
     ax.set_title(f"Sección: {params_design.section_name} - {params_design.sector}")
     ax.set_xlabel("Distancia (m)")
     ax.set_ylabel("Elevación (m)")
-    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.grid(True, linestyle='--', color='lightgray', alpha=0.7)
     ax.legend(loc='upper right')
     ax.set_aspect('equal', adjustable='box')
-    
-    # Save to buffer
+
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -60,33 +149,20 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
 
 
 def generate_word_report(comparisons, all_data, output_path, project_info=None,
-                         df_pozos=None, sections=None):
-    """
-    Generate a full Word report with summary tables and section detailed plots.
-    
-    all_data: List of dicts containing keys:
-        - section_name
-        - params_design
-        - params_topo
-        - profile_d: (dist, elev) arrays
-        - profile_t: (dist, elev) arrays
-    """
+                         df_pozos=None, sections=None, plot_options=None):
     if project_info is None:
         project_info = {}
         
     doc = Document()
     
-    # Title
     title = doc.add_heading(f"Informe de Conciliación Geotécnica", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
-    # Meta info
     p = doc.add_paragraph()
     p.add_run(f"Proyecto: {project_info.get('project', 'N/A')}\n").bold = True
     p.add_run(f"Elaborado por: {project_info.get('author', 'N/A')}\n")
     p.add_run(f"Fecha: {datetime.now().strftime('%d/%m/%Y')}\n")
     
-    # Summary
     doc.add_heading("1. Resumen Ejecutivo", level=1)
     
     if comparisons:
@@ -97,7 +173,6 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         doc.add_paragraph(f"Se evaluaron {len(comparisons)} bancos en total.")
         doc.add_paragraph(f"Cumplimiento Global: {pct:.1f}%")
         
-        # Table of Compliance
         table = doc.add_table(rows=1, cols=4)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
@@ -115,55 +190,64 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
     else:
         doc.add_paragraph("No se encontraron resultados para reportar.")
  
-    # Detailed Sections
     doc.add_heading("2. Detalle por Sección", level=1)
     
     for item in all_data:
         sec_name = item['section_name']
+        sec_comps = [c for c in comparisons if c['section'] == sec_name]
+        if not sec_comps:
+            continue
+            
         doc.add_heading(f"Sección {sec_name}", level=2)
         
-        # Add Plot
         pd = item['params_design']
         pt = item['params_topo']
         prof_d = item['profile_d']
         prof_t = item['profile_t']
         
-        img_stream = create_section_plot(pd, pt, prof_d[0], prof_d[1], prof_t[0], prof_t[1])
+        sec_obj = None
+        if sections:
+            for s in sections:
+                if s.name == sec_name:
+                    sec_obj = s
+                    break
+                    
+        filtered_bench_nums = {c['bench_num'] for c in sec_comps}
+        
+        img_stream = create_section_plot(
+            pd, pt, prof_d[0], prof_d[1], prof_t[0], prof_t[1],
+            plot_options=plot_options, section=sec_obj, df_pozos=df_pozos,
+            filtered_bench_nums=filtered_bench_nums
+        )
         doc.add_picture(img_stream, width=Inches(6))
         img_stream.close()
         
-        # Add bench table for this section
-        sec_comps = [c for c in comparisons if c['section'] == sec_name]
-        if sec_comps:
-            table = doc.add_table(rows=1, cols=7)
-            table.style = 'Table Grid'
-            # Header
-            headers = ['Banco', 'H. Dise (m)', 'H. Real', 'Ang. Dise (°)', 'Ang. Real', 'Berma Real (m)', 'Estado']
-            for i, h in enumerate(headers):
-                table.rows[0].cells[i].text = h
-                
-            for c in sec_comps:
-                row_cells = table.add_row().cells
-                row_cells[0].text = str(c['bench_num'])
-                row_cells[1].text = str(c['height_design'])
-                row_cells[2].text = str(c['height_real'])
-                row_cells[3].text = str(c['angle_design'])
-                row_cells[4].text = str(c['angle_real'])
-                row_cells[5].text = str(c['berm_real'])
-                
-                # Check overall status for this bench (simple logic: all must be compliant)
-                statuses = [c['height_status'], c['angle_status'], c['berm_status']]
-                if "NO CUMPLE" in statuses:
-                    final_status = "NO CUMPLE"
-                elif "FUERA DE TOLERANCIA" in statuses:
-                    final_status = "ALERTA"
-                else:
-                    final_status = "OK"
-                row_cells[6].text = final_status
+        table = doc.add_table(rows=1, cols=7)
+        table.style = 'Table Grid'
+        headers = ['Banco', 'H. Dise (m)', 'H. Real', 'Ang. Dise (°)', 'Ang. Real', 'Berma Real (m)', 'Estado']
+        for i, h in enumerate(headers):
+            table.rows[0].cells[i].text = h
+            
+        for c in sec_comps:
+            row_cells = table.add_row().cells
+            row_cells[0].text = str(c['bench_num'])
+            row_cells[1].text = str(c['height_design'])
+            row_cells[2].text = str(c['height_real'])
+            row_cells[3].text = str(c['angle_design'])
+            row_cells[4].text = str(c['angle_real'])
+            row_cells[5].text = str(c['berm_real'])
+            
+            statuses = [c['height_status'], c['angle_status'], c['berm_status']]
+            if "NO CUMPLE" in statuses:
+                final_status = "NO CUMPLE"
+            elif "FUERA DE TOLERANCIA" in statuses:
+                final_status = "ALERTA"
+            else:
+                final_status = "OK"
+            row_cells[6].text = final_status
  
-            doc.add_page_break()
+        doc.add_page_break()
 
-    # 3. Drill & Blast Analysis
     if df_pozos is not None and not df_pozos.empty:
         doc.add_heading("3. Análisis de Perforación y Tronadura", level=1)
 
@@ -227,11 +311,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
     doc.save(output_path)
 
 
-def generate_section_images_zip(all_data):
-    """
-    Generate a ZIP file containing PNG images of all section plots.
-    Returns: BytesIO object containing the ZIP file.
-    """
+def generate_section_images_zip(all_data, plot_options=None, sections=None, df_pozos=None, filtered_comps=None):
     import zipfile
     
     zip_buffer = io.BytesIO()
@@ -240,16 +320,31 @@ def generate_section_images_zip(all_data):
         for item in all_data:
             sec_name = item['section_name']
             
-            # Extract data
+            filtered_bench_nums = None
+            if filtered_comps:
+                sec_comps = [c for c in filtered_comps if c['section'] == sec_name]
+                if not sec_comps:
+                    continue
+                filtered_bench_nums = {c['bench_num'] for c in sec_comps}
+            
             pd = item['params_design']
             pt = item['params_topo']
             prof_d = item['profile_d']
             prof_t = item['profile_t']
             
-            # Generate plot
-            img_buf = create_section_plot(pd, pt, prof_d[0], prof_d[1], prof_t[0], prof_t[1])
+            sec_obj = None
+            if sections:
+                for s in sections:
+                    if s.name == sec_name:
+                        sec_obj = s
+                        break
             
-            # Add to ZIP
+            img_buf = create_section_plot(
+                pd, pt, prof_d[0], prof_d[1], prof_t[0], prof_t[1],
+                plot_options=plot_options, section=sec_obj, df_pozos=df_pozos,
+                filtered_bench_nums=filtered_bench_nums
+            )
+            
             filename = f"{sec_name}.png"
             zip_file.writestr(filename, img_buf.getvalue())
             img_buf.close()
