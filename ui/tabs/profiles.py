@@ -344,11 +344,12 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
     texts, colors = [], []
 
     for _, row in projected.iterrows():
-        d = row['dist_along']
+        d_c = row['dist_along']
+        d_t = row['dist_along_toe'] if 'dist_along_toe' in row else d_c
         z_c = row['Z_collar']
         z_t = row['Z_toe']
 
-        x_holes.extend([d, d, None])
+        x_holes.extend([d_c, d_t, None])
         y_holes.extend([z_c, z_t, None])
 
         label = str(row[label_col]) if label_col else ''

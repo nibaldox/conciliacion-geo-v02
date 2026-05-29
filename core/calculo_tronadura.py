@@ -150,18 +150,27 @@ def proyectar_pozos_en_seccion(
                           np.cos(np.radians(azimuth))])
     normal = np.array([direction[1], -direction[0]])
 
-    dx = df_pozos['X'].values - origin[0]
-    dy = df_pozos['Y'].values - origin[1]
+    dx_collar = df_pozos['X'].values - origin[0]
+    dy_collar = df_pozos['Y'].values - origin[1]
 
-    dist_along = dx * direction[0] + dy * direction[1]
-    dist_perp = np.abs(dx * normal[0] + dy * normal[1])
+    dist_along_collar = dx_collar * direction[0] + dy_collar * direction[1]
+    dist_perp_collar = np.abs(dx_collar * normal[0] + dy_collar * normal[1])
+
+    # Defensive guard in case X_toe / Y_toe are not present in raw dataframe
+    x_toe_vals = df_pozos['X_toe'].values if 'X_toe' in df_pozos.columns else df_pozos['X'].values
+    y_toe_vals = df_pozos['Y_toe'].values if 'Y_toe' in df_pozos.columns else df_pozos['Y'].values
+
+    dx_toe = x_toe_vals - origin[0]
+    dy_toe = y_toe_vals - origin[1]
+    dist_along_toe = dx_toe * direction[0] + dy_toe * direction[1]
 
     half_len = length / 2
-    mask = (dist_perp <= tolerance) & (dist_along >= -half_len) & (dist_along <= half_len)
+    mask = (dist_perp_collar <= tolerance) & (dist_along_collar >= -half_len) & (dist_along_collar <= half_len)
 
     result = df_pozos.loc[mask].copy()
-    result['dist_along'] = dist_along[mask]
-    result['dist_perp'] = dist_perp[mask]
+    result['dist_along'] = dist_along_collar[mask]
+    result['dist_along_toe'] = dist_along_toe[mask]
+    result['dist_perp'] = dist_perp_collar[mask]
 
     return result.sort_values('dist_along').reset_index(drop=True)
 
