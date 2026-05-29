@@ -45,7 +45,9 @@ def _render_excel_export(config: dict) -> None:
             st.session_state.comparison_results,
             st.session_state.params_design,
             st.session_state.params_topo,
-            config['tolerances'], output_path, project_info)
+            config['tolerances'], output_path, project_info,
+            df_pozos=st.session_state.get('blast_df_clean'),
+            sections=st.session_state.get('sections'))
 
         with open(output_path, "rb") as f:
             st.download_button(

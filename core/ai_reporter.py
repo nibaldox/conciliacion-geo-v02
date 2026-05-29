@@ -41,11 +41,18 @@ def generate_geotech_report(stats, api_key, model, base_url=None):
     for k, v in global_stats.items():
         compliance_text += f"- {k}: {v}\n"
 
-    # 2. Critical Sections (Mockup logic if stats doesn't have it explicitly, 
-    # but assuming we pass the full 'comparisons' list or a summary)
-    # For now, let's assume 'stats' has a 'critical_sections' list or we summarize it.
-    # If not, we'll keep it generic.
-    
+    # 2. Drill & Blast Stats
+    blast_stats = stats.get('blast_stats', {})
+    blast_text = ""
+    if blast_stats:
+        blast_text = f"""
+    ### Datos de Perforación y Voladura (Tronadura)
+    - Total de Pozos de Voladura Cargados: {blast_stats.get('n_pozos', 'N/A')}
+    - Pasadura (Sub-drilling) Promedio: {blast_stats.get('pasadura_promedio', 'N/A')} m
+    - Porcentaje de Pozos en Pasadura Óptima (0.5m - 1.5m): {blast_stats.get('pasadura_optima_pct', 'N/A')}%
+    - Coeficiente de Correlación (Kg Explosivo vs Daño de Talud): {blast_stats.get('correlacion_r', 'N/A')} (Interpretación: {blast_stats.get('correlacion_interpretacion', 'N/A')})
+        """
+
     prompt = f"""
     Actúa como un Ingeniero Geotécnico Senior experto en conciliación (Diseño vs As-Built).
     Tu tarea es escribir un **Informe Ejecutivo** breve y profesional basado en los siguientes datos de la semana.
@@ -54,13 +61,14 @@ def generate_geotech_report(stats, api_key, model, base_url=None):
     - Total de Bancos Analizados: {stats.get('n_total', 'N/A')}
     - Tramos/Bancos Validados: {stats.get('n_valid', 'N/A')}
     
-    ### Estadísticas Globales
+    ### Estadísticas Globales de Adherencia Geotécnica
     {compliance_text}
+    {blast_text}
 
     ### Instrucciones
     1.  **Resumen Ejecutivo**: Da un veredicto general sobre la adherencia al diseño (¿Es buena, regular o mala?).
     2.  **Análisis de Desviaciones**: Menciona qué parámetro (Altura, Ángulo, Berma) presenta mayores problemas.
-    3.  **Recomendaciones**: Sugiere 2-3 acciones operativas para corregir las desviaciones detectadas (ej. "Revisar perforación en bancos superiores" si hay sobre-excavación).
+    3.  **Optimización de Perforación y Voladura**: Si hay datos de Tronadura disponibles, formula sugerencias técnicas explícitas para corregir desviaciones. Por ejemplo, si el sobre-quiebre (overbreak) es alto en zonas de alta energía, sugiere ensanchar la malla de pre-corte o reducir carga de producción. Si la pasadura es deficiente (corta), recomienda incrementarla para evitar lomos duros en el piso.
     4.  **Tono**: Técnico, directo y profesional. Usa formato Markdown (negritas, listas).
     5.  **Idioma**: Español.
 

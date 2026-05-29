@@ -354,7 +354,9 @@ def _write_sector_summary(wb: Workbook, comparisons: List[Dict[str, Any]]) -> No
 
 def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
                    params_topo: List[Any], tolerances: Dict[str, Any],
-                   output_path: str, project_info: Optional[Dict[str, str]] = None) -> None:
+                   output_path: str, project_info: Optional[Dict[str, str]] = None,
+                   df_pozos: Optional[Any] = None,
+                   sections: Optional[List[Any]] = None) -> None:
     """Export comparison results to a formatted Excel workbook."""
     if project_info is None:
         project_info = {}
@@ -367,4 +369,155 @@ def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
     _write_interramp_sheet(wb, params_design, params_topo)
     _write_dashboard_sheet(wb, comparisons)
 
+    if df_pozos is not None and not df_pozos.empty:
+        _write_tronadura_sheet(wb, df_pozos, comparisons, sections)
+
     wb.save(output_path)
+
+
+def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: List[Dict[str, Any]], sections: Optional[List[Any]] = None) -> None:
+    """Write Drill & Blast and Geotechnical correlation results to Excel."""
+    ws = wb.create_sheet("Tronadura")
+    ws.views.sheetView[0].showGridLines = True
+
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from core.geom_utils import find_df_column
+    import pandas as pd
+    import numpy as np
+
+    title_font = Font(name='Calibri', size=16, bold=True, color='2F5496')
+    section_font = Font(name='Calibri', size=13, bold=True, color='1F4E78')
+    header_font = Font(name='Calibri', size=11, bold=True, color='FFFFFF')
+    regular_font = Font(name='Calibri', size=11)
+
+    header_fill = PatternFill(start_color='1F4E78', end_color='1F4E78', fill_type='solid')
+    zebra_fill = PatternFill(start_color='F2F5F8', end_color='F2F5F8', fill_type='solid')
+
+    center_align = Alignment(horizontal='center', vertical='center')
+    left_align = Alignment(horizontal='left', vertical='center')
+
+    thin_side = Side(border_style="thin", color="D3D3D3")
+    thin_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+
+    # Title
+    ws.cell(row=1, column=1, value="ANÁLISIS DE PERFORACIÓN, TRONADURA Y CORRELACIÓN").font = title_font
+
+    # Section 1: Geotechnical Correlation Summary
+    ws.cell(row=3, column=1, value="1. Resumen de Correlación Geotécnica vs Voladura").font = section_font
+
+    headers_corr = ["Sección", "Pozos Cercanos (r=15m)", "Carga Explosiva Cercana (Kg)", "Desviación Media Absoluta (m)"]
+    for col_idx, h in enumerate(headers_corr, 1):
+        cell = ws.cell(row=4, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+
+    row_idx = 5
+    kg_col = find_df_column(df_pozos, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+
+    df_comp = pd.DataFrame(comparisons)
+    dev_col = None
+    for col_name in ['delta_crest', 'height_dev', 'angle_dev']:
+        if col_name in df_comp.columns:
+            dev_col = col_name
+            break
+
+    unique_sections = sorted(df_comp['section'].unique().tolist()) if not df_comp.empty else []
+
+    corr_rows = []
+    if sections and kg_col and dev_col:
+        from core.calculo_tronadura import proyectar_pozos_en_seccion
+        for sec in sections:
+            sec_name = sec.name
+            df_sec = df_comp[df_comp['section'] == sec_name]
+            if df_sec.empty:
+                continue
+            avg_dev = df_sec[dev_col].abs().mean()
+            proj = proyectar_pozos_en_seccion(df_pozos, sec.start, sec.azimuth, sec.length, tolerance=15.0)
+            if not proj.empty:
+                total_kg = proj[kg_col].fillna(0).sum()
+                num_wells = len(proj)
+            else:
+                total_kg = 0
+                num_wells = 0
+            corr_rows.append((sec_name, num_wells, total_kg, avg_dev))
+    else:
+        # Fallback if sections not loaded
+        for sec_name in unique_sections:
+            df_sec = df_comp[df_comp['section'] == sec_name]
+            avg_dev = df_sec[dev_col].abs().mean() if dev_col else 0.0
+            corr_rows.append((sec_name, 0, 0, avg_dev))
+
+    for row_data in corr_rows:
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.font = regular_font
+            cell.border = thin_border
+            if col_idx in (2, 3):
+                cell.number_format = '#,##0'
+                cell.alignment = center_align
+            elif col_idx == 4:
+                cell.number_format = '0.00'
+                cell.alignment = center_align
+            else:
+                cell.alignment = left_align
+        row_idx += 1
+
+    # Section 2: Drill Holes Details
+    row_idx += 2
+    ws.cell(row=row_idx, column=1, value="2. Detalle de Pozos de Tronadura y Pasadura").font = section_font
+
+    row_idx += 1
+    headers_pozo = ["Pozo", "Collar X", "Collar Y", "Collar Z", "Pata X", "Pata Y", "Pata Z", "Largo (m)", "Inclinación (°)", "Azimut (°)", "Explosivo (Kg)", "Pasadura (m)"]
+    for col_idx, h in enumerate(headers_pozo, 1):
+        cell = ws.cell(row=row_idx, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+
+    row_idx += 1
+    df_pozos['Pasadura'] = (df_pozos['Z_collar'] - 15.0) - df_pozos['Z_toe']
+
+    label_col = find_df_column(df_pozos, ['label_pozo'], raise_error=False)
+    incl_col = 'Incl'
+    az_col = 'Az'
+    len_col = 'Len'
+
+    for idx, (_, row) in enumerate(df_pozos.iterrows()):
+        label = str(row[label_col]) if label_col and pd.notna(row[label_col]) else f"P-{idx+1}"
+        x_c = row['X']
+        y_c = row['Y']
+        z_c = row['Z_collar']
+        x_t = row['X_toe']
+        y_t = row['Y_toe']
+        z_t = row['Z_toe']
+        length = row[len_col]
+        incl = row[incl_col]
+        az = row[az_col]
+        kg = row[kg_col] if kg_col and pd.notna(row[kg_col]) else 0.0
+        pas = row['Pasadura']
+
+        row_vals = [label, x_c, y_c, z_c, x_t, y_t, z_t, length, incl, az, kg, pas]
+
+        for col_idx, val in enumerate(row_vals, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.font = regular_font
+            cell.border = thin_border
+            if col_idx == 1:
+                cell.alignment = left_align
+            else:
+                cell.alignment = center_align
+                if col_idx in (2, 3, 4, 5, 6, 7):
+                    cell.number_format = '#,##0.0'
+                elif col_idx in (8, 9, 10, 11, 12):
+                    cell.number_format = '0.0'
+
+        if idx % 2 == 1:
+            for col_idx in range(1, 13):
+                ws.cell(row=row_idx, column=col_idx).fill = zebra_fill
+
+        row_idx += 1
+
+    _auto_width(ws)

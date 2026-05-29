@@ -58,7 +58,9 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
     buf.seek(0)
     return buf
 
-def generate_word_report(comparisons, all_data, output_path, project_info=None):
+
+def generate_word_report(comparisons, all_data, output_path, project_info=None,
+                         df_pozos=None, sections=None):
     """
     Generate a full Word report with summary tables and section detailed plots.
     
@@ -112,7 +114,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None):
             row_cells[3].text = str(sum(1 for c in comparisons if c[key] == "NO CUMPLE"))
     else:
         doc.add_paragraph("No se encontraron resultados para reportar.")
-
+ 
     # Detailed Sections
     doc.add_heading("2. Detalle por Sección", level=1)
     
@@ -158,8 +160,69 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None):
                 else:
                     final_status = "OK"
                 row_cells[6].text = final_status
+ 
+            doc.add_page_break()
 
-        doc.add_page_break()
+    # 3. Drill & Blast Analysis
+    if df_pozos is not None and not df_pozos.empty:
+        doc.add_heading("3. Análisis de Perforación y Tronadura", level=1)
+
+        pasadura = (df_pozos['Z_collar'] - 15.0) - df_pozos['Z_toe']
+        p_mean = pasadura.mean()
+        p_optimal = ((pasadura >= 0.5) & (pasadura <= 1.5)).sum()
+        p_pct = p_optimal / len(df_pozos) * 100 if len(df_pozos) > 0 else 0
+
+        p1 = doc.add_paragraph()
+        p1.add_run("Estadísticas Generales de Perforación y Voladura:\n").bold = True
+        p1.add_run(f"- Total de Pozos Registrados: {len(df_pozos)}\n")
+        p1.add_run(f"- Pasadura Promedio (Sub-drilling): {p_mean:.2f} m\n")
+        p1.add_run(f"- Porcentaje de Pozos en Pasadura Óptima (0.5m a 1.5m): {p_pct:.1f}% ({p_optimal} pozos)\n")
+
+        from core.geom_utils import find_df_column
+        kg_col = find_df_column(df_pozos, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+
+        import pandas as pd
+        df_comp = pd.DataFrame(comparisons)
+        dev_col = None
+        for col_name in ['delta_crest', 'height_dev', 'angle_dev']:
+            if col_name in df_comp.columns:
+                dev_col = col_name
+                break
+
+        if sections and kg_col and dev_col:
+            doc.add_heading("Cruce de Desviaciones vs Carga de Explosivo", level=2)
+            doc.add_paragraph(
+                "A continuación se detalla la cantidad de pozos y la carga de explosivo acumulada en un radio de 15 metros "
+                "respecto al eje de cada sección transversal, cruzada con su respectiva desviación absoluta media:"
+            )
+
+            from core.calculo_tronadura import proyectar_pozos_en_seccion
+            table = doc.add_table(rows=1, cols=4)
+            table.style = 'Table Grid'
+
+            headers = ["Sección", "Pozos Cercanos", "Kilos de Explosivo", "Desviación Media (m)"]
+            for idx, h in enumerate(headers):
+                table.rows[0].cells[idx].text = h
+
+            for sec in sections:
+                sec_name = sec.name
+                df_sec = df_comp[df_comp['section'] == sec_name]
+                if df_sec.empty:
+                    continue
+                avg_dev = df_sec[dev_col].abs().mean()
+                proj = proyectar_pozos_en_seccion(df_pozos, sec.start, sec.azimuth, sec.length, tolerance=15.0)
+                if not proj.empty:
+                    total_kg = proj[kg_col].fillna(0).sum()
+                    num_wells = len(proj)
+                else:
+                    total_kg = 0
+                    num_wells = 0
+
+                row_cells = table.add_row().cells
+                row_cells[0].text = sec_name
+                row_cells[1].text = str(num_wells)
+                row_cells[2].text = f"{total_kg:.0f}"
+                row_cells[3].text = f"{avg_dev:.2f}"
 
     doc.save(output_path)
 

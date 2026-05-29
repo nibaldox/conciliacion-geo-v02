@@ -140,11 +140,13 @@ def render_modulo_tronadura() -> None:
                 )
 
                 # Custom 3D coloring option
-                color_by = st.selectbox(
+                col_c1, col_c2 = st.columns(2)
+                color_by = col_c1.selectbox(
                     "Colorear pozos en 3D por:",
                     ["Carga Explosiva (Kg)"] if kg_col else [] + ["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"],
                     index=0
                 )
+                show_energy_grid = col_c2.checkbox("Mostrar Densidad de Energía 3D (Modelo de Daño)", value=False)
 
                 # Reconstruct x_lines, y_lines, z_lines dynamically for filtered set
                 import numpy as np
@@ -172,7 +174,7 @@ def render_modulo_tronadura() -> None:
                     filt_z[j + 1] = zt[i]
                     filt_z[j + 2] = None
 
-                _render_3d(df_filtered, filt_x, filt_y, filt_z, color_by)
+                _render_3d(df_filtered, filt_x, filt_y, filt_z, color_by, show_energy_grid)
 
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
                     st.dataframe(df_filtered, use_container_width=True)
@@ -341,7 +343,7 @@ def _read_uploaded(uploaded) -> "pd.DataFrame":
     return pd.read_csv(io.StringIO(content))
 
 
-def _render_3d(df, x_lines, y_lines, z_lines, color_by: str) -> None:
+def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False) -> None:
     fig = go.Figure()
 
     add_ref_lines_3d(fig, z_value=float(df['Z_collar'].max()) + 5)
@@ -391,6 +393,56 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str) -> None:
         name='Collars',
         hovertemplate='X: %{x:.1f}<br>Y: %{y:.1f}<br>Z: %{z:.1f}<extra>Collar</extra>',
     ))
+
+    # --- Volumetric Energy Density Grid (IDW 3D) ---
+    if show_energy_grid:
+        import numpy as np
+        # 1. Bounding box
+        x_min, x_max = float(df['X'].min()), float(df['X'].max())
+        y_min, y_max = float(df['Y'].min()), float(df['Y'].max())
+        z_min, z_max = float(df['Z_toe'].min()), float(df['Z_collar'].max())
+
+        # 2. Build 3D mesh grid (10x10x4 = 400 points for real-time calculation)
+        xs = np.linspace(x_min, x_max, 10)
+        ys = np.linspace(y_min, y_max, 10)
+        zs = np.linspace(z_min, z_max, 4)
+        grid_x, grid_y, grid_z = np.meshgrid(xs, ys, zs)
+        points = np.vstack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()]).T
+
+        # 3. Vectorized IDW calculations
+        C = df[['X', 'Y', 'Z_collar']].values.astype(float)
+        T = df[['X_toe', 'Y_toe', 'Z_toe']].values.astype(float)
+        V = T - C
+        V_len_sq = np.sum(V**2, axis=1)
+        V_len_sq[V_len_sq == 0] = 1e-6
+        Q = df[kg_col].fillna(0).values if kg_col else np.ones(len(df))
+
+        energies = []
+        for gp in points:
+            W = gp - C
+            t = np.sum(W * V, axis=1) / V_len_sq
+            t_c = np.clip(t, 0.0, 1.0)
+            closest = C + t_c[:, np.newaxis] * V
+            d_sq = np.sum((gp - closest)**2, axis=1)
+            d_sq[d_sq < 1e-4] = 1e-4
+            energy = np.sum(Q / d_sq)
+            energies.append(energy)
+
+        # 4. Draw transparent volumetric scatter trace
+        fig.add_trace(go.Scatter3d(
+            x=points[:, 0], y=points[:, 1], z=points[:, 2],
+            mode='markers',
+            marker=dict(
+                size=7,
+                color=energies,
+                colorscale='YlOrRd',
+                opacity=0.3,
+                showscale=False,
+            ),
+            name='Densidad Energía',
+            hoverinfo='skip',
+            showlegend=True,
+        ))
 
     fig.update_layout(
         scene=dict(
