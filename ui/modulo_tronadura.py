@@ -46,7 +46,7 @@ def render_modulo_tronadura() -> None:
         return
 
     st.subheader("Vista previa del archivo")
-    st.dataframe(df.head(20), use_container_width=True)
+    st.dataframe(df.head(20), width="stretch")
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
     # Clear processed state if file changes
@@ -258,7 +258,7 @@ def render_modulo_tronadura() -> None:
                 )
 
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
-                    st.dataframe(df_filtered, use_container_width=True)
+                    st.dataframe(df_filtered, width="stretch")
 
         with tab_corr:
             df_filtered = df_clean.copy() # Base for correlation
@@ -369,7 +369,7 @@ def render_modulo_tronadura() -> None:
                         if df_corr.empty or df_corr['Kg_Explosivo'].sum() == 0:
                             st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
                         else:
-                            st.dataframe(df_corr, use_container_width=True)
+                            st.dataframe(df_corr, width="stretch")
 
                             # Plot Scatter with Trendline
                             fig_scat = go.Figure()

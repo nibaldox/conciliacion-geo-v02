@@ -46,7 +46,7 @@ def render_sections_section():
                 "Origen X": f"{s.origin[0]:.1f}", "Origen Y": f"{s.origin[1]:.1f}",
                 "Azimut (°)": f"{s.azimuth:.1f}", "Longitud (m)": f"{s.length:.1f}"
             })
-        st.dataframe(sec_data, use_container_width=True)
+        st.dataframe(sec_data, width="stretch")
 
     return st.session_state.sections if st.session_state.sections else None
 
@@ -272,7 +272,7 @@ def _render_tab_interactive(tab):
                     "Azimut (°)": f"{s.azimuth:.1f}",
                     "Longitud (m)": f"{s.length:.1f}",
                 })
-            st.dataframe(sec_data_int, use_container_width=True)
+            st.dataframe(sec_data_int, width="stretch")
 
         cols_btn = st.columns(2)
         if cols_btn[0].button("✅ Aplicar Secciones", type="primary", key="apply_int"):

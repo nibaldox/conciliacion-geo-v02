@@ -253,7 +253,7 @@ def _render_tab_interactive() -> None:
 
     if st.session_state.clicked_sections:
         st.subheader(f"📍 {len(st.session_state.clicked_sections)} secciones colocadas")
-        st.dataframe(_sections_to_rows(st.session_state.clicked_sections), use_container_width=True)
+        st.dataframe(_sections_to_rows(st.session_state.clicked_sections), width="stretch")
 
     cols_btn = st.columns(2)
     if cols_btn[0].button("✅ Aplicar Secciones", type="primary", key="apply_int"):
@@ -378,7 +378,7 @@ def _render_sections_table() -> None:
         st.subheader("📋 Secciones Definidas")
         cols_tbl = st.columns([5, 1])
         with cols_tbl[0]:
-            st.dataframe(_sections_to_rows(st.session_state.sections), use_container_width=True)
+            st.dataframe(_sections_to_rows(st.session_state.sections), width="stretch")
         with cols_tbl[1]:
             if st.button("🗑️ Limpiar Secciones", key="clear_all_sections_btn", type="secondary"):
                 st.session_state.sections = []
