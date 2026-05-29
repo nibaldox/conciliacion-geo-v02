@@ -344,7 +344,7 @@ def render_modulo_tronadura() -> None:
                             # Project wells with tolerance=15m
                             proj_wells = proyectar_pozos_en_seccion(
                                 df_filtered,
-                                sec.start,
+                                sec.origin,
                                 sec.azimuth,
                                 sec.length,
                                 tolerance=15.0
