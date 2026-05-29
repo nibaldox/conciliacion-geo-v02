@@ -222,20 +222,42 @@ def extract_parameters(distances, elevations, section_name, sector,
 
     _compute_berm_widths_from_profile(
         benches, simplified, d_simp, e_simp,
-        berm_threshold=berm_threshold,
         max_berm_width=max_berm_width,
     )
 
-    # check for trailing berm (flat area after last bench)
+    # check for leading berm (flat area before first bench)
     if len(benches) > 0:
-        last_bench = benches[-1]
-        # Find points after the last toe
-        # We need the original simplified points or distances/elevations
-        # benches stores crest/toe coordinates.
-        # Let's use the input arrays (distances, elevations) to find limits
+        first_bench = benches[0]
+        first_x = min(first_bench.toe_distance, first_bench.crest_distance)
         
-        # Last element indices in simplified array were stored in merged_segments but we lost them
-        # We can search in 'distances' array for points > last_bench.toe_distance (assuming scanning direction)
+        # Check if distances increase or decrease
+        if distances[-1] > distances[0]:
+            # Increasing distance
+            mask_before = distances < first_x - 0.1
+        else:
+            # Decreasing distance
+            mask_before = distances > first_x + 0.1
+            
+        d_before = distances[mask_before]
+        e_before = elevations[mask_before]
+        
+        if len(d_before) > 1:
+            # Check average slope of this leading segment
+            slope_deg = np.degrees(np.arctan2(np.abs(e_before[-1] - e_before[0]), np.abs(d_before[-1] - d_before[0])))
+            
+            # If it's flat enough to be a berm (<= berm_threshold)
+            if slope_deg <= berm_threshold:
+                # Calculate horizontal width
+                width = np.abs(d_before[-1] - d_before[0])
+                first_bench.berm_width = float(width)
+                
+                # Check for ramp
+                if 15.0 <= width <= 42.0:
+                    first_bench.is_ramp = True
+
+    # check for trailing berm (flat area after last bench) as a fallback floor
+    if len(benches) == 1 and benches[-1].berm_width <= 0:
+        last_bench = benches[-1]
         
         # Check if distances increase or decrease
         if distances[-1] > distances[0]:
@@ -292,61 +314,44 @@ def extract_parameters(distances, elevations, section_name, sector,
 
 def _compute_berm_widths_from_profile(
     benches, simplified, d_simp, e_simp,
-    berm_threshold=20.0, max_berm_width=50.0
+    max_berm_width=50.0
 ):
-    """Compute berm widths directly from the simplified profile.
+    """Compute berm widths as the horizontal distance between toe and crest of adjacent benches.
 
-    For each pair of consecutive benches, searches the simplified profile
-    between toe_distance[i] and crest_distance[i+1] for the flat (berm)
-    segment and returns its horizontal span. Falls back to the simple
-    |toe - crest| only when the profile-based search fails.
+    Geotechnically, the berm of a bench (e.g. Bench i) is the horizontal platform 
+    located in its UPPER part (at its crest), connecting it to the previous bench i-1.
+    
+    For Bench i >= 1:
+      berm_width = abs(min(curr_crest, curr_toe) - max(prev_crest, prev_toe))
     """
-    if len(benches) < 2:
+    n_benches = len(benches)
+    if n_benches == 0:
         return
-
-    for i in range(len(benches) - 1):
-        b_upper = benches[i]
-        b_lower = benches[i + 1]
-
-        d_toe = b_upper.toe_distance
-        d_crest = b_lower.crest_distance
-
-        d_min = min(d_toe, d_crest)
-        d_max = max(d_toe, d_crest)
-
-        mask = (d_simp >= d_min) & (d_simp <= d_max)
-        seg_d = d_simp[mask]
-        seg_e = e_simp[mask]
-
-        berm_width = None
-
-        if len(seg_d) >= 2:
-            dx_seg = np.diff(seg_d)
-            dy_seg = np.diff(seg_e)
-            seg_lens = np.sqrt(dx_seg**2 + dy_seg**2)
-            valid = seg_lens > 1e-4
-            if np.any(valid):
-                seg_angles = np.abs(np.degrees(np.arctan2(
-                    dy_seg[valid], dx_seg[valid])))
-                flat_mask = seg_angles <= berm_threshold
-                if np.any(flat_mask):
-                    flat_indices = np.where(valid)[0][flat_mask]
-                    flat_start_d = seg_d[flat_indices[0]]
-                    flat_end_d = seg_d[flat_indices[-1] + 1]
-                    raw_width = abs(flat_end_d - flat_start_d)
-                    if raw_width <= 20.0:
-                        berm_width = raw_width
-
-        if berm_width is None:
-            berm_width = abs(d_toe - d_crest)
-
-        b_upper.berm_width = float(berm_width)
-
-        if 15.0 <= b_upper.berm_width <= 42.0:
-            b_upper.is_ramp = True
-
-        if max_berm_width and b_upper.berm_width > max_berm_width:
-            b_upper.group_break = True
+        
+    # Initialize the first bench's berm to 0.0 (it might be updated later by leading berm check)
+    benches[0].berm_width = 0.0
+    benches[0].is_ramp = False
+    benches[0].group_break = False
+        
+    for i in range(n_benches - 1):
+        b_curr = benches[i]
+        b_next = benches[i + 1]
+        
+        curr_right = max(b_curr.toe_distance, b_curr.crest_distance)
+        next_left = min(b_next.toe_distance, b_next.crest_distance)
+        
+        width = float(abs(next_left - curr_right))
+        b_next.berm_width = width
+        
+        if 15.0 <= width <= 42.0:
+            b_next.is_ramp = True
+        else:
+            b_next.is_ramp = False
+            
+        if width >= max_berm_width:
+            b_next.group_break = True
+        else:
+            b_next.group_break = False
 
 
 def _evaluate_status(deviation, tol_neg, tol_pos):
@@ -407,6 +412,9 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     if n_d == 0 and n_t == 0:
         return []
 
+    # Threshold for valid match (e.g. vertical difference < 8.0m)
+    match_threshold = 8.0
+
     # Create Cost Matrix (Weighted 2D Euclidean Distance between Bench Centroids)
     # Rows: Design, Cols: Topo
     cost_matrix = np.zeros((n_d, n_t))
@@ -417,14 +425,18 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
         for j, bt in enumerate(benches_topo):
             bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
             bt_x = (bt.crest_distance + bt.toe_distance) / 2
-            # 2D Euclidean distance: Z has 1.5x weight for vertical priority, X has 1.0x weight
-            cost_matrix[i, j] = np.sqrt(1.5 * (bd_z - bt_z)**2 + 1.0 * (bd_x - bt_x)**2)
+            
+            # If vertical difference is too large, assign a massive cost
+            # to prevent matching across different vertical levels!
+            diff_z = abs(bd_z - bt_z)
+            if diff_z >= match_threshold:
+                cost_matrix[i, j] = 1e9
+            else:
+                # 2D Euclidean distance: Z has 1.5x weight for vertical priority, X has 1.0x weight
+                cost_matrix[i, j] = np.sqrt(1.5 * (bd_z - bt_z)**2 + 1.0 * (bd_x - bt_x)**2)
             
     # Solve Assignment Problem (Minimize total 2D distance cost)
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
-    
-    # Threshold for valid match (e.g. vertical difference < 8.0m)
-    match_threshold = 8.0
     
     # Gather valid match candidates
     candidates = []
@@ -459,49 +471,31 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 
     # Sort final matches by design index r
     valid_matches.sort(key=lambda x: x[0])
-    
+
     matched_design_indices = {r for r, c, _ in valid_matches}
     matched_topo_indices = {c for r, c, _ in valid_matches}
     design_to_topo = {r: c for r, c, _ in valid_matches}
-    
+
     # Process Matches
     for r in range(n_d):
         if r in matched_design_indices:
             c = design_to_topo[r]
             bd = benches_design[r]
             bt = benches_topo[c]
-            
-            # --- Comparison Logic ---
+
             height_dev = bt.bench_height - bd.bench_height
             angle_dev = bt.face_angle - bd.face_angle
-            
+
             tol_h = tolerances['bench_height']
             tol_a = tolerances['face_angle']
             tol_b = tolerances['berm_width']
 
             min_berm = tol_b.get('min', 0.0)
 
-            if bd.group_break and bt.group_break:
+            berm_real = round(bt.berm_width, 2)
+
+            if berm_real >= min_berm:
                 berm_status = "CUMPLE"
-            elif bd.group_break:
-                berm_status = "FALTA BANCO"
-            elif bt.group_break:
-                berm_status = "NO CUMPLE"
-            elif bt.is_ramp:
-                berm_status = "RAMPA DETECTADA"
-                if bd.is_ramp or bd.berm_width > 15.0:
-                    if abs(bt.berm_width - bd.berm_width) < 3.0:
-                        berm_status = "RAMPA OK"
-                    else:
-                        berm_status = "RAMPA (Desv. Ancho)"
-            elif bd.is_ramp:
-                berm_status = "FALTA RAMPA"
-            elif bt.berm_width == 0.0 and bd.berm_width == 0.0:
-                berm_status = "CUMPLE"
-            elif bt.berm_width >= min_berm:
-                berm_status = "CUMPLE"
-            elif bt.berm_width >= min_berm * 0.8:
-                berm_status = "FUERA DE TOLERANCIA"
             else:
                 berm_status = "NO CUMPLE"
             
@@ -520,7 +514,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'angle_dev': round(angle_dev, 1),
                 'angle_status': _evaluate_status(angle_dev, tol_a['neg'], tol_a['pos']),
                 'berm_design': round(bd.berm_width, 2),
-                'berm_real': round(bt.berm_width, 2),
+                'berm_real': berm_real,
                 'berm_min': min_berm,
                 'berm_status': berm_status,
                 'delta_crest': round(bt.crest_distance - bd.crest_distance, 2),
