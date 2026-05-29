@@ -278,7 +278,7 @@ def _render_tab_profiles(tab, config: dict):
                 legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
                 margin=dict(l=60, r=20, t=40, b=40),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -348,7 +348,8 @@ def _render_tab_table(tab):
             'berm_min': 'B. Mínima', 'berm_status': 'Cumpl. B',
             'delta_crest': 'Δ Cresta', 'delta_toe': 'Δ Pata'
         }
-        df_display = df.rename(columns=display_cols)
+        cols_to_keep = [c for c in df.columns if c in display_cols]
+        df_display = df[cols_to_keep].rename(columns=display_cols)
 
         def highlight_status(val):
             val = str(val)
@@ -453,7 +454,7 @@ def _render_tab_dashboard(tab, config: dict):
                                  marker_color='#9C0006'))
         fig_bar.update_layout(barmode='stack', title="Cumplimiento por Parámetro",
                               height=350, margin=dict(l=40, r=20, t=40, b=40))
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width="stretch")
 
         tol_h_neg = tolerances['bench_height']['neg']
         tol_h_pos = tolerances['bench_height']['pos']
@@ -468,7 +469,7 @@ def _render_tab_dashboard(tab, config: dict):
                                 xaxis_title="Desviación (m)", yaxis_title="Frecuencia")
             fig_h.add_vline(x=-tol_h_neg, line_dash="dash", line_color="orange")
             fig_h.add_vline(x=tol_h_pos, line_dash="dash", line_color="orange")
-            st.plotly_chart(fig_h, use_container_width=True)
+            st.plotly_chart(fig_h, width="stretch")
         with col2:
             devs_a = [r['angle_dev'] for r in filtered_results if r['angle_dev'] is not None]
             fig_a = go.Figure(go.Histogram(x=devs_a, nbinsx=15, marker_color='forestgreen'))
@@ -476,7 +477,7 @@ def _render_tab_dashboard(tab, config: dict):
                                 xaxis_title="Desviación (°)", yaxis_title="Frecuencia")
             fig_a.add_vline(x=-tol_a_neg, line_dash="dash", line_color="orange")
             fig_a.add_vline(x=tol_a_pos, line_dash="dash", line_color="orange")
-            st.plotly_chart(fig_a, use_container_width=True)
+            st.plotly_chart(fig_a, width="stretch")
         with col3:
             berm_vals = [r['berm_real'] for r in filtered_results if r['berm_real'] is not None and r['berm_real'] > 0]
             if berm_vals:
@@ -485,7 +486,7 @@ def _render_tab_dashboard(tab, config: dict):
                                     xaxis_title="Ancho (m)", yaxis_title="Frecuencia")
                 fig_b.add_vline(x=min_berm_width, line_dash="dash", line_color="red",
                                 annotation_text="Mínimo", annotation_position="top right")
-                st.plotly_chart(fig_b, use_container_width=True)
+                st.plotly_chart(fig_b, width="stretch")
 
 
 # ──────────────────────────────────────────────────────────────

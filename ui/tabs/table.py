@@ -28,7 +28,8 @@ def render_tab_table() -> None:
         'berm_min': 'B. Mínima', 'berm_status': 'Cumpl. B',
         'delta_crest': 'Δ Cresta', 'delta_toe': 'Δ Pata',
     }
-    df_display = df.rename(columns=display_cols)
+    cols_to_keep = [c for c in df.columns if c in display_cols]
+    df_display = df[cols_to_keep].rename(columns=display_cols)
     df_display = _format_numeric(df_display)
     styled = df_display.style.map(
         _highlight_status, subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
