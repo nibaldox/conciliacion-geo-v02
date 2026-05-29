@@ -29,10 +29,31 @@ def render_step1() -> None:
             "Cargar Topografía (STL, OBJ, PLY, DXF)",
             type=["stl", "obj", "ply", "dxf"], key="topo_file")
 
-    if file_design and file_topo:
-        _load_meshes(file_design, file_topo)
+    # Clear meshes if files are removed
+    if not file_design or not file_topo:
+        st.session_state.mesh_design = None
+        st.session_state.mesh_topo = None
+        st.session_state.bounds_design = None
+        st.session_state.bounds_topo = None
+        st.session_state.decimated_mesh_design = None
+        st.session_state.decimated_mesh_topo = None
+        st.session_state.mesh_design_file_name = None
+        st.session_state.mesh_design_file_size = None
+        st.session_state.mesh_topo_file_name = None
+        st.session_state.mesh_topo_file_size = None
+        st.session_state.step = 1
+    else:
+        # Check if files changed
+        d_changed = (st.session_state.get('mesh_design_file_name') != file_design.name or
+                     st.session_state.get('mesh_design_file_size') != file_design.size)
+        t_changed = (st.session_state.get('mesh_topo_file_name') != file_topo.name or
+                     st.session_state.get('mesh_topo_file_size') != file_topo.size)
+
+        if d_changed or t_changed or st.session_state.mesh_design is None or st.session_state.mesh_topo is None:
+            _load_meshes(file_design, file_topo)
 
     if st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None:
+        _render_mesh_info()
         _render_3d_view()
         _render_contour_view()
 
@@ -40,6 +61,26 @@ def render_step1() -> None:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _render_mesh_info() -> None:
+    col1, col2 = st.columns(2)
+    with col1:
+        bd = st.session_state.bounds_design
+        if bd:
+            st.success(f"✅ Diseño: {bd['n_faces']:,} caras, {bd['n_vertices']:,} vértices")
+            st.caption(
+                f"X: [{bd['xmin']:.1f}, {bd['xmax']:.1f}] | "
+                f"Y: [{bd['ymin']:.1f}, {bd['ymax']:.1f}] | "
+                f"Z: [{bd['zmin']:.1f}, {bd['zmax']:.1f}]")
+    with col2:
+        bt = st.session_state.bounds_topo
+        if bt:
+            st.success(f"✅ Topografía Real: {bt['n_faces']:,} caras, {bt['n_vertices']:,} vértices")
+            st.caption(
+                f"X: [{bt['xmin']:.1f}, {bt['xmax']:.1f}] | "
+                f"Y: [{bt['ymin']:.1f}, {bt['ymax']:.1f}] | "
+                f"Z: [{bt['zmin']:.1f}, {bt['zmax']:.1f}]")
+
 
 def _load_meshes(file_design, file_topo) -> None:
     from pathlib import Path
@@ -55,27 +96,24 @@ def _load_meshes(file_design, file_topo) -> None:
             f.write(file_topo.read())
             f_topo = f.name
 
-        with st.spinner("Cargando superficies..."):
-            st.session_state.mesh_design = load_mesh(f_design)
-            st.session_state.mesh_topo = load_mesh(f_topo)
-            st.session_state.bounds_design = get_mesh_bounds(st.session_state.mesh_design)
-            st.session_state.bounds_topo = get_mesh_bounds(st.session_state.mesh_topo)
+        with st.spinner("Cargando y decimando superficies..."):
+            mesh_d = load_mesh(f_design)
+            mesh_t = load_mesh(f_topo)
+            
+            st.session_state.mesh_design = mesh_d
+            st.session_state.mesh_topo = mesh_t
+            st.session_state.bounds_design = get_mesh_bounds(mesh_d)
+            st.session_state.bounds_topo = get_mesh_bounds(mesh_t)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            bd = st.session_state.bounds_design
-            st.success(f"✅ Diseño cargado: {bd['n_faces']:,} caras, {bd['n_vertices']:,} vértices")
-            st.caption(
-                f"X: [{bd['xmin']:.1f}, {bd['xmax']:.1f}] | "
-                f"Y: [{bd['ymin']:.1f}, {bd['ymax']:.1f}] | "
-                f"Z: [{bd['zmin']:.1f}, {bd['zmax']:.1f}]")
-        with col2:
-            bt = st.session_state.bounds_topo
-            st.success(f"✅ Topografía cargada: {bt['n_faces']:,} caras, {bt['n_vertices']:,} vértices")
-            st.caption(
-                f"X: [{bt['xmin']:.1f}, {bt['xmax']:.1f}] | "
-                f"Y: [{bt['ymin']:.1f}, {bt['ymax']:.1f}] | "
-                f"Z: [{bt['zmin']:.1f}, {bt['zmax']:.1f}]")
+            # Pre-decimate meshes for Plotly 3D visualization
+            st.session_state.decimated_mesh_design = decimate_mesh(mesh_d, 30000)
+            st.session_state.decimated_mesh_topo = decimate_mesh(mesh_t, 30000)
+
+            # Store cache keys
+            st.session_state.mesh_design_file_name = file_design.name
+            st.session_state.mesh_design_file_size = file_design.size
+            st.session_state.mesh_topo_file_name = file_topo.name
+            st.session_state.mesh_topo_file_size = file_topo.size
 
         st.session_state.step = max(st.session_state.step, 2)
 
@@ -91,8 +129,18 @@ def _render_3d_view() -> None:
     with st.expander("🌐 Vista 3D de Superficies", expanded=False):
         with st.spinner("Generando vista 3D..."):
             fig = go.Figure()
-            md = decimate_mesh(st.session_state.mesh_design, 30000)
-            mt = decimate_mesh(st.session_state.mesh_topo, 30000)
+            
+            # Use pre-decimated meshes
+            md = st.session_state.get('decimated_mesh_design')
+            if md is None:
+                md = decimate_mesh(st.session_state.mesh_design, 30000)
+                st.session_state.decimated_mesh_design = md
+                
+            mt = st.session_state.get('decimated_mesh_topo')
+            if mt is None:
+                mt = decimate_mesh(st.session_state.mesh_topo, 30000)
+                st.session_state.decimated_mesh_topo = mt
+
             fig.add_trace(mesh_to_plotly(md, "Diseño", "royalblue", 1.0))
             fig.add_trace(mesh_to_plotly(mt, "Topografía Real", "forestgreen", 1.0))
 

@@ -27,6 +27,10 @@ def render_step2() -> None:
     """Render Paso 2: section definition."""
     st.header("✂️ Paso 2: Definir Secciones de Corte")
 
+    if st.session_state.mesh_design is None:
+        st.warning("⚠️ Debes cargar las superficies de diseño y topografía en el Paso 1 antes de definir secciones.")
+        return
+
     tab_file, tab_interactive, tab_manual, tab_auto = st.tabs([
         "📂 Archivo de Coordenadas", "🗺️ Interactivo (Clic)",
         "📌 Manual", "🔄 Automático"])
