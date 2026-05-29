@@ -94,3 +94,21 @@ def calculate_area_between_profiles(profile_ref: Any, profile_eval: Any) -> tupl
     area_over = np.sum(np.abs(diff[area_over_mask])) * dx
     
     return area_over, area_under, common_d, z_ref_interp, z_eval_interp
+
+
+def find_df_column(df, candidates: list[str], raise_error: bool = True) -> str | None:
+    """Find a column in a pandas DataFrame matching one of the candidate names (case-insensitive)."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    lower_map = {col.lower(): col for col in df.columns}
+    for c in candidates:
+        if c.lower() in lower_map:
+            return lower_map[c.lower()]
+    if raise_error:
+        raise KeyError(
+            f"No se encontró columna válida entre {candidates}. "
+            f"Columnas disponibles: {list(df.columns)}"
+        )
+    return None
+

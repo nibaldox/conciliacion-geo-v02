@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.calculo_tronadura import procesar_pozos
+from core.geom_utils import find_df_column
 from ui.ref_lines import add_ref_lines_3d
 
 
@@ -48,13 +49,33 @@ def render_modulo_tronadura() -> None:
     st.dataframe(df.head(20), use_container_width=True)
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
+    # Clear processed state if file changes
+    if 'blast_cached_name' not in st.session_state or st.session_state['blast_cached_name'] != uploaded.name:
+        st.session_state['blast_cached_name'] = uploaded.name
+        st.session_state['blast_df_clean'] = None
+        st.session_state['blast_x_lines'] = None
+        st.session_state['blast_y_lines'] = None
+        st.session_state['blast_z_lines'] = None
+        st.session_state['blast_processed'] = False
+
     if st.button("🚀 Procesar Pozos", type="primary", key="process_blast"):
         with st.spinner("Calculando coordenadas de fondo (toe)..."):
             try:
                 df_clean, x_lines, y_lines, z_lines = procesar_pozos(df)
+                st.session_state['blast_df_clean'] = df_clean
+                st.session_state['blast_x_lines'] = x_lines
+                st.session_state['blast_y_lines'] = y_lines
+                st.session_state['blast_z_lines'] = z_lines
+                st.session_state['blast_processed'] = True
             except KeyError as e:
                 st.error(str(e))
-                return
+                st.session_state['blast_processed'] = False
+
+    if st.session_state.get('blast_processed', False):
+        df_clean = st.session_state['blast_df_clean']
+        x_lines = st.session_state['blast_x_lines']
+        y_lines = st.session_state['blast_y_lines']
+        z_lines = st.session_state['blast_z_lines']
 
         col1, col2, col3 = st.columns(3)
         col1.metric("Pozos procesados", len(df_clean))
@@ -67,11 +88,9 @@ def render_modulo_tronadura() -> None:
             f"{df_clean['Len'].mean():.1f} m",
         )
 
-        st.session_state['blast_df_clean'] = df_clean
-
         _render_3d(df_clean, x_lines, y_lines, z_lines)
 
-        with st.expander("📋 Datos procesados"):
+        with st.expander("📋 Datos procesados", expanded=False):
             st.dataframe(df_clean, use_container_width=True)
 
 
@@ -98,7 +117,7 @@ def _render_3d(df, x_lines, y_lines, z_lines) -> None:
         hoverinfo='skip',
     ))
 
-    color_col = _find_col(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'])
+    color_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
     if color_col:
         marker = dict(
             size=4,
@@ -135,12 +154,4 @@ def _render_3d(df, x_lines, y_lines, z_lines) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _find_col(df, candidates: list[str]):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    lower_map = {col.lower(): col for col in df.columns}
-    for c in candidates:
-        if c.lower() in lower_map:
-            return lower_map[c.lower()]
-    return None
+

@@ -10,6 +10,7 @@ Columnas descartadas al procesar (según descripción ENAEX):
 """
 import numpy as np
 import pandas as pd
+from core.geom_utils import find_df_column
 
 COLS_DROP = [
     'uniqid', 'id_rajo', 'id_malla_opit', 'id_pozo', 'numero',
@@ -56,12 +57,12 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
         df_work['fecha_tronadura'] = pd.to_datetime(
             df_work['fecha_tronadura'], errors='coerce').dt.date
 
-    x_col = _find_col(df_work, ['Latitud_Geo', 'Latitud', 'X', 'Este'])
-    y_col = _find_col(df_work, ['Longitud_Geo', 'Longitud', 'Y', 'Norte'])
-    z_col = _find_col(df_work, ['Nombre_Banco', 'Banco', 'Cota_Collar', 'Z'])
-    incl_col = _find_col(df_work, ['Inclinacion_real', 'Inclinacion', 'Inclination'])
-    az_col = _find_col(df_work, ['Azimuth_real', 'Azimuth', 'Azimut'])
-    len_col = _find_col(df_work, ['longitud_real', 'Longitud', 'Length', 'Profundidad'])
+    x_col = find_df_column(df_work, ['Latitud_Geo', 'Latitud', 'X', 'Este'])
+    y_col = find_df_column(df_work, ['Longitud_Geo', 'Longitud', 'Y', 'Norte'])
+    z_col = find_df_column(df_work, ['Nombre_Banco', 'Banco', 'Cota_Collar', 'Z'])
+    incl_col = find_df_column(df_work, ['Inclinacion_real', 'Inclinacion', 'Inclination'])
+    az_col = find_df_column(df_work, ['Azimuth_real', 'Azimuth', 'Azimut'])
+    len_col = find_df_column(df_work, ['longitud_real', 'Longitud', 'Length', 'Profundidad'])
 
     df_work = df_work.rename(columns={
         x_col: 'X', y_col: 'Y', z_col: 'Z_collar',
@@ -165,15 +166,4 @@ def proyectar_pozos_en_seccion(
     return result.sort_values('dist_along').reset_index(drop=True)
 
 
-def _find_col(df: pd.DataFrame, candidates: list[str]) -> str:
-    for c in candidates:
-        if c in df.columns:
-            return c
-    lower_map = {col.lower(): col for col in df.columns}
-    for c in candidates:
-        if c.lower() in lower_map:
-            return lower_map[c.lower()]
-    raise KeyError(
-        f"No se encontró columna válida entre {candidates}. "
-        f"Columnas disponibles: {list(df.columns)}"
-    )
+

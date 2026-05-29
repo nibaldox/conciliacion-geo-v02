@@ -9,7 +9,7 @@ import streamlit as st
 
 from core import build_reconciled_profile
 from core.calculo_tronadura import proyectar_pozos_en_seccion
-from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles
+from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles, find_df_column
 
 
 def render_tab_profiles(config: dict) -> None:
@@ -95,7 +95,8 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
 
     if show_reconciled and i < len(st.session_state.params_topo):
         _add_reconciled_trace(fig, st.session_state.params_topo[i].benches,
-                              color='#FF7F0E', label='Conciliado As-Built', dash='solid', width=2.5)
+                              color='#FF7F0E', label='Conciliado As-Built', dash='solid', width=2.5,
+                              show_berm_width=True, comparison_results=sec_comps)
 
     if i < len(st.session_state.params_topo):
         for bench in st.session_state.params_topo[i].benches:
@@ -251,13 +252,72 @@ def _add_semaphore_traces(fig, pd_prof, pt_prof, config):
             marker=dict(color='#FF0000', size=4)))
 
 
-def _add_reconciled_trace(fig, benches, color, label, dash, width=1.5):
+def _add_reconciled_trace(fig, benches, color, label, dash, width=1.5, show_berm_width=False, comparison_results=None):
     rd, re = build_reconciled_profile(benches)
     if len(rd) > 0:
         fig.add_trace(go.Scatter(
             x=rd, y=re, mode='lines+markers', name=label,
             line=dict(color=color, width=width, dash=dash),
             marker=dict(size=5 if width == 1.5 else 6, symbol='diamond', color=color)))
+        if show_berm_width and comparison_results is not None:
+            _add_berm_width_indicators(fig, benches, comparison_results)
+
+
+def _add_berm_width_indicators(fig, benches, comparison_results):
+    bt_to_design = {}
+    for comp in comparison_results:
+        if comp.get('type') == 'MATCH':
+            bt = comp.get('bench_real')
+            bd = comp.get('bench_design')
+            if bt is not None and bd is not None:
+                bt_to_design[id(bt)] = bd.bench_number
+
+    for j, bench in enumerate(benches):
+        bench_id = id(bench)
+        if bench_id not in bt_to_design:
+            continue
+        design_num = bt_to_design[bench_id]
+        
+        # Use actual berm width from the parameters
+        berm = bench.berm_width
+        if berm <= 0:
+            continue
+
+        if j == 0:
+            # Leading berm (before Bench 1, at its crest level)
+            x1 = min(bench.toe_distance, bench.crest_distance)
+            if bench.toe_distance > bench.crest_distance:
+                berm_e = bench.crest_elevation
+                x0 = x1 - berm
+            else:
+                berm_e = bench.toe_elevation
+                x0 = x1 - berm
+        else:
+            # Intermediate berm: connects previous bench to current bench (at previous bench's toe/crest level)
+            b_prev = benches[j - 1]
+            x0 = max(b_prev.toe_distance, b_prev.crest_distance)
+            x1 = min(bench.toe_distance, bench.crest_distance)
+            
+            if b_prev.toe_distance > b_prev.crest_distance:
+                berm_e = b_prev.toe_elevation
+            else:
+                berm_e = b_prev.crest_elevation
+
+        mid_x = (x0 + x1) / 2
+
+        fig.add_annotation(
+            x=mid_x, y=berm_e,
+            text=f"B{design_num}={berm:.1f}m",
+            showarrow=False,
+            font=dict(size=12, color="darkorange"),
+            xanchor='center', yanchor='bottom',
+            align='center',
+        )
+        fig.add_shape(
+            type="line",
+            x0=x0, y0=berm_e, x1=x1, y1=berm_e,
+            line=dict(color="darkorange", width=1.5, dash="dash"),
+        )
 
 
 def _add_blast_holes(fig, section, tolerance: float) -> None:
@@ -276,9 +336,9 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
     if projected.empty:
         return
 
-    kg_col = _find_blast_col(projected, ['Kilos_Cargados_real', 'Kilos_Cargados'])
-    malla_col = _find_blast_col(projected, ['holes_polygon', 'Nombre_Malla_Original'])
-    label_col = _find_blast_col(projected, ['label_pozo'])
+    kg_col = find_df_column(projected, ['Kilos_Cargados_real', 'Kilos_Cargados'], raise_error=False)
+    malla_col = find_df_column(projected, ['holes_polygon', 'Nombre_Malla_Original'], raise_error=False)
+    label_col = find_df_column(projected, ['label_pozo'], raise_error=False)
 
     x_holes, y_holes = [], []
     texts, colors = [], []
@@ -344,8 +404,4 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
     ))
 
 
-def _find_blast_col(df, candidates: list[str]):
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
+
