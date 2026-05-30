@@ -342,6 +342,7 @@ def _render_tab_table(tab):
             'angle_dev': 'Desv. Á', 'angle_status': 'Cumpl. Á',
             'berm_design': 'B. Diseño', 'berm_real': 'B. Real',
             'berm_min': 'B. Mínima', 'berm_status': 'Cumpl. B',
+            'spill_width': 'B. Derrame', 'effective_berm': 'B. Efectiva',
             'delta_crest': 'Δ Cresta', 'delta_toe': 'Δ Pata'
         }
         cols_to_keep = [c for c in df.columns if c in display_cols]

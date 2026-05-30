@@ -9,7 +9,6 @@ from scipy.ndimage import uniform_filter1d
 
 @dataclass
 class BenchParams:
-    """Parameters for a single bench."""
     bench_number: int
     crest_elevation: float
     crest_distance: float
@@ -20,6 +19,8 @@ class BenchParams:
     berm_width: float
     is_ramp: bool = False
     group_break: bool = False
+    spill_width: float = 0.0
+    effective_berm_width: float = 0.0
 
 
 @dataclass
@@ -259,8 +260,10 @@ def extract_parameters(distances, elevations, section_name, sector,
                     face_pts_for_analysis = simplified_face
             corrected_toe_x, corrected_angle = _detect_and_project_solid_toe(face_pts_for_analysis, face_threshold)
             final_toe_x = corrected_toe_x
+            spill_w = 0.0
             if abs(corrected_toe_x - toe[0]) > 1e-3:
                 final_angle = corrected_angle
+                spill_w = abs(toe[0] - corrected_toe_x)
             else:
                 final_angle = weighted_angle
 
@@ -273,7 +276,9 @@ def extract_parameters(distances, elevations, section_name, sector,
                 toe_distance=final_toe_x,
                 bench_height=float(bench_height),
                 face_angle=float(final_angle),
-                berm_width=0.0
+                berm_width=0.0,
+                spill_width=float(spill_w),
+                effective_berm_width=0.0
             ))
 
     _compute_berm_widths_from_profile(
@@ -386,6 +391,7 @@ def _compute_berm_widths_from_profile(
         
     # Initialize the first bench's berm to 0.0 (it might be updated later by leading berm check)
     benches[0].berm_width = 0.0
+    benches[0].effective_berm_width = 0.0
     benches[0].is_ramp = False
     benches[0].group_break = False
         
@@ -398,6 +404,7 @@ def _compute_berm_widths_from_profile(
         
         width = float(abs(next_left - curr_right))
         b_next.berm_width = width
+        b_next.effective_berm_width = float(max(width - b_curr.spill_width, 0.0))
         
         if 15.0 <= width <= 42.0:
             b_next.is_ramp = True
@@ -573,6 +580,8 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': berm_real,
                 'berm_min': min_berm,
                 'berm_status': berm_status,
+                'spill_width': round(bt.spill_width, 2),
+                'effective_berm': round(bt.effective_berm_width, 2),
                 'delta_crest': round(bt.crest_distance - bd.crest_distance, 2),
                 'delta_toe': round(bt.toe_distance - bd.toe_distance, 2),
                 'bench_design': bd,
@@ -601,6 +610,8 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': None,
                 'berm_min': None,
                 'berm_status': "FALTA BANCO",
+                'spill_width': None,
+                'effective_berm': None,
                 'delta_crest': None,
                 'delta_toe': None,
                 'bench_design': bd,
@@ -629,6 +640,8 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_real': round(bt.berm_width, 2),
                 'berm_min': None,
                 'berm_status': "BANCO ADICIONAL",
+                'spill_width': round(bt.spill_width, 2),
+                'effective_berm': round(bt.effective_berm_width, 2),
                 'delta_crest': None,
                 'delta_toe': None,
                 'bench_design': None,

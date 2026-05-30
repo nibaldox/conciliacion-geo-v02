@@ -26,6 +26,7 @@ def render_tab_table() -> None:
         'angle_dev': 'Desv. Á', 'angle_status': 'Cumpl. Á',
         'berm_design': 'B. Diseño', 'berm_real': 'B. Real',
         'berm_min': 'B. Mínima', 'berm_status': 'Cumpl. B',
+        'spill_width': 'B. Derrame', 'effective_berm': 'B. Efectiva',
         'delta_crest': 'Δ Cresta', 'delta_toe': 'Δ Pata',
     }
     cols_to_keep = [c for c in df.columns if c in display_cols]
@@ -94,6 +95,7 @@ def _format_numeric(df: pd.DataFrame) -> pd.DataFrame:
         'H. Diseño', 'H. Real', 'Desv. H',
         'Á. Diseño', 'Á. Real', 'Desv. Á',
         'B. Diseño', 'B. Real', 'B. Mínima',
+        'B. Derrame', 'B. Efectiva',
         'Δ Cresta', 'Δ Pata',
     ]
     for col in numeric_cols:
