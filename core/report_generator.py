@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_ORIENT
 from datetime import datetime
 import numpy as np
 
@@ -149,15 +150,22 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
 
     if len(valid_d) > 0 and len(valid_z) > 0:
         xmin, xmax = float(np.min(valid_d)), float(np.max(valid_d))
-        zmin, zmax = float(np.min(valid_z)), float(np.max(valid_z))
         x_pad = max((xmax - xmin) * 0.05, 5.0)
-        z_pad = max((zmax - zmin) * 0.05, 5.0)
         ax.set_xlim(xmin - x_pad, xmax + x_pad)
-        ax.set_ylim(zmin - z_pad, zmax + z_pad)
+
+        if 'z_limits' in plot_options and plot_options['z_limits'] is not None:
+            zmin, zmax = plot_options['z_limits']
+        else:
+            zmin, zmax = float(np.min(valid_z)), float(np.max(valid_z))
+            z_pad = max((zmax - zmin) * 0.05, 5.0)
+            zmin = zmin - z_pad
+            zmax = zmax + z_pad
+
+        ax.set_ylim(zmin, zmax)
 
         if grid_height is not None and grid_height > 0:
-            y_ticks = np.arange(np.floor((zmin - z_pad - grid_ref) / grid_height) * grid_height + grid_ref,
-                                np.ceil((zmax + z_pad - grid_ref) / grid_height) * grid_height + grid_ref + grid_height,
+            y_ticks = np.arange(np.floor((zmin - grid_ref) / grid_height) * grid_height + grid_ref,
+                                np.ceil((zmax - grid_ref) / grid_height) * grid_height + grid_ref + grid_height,
                                 grid_height)
             ax.set_yticks(y_ticks)
 
@@ -181,6 +189,38 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         project_info = {}
         
     doc = Document()
+    
+    for section in doc.sections:
+        section.orientation = WD_ORIENT.LANDSCAPE
+        new_width, new_height = section.page_height, section.page_width
+        section.page_width = new_width
+        section.page_height = new_height
+        section.top_margin = Inches(0.5)
+        section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.5)
+        section.right_margin = Inches(0.5)
+
+    global_zmin = float('inf')
+    global_zmax = float('-inf')
+    for item in all_data:
+        prof_d = item['profile_d']
+        prof_t = item['profile_t']
+        if len(prof_d[1]) > 0:
+            global_zmin = min(global_zmin, np.min(prof_d[1]))
+            global_zmax = max(global_zmax, np.max(prof_d[1]))
+        if len(prof_t[1]) > 0:
+            global_zmin = min(global_zmin, np.min(prof_t[1]))
+            global_zmax = max(global_zmax, np.max(prof_t[1]))
+
+    if global_zmin < float('inf') and global_zmax > float('-inf'):
+        z_pad = max((global_zmax - global_zmin) * 0.05, 5.0)
+        z_limits = [float(global_zmin - z_pad), float(global_zmax + z_pad)]
+    else:
+        z_limits = None
+
+    if plot_options is None:
+        plot_options = {}
+    plot_options['z_limits'] = z_limits
     
     title = doc.add_heading(f"Informe de Conciliación Geotécnica", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -219,12 +259,15 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
  
     doc.add_heading("2. Detalle por Sección", level=1)
     
+    valid_items = []
     for item in all_data:
         sec_name = item['section_name']
         sec_comps = [c for c in comparisons if c['section'] == sec_name]
-        if not sec_comps:
-            continue
+        if sec_comps:
+            valid_items.append((item, sec_comps))
             
+    for idx, (item, sec_comps) in enumerate(valid_items):
+        sec_name = item['section_name']
         doc.add_heading(f"Sección {sec_name}", level=2)
         
         pd = item['params_design']
@@ -246,34 +289,62 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             plot_options=plot_options, section=sec_obj, df_pozos=df_pozos,
             filtered_bench_nums=filtered_bench_nums
         )
-        doc.add_picture(img_stream, width=Inches(6))
+        
+        layout_table = doc.add_table(rows=1, cols=2)
+        layout_table.style = 'Normal Table'
+        layout_table.autofit = False
+        
+        layout_table.columns[0].width = Inches(4.2)
+        layout_table.columns[1].width = Inches(4.8)
+        
+        cell_left = layout_table.rows[0].cells[0]
+        cell_right = layout_table.rows[0].cells[1]
+        
+        p_img = cell_left.paragraphs[0]
+        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_img.add_run().add_picture(img_stream, width=Inches(4.0))
         img_stream.close()
         
-        table = doc.add_table(rows=1, cols=7)
+        table = cell_right.add_table(rows=1, cols=4)
         table.style = 'Table Grid'
-        headers = ['Banco', 'H. Dise (m)', 'H. Real', 'Ang. Dise (°)', 'Ang. Real', 'Berma Real (m)', 'Estado']
-        for i, h in enumerate(headers):
-            table.rows[0].cells[i].text = h
+        
+        headers = ['Banco (cota)', 'H. Dise / Real', 'Ang. Dise / Real', 'Berma Dise / Real']
+        for col_idx, h in enumerate(headers):
+            hdr_cell = table.rows[0].cells[col_idx]
+            hdr_cell.text = h
+            for paragraph in hdr_cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(8.5)
             
         for c in sec_comps:
             row_cells = table.add_row().cells
-            row_cells[0].text = str(c['bench_num'])
-            row_cells[1].text = str(c['height_design'])
-            row_cells[2].text = str(c['height_real'])
-            row_cells[3].text = str(c['angle_design'])
-            row_cells[4].text = str(c['angle_real'])
-            row_cells[5].text = str(c['berm_real'])
             
-            statuses = [c['height_status'], c['angle_status'], c['berm_status']]
-            if "NO CUMPLE" in statuses:
-                final_status = "NO CUMPLE"
-            elif "FUERA DE TOLERANCIA" in statuses:
-                final_status = "ALERTA"
-            else:
-                final_status = "OK"
-            row_cells[6].text = final_status
+            b_num = c.get('bench_num', 'N/A')
+            b_level = c.get('level', 'N/A')
+            row_cells[0].text = f"B{b_num} ({b_level})"
+            
+            h_d = f"{c['height_design']:.1f}" if c.get('height_design') is not None else "N/A"
+            h_r = f"{c['height_real']:.1f}" if c.get('height_real') is not None else "N/A"
+            row_cells[1].text = f"{h_d} / {h_r}"
+            
+            a_d = f"{c['angle_design']:.1f}" if c.get('angle_design') is not None else "N/A"
+            a_r = f"{c['angle_real']:.1f}" if c.get('angle_real') is not None else "N/A"
+            row_cells[2].text = f"{a_d} / {a_r}"
+            
+            b_d = f"{c['berm_design']:.1f}" if c.get('berm_design') is not None else "N/A"
+            b_r = f"{c['berm_real']:.1f}" if c.get('berm_real') is not None else "N/A"
+            row_cells[3].text = f"{b_d} / {b_r}"
+            
+            for cell in row_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = Pt(8.0)
  
-        doc.add_page_break()
+        if (idx + 1) % 3 == 0 and (idx + 1) < len(valid_items):
+            doc.add_page_break()
+        else:
+            doc.add_paragraph()
 
     if df_pozos is not None and not df_pozos.empty:
         doc.add_heading("3. Análisis de Perforación y Tronadura", level=1)
@@ -347,6 +418,28 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 def generate_section_images_zip(all_data, plot_options=None, sections=None, df_pozos=None, filtered_comps=None):
     import zipfile
     
+    global_zmin = float('inf')
+    global_zmax = float('-inf')
+    for item in all_data:
+        prof_d = item['profile_d']
+        prof_t = item['profile_t']
+        if len(prof_d[1]) > 0:
+            global_zmin = min(global_zmin, np.min(prof_d[1]))
+            global_zmax = max(global_zmax, np.max(prof_d[1]))
+        if len(prof_t[1]) > 0:
+            global_zmin = min(global_zmin, np.min(prof_t[1]))
+            global_zmax = max(global_zmax, np.max(prof_t[1]))
+
+    if global_zmin < float('inf') and global_zmax > float('-inf'):
+        z_pad = max((global_zmax - global_zmin) * 0.05, 5.0)
+        z_limits = [float(global_zmin - z_pad), float(global_zmax + z_pad)]
+    else:
+        z_limits = None
+
+    if plot_options is None:
+        plot_options = {}
+    plot_options['z_limits'] = z_limits
+
     zip_buffer = io.BytesIO()
     
     with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
