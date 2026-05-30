@@ -93,7 +93,7 @@ def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: f
     segs_ang[valid] = np.abs(np.degrees(np.arctan2(dy[valid], dx_diff[valid])))
     spill_idx = len(segs_ang)
     for i in range(len(segs_ang) - 1, -1, -1):
-        if segs_ang[i] < 48.0:
+        if segs_ang[i] < 48.0 and np.any(segs_ang[:i] > 52.0):
             spill_idx = i
         else:
             break
@@ -240,7 +240,24 @@ def extract_parameters(distances, elevations, section_name, sector,
             else:
                 weighted_angle = np.average(local_ang, weights=local_len)
                 
-            corrected_toe_x, corrected_angle = _detect_and_project_solid_toe(sorted_face_pts, face_threshold)
+            d_min = min(crest[0], toe[0])
+            d_max = max(crest[0], toe[0])
+            mask_raw = (
+                (elevations > toe[1] + 0.1) &
+                (elevations < crest[1] - 0.1) &
+                (distances > d_min - 0.1) &
+                (distances < d_max + 0.1)
+            )
+            raw_d = distances[mask_raw]
+            raw_e = elevations[mask_raw]
+            face_pts_for_analysis = sorted_face_pts
+            if len(raw_d) >= 3:
+                raw_face_pts = np.column_stack((raw_d, raw_e))
+                raw_face_pts = raw_face_pts[np.argsort(-raw_face_pts[:, 1])]
+                simplified_face = ramer_douglas_peucker(raw_face_pts, 0.03)
+                if len(simplified_face) >= 3:
+                    face_pts_for_analysis = simplified_face
+            corrected_toe_x, corrected_angle = _detect_and_project_solid_toe(face_pts_for_analysis, face_threshold)
             final_toe_x = corrected_toe_x
             if abs(corrected_toe_x - toe[0]) > 1e-3:
                 final_angle = corrected_angle
