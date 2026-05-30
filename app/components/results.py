@@ -745,25 +745,42 @@ def _render_tab_export(tab, config: dict):
             with st.spinner("Generando gráficos e imágenes..."):
                 all_data_for_images = []
                 progress_bar = st.progress(0)
+                sections = st.session_state.sections
 
-                for i, sec in enumerate(st.session_state.sections):
+                # Build maps for robust lookup by section name
+                processed_secs = st.session_state.get('processed_sections', [])
+                if not processed_secs:
+                    processed_secs = sections
+
+                params_d_list = st.session_state.get('params_design', [])
+                params_t_list = st.session_state.get('params_topo', [])
+
+                design_params_map = {}
+                topo_params_map = {}
+                for idx, sec in enumerate(processed_secs):
+                    if idx < len(params_d_list):
+                        design_params_map[sec.name] = params_d_list[idx]
+                    if idx < len(params_t_list):
+                        topo_params_map[sec.name] = params_t_list[idx]
+
+                for i, sec in enumerate(sections):
                     pd_prof, pt_prof = cut_both_surfaces(
                         st.session_state.mesh_design,
                         st.session_state.mesh_topo,
                         sec
                     )
 
-                    if (pd_prof and pt_prof
-                            and i < len(st.session_state.params_design)
-                            and i < len(st.session_state.params_topo)):
+                    if pd_prof and pt_prof:
+                        p_d = design_params_map.get(sec.name)
+                        p_t = topo_params_map.get(sec.name)
                         all_data_for_images.append({
                             'section_name': sec.name,
-                            'params_design': st.session_state.params_design[i],
-                            'params_topo': st.session_state.params_topo[i],
+                            'params_design': p_d,
+                            'params_topo': p_t,
                             'profile_d': (pd_prof.distances, pd_prof.elevations),
                             'profile_t': (pt_prof.distances, pt_prof.elevations),
                         })
-                    progress_bar.progress((i + 1) / len(st.session_state.sections))
+                    progress_bar.progress((i + 1) / len(sections))
 
                 zip_bytes = generate_section_images_zip(all_data_for_images)
 
@@ -813,8 +830,25 @@ def _render_tab_export(tab, config: dict):
 
                 progress_bar = st.progress(0)
                 n_exported = 0
+                sections = st.session_state.sections
 
-                for i, sec in enumerate(st.session_state.sections):
+                # Build maps for robust lookup by section name
+                processed_secs = st.session_state.get('processed_sections', [])
+                if not processed_secs:
+                    processed_secs = sections
+
+                params_d_list = st.session_state.get('params_design', [])
+                params_t_list = st.session_state.get('params_topo', [])
+
+                design_params_map = {}
+                topo_params_map = {}
+                for idx, sec in enumerate(processed_secs):
+                    if idx < len(params_d_list):
+                        design_params_map[sec.name] = params_d_list[idx]
+                    if idx < len(params_t_list):
+                        topo_params_map[sec.name] = params_t_list[idx]
+
+                for i, sec in enumerate(sections):
                     pd_prof, pt_prof = cut_both_surfaces(
                         st.session_state.mesh_design,
                         st.session_state.mesh_topo,
@@ -853,15 +887,18 @@ def _render_tab_export(tab, config: dict):
                         if len(topo_3d) > 1:
                             draw_3d_polyline(topo_3d, f'TOPO_{layer_suffix}')
 
-                        if i < len(st.session_state.params_design) and st.session_state.params_design[i].benches:
-                            rd, re = build_reconciled_profile(st.session_state.params_design[i].benches)
+                        p_d = design_params_map.get(sec.name)
+                        p_t = topo_params_map.get(sec.name)
+
+                        if p_d and p_d.benches:
+                            rd, re = build_reconciled_profile(p_d.benches)
                             if len(rd) > 0:
                                 conc_d_3d = to_3d(rd, re)
                                 if len(conc_d_3d) > 1:
                                     draw_3d_polyline(conc_d_3d, 'CONCILIADO_DISEÑO')
 
-                        if i < len(st.session_state.params_topo) and st.session_state.params_topo[i].benches:
-                            rt, ret = build_reconciled_profile(st.session_state.params_topo[i].benches)
+                        if p_t and p_t.benches:
+                            rt, ret = build_reconciled_profile(p_t.benches)
                             if len(rt) > 0:
                                 conc_t_3d = to_3d(rt, ret)
                                 if len(conc_t_3d) > 1:
@@ -880,7 +917,7 @@ def _render_tab_export(tab, config: dict):
 
                         n_exported += 1
 
-                    progress_bar.progress((i + 1) / len(st.session_state.sections))
+                    progress_bar.progress((i + 1) / len(sections))
 
                 tmp_path = os.path.join(tempfile.gettempdir(), "Perfiles_3D.dxf")
                 doc.saveas(tmp_path)

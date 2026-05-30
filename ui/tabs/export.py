@@ -119,6 +119,22 @@ def _render_images_export(config: dict) -> None:
             'tolerances': config.get('tolerances'),
         }
 
+        # Build maps for robust lookup by section name
+        processed_secs = st.session_state.get('processed_sections', [])
+        if not processed_secs:
+            processed_secs = sections
+
+        params_d_list = st.session_state.get('params_design', [])
+        params_t_list = st.session_state.get('params_topo', [])
+
+        design_params_map = {}
+        topo_params_map = {}
+        for idx, sec in enumerate(processed_secs):
+            if idx < len(params_d_list):
+                design_params_map[sec.name] = params_d_list[idx]
+            if idx < len(params_t_list):
+                topo_params_map[sec.name] = params_t_list[idx]
+
         for i, sec in enumerate(sections):
             if sec.name not in matching_section_names:
                 continue
@@ -128,13 +144,13 @@ def _render_images_export(config: dict) -> None:
                 st.session_state.mesh_topo,
                 sec)
 
-            if (pd_prof and pt_prof
-                    and i < len(st.session_state.params_design)
-                    and i < len(st.session_state.params_topo)):
+            if pd_prof and pt_prof:
+                p_d = design_params_map.get(sec.name)
+                p_t = topo_params_map.get(sec.name)
                 all_data_for_images.append({
                     'section_name': sec.name,
-                    'params_design': st.session_state.params_design[i],
-                    'params_topo': st.session_state.params_topo[i],
+                    'params_design': p_d,
+                    'params_topo': p_t,
                     'profile_d': (pd_prof.distances, pd_prof.elevations),
                     'profile_t': (pt_prof.distances, pt_prof.elevations),
                 })
@@ -191,6 +207,22 @@ def _render_word_report(config: dict) -> None:
             'tolerances': config.get('tolerances'),
         }
 
+        # Build maps for robust lookup by section name
+        processed_secs = st.session_state.get('processed_sections', [])
+        if not processed_secs:
+            processed_secs = sections
+
+        params_d_list = st.session_state.get('params_design', [])
+        params_t_list = st.session_state.get('params_topo', [])
+
+        design_params_map = {}
+        topo_params_map = {}
+        for idx, sec in enumerate(processed_secs):
+            if idx < len(params_d_list):
+                design_params_map[sec.name] = params_d_list[idx]
+            if idx < len(params_t_list):
+                topo_params_map[sec.name] = params_t_list[idx]
+
         for i, sec in enumerate(sections):
             if sec.name not in matching_section_names:
                 continue
@@ -200,13 +232,13 @@ def _render_word_report(config: dict) -> None:
                 st.session_state.mesh_topo,
                 sec)
 
-            if (pd_prof and pt_prof
-                    and i < len(st.session_state.params_design)
-                    and i < len(st.session_state.params_topo)):
+            if pd_prof and pt_prof:
+                p_d = design_params_map.get(sec.name)
+                p_t = topo_params_map.get(sec.name)
                 all_data_for_report.append({
                     'section_name': sec.name,
-                    'params_design': st.session_state.params_design[i],
-                    'params_topo': st.session_state.params_topo[i],
+                    'params_design': p_d,
+                    'params_topo': p_t,
                     'profile_d': (pd_prof.distances, pd_prof.elevations),
                     'profile_t': (pt_prof.distances, pt_prof.elevations),
                 })
@@ -262,9 +294,24 @@ def _render_dxf_export() -> None:
         _create_dxf_layers(doc)
         section_status = _build_section_status_map(st.session_state.comparison_results)
 
+        # Build maps for robust lookup by section name
+        processed_secs = st.session_state.get('processed_sections', [])
+        if not processed_secs:
+            processed_secs = sections
+
+        params_d_list = st.session_state.get('params_design', [])
+        params_t_list = st.session_state.get('params_topo', [])
+
+        design_params_map = {}
+        topo_params_map = {}
+        for idx, sec in enumerate(processed_secs):
+            if idx < len(params_d_list):
+                design_params_map[sec.name] = params_d_list[idx]
+            if idx < len(params_t_list):
+                topo_params_map[sec.name] = params_t_list[idx]
+
         progress_bar = st.progress(0)
         n_exported = 0
-        sections = st.session_state.sections
 
         for i, sec in enumerate(sections):
             pd_prof, pt_prof = cut_both_surfaces(
@@ -273,8 +320,10 @@ def _render_dxf_export() -> None:
                 sec)
 
             if pd_prof and pt_prof:
+                p_d = design_params_map.get(sec.name)
+                p_t = topo_params_map.get(sec.name)
                 _write_section_to_dxf(
-                    msp, sec, i, pd_prof, pt_prof, section_status)
+                    msp, sec, p_d, p_t, pd_prof, pt_prof, section_status)
                 n_exported += 1
 
             progress_bar.progress((i + 1) / len(sections))
@@ -330,7 +379,7 @@ def _draw_3d_polyline(msp, pts, layer: str) -> None:
         msp.add_line(pts[j], pts[j + 1], dxfattribs={'layer': layer})
 
 
-def _write_section_to_dxf(msp, sec, i, pd_prof, pt_prof, section_status) -> None:
+def _write_section_to_dxf(msp, sec, p_d, p_t, pd_prof, pt_prof, section_status) -> None:
     safe_name = sec.name.replace("/", "_").replace("\\", "_")
     status = section_status.get(sec.name, 'CUMPLE')
     layer_suffix = {'NO CUMPLE': 'NO_CUMPLE', 'FUERA DE TOLERANCIA': 'FUERA_TOL'}.get(
@@ -347,18 +396,15 @@ def _write_section_to_dxf(msp, sec, i, pd_prof, pt_prof, section_status) -> None
     if len(topo_3d) > 1:
         _draw_3d_polyline(msp, topo_3d, f'TOPO_{layer_suffix}')
 
-    params_design = st.session_state.params_design
-    params_topo = st.session_state.params_topo
-
-    if i < len(params_design) and params_design[i] and params_design[i].benches:
-        rd, re = build_reconciled_profile(params_design[i].benches)
+    if p_d and p_d.benches:
+        rd, re = build_reconciled_profile(p_d.benches)
         if len(rd) > 0:
             conc_d = _profile_to_3d(rd, re, ox, oy, direction)
             if len(conc_d) > 1:
                 _draw_3d_polyline(msp, conc_d, 'CONCILIADO_DISEÑO')
 
-    if i < len(params_topo) and params_topo[i] and params_topo[i].benches:
-        rt, ret = build_reconciled_profile(params_topo[i].benches)
+    if p_t and p_t.benches:
+        rt, ret = build_reconciled_profile(p_t.benches)
         if len(rt) > 0:
             conc_t = _profile_to_3d(rt, ret, ox, oy, direction)
             if len(conc_t) > 1:

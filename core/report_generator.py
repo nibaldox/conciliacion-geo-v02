@@ -169,7 +169,19 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
                                 grid_height)
             ax.set_yticks(y_ticks)
 
-    ax.set_title(f"Sección: {params_design.section_name} - {params_design.sector}")
+    title_name = "N/A"
+    title_sector = "N/A"
+    if section is not None:
+        title_name = section.name
+        title_sector = section.sector
+    elif params_design is not None:
+        title_name = params_design.section_name
+        title_sector = params_design.sector
+    elif params_topo is not None:
+        title_name = params_topo.section_name
+        title_sector = params_topo.sector
+
+    ax.set_title(f"Sección: {title_name} - {title_sector}")
     ax.set_xlabel("Distancia (m)")
     ax.set_ylabel("Elevación (m)")
     ax.grid(True, linestyle='--', color='lightgray', alpha=0.7)
