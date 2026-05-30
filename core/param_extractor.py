@@ -76,6 +76,44 @@ def ramer_douglas_peucker(points, epsilon):
         return np.vstack((points[0], points[end]))
 
 
+def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: float) -> tuple[float, float]:
+    n_pts = len(sorted_face_pts)
+    crest = sorted_face_pts[0]
+    toe = sorted_face_pts[-1]
+    dz = crest[1] - toe[1]
+    dx = abs(crest[0] - toe[0])
+    default_angle = float(np.degrees(np.arctan2(dz, dx))) if dx > 1e-3 else face_threshold
+    if n_pts < 3:
+        return float(toe[0]), default_angle
+    dy = np.diff(sorted_face_pts[:, 1])
+    dx_diff = np.diff(sorted_face_pts[:, 0])
+    segs_len = np.sqrt(dx_diff**2 + dy**2)
+    valid = segs_len > 1e-4
+    segs_ang = np.zeros(len(dy))
+    segs_ang[valid] = np.abs(np.degrees(np.arctan2(dy[valid], dx_diff[valid])))
+    spill_idx = len(segs_ang)
+    for i in range(len(segs_ang) - 1, -1, -1):
+        if segs_ang[i] < 48.0:
+            spill_idx = i
+        else:
+            break
+    if spill_idx > 0:
+        solid_pts = sorted_face_pts[:spill_idx + 1]
+        solid_y = solid_pts[:, 1]
+        solid_x = solid_pts[:, 0]
+        if len(solid_pts) >= 2 and np.var(solid_y) > 1e-4:
+            poly = np.polyfit(solid_y, solid_x, 1)
+            x_projected = float(poly[0] * toe[1] + poly[1])
+            m_abs = abs(poly[0])
+            corrected_angle = float(np.degrees(np.arctan2(1, m_abs))) if m_abs > 1e-4 else 90.0
+            if crest[0] < toe[0]:
+                x_projected = np.clip(x_projected, crest[0], toe[0])
+            else:
+                x_projected = np.clip(x_projected, toe[0], crest[0])
+            return x_projected, corrected_angle
+    return float(toe[0]), default_angle
+
+
 def extract_parameters(distances, elevations, section_name, sector,
                        resolution=0.5, face_threshold=40.0,
                        berm_threshold=20.0, max_berm_width=50.0):
@@ -182,41 +220,42 @@ def extract_parameters(distances, elevations, section_name, sector,
             p_end = face_pts[-1]
             
             # Determine Crest and Toe based on elevation
-            if p_start[1] > p_end[1]:
-                crest = p_start
-                toe = p_end
-            else:
-                crest = p_end
-                toe = p_start
+            sorted_face_pts = face_pts[np.argsort(-face_pts[:, 1])]
+            crest = sorted_face_pts[0]
+            toe = sorted_face_pts[-1]
             
             bench_height = abs(crest[1] - toe[1])
             
             if bench_height < 2.0:
                 continue
                 
-            # Weighted average angle for the face (weighted by segment length)
-            # segs in this face group
             local_dx = dx[idx_start:idx_end]
             local_dy = dy[idx_start:idx_end]
             local_len = dists[idx_start:idx_end]
             local_ang = angles[idx_start:idx_end]
             
-            # We filter for only "steep" sub-segments to avoid calculating average with small flat steps if any
             steep_mask = local_ang > (face_threshold - 10)
             if np.sum(local_len[steep_mask]) > 0.1:
                 weighted_angle = np.average(local_ang[steep_mask], weights=local_len[steep_mask])
             else:
                 weighted_angle = np.average(local_ang, weights=local_len)
                 
+            corrected_toe_x, corrected_angle = _detect_and_project_solid_toe(sorted_face_pts, face_threshold)
+            final_toe_x = corrected_toe_x
+            if abs(corrected_toe_x - toe[0]) > 1e-3:
+                final_angle = corrected_angle
+            else:
+                final_angle = weighted_angle
+
             bench_num += 1
             benches.append(BenchParams(
                 bench_number=bench_num,
                 crest_elevation=float(crest[1]),
                 crest_distance=float(crest[0]),
                 toe_elevation=float(toe[1]),
-                toe_distance=float(toe[0]),
+                toe_distance=final_toe_x,
                 bench_height=float(bench_height),
-                face_angle=float(weighted_angle),
+                face_angle=float(final_angle),
                 berm_width=0.0
             ))
 
