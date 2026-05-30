@@ -186,10 +186,9 @@ def render_tab_blast_correlation(config: dict) -> None:
             fig_bench.update_layout(
                 title='Relación Carga Explosiva vs Desviación de Cresta por Banco',
                 xaxis=dict(title='Nivel de Banco (Cota)', type='category'),
-                yaxis=dict(title='Carga Explosiva Total (Kg)', titlecolor='crimson', tickcolor='crimson'),
+                yaxis=dict(title=dict(text='Carga Explosiva Total (Kg)', font=dict(color='crimson')), tickcolor='crimson'),
                 yaxis2=dict(
-                    title='Desviación de Cresta Abs. Media (m)',
-                    titlecolor='darkorange',
+                    title=dict(text='Desviación de Cresta Abs. Media (m)', font=dict(color='darkorange')),
                     tickcolor='darkorange',
                     overlaying='y',
                     side='right'
