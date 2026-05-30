@@ -575,7 +575,13 @@ def _render_tab_ai(tab, config: dict):
                             continue
                         avg_dev = match['abs_dev'].values[0]
 
-                        proj = proyectar_pozos_en_seccion(blast_df, sec.start, sec.azimuth, sec.length, tolerance=15.0)
+                        proj = proyectar_pozos_en_seccion(
+                            blast_df,
+                            origin=sec.origin,
+                            azimuth=sec.azimuth,
+                            length=sec.length,
+                            tolerance=15.0
+                        )
                         if not proj.empty:
                             total_kg = proj[kg_col].fillna(0).sum()
                             if avg_dev > 1.0 and total_kg > 2000:
@@ -636,7 +642,13 @@ def _render_tab_ai(tab, config: dict):
                                 if match.empty:
                                     continue
                                 avg_dev = match['abs_dev'].values[0]
-                                proj_wells = proyectar_pozos_en_seccion(blast_df, sec.start, sec.azimuth, sec.length, tolerance=15.0)
+                                proj_wells = proyectar_pozos_en_seccion(
+                                    blast_df,
+                                    origin=sec.origin,
+                                    azimuth=sec.azimuth,
+                                    length=sec.length,
+                                    tolerance=15.0
+                                )
                                 total_kg = proj_wells[kg_col].fillna(0).sum() if not proj_wells.empty else 0
                                 corr_data.append({'Kg_Explosivo': total_kg, 'Desviacion': avg_dev})
 

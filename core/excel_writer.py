@@ -434,7 +434,13 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
             if df_sec.empty:
                 continue
             avg_dev = df_sec[dev_col].abs().mean()
-            proj = proyectar_pozos_en_seccion(df_pozos, sec.start, sec.azimuth, sec.length, tolerance=15.0)
+            proj = proyectar_pozos_en_seccion(
+                df_pozos,
+                origin=sec.origin,
+                azimuth=sec.azimuth,
+                length=sec.length,
+                tolerance=15.0
+            )
             if not proj.empty:
                 total_kg = proj[kg_col].fillna(0).sum()
                 num_wells = len(proj)
