@@ -388,7 +388,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p_img.paragraph_format.space_before = Pt(0)
         p_img.paragraph_format.space_after = Pt(2)
-        p_img.add_run().add_picture(img_stream, width=Inches(3.8))
+        p_img.add_run().add_picture(img_stream, width=Inches(3.0))
         img_stream.close()
         
         if (idx + 1) % 3 == 0 and (idx + 1) < len(valid_items):
