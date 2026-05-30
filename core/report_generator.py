@@ -195,6 +195,49 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
     return buf
 
 
+def create_compliance_pie_charts(comparisons):
+    keys = ['height_status', 'angle_status', 'berm_status']
+    labels = ['Altura de Banco', 'Ángulo de Cara', 'Ancho de Berma']
+    
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    
+    any_data = False
+    for idx, (key, title) in enumerate(zip(keys, labels)):
+        ax = axes[idx]
+        counts = {
+            'CUMPLE': sum(1 for c in comparisons if c[key] == "CUMPLE"),
+            'FUERA TOL.': sum(1 for c in comparisons if c[key] == "FUERA DE TOLERANCIA"),
+            'NO CUMPLE': sum(1 for c in comparisons if c[key] == "NO CUMPLE")
+        }
+        
+        labels_to_show = []
+        sizes = []
+        colors_to_show = []
+        for cat, color in zip(['CUMPLE', 'FUERA TOL.', 'NO CUMPLE'], ['#006100', '#9C5700', '#9C0006']):
+            val = counts[cat]
+            if val > 0:
+                labels_to_show.append(f"{cat}\n({val})")
+                sizes.append(val)
+                colors_to_show.append(color)
+        
+        if sum(sizes) > 0:
+            any_data = True
+            ax.pie(sizes, labels=labels_to_show, autopct='%1.1f%%', startangle=90, colors=colors_to_show,
+                   textprops={'fontsize': 9, 'weight': 'bold'})
+            ax.set_title(title, fontsize=11, weight='bold', pad=10)
+        else:
+            ax.text(0.5, 0.5, 'Sin Datos', ha='center', va='center')
+            ax.axis('off')
+            
+    fig.tight_layout()
+    
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
 def generate_word_report(comparisons, all_data, output_path, project_info=None,
                          df_pozos=None, sections=None, plot_options=None):
     if project_info is None:
@@ -252,6 +295,16 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         doc.add_paragraph(f"Se evaluaron {len(comparisons)} bancos en total.")
         doc.add_paragraph(f"Cumplimiento Global: {pct:.1f}%")
         
+        try:
+            pie_stream = create_compliance_pie_charts(comparisons)
+            p_pie = doc.add_paragraph()
+            p_pie.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p_pie.add_run().add_picture(pie_stream, width=Inches(8.5))
+            pie_stream.close()
+        except Exception as e:
+            doc.add_paragraph(f"(Error al generar gráficos de torta: {e})")
+
+        doc.add_paragraph("Resumen por parámetro:")
         table = doc.add_table(rows=1, cols=4)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
@@ -260,16 +313,69 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         hdr_cells[2].text = 'FUERA TOL.'
         hdr_cells[3].text = 'NO CUMPLE'
         
+        for col_idx, h in enumerate(['Parámetro', 'CUMPLE', 'FUERA TOL.', 'NO CUMPLE']):
+            for paragraph in hdr_cells[col_idx].paragraphs:
+                for run in paragraph.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(9.5)
+
         for key, label in [('height_status', 'Altura'), ('angle_status', 'Ángulo Cara'), ('berm_status', 'Berma')]:
             row_cells = table.add_row().cells
             row_cells[0].text = label
             row_cells[1].text = str(sum(1 for c in comparisons if c[key] == "CUMPLE"))
             row_cells[2].text = str(sum(1 for c in comparisons if c[key] == "FUERA DE TOLERANCIA"))
             row_cells[3].text = str(sum(1 for c in comparisons if c[key] == "NO CUMPLE"))
+            for cell in row_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = Pt(9.0)
     else:
         doc.add_paragraph("No se encontraron resultados para reportar.")
- 
-    doc.add_heading("2. Detalle por Sección", level=1)
+
+    doc.add_heading("2. Tabla Resumen de Cumplimiento por Perfil", level=1)
+    if comparisons:
+        table_summary = doc.add_table(rows=1, cols=5)
+        table_summary.style = 'Table Grid'
+        
+        headers = ['Sección', 'Banco (cota)', 'H. Dise / Real', 'Ang. Dise / Real', 'Berma Dise / Real']
+        for col_idx, h in enumerate(headers):
+            hdr_cell = table_summary.rows[0].cells[col_idx]
+            hdr_cell.text = h
+            for paragraph in hdr_cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(9.5)
+                    
+        for c in comparisons:
+            row_cells = table_summary.add_row().cells
+            row_cells[0].text = c.get('section', 'N/A')
+            
+            b_num = c.get('bench_num', 'N/A')
+            b_level = c.get('level', 'N/A')
+            row_cells[1].text = f"B{b_num} ({b_level})"
+            
+            h_d = f"{c['height_design']:.1f}" if c.get('height_design') is not None else "N/A"
+            h_r = f"{c['height_real']:.1f}" if c.get('height_real') is not None else "N/A"
+            row_cells[2].text = f"{h_d} / {h_r}"
+            
+            a_d = f"{c['angle_design']:.1f}" if c.get('angle_design') is not None else "N/A"
+            a_r = f"{c['angle_real']:.1f}" if c.get('angle_real') is not None else "N/A"
+            row_cells[3].text = f"{a_d} / {a_r}"
+            
+            b_d = f"{c['berm_design']:.1f}" if c.get('berm_design') is not None else "N/A"
+            b_r = f"{c['berm_real']:.1f}" if c.get('berm_real') is not None else "N/A"
+            row_cells[4].text = f"{b_d} / {b_r}"
+            
+            for cell in row_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.size = Pt(8.5)
+    else:
+        doc.add_paragraph("No hay datos de comparación disponibles.")
+
+    doc.add_page_break()
+
+    doc.add_heading("3. Detalle por Sección", level=1)
     
     valid_items = []
     for item in all_data:
@@ -302,64 +408,19 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             filtered_bench_nums=filtered_bench_nums
         )
         
-        layout_table = doc.add_table(rows=1, cols=2)
-        layout_table.style = 'Normal Table'
-        layout_table.autofit = False
-        
-        layout_table.columns[0].width = Inches(4.2)
-        layout_table.columns[1].width = Inches(4.8)
-        
-        cell_left = layout_table.rows[0].cells[0]
-        cell_right = layout_table.rows[0].cells[1]
-        
-        p_img = cell_left.paragraphs[0]
+        p_img = doc.add_paragraph()
         p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p_img.add_run().add_picture(img_stream, width=Inches(4.0))
+        p_img.add_run().add_picture(img_stream, width=Inches(6.0))
         img_stream.close()
         
-        table = cell_right.add_table(rows=1, cols=4)
-        table.style = 'Table Grid'
-        
-        headers = ['Banco (cota)', 'H. Dise / Real', 'Ang. Dise / Real', 'Berma Dise / Real']
-        for col_idx, h in enumerate(headers):
-            hdr_cell = table.rows[0].cells[col_idx]
-            hdr_cell.text = h
-            for paragraph in hdr_cell.paragraphs:
-                for run in paragraph.runs:
-                    run.font.bold = True
-                    run.font.size = Pt(8.5)
-            
-        for c in sec_comps:
-            row_cells = table.add_row().cells
-            
-            b_num = c.get('bench_num', 'N/A')
-            b_level = c.get('level', 'N/A')
-            row_cells[0].text = f"B{b_num} ({b_level})"
-            
-            h_d = f"{c['height_design']:.1f}" if c.get('height_design') is not None else "N/A"
-            h_r = f"{c['height_real']:.1f}" if c.get('height_real') is not None else "N/A"
-            row_cells[1].text = f"{h_d} / {h_r}"
-            
-            a_d = f"{c['angle_design']:.1f}" if c.get('angle_design') is not None else "N/A"
-            a_r = f"{c['angle_real']:.1f}" if c.get('angle_real') is not None else "N/A"
-            row_cells[2].text = f"{a_d} / {a_r}"
-            
-            b_d = f"{c['berm_design']:.1f}" if c.get('berm_design') is not None else "N/A"
-            b_r = f"{c['berm_real']:.1f}" if c.get('berm_real') is not None else "N/A"
-            row_cells[3].text = f"{b_d} / {b_r}"
-            
-            for cell in row_cells:
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        run.font.size = Pt(8.0)
- 
         if (idx + 1) % 3 == 0 and (idx + 1) < len(valid_items):
             doc.add_page_break()
         else:
             doc.add_paragraph()
 
     if df_pozos is not None and not df_pozos.empty:
-        doc.add_heading("3. Análisis de Perforación y Tronadura", level=1)
+        doc.add_page_break()
+        doc.add_heading("4. Análisis de Perforación y Tronadura", level=1)
 
         pasadura = (df_pozos['Z_collar'] - 15.0) - df_pozos['Z_toe']
         p_mean = pasadura.mean()
