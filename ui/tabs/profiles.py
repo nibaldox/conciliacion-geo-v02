@@ -13,7 +13,6 @@ from core.geom_utils import calculate_profile_deviation, calculate_area_between_
 
 
 def render_tab_profiles(config: dict) -> None:
-    # 5-column layout for control parameters (compact layout)
     ctrl_cols = st.columns(5)
     
     with ctrl_cols[0]:
@@ -27,6 +26,10 @@ def render_tab_profiles(config: dict) -> None:
             "Mostrar Áreas",
             value=False, key="show_areas",
             help="Rellena áreas de sobre-excavación y deuda de material")
+        show_spill_areas = st.checkbox(
+            "Mostrar Área de Derrame",
+            value=True, key="show_spill_areas",
+            help="Muestra el área del material de derrame en la base de los bancos")
             
     with ctrl_cols[2]:
         show_semaphore = st.checkbox(
@@ -51,13 +54,12 @@ def render_tab_profiles(config: dict) -> None:
         num_cols = st.selectbox(
             "Columnas en pantalla",
             [1, 2, 3],
-            index=2, # default to 3 columns
+            index=2,
             key="profile_grid_cols",
             help="Ajusta el número de columnas para optimizar el espacio")
 
     display_sections = st.session_state.get('processed_sections', st.session_state.sections)
 
-    # Filter valid sections/profiles first
     valid_plots = []
     for i, section in enumerate(display_sections):
         pd_prof = st.session_state.profiles_design[i]
@@ -68,7 +70,6 @@ def render_tab_profiles(config: dict) -> None:
             continue
         valid_plots.append((i, section, pd_prof, pt_prof))
 
-    # Render dynamic grid rows
     for j in range(0, len(valid_plots), num_cols):
         cols = st.columns(num_cols)
         for col_idx in range(num_cols):
@@ -78,20 +79,17 @@ def render_tab_profiles(config: dict) -> None:
                     fig = _build_profile_figure(
                         i, section, pd_prof, pt_prof,
                         show_areas=show_areas,
+                        show_spill_areas=show_spill_areas,
                         show_semaphore=show_semaphore,
                         show_reconciled=show_reconciled,
                         show_pozos=show_pozos,
                         blast_tolerance=blast_tolerance,
                         config=config)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
 
-
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
 
 def _build_profile_figure(i, section, pd_prof, pt_prof,
-                           show_areas, show_semaphore, show_reconciled,
+                           show_areas, show_spill_areas, show_semaphore, show_reconciled,
                            show_pozos, blast_tolerance, config):
     fig = go.Figure()
 
@@ -104,6 +102,9 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
 
     if show_areas:
         _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under)
+
+    if show_spill_areas and i < len(st.session_state.params_topo):
+        _add_spill_areas_traces(fig, st.session_state.params_topo[i].benches, pt_prof)
 
     sec_name = section.name
     sec_comps = [c for c in st.session_state.comparison_results if c['section'] == sec_name]
@@ -471,6 +472,42 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
         hoverinfo='text',
         showlegend=False,
     ))
+
+
+def _add_spill_areas_traces(fig, benches, pt_prof):
+    legend_added = False
+    for bench in benches:
+        if bench.spill_width > 0.05 and bench.spill_start_elevation > 0.0:
+            if bench.toe_distance > bench.crest_distance:
+                toe_observed = bench.toe_distance + bench.spill_width
+            else:
+                toe_observed = bench.toe_distance - bench.spill_width
+
+            d_min = min(bench.spill_start_distance, toe_observed)
+            d_max = max(bench.spill_start_distance, toe_observed)
+            mask = (pt_prof.distances >= d_min - 0.01) & (pt_prof.distances <= d_max + 0.01)
+            topo_x = pt_prof.distances[mask]
+            topo_y = pt_prof.elevations[mask]
+
+            if len(topo_x) > 0:
+                topo_pts = np.column_stack((topo_x, topo_y))
+                if toe_observed > bench.spill_start_distance:
+                    topo_pts = topo_pts[np.argsort(-topo_pts[:, 0])]
+                else:
+                    topo_pts = topo_pts[np.argsort(topo_pts[:, 0])]
+
+                poly_x = [bench.spill_start_distance, bench.toe_distance, toe_observed] + list(topo_pts[:, 0]) + [bench.spill_start_distance]
+                poly_y = [bench.spill_start_elevation, bench.toe_elevation, bench.toe_elevation] + list(topo_pts[:, 1]) + [bench.spill_start_elevation]
+
+                fig.add_trace(go.Scatter(
+                    x=poly_x, y=poly_y,
+                    fill='toself', fillcolor='rgba(255, 165, 0, 0.4)',
+                    line=dict(width=0),
+                    name='Derrame',
+                    hoverinfo='skip',
+                    showlegend=not legend_added
+                ))
+                legend_added = True
 
 
 

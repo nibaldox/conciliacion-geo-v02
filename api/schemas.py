@@ -77,6 +77,10 @@ class BenchParamsSchema(BaseModel):
     face_angle: float
     berm_width: float
     is_ramp: bool = False
+    spill_width: float = 0.0
+    effective_berm_width: float = 0.0
+    spill_start_distance: float = 0.0
+    spill_start_elevation: float = 0.0
 
 
 class ExtractionResultSchema(BaseModel):

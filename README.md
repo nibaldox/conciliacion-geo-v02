@@ -123,8 +123,13 @@ Esta aplicación automatiza el flujo de trabajo de conciliación geotécnica, re
 ### 3. Extracción Automática de Parámetros
 El algoritmo inteligente identifica y calcula:
 *   **Altura de Banco**: Distancia vertical entre pata y cresta.
-*   **Ancho de Berma**: Distancia horizontal entre pata superior y cresta inferior.
-*   **Ángulo de Cara**: Inclinación del talud del banco.
+*   **Ancho de Berma Total y Desglose**:
+    *   **Ancho de Berma Total**: Distancia horizontal total calculada entre pata superior y cresta inferior.
+    *   **Berma de Derrame (Material Acumulado)**: Identificación del ancho ocupado por material suelto acumulado al pie del banco (`spill_width`), a partir de la estimación del punto de quiebre (knickpoint) por segunda derivada.
+    *   **Berma Efectiva**: Ancho de berma real útil y transitable (`effective_berm_width`), correspondiente a la berma total menos el derrame del banco superior.
+*   **Ángulo de Cara y Proyección Sólida**:
+    *   **Ángulo de Cara**: Inclinación de la cara de roca sana o competente.
+    *   **Pata Sólida Proyectada**: Reconstrucción de la línea de talud de roca competente mediante regresión lineal y proyección matemática hasta el nivel del piso, deduciendo la posición teórica original de la pata antes del derrame.
 *   **Ángulo Inter-rampa**: Pendiente global entre bancos.
 *   **Detección de Rampas**: Identificación automática de rampas basada en anchos de berma (15m - 42m).
 
@@ -135,9 +140,10 @@ El algoritmo inteligente identifica y calcula:
 
 ### 5. Ergonomía Visual en Perfiles Cross-Section
 *   **Grilla Multicolumna Dinámica**: Selector en pantalla para visualizar perfiles en 1, 2 o 3 columnas de forma adaptativa, minimizando el scrolling vertical.
-*   **Cabecera de Mandos Compacta**: Mandos de control (área, semáforo, pozos, perfiles) reestructurados horizontalmente en una cabecera de 5 columnas para aprovechar al máximo el espacio de la aplicación.
+*   **Cabecera de Mandos Compacta**: Mandos de control (área, semáforo, derrame, pozos, perfiles) reestructurados horizontalmente en una cabecera de 5 columnas para aprovechar al máximo el espacio de la aplicación.
+*   **Visualización Dinámica del Área de Derrame**: Representación visual premium de las pilas de derrame acumuladas al pie del talud como polígonos cerrados sombreados en color naranja semi-transparente (`rgba(255, 165, 0, 0.4)`), delimitados por la cara proyectada de roca sana, el piso horizontal y la topografía real.
 *   **Encuadre Bounding Box y Relación 1:1**: Centrado simétrico inteligente con un 5% de margen (padding) focalizado en el talud, forzando una escala geométrica estricta de 1:1 en pantalla.
-*   **Leyendas Simplificadas**: Caja de leyendas despejada de contaminación visual, ocultando trazas auxiliares (Deuda, Sobre-excavación, Info Bancos, Semáforos, Pozos) para reflejar únicamente las series clave: `Diseño`, `Topografía Real` y `Conciliado As-Built`.
+*   **Leyendas Simplificadas**: Caja de leyendas despejada de contaminación visual, ocultando trazas auxiliares (Deuda, Sobre-excavación, Info Bancos, Semáforos, Pozos) para reflejar únicamente las series clave: `Diseño`, `Topografía Real`, `Conciliado As-Built` y `Derrame`.
 
 ### 6. Reportabilidad y Exportación de Alta Fidelidad
 *   **Tablas Interactivas**: Filtrado por Sector, Nivel y Sección. Ordenamiento flexible con coloreado de cumplimiento.

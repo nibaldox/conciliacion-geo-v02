@@ -298,7 +298,7 @@ def render_modulo_tronadura() -> None:
                 height=350,
                 margin=dict(l=40, r=20, t=40, b=40)
             )
-            st.plotly_chart(fig_pas, use_container_width=True)
+            st.plotly_chart(fig_pas, width="stretch")
 
             st.markdown("---")
             st.subheader("💥 Correlación Geotécnica: Daño vs Explosivos")
@@ -403,7 +403,7 @@ def render_modulo_tronadura() -> None:
                                 height=450,
                                 margin=dict(l=40, r=20, t=40, b=40)
                             )
-                            st.plotly_chart(fig_scat, use_container_width=True)
+                            st.plotly_chart(fig_scat, width="stretch")
 
                             r_coef = np.corrcoef(xs, ys)[0, 1] if len(xs) > 1 and np.var(xs) > 0 and np.var(ys) > 0 else 0
                             if r_coef > 0.5:
@@ -579,7 +579,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: list[str], label_prefix: str) -> None:

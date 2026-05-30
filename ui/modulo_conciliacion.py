@@ -56,4 +56,4 @@ def _render_ref_lines_preview() -> None:
             height=500, margin=dict(l=60, r=20, t=30, b=40),
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")

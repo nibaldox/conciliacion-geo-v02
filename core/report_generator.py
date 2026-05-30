@@ -79,6 +79,33 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
                     ax.plot(b.crest_distance, b.crest_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
                     ax.plot(b.toe_distance, b.toe_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
 
+            legend_added = False
+            for bench in params_topo.benches:
+                if bench.spill_width > 0.05 and bench.spill_start_elevation > 0.0:
+                    if bench.toe_distance > bench.crest_distance:
+                        toe_observed = bench.toe_distance + bench.spill_width
+                    else:
+                        toe_observed = bench.toe_distance - bench.spill_width
+
+                    d_min = min(bench.spill_start_distance, toe_observed)
+                    d_max = max(bench.spill_start_distance, toe_observed)
+                    mask = (pt_prof.distances >= d_min - 0.01) & (pt_prof.distances <= d_max + 0.01)
+                    topo_x = pt_prof.distances[mask]
+                    topo_y = pt_prof.elevations[mask]
+
+                    if len(topo_x) > 0:
+                        topo_pts = np.column_stack((topo_x, topo_y))
+                        if toe_observed > bench.spill_start_distance:
+                            topo_pts = topo_pts[np.argsort(-topo_pts[:, 0])]
+                        else:
+                            topo_pts = topo_pts[np.argsort(topo_pts[:, 0])]
+
+                        poly_x = [bench.spill_start_distance, bench.toe_distance, toe_observed] + list(topo_pts[:, 0]) + [bench.spill_start_distance]
+                        poly_y = [bench.spill_start_elevation, bench.toe_elevation, bench.toe_elevation] + list(topo_pts[:, 1]) + [bench.spill_start_elevation]
+
+                        ax.fill(poly_x, poly_y, color='#FFA500', alpha=0.4, label='Derrame' if not legend_added else None, zorder=3)
+                        legend_added = True
+
         if params_design and params_design.benches:
             rec_d_dist, rec_d_elev = build_reconciled_profile(params_design.benches)
             if len(rec_d_dist) > 0:

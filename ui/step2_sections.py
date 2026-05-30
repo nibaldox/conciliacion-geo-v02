@@ -185,7 +185,7 @@ def _render_file_preview(polyline, preview_sections) -> None:
         xaxis_title='Este (m)', yaxis_title='Norte (m)',
         yaxis=dict(scaleanchor='x', scaleratio=1),
         height=500, margin=dict(l=60, r=20, t=30, b=40))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ---------------------------------------------------------------------------

@@ -161,7 +161,7 @@ def _render_3d_view() -> None:
                 height=600, margin=dict(l=0, r=0, t=30, b=0),
                 legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
 
 def _render_contour_view() -> None:
@@ -227,4 +227,4 @@ def _render_contour_view() -> None:
                 height=650, margin=dict(l=60, r=20, t=30, b=40),
                 legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
             )
-            st.plotly_chart(fig_contour, use_container_width=True)
+            st.plotly_chart(fig_contour, width="stretch")

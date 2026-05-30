@@ -165,7 +165,7 @@ def _render_tab_file(tab):
                         yaxis=dict(scaleanchor='x', scaleratio=1),
                         height=500, margin=dict(l=60, r=20, t=30, b=40),
                     )
-                    st.plotly_chart(fig_preview, use_container_width=True)
+                    st.plotly_chart(fig_preview, width="stretch")
 
                     if st.button("✅ Aplicar Secciones desde Archivo", type="primary",
                                  key="apply_file"):

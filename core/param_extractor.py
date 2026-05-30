@@ -21,6 +21,8 @@ class BenchParams:
     group_break: bool = False
     spill_width: float = 0.0
     effective_berm_width: float = 0.0
+    spill_start_distance: float = 0.0
+    spill_start_elevation: float = 0.0
 
 
 @dataclass
@@ -77,7 +79,7 @@ def ramer_douglas_peucker(points, epsilon):
         return np.vstack((points[0], points[end]))
 
 
-def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: float) -> tuple[float, float]:
+def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: float) -> tuple[float, float, np.ndarray]:
     n_pts = len(sorted_face_pts)
     crest = sorted_face_pts[0]
     toe = sorted_face_pts[-1]
@@ -85,7 +87,7 @@ def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: f
     dx = abs(crest[0] - toe[0])
     default_angle = float(np.degrees(np.arctan2(dz, dx))) if dx > 1e-3 else face_threshold
     if n_pts < 3:
-        return float(toe[0]), default_angle
+        return float(toe[0]), default_angle, toe
     dy = np.diff(sorted_face_pts[:, 1])
     dx_diff = np.diff(sorted_face_pts[:, 0])
     segs_len = np.sqrt(dx_diff**2 + dy**2)
@@ -111,8 +113,8 @@ def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: f
                 x_projected = np.clip(x_projected, crest[0], toe[0])
             else:
                 x_projected = np.clip(x_projected, toe[0], crest[0])
-            return x_projected, corrected_angle
-    return float(toe[0]), default_angle
+            return x_projected, corrected_angle, sorted_face_pts[spill_idx]
+    return float(toe[0]), default_angle, toe
 
 
 def extract_parameters(distances, elevations, section_name, sector,
@@ -258,7 +260,7 @@ def extract_parameters(distances, elevations, section_name, sector,
                 simplified_face = ramer_douglas_peucker(raw_face_pts, 0.03)
                 if len(simplified_face) >= 3:
                     face_pts_for_analysis = simplified_face
-            corrected_toe_x, corrected_angle = _detect_and_project_solid_toe(face_pts_for_analysis, face_threshold)
+            corrected_toe_x, corrected_angle, spill_pt = _detect_and_project_solid_toe(face_pts_for_analysis, face_threshold)
             final_toe_x = corrected_toe_x
             spill_w = 0.0
             if abs(corrected_toe_x - toe[0]) > 1e-3:
@@ -278,7 +280,9 @@ def extract_parameters(distances, elevations, section_name, sector,
                 face_angle=float(final_angle),
                 berm_width=0.0,
                 spill_width=float(spill_w),
-                effective_berm_width=0.0
+                effective_berm_width=0.0,
+                spill_start_distance=float(spill_pt[0]),
+                spill_start_elevation=float(spill_pt[1])
             ))
 
     _compute_berm_widths_from_profile(

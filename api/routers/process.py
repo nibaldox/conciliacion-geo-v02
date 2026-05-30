@@ -104,6 +104,10 @@ def _bench_to_dict(b: BenchParams) -> dict:
         "face_angle": round(b.face_angle, 1),
         "berm_width": round(b.berm_width, 2),
         "is_ramp": b.is_ramp,
+        "spill_width": round(b.spill_width, 2),
+        "effective_berm_width": round(b.effective_berm_width, 2),
+        "spill_start_distance": round(b.spill_start_distance, 2),
+        "spill_start_elevation": round(b.spill_start_elevation, 2),
     }
 
 
@@ -119,6 +123,10 @@ def _dict_to_bench(d: dict) -> BenchParams:
         face_angle=float(d.get("face_angle", 0)),
         berm_width=float(d.get("berm_width", 0)),
         is_ramp=bool(d.get("is_ramp", False)),
+        spill_width=float(d.get("spill_width", 0.0)),
+        effective_berm_width=float(d.get("effective_berm_width", 0.0)),
+        spill_start_distance=float(d.get("spill_start_distance", 0.0)),
+        spill_start_elevation=float(d.get("spill_start_elevation", 0.0)),
     )
 
 
