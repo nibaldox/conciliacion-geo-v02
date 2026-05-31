@@ -247,21 +247,8 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         section.left_margin = Inches(0.5)
         section.right_margin = Inches(0.5)
 
-    max_local_span = 0.0
-    for item in all_data:
-        prof_d = item['profile_d']
-        prof_t = item['profile_t']
-        all_z = np.concatenate([prof_d[1], prof_t[1]])
-        valid_z = all_z[np.isfinite(all_z)]
-        if len(valid_z) > 0:
-            local_span = np.max(valid_z) - np.min(valid_z)
-            max_local_span = max(max_local_span, local_span)
-
-    z_span = max(max_local_span + 10.0, 30.0)
-
     if plot_options is None:
         plot_options = {}
-    plot_options['z_span'] = z_span
     
     title = doc.add_heading(f"Informe de Conciliación Geotécnica", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -489,21 +476,8 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 def generate_section_images_zip(all_data, plot_options=None, sections=None, df_pozos=None, filtered_comps=None):
     import zipfile
     
-    max_local_span = 0.0
-    for item in all_data:
-        prof_d = item['profile_d']
-        prof_t = item['profile_t']
-        all_z = np.concatenate([prof_d[1], prof_t[1]])
-        valid_z = all_z[np.isfinite(all_z)]
-        if len(valid_z) > 0:
-            local_span = np.max(valid_z) - np.min(valid_z)
-            max_local_span = max(max_local_span, local_span)
-
-    z_span = max(max_local_span + 10.0, 30.0)
-
     if plot_options is None:
         plot_options = {}
-    plot_options['z_span'] = z_span
 
     zip_buffer = io.BytesIO()
     
