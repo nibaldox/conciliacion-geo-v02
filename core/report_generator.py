@@ -128,7 +128,12 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
 
     if len(valid_d) > 0 and len(valid_z) > 0:
         xmin, xmax = float(np.min(valid_d)), float(np.max(valid_d))
-        if 'z_limits' in plot_options and plot_options['z_limits'] is not None:
+        if 'z_span' in plot_options and plot_options['z_span'] is not None:
+            z_span_val = plot_options['z_span']
+            z_mid = (float(np.min(valid_z)) + float(np.max(valid_z))) / 2
+            zmin = z_mid - z_span_val / 2
+            zmax = z_mid + z_span_val / 2
+        elif 'z_limits' in plot_options and plot_options['z_limits'] is not None:
             zmin, zmax = plot_options['z_limits']
         else:
             zmin, zmax = float(np.min(valid_z)), float(np.max(valid_z))
@@ -242,27 +247,21 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         section.left_margin = Inches(0.5)
         section.right_margin = Inches(0.5)
 
-    global_zmin = float('inf')
-    global_zmax = float('-inf')
+    max_local_span = 0.0
     for item in all_data:
         prof_d = item['profile_d']
         prof_t = item['profile_t']
-        if len(prof_d[1]) > 0:
-            global_zmin = min(global_zmin, np.min(prof_d[1]))
-            global_zmax = max(global_zmax, np.max(prof_d[1]))
-        if len(prof_t[1]) > 0:
-            global_zmin = min(global_zmin, np.min(prof_t[1]))
-            global_zmax = max(global_zmax, np.max(prof_t[1]))
+        all_z = np.concatenate([prof_d[1], prof_t[1]])
+        valid_z = all_z[np.isfinite(all_z)]
+        if len(valid_z) > 0:
+            local_span = np.max(valid_z) - np.min(valid_z)
+            max_local_span = max(max_local_span, local_span)
 
-    if global_zmin < float('inf') and global_zmax > float('-inf'):
-        z_pad = max((global_zmax - global_zmin) * 0.05, 5.0)
-        z_limits = [float(global_zmin - z_pad), float(global_zmax + z_pad)]
-    else:
-        z_limits = None
+    z_span = max(max_local_span + 10.0, 30.0)
 
     if plot_options is None:
         plot_options = {}
-    plot_options['z_limits'] = z_limits
+    plot_options['z_span'] = z_span
     
     title = doc.add_heading(f"Informe de Conciliación Geotécnica", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -490,27 +489,21 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 def generate_section_images_zip(all_data, plot_options=None, sections=None, df_pozos=None, filtered_comps=None):
     import zipfile
     
-    global_zmin = float('inf')
-    global_zmax = float('-inf')
+    max_local_span = 0.0
     for item in all_data:
         prof_d = item['profile_d']
         prof_t = item['profile_t']
-        if len(prof_d[1]) > 0:
-            global_zmin = min(global_zmin, np.min(prof_d[1]))
-            global_zmax = max(global_zmax, np.max(prof_d[1]))
-        if len(prof_t[1]) > 0:
-            global_zmin = min(global_zmin, np.min(prof_t[1]))
-            global_zmax = max(global_zmax, np.max(prof_t[1]))
+        all_z = np.concatenate([prof_d[1], prof_t[1]])
+        valid_z = all_z[np.isfinite(all_z)]
+        if len(valid_z) > 0:
+            local_span = np.max(valid_z) - np.min(valid_z)
+            max_local_span = max(max_local_span, local_span)
 
-    if global_zmin < float('inf') and global_zmax > float('-inf'):
-        z_pad = max((global_zmax - global_zmin) * 0.05, 5.0)
-        z_limits = [float(global_zmin - z_pad), float(global_zmax + z_pad)]
-    else:
-        z_limits = None
+    z_span = max(max_local_span + 10.0, 30.0)
 
     if plot_options is None:
         plot_options = {}
-    plot_options['z_limits'] = z_limits
+    plot_options['z_span'] = z_span
 
     zip_buffer = io.BytesIO()
     
