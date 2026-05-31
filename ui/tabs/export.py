@@ -294,10 +294,9 @@ def _render_dxf_export() -> None:
         _create_dxf_layers(doc)
         section_status = _build_section_status_map(st.session_state.comparison_results)
 
-        # Build maps for robust lookup by section name
         processed_secs = st.session_state.get('processed_sections', [])
         if not processed_secs:
-            processed_secs = sections
+            processed_secs = st.session_state.get('sections', [])
 
         params_d_list = st.session_state.get('params_design', [])
         params_t_list = st.session_state.get('params_topo', [])
@@ -313,7 +312,7 @@ def _render_dxf_export() -> None:
         progress_bar = st.progress(0)
         n_exported = 0
 
-        for i, sec in enumerate(sections):
+        for i, sec in enumerate(processed_secs):
             pd_prof, pt_prof = cut_both_surfaces(
                 st.session_state.mesh_design,
                 st.session_state.mesh_topo,
@@ -326,7 +325,7 @@ def _render_dxf_export() -> None:
                     msp, sec, p_d, p_t, pd_prof, pt_prof, section_status)
                 n_exported += 1
 
-            progress_bar.progress((i + 1) / len(sections))
+            progress_bar.progress((i + 1) / len(processed_secs))
 
         tmp_path = os.path.join(tempfile.gettempdir(), "Perfiles_3D.dxf")
         doc.saveas(tmp_path)
