@@ -402,7 +402,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             p_cell.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p_cell.paragraph_format.space_before = Pt(0)
             p_cell.paragraph_format.space_after = Pt(0)
-            p_cell.add_run().add_picture(img_stream, width=Inches(3.0))
+            p_cell.add_run().add_picture(img_stream, width=Inches(3.0), height=Inches(2.2))
             img_stream.close()
 
         if chunk_idx < len(chunks) - 1:
