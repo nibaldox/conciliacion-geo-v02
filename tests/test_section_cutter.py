@@ -32,6 +32,25 @@ class TestCutMesh:
         assert len(result.distances) >= 2
         assert len(result.distances) == len(result.elevations)
 
+    def test_cut_mesh_with_asymmetric_section(self, pit_mesh_design):
+        """Cortar mesh con una sección asimétrica respeta length_up y length_down."""
+        section = SectionLine(
+            name="S-ASYM",
+            origin=np.array([250.0, 250.0]),
+            azimuth=0.0,
+            length=200.0,
+            sector="Test",
+            length_up=150.0,
+            length_down=50.0,
+        )
+        result = cut_mesh_with_section(pit_mesh_design, section)
+
+        assert result is not None
+        assert isinstance(result, ProfileResult)
+        assert result.distances.max() <= 150.001
+        assert result.distances.min() >= -50.001
+        assert section.length == 200.0
+
     def test_cut_mesh_no_intersection(self, pit_mesh_design):
         """Sección fuera del mesh retorna None."""
         section = SectionLine(

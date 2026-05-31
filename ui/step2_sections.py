@@ -60,13 +60,15 @@ def _render_tab_file() -> None:
     coord_file = st.file_uploader(
         "Cargar coordenadas (CSV, DXF)", type=["csv", "txt", "dxf"], key="coord_file")
 
-    cols_file = st.columns(4)
+    cols_file = st.columns(5)
     spacing_file = cols_file[0].number_input(
         "Distancia entre perfiles (m)", value=20.0, min_value=1.0, step=5.0, key="spacing_file")
-    length_file = cols_file[1].number_input(
-        "Longitud de sección (m)", value=200.0, min_value=10.0, key="len_file")
-    sector_file = cols_file[2].text_input("Sector", "Principal", key="sector_file")
-    az_mode_file = cols_file[3].selectbox(
+    len_up_file = cols_file[1].number_input(
+        "Long. Arriba (m)", value=100.0, min_value=5.0, key="len_up_file")
+    len_down_file = cols_file[2].number_input(
+        "Long. Abajo (m)", value=100.0, min_value=5.0, key="len_down_file")
+    sector_file = cols_file[3].text_input("Sector", "Principal", key="sector_file")
+    az_mode_file = cols_file[4].selectbox(
         "Azimut",
         ["Perpendicular a la línea (Recomendado)", "Auto (pendiente local - Ruidoso)"],
         key="az_mode_file")
@@ -90,7 +92,8 @@ def _render_tab_file() -> None:
 
     auto_mesh = (st.session_state.mesh_design if "pendiente local" in az_mode_file else None)
     preview_sections = generate_perpendicular_sections(
-        polyline, spacing_file, length_file, sector_file, design_mesh=auto_mesh)
+        polyline, spacing_file, len_up_file + len_down_file, sector_file,
+        design_mesh=auto_mesh, length_up=len_up_file, length_down=len_down_file)
 
     import os
     file_base, _ = os.path.splitext(coord_file.name)
@@ -196,11 +199,13 @@ def _render_tab_interactive() -> None:
     st.markdown("Haz clic sobre la vista de planta para colocar el origen de cada sección. "
                 "El azimut se calcula automáticamente según la pendiente local del diseño.")
 
-    cols_cfg = st.columns(3)
-    sec_length_int = cols_cfg[0].number_input(
-        "Longitud de sección (m)", value=200.0, min_value=10.0, key="len_int")
-    sector_int = cols_cfg[1].text_input("Sector", "Principal", key="sector_int")
-    az_mode = cols_cfg[2].selectbox(
+    cols_cfg = st.columns(4)
+    len_up_int = cols_cfg[0].number_input(
+        "Long. Arriba (m)", value=100.0, min_value=5.0, key="len_up_int")
+    len_down_int = cols_cfg[1].number_input(
+        "Long. Abajo (m)", value=100.0, min_value=5.0, key="len_down_int")
+    sector_int = cols_cfg[2].text_input("Sector", "Principal", key="sector_int")
+    az_mode = cols_cfg[3].selectbox(
         "Azimut", ["Auto (pendiente local)", "Manual"], key="az_mode_int")
     manual_az_int = 0.0
     if az_mode == "Manual":
@@ -244,7 +249,8 @@ def _render_tab_interactive() -> None:
                     n = len(st.session_state.clicked_sections) + 1
                     st.session_state.clicked_sections.append(SectionLine(
                         name=f"S-{n:02d}", origin=origin,
-                        azimuth=az, length=sec_length_int, sector=sector_int))
+                        azimuth=az, length=len_up_int + len_down_int, sector=sector_int,
+                        length_up=len_up_int, length_down=len_down_int))
                     st.rerun()
     except TypeError:
         st.plotly_chart(fig_plan, key="plan_fallback")
@@ -289,7 +295,7 @@ def _render_tab_manual() -> None:
             name = cols[0].text_input("Nombre", f"S-{i+1:02d}", key=f"sname_{i}")
             sector = cols[1].text_input("Sector", "", key=f"ssector_{i}")
 
-            cols2 = st.columns(4)
+            cols2 = st.columns(5)
             ox = cols2[0].number_input("Origen X", value=float(cx), format="%.1f", key=f"sox_{i}")
             oy = cols2[1].number_input("Origen Y", value=float(cy), format="%.1f", key=f"soy_{i}")
 
@@ -300,10 +306,12 @@ def _render_tab_manual() -> None:
                 az = cols2[2].number_input("Azimut (°)", value=0.0, min_value=0.0,
                                            max_value=360.0, key=f"saz_{i}")
 
-            length = cols2[3].number_input("Longitud (m)", value=200.0, min_value=10.0, key=f"slen_{i}")
+            len_up = cols2[3].number_input("Long. Arriba (m)", value=100.0, min_value=5.0, key=f"slen_up_{i}")
+            len_down = cols2[4].number_input("Long. Abajo (m)", value=100.0, min_value=5.0, key=f"slen_down_{i}")
             sections_manual.append(SectionLine(
                 name=name, origin=np.array([ox, oy]),
-                azimuth=az, length=length, sector=sector))
+                azimuth=az, length=len_up + len_down, sector=sector,
+                length_up=len_up, length_down=len_down))
 
     if st.button("✅ Aplicar Secciones Manuales", type="primary"):
         st.session_state.sections = sections_manual
@@ -325,8 +333,12 @@ def _render_tab_auto() -> None:
     x2 = cols[2].number_input("Punto fin X", value=float(bd['xmax']), format="%.1f")
     y2 = cols[3].number_input("Punto fin Y", value=float(bd['center'][1]), format="%.1f")
 
-    cols2 = st.columns(3)
+    cols2 = st.columns(4)
     n_auto = cols2[0].number_input("N° de secciones", min_value=2, max_value=50, value=5)
+    len_up_auto = cols2[1].number_input("Long. Arriba (m)", value=100.0, min_value=5.0)
+    len_down_auto = cols2[2].number_input("Long. Abajo (m)", value=100.0, min_value=5.0)
+    sector_auto = cols2[3].text_input("Sector", "Sector Principal", key="sector_auto_txt")
+
     az_method = st.radio(
         "Método de Azimut",
         ["Perpendicular a la línea (Recomendado)", "Fijo", "Auto (pendiente local - Ruidoso)"],
@@ -335,9 +347,6 @@ def _render_tab_auto() -> None:
     fixed_az = 0.0
     if az_method == "Fijo":
         fixed_az = st.number_input("Azimut fijo (°)", value=0.0, min_value=0.0, max_value=360.0)
-
-    len_auto = cols2[1].number_input("Longitud de sección (m)", value=200.0, min_value=10.0)
-    sector_auto = cols2[2].text_input("Sector", "Sector Principal", key="sector_auto_txt")
 
     if st.button("🔄 Generar Secciones Automáticas", type="primary"):
         gen_az = None
@@ -349,7 +358,8 @@ def _render_tab_auto() -> None:
         sections_auto = generate_sections_along_crest(
             st.session_state.mesh_design,
             np.array([x1, y1]), np.array([x2, y2]),
-            n_auto, gen_az, len_auto, sector_auto)
+            n_auto, gen_az, len_up_auto + len_down_auto, sector_auto,
+            length_up=len_up_auto, length_down=len_down_auto)
 
         if az_method == "Auto (pendiente local - Ruidoso)":
             for sec in sections_auto:
@@ -368,7 +378,10 @@ def _sections_to_rows(sections) -> list:
     return [
         {"Nombre": s.name, "Archivo": getattr(s, 'file_name', ''), "Sector": s.sector,
          "Origen X": f"{s.origin[0]:.1f}", "Origen Y": f"{s.origin[1]:.1f}",
-         "Azimut (°)": f"{s.azimuth:.1f}", "Longitud (m)": f"{s.length:.1f}"}
+         "Azimut (°)": f"{s.azimuth:.1f}",
+         "Long. Arriba (m)": f"{s.length_up:.1f}" if getattr(s, 'length_up', None) is not None else f"{s.length/2:.1f}",
+         "Long. Abajo (m)": f"{s.length_down:.1f}" if getattr(s, 'length_down', None) is not None else f"{s.length/2:.1f}",
+         "Longitud Total (m)": f"{s.length:.1f}"}
         for s in sections
     ]
 

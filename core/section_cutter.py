@@ -14,6 +14,12 @@ class SectionLine:
     length: float
     sector: str = ""
     file_name: str = ""
+    length_up: Optional[float] = None
+    length_down: Optional[float] = None
+
+    def __post_init__(self):
+        if self.length_up is not None and self.length_down is not None:
+            self.length = float(self.length_up + self.length_down)
 
 
 @dataclass
@@ -65,8 +71,11 @@ def cut_mesh_with_section(mesh: trimesh.Trimesh, section: SectionLine) -> Option
     elevs = points[:, 2]
 
     # Filter by section length
-    half_len = section.length / 2
-    mask = (dists >= -half_len) & (dists <= half_len)
+    if getattr(section, 'length_up', None) is not None and getattr(section, 'length_down', None) is not None:
+        mask = (dists >= -section.length_down) & (dists <= section.length_up)
+    else:
+        half_len = section.length / 2
+        mask = (dists >= -half_len) & (dists <= half_len)
     dists = dists[mask]
     elevs = elevs[mask]
 
@@ -152,7 +161,9 @@ def generate_sections_along_crest(mesh: trimesh.Trimesh, start_point: np.ndarray
                                    end_point: np.ndarray, n_sections: int,
                                    section_azimuth: Optional[float] = None,
                                    section_length: float = 200.0,
-                                   sector_name: str = "") -> List[SectionLine]:
+                                   sector_name: str = "",
+                                   length_up: Optional[float] = None,
+                                   length_down: Optional[float] = None) -> List[SectionLine]:
     """
     Generate evenly spaced sections along a line (e.g., pit crest).
     If section_azimuth is None, computes azimuth perpendicular to the line (Right Hand Rule).
@@ -177,13 +188,17 @@ def generate_sections_along_crest(mesh: trimesh.Trimesh, start_point: np.ndarray
             azimuth=computed_az,
             length=section_length,
             sector=sector_name,
+            length_up=length_up,
+            length_down=length_down,
         ))
     return sections
 
 
 def generate_perpendicular_sections(points: np.ndarray, spacing: float,
                                      section_length: float, sector_name: str = "",
-                                     design_mesh: Optional[trimesh.Trimesh] = None) -> List[SectionLine]:
+                                     design_mesh: Optional[trimesh.Trimesh] = None,
+                                     length_up: Optional[float] = None,
+                                     length_down: Optional[float] = None) -> List[SectionLine]:
     """
     Generate sections perpendicular to a polyline at specified spacing.
 
@@ -194,6 +209,8 @@ def generate_perpendicular_sections(points: np.ndarray, spacing: float,
         sector_name: Sector name for labeling
         design_mesh: If provided, compute azimuth from this mesh's slope
                      instead of line perpendicular. MUST be the DESIGN mesh.
+        length_up: Optional asymmetric length in positive direction
+        length_down: Optional asymmetric length in negative direction
     Returns:
         List of SectionLine objects
     """
@@ -242,6 +259,8 @@ def generate_perpendicular_sections(points: np.ndarray, spacing: float,
             azimuth=az,
             length=section_length,
             sector=sector_name,
+            length_up=length_up,
+            length_down=length_down,
         ))
 
     return sections

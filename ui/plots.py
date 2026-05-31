@@ -24,8 +24,12 @@ def draw_sections_on_figure(fig: go.Figure, sections, is_3d: bool = False, zref:
     """
     for sec in sections:
         d = azimuth_to_direction(sec.azimuth)
-        p1 = sec.origin - d * sec.length / 2
-        p2 = sec.origin + d * sec.length / 2
+        if getattr(sec, 'length_up', None) is not None and getattr(sec, 'length_down', None) is not None:
+            p1 = sec.origin - d * sec.length_down
+            p2 = sec.origin + d * sec.length_up
+        else:
+            p1 = sec.origin - d * sec.length / 2
+            p2 = sec.origin + d * sec.length / 2
 
         if is_3d:
             fig.add_trace(go.Scatter3d(
