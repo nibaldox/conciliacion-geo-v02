@@ -296,3 +296,32 @@ class TestCompareDesignVsAsbuilt:
 
         comparisons = compare_design_vs_asbuilt(params_d, params_a, sample_tolerances)
         assert comparisons == []
+
+    def test_compare_delta_signs(self, sample_tolerances):
+        """delta_crest y delta_toe tienen signo consistente con sobre/sub excavacion independientemente de la orientacion."""
+        from core import compare_design_vs_asbuilt
+        bd1 = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=50.0,
+            toe_elevation=3885.0, toe_distance=30.0, bench_height=15.0, face_angle=70.0, berm_width=9.0
+        )
+        bt1 = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=45.0,
+            toe_elevation=3885.0, toe_distance=30.0, bench_height=15.0, face_angle=70.0, berm_width=9.0
+        )
+        params_d1 = self._make_params([bd1])
+        params_a1 = self._make_params([bt1])
+        comps1 = compare_design_vs_asbuilt(params_d1, params_a1, sample_tolerances)
+        assert comps1[0]['delta_crest'] == -5.0
+
+        bd2 = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=30.0,
+            toe_elevation=3885.0, toe_distance=50.0, bench_height=15.0, face_angle=70.0, berm_width=9.0
+        )
+        bt2 = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=35.0,
+            toe_elevation=3885.0, toe_distance=50.0, bench_height=15.0, face_angle=70.0, berm_width=9.0
+        )
+        params_d2 = self._make_params([bd2])
+        params_a2 = self._make_params([bt2])
+        comps2 = compare_design_vs_asbuilt(params_d2, params_a2, sample_tolerances)
+        assert comps2[0]['delta_crest'] == -5.0

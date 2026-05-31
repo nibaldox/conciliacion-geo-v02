@@ -580,8 +580,8 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_status': berm_status,
                 'spill_width': round(bt.spill_width, 2),
                 'effective_berm': round(bt.effective_berm_width, 2),
-                'delta_crest': round(bt.crest_distance - bd.crest_distance, 2),
-                'delta_toe': round(bt.toe_distance - bd.toe_distance, 2),
+                'delta_crest': round((bt.crest_distance - bd.crest_distance) * (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
+                'delta_toe': round((bt.toe_distance - bd.toe_distance) * (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
                 'bench_design': bd,
                 'bench_real': bt,
             })
