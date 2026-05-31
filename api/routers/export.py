@@ -290,8 +290,7 @@ def export_dxf(request: Request):
             ]
 
         def _draw_lines(pts, layer):
-            for j in range(len(pts) - 1):
-                msp.add_line(pts[j], pts[j + 1], dxfattribs={"layer": layer})
+            msp.add_polyline3d(pts, dxfattribs={"layer": layer})
 
         # Design + Topo raw profiles
         d3d = _to_3d(pd_prof.distances, pd_prof.elevations)

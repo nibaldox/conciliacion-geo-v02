@@ -375,8 +375,7 @@ def _profile_to_3d(distances, elevations, origin_x, origin_y, direction):
 
 
 def _draw_3d_polyline(msp, pts, layer: str) -> None:
-    for j in range(len(pts) - 1):
-        msp.add_line(pts[j], pts[j + 1], dxfattribs={'layer': layer})
+    msp.add_polyline3d(pts, dxfattribs={'layer': layer})
 
 
 def _write_section_to_dxf(msp, sec, p_d, p_t, pd_prof, pt_prof, section_status) -> None:
