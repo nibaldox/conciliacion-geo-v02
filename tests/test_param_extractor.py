@@ -116,6 +116,37 @@ class TestExtractParameters:
         )
         assert len(result.benches) == 0
 
+    def test_build_reconciled_profile(self):
+        """build_reconciled_profile ordena todos los puntos de menor a mayor distancia."""
+        from core.param_extractor import build_reconciled_profile, BenchParams
+        benches = [
+            BenchParams(
+                bench_number=1,
+                crest_elevation=100.0,
+                crest_distance=20.0,
+                toe_elevation=85.0,
+                toe_distance=10.0,
+                bench_height=15.0,
+                face_angle=70.0,
+                berm_width=9.0,
+            ),
+            BenchParams(
+                bench_number=2,
+                crest_elevation=85.0,
+                crest_distance=35.0,
+                toe_elevation=70.0,
+                toe_distance=40.0,
+                bench_height=15.0,
+                face_angle=70.0,
+                berm_width=9.0,
+            ),
+        ]
+        dists, elevs = build_reconciled_profile(benches)
+        assert len(dists) == 4
+        assert np.all(dists[:-1] <= dists[1:])
+        np.testing.assert_allclose(dists, [10.0, 20.0, 35.0, 40.0])
+        np.testing.assert_allclose(elevs, [85.0, 100.0, 85.0, 70.0])
+
     def test_extract_parameters_returns_extraction_result(self, design_profile):
         """El resultado tiene los campos esperados."""
         result = extract_parameters(

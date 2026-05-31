@@ -445,19 +445,13 @@ def build_reconciled_profile(benches):
     """
     if not benches:
         return np.array([]), np.array([])
-    distances = []
-    elevations = []
-    # Assumes benches are sorted by elevation descending
-    # We want to plot them in order of distance if possible, or just connectivity
-    # Let's sort by distance for plotting
-    sorted_b = sorted(benches, key=lambda b: b.crest_distance)
-    
-    for bench in sorted_b:
-        distances.append(bench.crest_distance)
-        elevations.append(bench.crest_elevation)
-        distances.append(bench.toe_distance)
-        elevations.append(bench.toe_elevation)
-        
+    pts = []
+    for bench in benches:
+        pts.append((bench.crest_distance, bench.crest_elevation))
+        pts.append((bench.toe_distance, bench.toe_elevation))
+    pts_sorted = sorted(pts, key=lambda p: p[0])
+    distances = [p[0] for p in pts_sorted]
+    elevations = [p[1] for p in pts_sorted]
     return np.array(distances), np.array(elevations)
 
 
