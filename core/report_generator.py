@@ -128,9 +128,6 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
 
     if len(valid_d) > 0 and len(valid_z) > 0:
         xmin, xmax = float(np.min(valid_d)), float(np.max(valid_d))
-        x_pad = max((xmax - xmin) * 0.05, 5.0)
-        ax.set_xlim(xmin - x_pad, xmax + x_pad)
-
         if 'z_limits' in plot_options and plot_options['z_limits'] is not None:
             zmin, zmax = plot_options['z_limits']
         else:
@@ -139,6 +136,18 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
             zmin = zmin - z_pad
             zmax = zmax + z_pad
 
+        min_x_span = (zmax - zmin) * 1.3
+        current_x_span = xmax - xmin
+        if current_x_span < min_x_span:
+            x_mid = (xmin + xmax) / 2
+            xmin = x_mid - min_x_span / 2
+            xmax = x_mid + min_x_span / 2
+        else:
+            x_pad = max(current_x_span * 0.05, 5.0)
+            xmin = xmin - x_pad
+            xmax = xmax + x_pad
+
+        ax.set_xlim(xmin, xmax)
         ax.set_ylim(zmin, zmax)
 
         if grid_height is not None and grid_height > 0:
@@ -163,7 +172,7 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
     ax.set_xlabel("Distancia (m)")
     ax.set_ylabel("Elevación (m)")
     ax.grid(True, linestyle='--', color='lightgray', alpha=0.7)
-    ax.legend(loc='upper right')
+    ax.legend(loc='upper right', fontsize=7, labelspacing=0.2, handletextpad=0.3, borderaxespad=0.3)
     ax.set_aspect('equal', adjustable='box')
 
     buf = io.BytesIO()
@@ -402,7 +411,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             p_cell.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p_cell.paragraph_format.space_before = Pt(0)
             p_cell.paragraph_format.space_after = Pt(0)
-            p_cell.add_run().add_picture(img_stream, width=Inches(3.0), height=Inches(2.2))
+            p_cell.add_run().add_picture(img_stream, width=Inches(3.0))
             img_stream.close()
 
         if chunk_idx < len(chunks) - 1:
