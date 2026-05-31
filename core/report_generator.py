@@ -7,6 +7,7 @@ from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.section import WD_ORIENT
+from docx.enum.table import WD_TABLE_ALIGNMENT
 from datetime import datetime
 import numpy as np
 
@@ -361,37 +362,50 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         if sec_comps:
             valid_items.append((item, sec_comps))
             
-    for idx, (item, sec_comps) in enumerate(valid_items):
-        sec_name = item['section_name']
+    # Split valid_items into chunks of 3 and place side-by-side in a 1-row table
+    chunks = [valid_items[i:i + 3] for i in range(0, len(valid_items), 3)]
+    
+    for chunk_idx, chunk in enumerate(chunks):
+        table_plots = doc.add_table(rows=1, cols=len(chunk))
+        table_plots.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table_plots.autofit = False
         
-        pd = item['params_design']
-        pt = item['params_topo']
-        prof_d = item['profile_d']
-        prof_t = item['profile_t']
-        
-        sec_obj = None
-        if sections:
-            for s in sections:
-                if s.name == sec_name:
-                    sec_obj = s
-                    break
-                    
-        filtered_bench_nums = {c['bench_num'] for c in sec_comps}
-        
-        img_stream = create_section_plot(
-            pd, pt, prof_d[0], prof_d[1], prof_t[0], prof_t[1],
-            plot_options=plot_options, section=sec_obj, df_pozos=df_pozos,
-            filtered_bench_nums=filtered_bench_nums
-        )
-        
-        p_img = doc.add_paragraph()
-        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        p_img.paragraph_format.space_before = Pt(0)
-        p_img.paragraph_format.space_after = Pt(2)
-        p_img.add_run().add_picture(img_stream, width=Inches(3.0))
-        img_stream.close()
-        
-        if (idx + 1) % 3 == 0 and (idx + 1) < len(valid_items):
+        # Space columns equally
+        for col_idx in range(len(chunk)):
+            table_plots.columns[col_idx].width = Inches(3.2)
+            
+        row_cells = table_plots.rows[0].cells
+        for col_idx, (item, sec_comps) in enumerate(chunk):
+            sec_name = item['section_name']
+            pd = item['params_design']
+            pt = item['params_topo']
+            prof_d = item['profile_d']
+            prof_t = item['profile_t']
+            
+            sec_obj = None
+            if sections:
+                for s in sections:
+                    if s.name == sec_name:
+                        sec_obj = s
+                        break
+                        
+            filtered_bench_nums = {c['bench_num'] for c in sec_comps}
+            
+            img_stream = create_section_plot(
+                pd, pt, prof_d[0], prof_d[1], prof_t[0], prof_t[1],
+                plot_options=plot_options, section=sec_obj, df_pozos=df_pozos,
+                filtered_bench_nums=filtered_bench_nums
+            )
+            
+            cell = row_cells[col_idx]
+            p_cell = cell.paragraphs[0]
+            p_cell.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p_cell.paragraph_format.space_before = Pt(0)
+            p_cell.paragraph_format.space_after = Pt(0)
+            p_cell.add_run().add_picture(img_stream, width=Inches(3.0))
+            img_stream.close()
+            
+        if chunk_idx < len(chunks) - 1:
             doc.add_page_break()
 
     if df_pozos is not None and not df_pozos.empty:
