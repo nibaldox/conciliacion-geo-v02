@@ -1,29 +1,86 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.7
+#
+# Multi-stage build for the FastAPI backend.
+#
+# Stage 1 (builder): install Python deps into a virtual env we copy to
+#                    the final image. Keeps the runtime image small
+#                    and skips build-only packages like wheel.
+# Stage 2 (runtime): slim Python image with the venv + app code.
+#                    Runs as a non-root user for security.
+#
+# Build:  docker build -f Dockerfile-api -t conciliacion-api:dev .
+# Run:    docker run --rm -p 8000:8000 -v $(pwd)/data:/app/data \
+#                -e CONCILIACION_CORS_ORIGINS=http://localhost:5173 \
+#                conciliacion-api:dev
+# Health: curl http://localhost:8000/api/v1/health
+
+# ── Stage 1: builder ──────────────────────────────────────────────
+FROM python:3.12-slim AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build
+
+# System build deps (gcc for any wheels that need compiling)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        libspatialindex-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python deps into a venv we can copy wholesale
+RUN python -m venv /build/venv
+COPY requirements-api.txt .
+RUN /build/venv/bin/pip install -r requirements-api.txt
+
+# ── Stage 2: runtime ──────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/venv/bin:$PATH" \
+    # Defaults — override at runtime
+    CONCILIACION_DATA_DIR=/app/data \
+    CONCILIACION_LOG_LEVEL=INFO
+
+# Runtime system deps only (no gcc)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libspatialindex6 \
+        curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd --system --gid 1001 conciliacion && \
+    useradd --system --uid 1001 --gid conciliacion --no-create-home conciliacion
 
 WORKDIR /app
 
-# System deps for shapely/spatialindex
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends libspatialindex-dev && \
-    rm -rf /var/lib/apt/lists/*
+# Copy venv from builder
+COPY --from=builder /build/venv /app/venv
 
-# Python deps
-COPY requirements-api.txt .
-RUN pip install --no-cache-dir -r requirements-api.txt
+# Copy application code (both core and api must be present at runtime)
+COPY --chown=conciliacion:conciliacion core/ /app/core/
+COPY --chown=conciliacion:conciliacion api/ /app/api/
 
-# Copy application code
-COPY core/ ./core/
-COPY api/ ./api/
+# Data directory for SQLite (mounted as a volume in production)
+RUN mkdir -p /app/data && chown -R conciliacion:conciliacion /app/data
 
-# Create data directory for SQLite
-RUN mkdir -p /app/data
+# Switch to non-root
+USER conciliacion
 
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')" || exit 1
+# Health check (uses Python instead of wget for minimal image)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/api/v1/health',timeout=3); sys.exit(0 if r.status==200 else 1)" || exit 1
 
-# Run
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Defaults overridable via `docker run -e VAR=value ...`
+ENV CONCILIACION_HOST=0.0.0.0 \
+    CONCILIACION_PORT=8000 \
+    CONCILIACION_WORKERS=1
+
+CMD ["sh", "-c", "exec uvicorn api.main:app --host $CONCILIACION_HOST --port $CONCILIACION_PORT --workers $CONCILIACION_WORKERS"]

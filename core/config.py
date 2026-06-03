@@ -1,7 +1,24 @@
 """Centralized configuration defaults for the geotechnical pipeline."""
 
+import os
 from dataclasses import dataclass, field
 from typing import Dict
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    """Read a boolean env var (true/1/yes/on = True)."""
+    return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int env var, falling back to default on parse error."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
 
 
 @dataclass(frozen=True)
@@ -48,6 +65,36 @@ class PipelineDefaults:
 
 
 @dataclass(frozen=True)
+class DeployDefaults:
+    """Production-deployment knobs. All read from env vars at import time.
+
+    Every value has a sensible default that preserves the original
+    behaviour of the local-dev / Streamlit workflow. Production opt-ins
+    (Supabase, R2, auth) default to False so enabling them requires
+    an explicit decision.
+    """
+    # Logging
+    log_level: str = field(default_factory=lambda: os.environ.get("CONCILIACION_LOG_LEVEL", "INFO"))
+    log_format: str = field(default_factory=lambda: os.environ.get("CONCILIATION_LOG_FORMAT", "plain"))
+
+    # Rate limiting (slowapi)
+    rate_limit_enabled: bool = field(default_factory=lambda: _env_bool("CONCILIACION_RATE_LIMIT_ENABLED", False))
+    rate_limit_per_min: int = field(default_factory=lambda: _env_int("CONCILIACION_RATE_LIMIT_PER_MIN", 120))
+
+    # Phase 2.9 opt-ins (all default False → SQLite + local FS + open access)
+    use_supabase: bool = field(default_factory=lambda: _env_bool("CONCILIACION_USE_SUPABASE", False))
+    use_r2: bool = field(default_factory=lambda: _env_bool("CONCILIACION_USE_R2", False))
+    auth_required: bool = field(default_factory=lambda: _env_bool("CONCILIACION_AUTH_REQUIRED", False))
+
+    # CORS
+    cors_origins_env: str = field(default_factory=lambda: os.environ.get("CONCILIACION_CORS_ORIGINS", ""))
+
+    # Runtime
+    workers: int = field(default_factory=lambda: _env_int("CONCILIATION_WORKERS", 1))
+    data_dir: str = field(default_factory=lambda: os.environ.get("CONCILIACION_DATA_DIR", ""))
+
+
+@dataclass(frozen=True)
 class VisualizationDefaults:
     """Defaults for UI visualization."""
     grid_height: float = 15.0         # meters, vertical grid spacing
@@ -68,3 +115,4 @@ DETECTION = DetectionDefaults()
 TOLERANCES = Tolerances()
 VISUALIZATION = VisualizationDefaults()
 RAMP = RampDetection()
+DEPLOY = DeployDefaults()

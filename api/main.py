@@ -3,6 +3,7 @@ FastAPI application for Geotechnical Reconciliation (modular).
 Routes are split across api/routers/ — this file wires them together.
 """
 
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -11,8 +12,20 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.database import init_db, cleanup_old_sessions
+from api.middleware import install_health_endpoints, install_middleware
+from api.middleware_ratelimit import install_rate_limiter
 from api.routers import meshes, sections, process, export, settings, ai
-from core.config import DEFAULTS
+from core.config import DEFAULTS, DEPLOY
+
+logger = logging.getLogger(__name__)
+
+# ── Logging setup (plain text locally, JSON in production) ────────────
+logging.basicConfig(
+    level=getattr(logging, DEPLOY.log_level.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s [%(funcName)s] %(message)s"
+    if DEPLOY.log_format == "plain"
+    else '{"ts":"%(asctime)s","lvl":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}',
+)
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +108,7 @@ _DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:8501",
     "http://127.0.0.1:3000",
 ]
-_cors_env = os.environ.get("CONCILIACION_CORS_ORIGINS", "").strip()
+_cors_env = DEPLOY.cors_origins_env
 _allow_origins = (
     [o.strip() for o in _cors_env.split(",") if o.strip()]
     if _cors_env
@@ -118,6 +131,20 @@ app.add_middleware(
 @app.get("/api/v1/health")
 def health():
     return {"status": "ok", "version": "2.0.0"}
+
+
+# ---------------------------------------------------------------------------
+# Production middleware (additive — request ID, access log, /ready /live,
+# rate limiting). All opt-in via env vars; defaults preserve the original
+# behaviour of local dev and the Streamlit workflow.
+# ---------------------------------------------------------------------------
+
+install_middleware(app, logger)
+install_health_endpoints(
+    app,
+    is_ready=lambda: True,  # always ready when DB is up (init_db ran in lifespan)
+)
+install_rate_limiter(app)
 
 
 # ---------------------------------------------------------------------------

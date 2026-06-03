@@ -13,3 +13,6 @@ ezdxf>=1.3.0
 matplotlib>=3.9
 openai>=1.42
 pandas>=2.2
+# Production middleware (opt-in via env vars — safe to install even
+# when disabled, since the middleware module no-ops in that case).
+slowapi>=0.1.9

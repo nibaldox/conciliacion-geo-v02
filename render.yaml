@@ -1,0 +1,79 @@
+# render.yaml — Infrastructure as Code for Render.com
+# Docs: https://render.com/docs/blueprint-spec
+#
+# To deploy:
+#   1. Sign up / log in at https://render.com
+#   2. Connect your GitHub account: https://dashboard.render.com/connect
+#   3. New → Blueprint → select this repo → Apply
+#   4. Render reads this file and creates the services below
+#   5. The first deploy happens automatically on every push to main
+#
+# After the API is up, copy its URL (https://conciliacion-api.onrender.com)
+# into the VITE_API_URL secret on the GitHub repo so the frontend
+# deployed to GitHub Pages can find the backend.
+
+services:
+  - type: web
+    name: conciliacion-api
+    runtime: docker
+    plan: free                       # 750 hrs/month, sleeps after 15 min idle
+    region: oregon                   # closest to most users; change if needed
+    branch: main
+    dockerfilePath: ./Dockerfile-api
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+
+    # Persistent disk for SQLite + mesh BLOB cache.
+    # Render free tier disks are 1 GB; sufficient for a small SQLite.
+    disk:
+      name: conciliacion-data
+      mountPath: /app/data
+      sizeGB: 1
+
+    envVars:
+      # ── Required ────────────────────────────────────────────────
+      - key: DATABASE_URL
+        value: sqlite:////app/data/conciliacion.db
+      - key: CONCILIACION_DATA_DIR
+        value: /app/data
+
+      # ── CORS allowlist ───────────────────────────────────────────
+      # Comma-separated. The GH Pages frontend URL is the main one.
+      # For local dev, http://localhost:5173 (Vite) and :8501 (Streamlit).
+      - key: CONCILIACION_CORS_ORIGINS
+        value: >-
+          https://nibaldox.github.io,
+          http://localhost:5173,
+          http://localhost:8501,
+          http://127.0.0.1:5173
+
+      # ── Logging ──────────────────────────────────────────────────
+      - key: CONCILIACION_LOG_LEVEL
+        value: INFO
+      - key: CONCILIATION_LOG_FORMAT
+        value: json
+
+      # ── Rate limiting (generous defaults, off by feature flag) ──
+      - key: CONCILIACION_RATE_LIMIT_ENABLED
+        value: "true"
+      - key: CONCILIACION_RATE_LIMIT_PER_MIN
+        value: "120"
+
+      # ── Body size (mirrors .streamlit/config.toml) ──────────────
+      - key: CONCILIACION_MAX_UPLOAD_MB
+        value: "500"
+
+      # ── Future opt-ins (Phase 2.9) — leave false for now ───────
+      - key: CONCILIACION_USE_SUPABASE
+        value: "false"
+      - key: CONCILIACION_USE_R2
+        value: "false"
+      - key: CONCILIACION_AUTH_REQUIRED
+        value: "false"
+
+      # ── Python runtime tweaks ───────────────────────────────────
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: CONCILIATION_WORKERS
+        value: "2"
