@@ -1,0 +1,55 @@
+# Normalise line endings — this repo is developed on mixed Windows/macOS/Linux
+# hosts, so we force LF for everything text-based. Without this, files
+# committed from a Windows host with core.autocrlf=true end up with CRLF,
+# which breaks POSIX shell scripts (shebang becomes "#!/bin/bash\r" — invalid
+# path on Linux/macOS) and trips tools that compare byte-for-byte.
+
+# Default: treat as text, let git decide
+*               text=auto
+
+# Force LF for all text files (no CRLF, no CR-only)
+*.py            text eol=lf
+*.sh            text eol=lf
+*.bash          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.toml          text eol=lf
+*.json          text eol=lf
+*.jsonc         text eol=lf
+*.md            text eol=lf
+*.txt           text eol=lf
+*.cfg           text eol=lf
+*.ini           text eol=lf
+*.html          text eol=lf
+*.css           text eol=lf
+*.js            text eol=lf
+*.jsx           text eol=lf
+*.ts            text eol=lf
+*.tsx           text eol=lf
+*.svg           text eol=lf
+Dockerfile*     text eol=lf
+*.sh.eex        text eol=lf
+
+# Binary files (don't touch)
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.stl           binary
+*.obj           binary
+*.ply           binary
+*.dxf           binary
+*.xlsx          binary
+*.docx          binary
+*.zip           binary
+*.tar           binary
+*.gz            binary
+*.db            binary
+*.sqlite        binary
+*.db-journal    binary
+*.pkl           binary
+*.npy           binary
+*.npz           binary
+*.woff          binary
+*.woff2         binary
