@@ -78,6 +78,11 @@ export default defineConfig({
       'rbush',
       'topojson-client',
       'bit-twiddle',
+      'grapheme-splitter',
+      'draco3d',
+      'earcut',
+      'ktx-parse',
+      'bitmap-sdf',
     ],
   },
   server: {
