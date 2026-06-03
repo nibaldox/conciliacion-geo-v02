@@ -11,6 +11,13 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from datetime import datetime
 import numpy as np
 
+from core.blast_correlation import (
+    compute_blast_geotech_correlation,
+    compute_pasadura_stats,
+)
+from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.config import DEFAULTS
+
 def create_section_plot(params_design, params_topo, distances_d, elevations_d, distances_t, elevations_t,
                         plot_options=None, section=None, df_pozos=None, filtered_bench_nums=None):
     if plot_options is None:
@@ -81,10 +88,6 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
                     ax.plot(b.crest_distance, b.crest_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
                     ax.plot(b.toe_distance, b.toe_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
 
-            legend_added = False
-            for bench in params_topo.benches:
-                pass
-
         if params_design and params_design.benches:
             rec_d_dist, rec_d_elev = build_reconciled_profile(params_design.benches)
             if len(rec_d_dist) > 0:
@@ -104,7 +107,6 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
                         fontsize=7, color="darkred")
 
     if show_pozos and df_pozos is not None and not df_pozos.empty and section is not None:
-        from core.calculo_tronadura import proyectar_pozos_en_seccion
         projected = proyectar_pozos_en_seccion(
             df_pozos,
             origin=section.origin,
@@ -407,68 +409,45 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         doc.add_page_break()
         doc.add_heading("4. Análisis de Perforación y Tronadura", level=1)
 
-        pasadura = (df_pozos['Z_collar'] - 15.0) - df_pozos['Z_toe']
-        p_mean = pasadura.mean()
-        p_optimal = ((pasadura >= 0.5) & (pasadura <= 1.5)).sum()
-        p_pct = p_optimal / len(df_pozos) * 100 if len(df_pozos) > 0 else 0
+        stats = compute_pasadura_stats(df_pozos)
+        p_mean = stats["mean"]
+        p_optimal = stats["optimal_count"]
+        p_pct = stats["optimal_pct"]
 
         p1 = doc.add_paragraph()
         p1.add_run("Estadísticas Generales de Perforación y Voladura:\n").bold = True
-        p1.add_run(f"- Total de Pozos Registrados: {len(df_pozos)}\n")
+        p1.add_run(f"- Total de Pozos Registrados: {stats['total']}\n")
         p1.add_run(f"- Pasadura Promedio (Sub-drilling): {p_mean:.2f} m\n")
         p1.add_run(f"- Porcentaje de Pozos en Pasadura Óptima (0.5m a 1.5m): {p_pct:.1f}% ({p_optimal} pozos)\n")
 
-        from core.geom_utils import find_df_column
-        kg_col = find_df_column(df_pozos, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
-
-        import pandas as pd
-        df_comp = pd.DataFrame(comparisons)
-        dev_col = None
-        for col_name in ['delta_crest', 'height_dev', 'angle_dev']:
-            if col_name in df_comp.columns:
-                dev_col = col_name
-                break
-
-        if sections and kg_col and dev_col:
+        if sections and comparisons:
             doc.add_heading("Cruce de Desviaciones vs Carga de Explosivo", level=2)
+            r_label = int(DEFAULTS.blast_correlation_radius_m)
             doc.add_paragraph(
-                "A continuación se detalla la cantidad de pozos y la carga de explosivo acumulada en un radio de 15 metros "
+                f"A continuación se detalla la cantidad de pozos y la carga de explosivo acumulada en un radio de {r_label} metros "
                 "respecto al eje de cada sección transversal, cruzada con su respectiva desviación absoluta media:"
             )
 
-            from core.calculo_tronadura import proyectar_pozos_en_seccion
-            table = doc.add_table(rows=1, cols=4)
-            table.style = 'Table Grid'
+            corr_rows = compute_blast_geotech_correlation(
+                df_pozos=df_pozos,
+                sections=sections,
+                comparisons=comparisons,
+            )
+            if corr_rows:
+                table = doc.add_table(rows=1, cols=4)
+                table.style = 'Table Grid'
 
-            headers = ["Sección", "Pozos Cercanos", "Kilos de Explosivo", "Desviación Media (m)"]
-            for idx, h in enumerate(headers):
-                table.rows[0].cells[idx].text = h
+                headers = ["Sección", "Pozos Cercanos", "Kilos de Explosivo", "Desviación Media (m)"]
+                for idx, h in enumerate(headers):
+                    table.rows[0].cells[idx].text = h
 
-            for sec in sections:
-                sec_name = sec.name
-                df_sec = df_comp[df_comp['section'] == sec_name]
-                if df_sec.empty:
-                    continue
-                avg_dev = df_sec[dev_col].abs().mean()
-                proj = proyectar_pozos_en_seccion(
-                    df_pozos,
-                    origin=sec.origin,
-                    azimuth=sec.azimuth,
-                    length=sec.length,
-                    tolerance=15.0
-                )
-                if not proj.empty:
-                    total_kg = proj[kg_col].fillna(0).sum()
-                    num_wells = len(proj)
-                else:
-                    total_kg = 0
-                    num_wells = 0
-
-                row_cells = table.add_row().cells
-                row_cells[0].text = sec_name
-                row_cells[1].text = str(num_wells)
-                row_cells[2].text = f"{total_kg:.0f}"
-                row_cells[3].text = f"{avg_dev:.2f}"
+                for row in corr_rows:
+                    sec_name, num_wells, total_kg, avg_dev = row.as_tuple()
+                    row_cells = table.add_row().cells
+                    row_cells[0].text = sec_name
+                    row_cells[1].text = str(num_wells)
+                    row_cells[2].text = f"{total_kg:.0f}"
+                    row_cells[3].text = f"{avg_dev:.2f}"
 
     doc.save(output_path)
 

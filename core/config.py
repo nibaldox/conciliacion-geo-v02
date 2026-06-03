@@ -23,6 +23,14 @@ class DetectionDefaults:
     min_bench_height: float = 2.0     # meters, minimum bench height to be detected
     simplify_epsilon: float = 0.1     # meters, RDP simplification tolerance
     profile_resolution: float = 0.5   # meters, profile resampling resolution
+    # Spill-pile detection (used by _detect_and_project_solid_toe)
+    spill_angle_solid: float = 52.0   # degrees, segments above this are solid face
+    spill_angle_pile: float = 48.0    # degrees, segments below this are spill pile
+    # Face angle weight: when computing weighted face angle, use the segments
+    # whose angle is within (face_threshold - face_threshold_margin) of vertical
+    face_threshold_margin: float = 10.0  # degrees
+    # Final toe-X refinement RDP tolerance
+    face_refine_epsilon: float = 0.03  # meters
 
 
 @dataclass(frozen=True)
@@ -33,6 +41,10 @@ class PipelineDefaults:
     target_faces_visual: int = 30000  # target faces for mesh decimation
     max_upload_mb: int = 500          # max file upload size
     match_threshold: float = 5.0      # meters, bench matching by elevation
+    # Drill & Blast / geotech correlation
+    blast_correlation_radius_m: float = 15.0   # meters — projection radius
+    blast_correlation_pasadura_optimal: tuple = (0.5, 1.5)  # meters
+    blast_default_bench_height: float = 15.0   # meters — used for pasadura
 
 
 @dataclass(frozen=True)

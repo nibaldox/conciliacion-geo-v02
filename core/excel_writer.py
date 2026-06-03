@@ -3,11 +3,19 @@
 from typing import List, Dict, Any, Optional
 
 import openpyxl
+import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import Cell
+
+from core.blast_correlation import (
+    compute_blast_geotech_correlation,
+    compute_pasadura_stats,
+)
+from core.geom_utils import find_df_column
+from core.config import DEFAULTS
 
 
 # Style constants
@@ -381,9 +389,6 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     ws.views.sheetView[0].showGridLines = True
 
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from core.geom_utils import find_df_column
-    import pandas as pd
-    import numpy as np
 
     title_font = Font(name='Calibri', size=16, bold=True, color='2F5496')
     section_font = Font(name='Calibri', size=13, bold=True, color='1F4E78')
@@ -405,7 +410,13 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     # Section 1: Geotechnical Correlation Summary
     ws.cell(row=3, column=1, value="1. Resumen de Correlación Geotécnica vs Voladura").font = section_font
 
-    headers_corr = ["Sección", "Pozos Cercanos (r=15m)", "Carga Explosiva Cercana (Kg)", "Desviación Media Absoluta (m)"]
+    r_label = int(DEFAULTS.blast_correlation_radius_m)
+    headers_corr = [
+        "Sección",
+        f"Pozos Cercanos (r={r_label}m)",
+        "Carga Explosiva Cercana (Kg)",
+        "Desviación Media Absoluta (m)",
+    ]
     for col_idx, h in enumerate(headers_corr, 1):
         cell = ws.cell(row=4, column=col_idx, value=h)
         cell.font = header_font
@@ -413,50 +424,29 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
         cell.alignment = center_align
         cell.border = thin_border
 
+    # Use the shared correlation helper so Excel and Word stay in sync
+    corr_rows = compute_blast_geotech_correlation(
+        df_pozos=df_pozos,
+        sections=sections or [],
+        comparisons=comparisons or [],
+    )
+    if not corr_rows and comparisons:
+        # Fallback: at least show the sections that have comparisons
+        seen = []
+        for c in comparisons:
+            if c.get("section") not in seen:
+                seen.append(c["section"])
+        corr_rows = [
+            type("R", (), {
+                "as_tuple": lambda self, n=s: (n, 0, 0, 0.0)
+            })() for s in seen
+        ]
+
     row_idx = 5
-    kg_col = find_df_column(df_pozos, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
-
-    df_comp = pd.DataFrame(comparisons)
-    dev_col = None
-    for col_name in ['delta_crest', 'height_dev', 'angle_dev']:
-        if col_name in df_comp.columns:
-            dev_col = col_name
-            break
-
-    unique_sections = sorted(df_comp['section'].unique().tolist()) if not df_comp.empty else []
-
-    corr_rows = []
-    if sections and kg_col and dev_col:
-        from core.calculo_tronadura import proyectar_pozos_en_seccion
-        for sec in sections:
-            sec_name = sec.name
-            df_sec = df_comp[df_comp['section'] == sec_name]
-            if df_sec.empty:
-                continue
-            avg_dev = df_sec[dev_col].abs().mean()
-            proj = proyectar_pozos_en_seccion(
-                df_pozos,
-                origin=sec.origin,
-                azimuth=sec.azimuth,
-                length=sec.length,
-                tolerance=15.0
-            )
-            if not proj.empty:
-                total_kg = proj[kg_col].fillna(0).sum()
-                num_wells = len(proj)
-            else:
-                total_kg = 0
-                num_wells = 0
-            corr_rows.append((sec_name, num_wells, total_kg, avg_dev))
-    else:
-        # Fallback if sections not loaded
-        for sec_name in unique_sections:
-            df_sec = df_comp[df_comp['section'] == sec_name]
-            avg_dev = df_sec[dev_col].abs().mean() if dev_col else 0.0
-            corr_rows.append((sec_name, 0, 0, avg_dev))
-
-    for row_data in corr_rows:
-        for col_idx, val in enumerate(row_data, 1):
+    for row in corr_rows:
+        sec_name, num_wells, total_kg, avg_dev = row.as_tuple()
+        row_vals = [sec_name, num_wells, total_kg, avg_dev]
+        for col_idx, val in enumerate(row_vals, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.font = regular_font
             cell.border = thin_border
@@ -484,8 +474,13 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
         cell.border = thin_border
 
     row_idx += 1
-    df_pozos['Pasadura'] = (df_pozos['Z_collar'] - 15.0) - df_pozos['Z_toe']
+    df_pozos = df_pozos.copy()
+    stats = compute_pasadura_stats(df_pozos)
+    df_pozos['Pasadura'] = (df_pozos['Z_collar'] - DEFAULTS.blast_default_bench_height) - df_pozos['Z_toe']
+    # Touch `stats` so the computation is exercised even if no consumer reads it
+    _ = stats["total"], stats["mean"], stats["optimal_pct"]
 
+    kg_col = find_df_column(df_pozos, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
     label_col = find_df_column(df_pozos, ['label_pozo'], raise_error=False)
     incl_col = 'Incl'
     az_col = 'Az'
