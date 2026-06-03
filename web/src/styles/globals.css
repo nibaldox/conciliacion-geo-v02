@@ -2,7 +2,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 
 /* ── Dark mode selector (must be first) ────────────────────── */
-@custom-variant dark &;
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* ── Theme tokens — Light mode ───────────────────────────────── */
 @theme {
