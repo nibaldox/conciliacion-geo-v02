@@ -72,6 +72,20 @@ web/           React frontend (TypeScript, CesiumJS, Tailwind)
 tests/         pytest suite (conftest.py + 5 test modules)
 ```
 
+### Drill & Blast (Tronadura) module
+
+`app.py` is a router with sidebar navigation between two top-level modules:
+
+- **Conciliación Geotécnica** (`ui/modulo_conciliacion.py`) — original geotech reconciliation flow
+- **Análisis de Tronadura** (`ui/modulo_tronadura.py`) — drill & blast analysis
+
+Blast module key files:
+
+- `core/calculo_tronadura.py` — pure-math blast-hole processing. Coordinate correction: `X=Latitud_Geo`, `Y=Longitud_Geo`, `Z_collar=Nombre_Banco+15m`. Toe calculated from `Inclinacion_real`/`Azimuth_real`/`longitud_real`. Drops ENAEX columns marked "no usar" (see `COLS_DROP`).
+- `ui/ref_lines.py` — shared multi-file CSV uploader for mesh boundaries (mallas); traces stored in `st.session_state.ref_line_traces` so any module can overlay them.
+- `ui/tabs/blast_correlation.py` — cross-section blast-hole overlay (holes projected onto profiles with tolerance control, hover info, collar markers).
+- `ui/tabs/profiles.py` — also handles blast-hole projection onto reconciliation cross-sections.
+
 ### Pipeline
 
 1. `load_mesh(filepath)` → trimesh mesh
