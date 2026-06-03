@@ -203,20 +203,18 @@ uvicorn api.main:app --reload --port 8000   # Backend
 cd web && npm run dev                        # Frontend
 ```
 
-### Legacy Streamlit
-
-<details>
-<summary>Streamlit UI (v1 legacy)</summary>
-
-Ejecuta la aplicación con Streamlit:
+### Streamlit (v1 + módulo Tronadura)
 
 ```bash
 streamlit run app.py
 ```
 
-La aplicación se abrirá automáticamente en tu navegador predeterminado (usualmente en `http://localhost:8501`).
+`app.py` actúa como **router con dos módulos accesibles desde la barra lateral**:
 
-</details>
+- **⛏️ Conciliación Geotécnica** — flujo de 4 pasos (carga → secciones → análisis → resultados)
+- **💥 Análisis de Tronadura** — Drill & Blast: sube un reporte de pozos (CSV/XLSX) y visualiza trayectorias 3D, correlación con las secciones geotécnicas y métricas de pasadura
+
+Columnas esperadas en el reporte de pozos (formato ENAEX): `Latitud_Geo`, `Longitud_Geo`, `Nombre_Banco`, `Inclinacion_real`, `Azimuth_real`, `longitud_real`, `Kilos_Cargados_real` (opcional), `fecha_tronadura` (opcional).
 
 ### Línea de Comandos (CLI)
 
