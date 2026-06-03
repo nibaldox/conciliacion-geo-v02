@@ -10,7 +10,7 @@ import io
 import plotly.graph_objects as go
 import streamlit as st
 
-from core.calculo_tronadura import procesar_pozos
+from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
 from core.geom_utils import find_df_column
 from ui.ref_lines import add_ref_lines_3d
 
@@ -312,7 +312,6 @@ def render_modulo_tronadura() -> None:
             if not comparison or not sections:
                 st.info("💡 Realiza la Conciliación Geotécnica primero (Paso 3 y Paso 4) para correlacionar el daño de los taludes con los explosivos.")
             else:
-                from core.calculo_tronadura import proyectar_pozos_en_seccion
                 kg_col = find_df_column(df_filtered, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
 
                 if not kg_col:

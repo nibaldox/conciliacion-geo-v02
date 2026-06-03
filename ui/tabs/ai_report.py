@@ -4,6 +4,9 @@ Results tab: AI-generated executive report via streaming.
 import pandas as pd
 import streamlit as st
 
+from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.geom_utils import find_df_column
+
 
 def render_tab_ai(config: dict) -> None:
     df_final = pd.DataFrame(st.session_state.comparison_results)
@@ -41,8 +44,6 @@ def render_tab_ai(config: dict) -> None:
         p_pct = p_optimal / len(blast_df) * 100 if len(blast_df) > 0 else 0
 
         # Calculate correlation coefficient r if geotech results exist
-        from core.calculo_tronadura import proyectar_pozos_en_seccion
-        from core.geom_utils import find_df_column
         comparison = st.session_state.get('comparison_results', [])
         sections = st.session_state.get('sections', [])
 
@@ -146,8 +147,6 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
         has_alert = True
 
     # Check overbreak correlation
-    from core.calculo_tronadura import proyectar_pozos_en_seccion
-    from core.geom_utils import find_df_column
     comparison = st.session_state.get('comparison_results', [])
     sections = st.session_state.get('sections', [])
     kg_col = find_df_column(blast_df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)

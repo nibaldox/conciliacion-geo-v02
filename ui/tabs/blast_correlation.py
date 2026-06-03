@@ -3,8 +3,11 @@ import numpy as np
 import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
-import importlib.util
-_has_statsmodels = importlib.util.find_spec("statsmodels") is not None
+try:
+    import statsmodels  # noqa: F401
+    _HAS_STATSMODELS = True
+except ImportError:
+    _HAS_STATSMODELS = False
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
 from core.calculo_tronadura import proyectar_pozos_en_seccion
@@ -143,7 +146,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                     "sector": "Sector"
                 },
                 title="Correlación: Carga Explosiva vs Área de Sobre-excavación por Sección",
-                trendline="ols" if _has_statsmodels and len(df_filtered_sections) > 2 and np.var(df_filtered_sections['total_kg']) > 0 else None
+                trendline="ols" if _HAS_STATSMODELS and len(df_filtered_sections) > 2 and np.var(df_filtered_sections['total_kg']) > 0 else None
             )
             fig_scatter.update_layout(height=450)
             st.plotly_chart(fig_scatter, width="stretch")
