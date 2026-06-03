@@ -61,6 +61,11 @@ export default defineConfig({
   // with its workers and CJS/ESM mixed structure
   optimizeDeps: {
     exclude: ['cesium'],
+    // mersenne-twister is a CJS Plotly dependency that Vite's esbuild
+    // pre-bundler otherwise tries to import as ESM and breaks with
+    // "does not provide an export named 'default'". Forcing it into
+    // the include list tells Vite to pre-bundle it as CJS.
+    include: ['mersenne-twister'],
   },
   server: {
     port: 5173,

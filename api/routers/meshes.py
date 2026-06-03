@@ -214,17 +214,17 @@ def mesh_contours(
     )
 
     # Suppress matplotlib output; extract paths from QuadContourSet
+    # NOTE: matplotlib 3.8+ removed QuadContourSet.collections. The new
+    # API exposes the line segments directly via `allsegs[lev_idx]`, which
+    # is a list of (N, 2) arrays — one per polyline at that level.
     fig, ax = plt.subplots()
     try:
         cs = ax.contour(xi_grid, yi_grid, zi_grid, levels=levels)
         contour_lines: list[dict] = []
         for lev_idx, lev in enumerate(cs.levels):
             segs: list[list[list[float]]] = []
-            collection = cs.collections[lev_idx]
-            if collection is None:
-                continue
-            for path in collection.get_paths():
-                vertices = path.vertices
+            level_segs = cs.allsegs[lev_idx] if lev_idx < len(cs.allsegs) else []
+            for vertices in level_segs:
                 if len(vertices) < 2:
                     continue
                 poly: list[list[float]] = [[float(v[0]), float(v[1])] for v in vertices]
