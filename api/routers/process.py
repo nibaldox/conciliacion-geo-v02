@@ -9,6 +9,7 @@ Endpoints:
 """
 
 import os
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -31,6 +32,8 @@ from core import (
 from core.section_cutter import azimuth_to_direction
 from core.param_extractor import BenchParams, ExtractionResult
 from core.config import DETECTION, TOLERANCES as DEFAULT_TOLERANCES
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/process", tags=["process"])
 
@@ -230,7 +233,8 @@ def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None
                 p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
                 p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
                 return idx, sec, p_d_empty, p_t_empty, []
-        except Exception:
+        except Exception as exc:
+            logger.exception("Section %s processing failed: %s", sec.name, exc)
             p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
             p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
             return idx, sec, p_d_empty, p_t_empty, []

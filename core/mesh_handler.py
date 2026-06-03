@@ -1,9 +1,13 @@
 """Mesh loading, decimation, bounds extraction and conversion to plotly."""
 
+import logging
+
 import trimesh
 import numpy as np
 import plotly.graph_objects as go
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _load_dxf(filepath: str) -> trimesh.Trimesh:
@@ -98,8 +102,8 @@ def load_dxf_polyline(file_path: str) -> np.ndarray:
             
         raise ValueError("No se encontraron entidades POLYLINE o LWPOLYLINE en el DXF.")
         
-    except Exception as e:
-        print(f"Error loading DXF polyline: {e}")
+    except (ValueError, KeyError, AttributeError) as e:
+        logger.warning("DXF polyline extraction failed for %s: %s", filepath, e)
         return np.array([])
 
 

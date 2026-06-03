@@ -5,9 +5,12 @@ Both use the OpenAI-compatible chat completions API.
 """
 
 import json
+import logging
 from typing import Generator, Optional
 
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 
 # Provider configurations
@@ -50,7 +53,8 @@ def get_available_models(provider: str) -> list[str]:
         client = OpenAI(api_key=config["api_key"], base_url=config["base_url"])
         models = client.models.list()
         return [m.id for m in models.data]
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to list models from %s: %s", provider, exc)
         return [config["default_model"]]
 
 
