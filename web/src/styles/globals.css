@@ -1,5 +1,6 @@
 @import "tailwindcss";
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+/* Fonts loaded via <link rel="stylesheet"> in index.html for better
+   preconnect hints and to avoid blocking CSS parsing. */
 
 /* ── Dark mode selector (must be first) ────────────────────── */
 @custom-variant dark (&:where(.dark, .dark *));

@@ -6,7 +6,10 @@ Geotechnical reconciliation tool for open-pit mine slopes. Compares 3D design su
 
 **Stack**: Python 3.10+, Streamlit, FastAPI, trimesh, numpy, scipy, plotly, openpyxl
 **Web frontend**: React 19, Vite 6, TypeScript, Tailwind CSS 4, CesiumJS, Chart.js, Zustand, TanStack Query/Table
-**Deploy**: Docker Compose (FastAPI + nginx for React) — `docker-compose.yml`
+**Deploy**:
+- Frontend → **GitHub Pages** (`.github/workflows/deploy-frontend.yml` on push to main)
+- Backend → Render.com free tier (see `web/DEPLOY.md`)
+- Legacy: Docker Compose — `docker-compose.yml`
 
 ---
 

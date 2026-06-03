@@ -47,6 +47,11 @@ function cesiumStaticAssets() {
 }
 
 export default defineConfig({
+  // base path: default works for GitHub Pages at /conciliacion-geo-v02/.
+  // For a custom domain (e.g. conciliacion-geo.app), set VITE_BASE=/ in
+  // the deploy environment.  See web/README-deploy.md.
+  base: process.env.VITE_BASE ?? '/conciliacion-geo-v02/',
+
   plugins: [
     react(),
     tailwindcss(),

@@ -1,0 +1,75 @@
+name: Deploy Frontend to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Allow only one concurrent deploy, queueing newer runs and skipping stale ones
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+# Required for `actions/deploy-pages` to grant the GITHUB_TOKEN the
+# `pages: write` and `id-token: write` permissions.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Don't waste a build if only docs/markdown changed.
+paths:
+  - 'web/**'
+  - 'package.json'
+  - '.github/workflows/deploy-frontend.yml'
+
+jobs:
+  build:
+    name: Build React bundle
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Build
+        env:
+          # Custom domain (e.g. conciliacion-geo.app) → set this in repo
+          # Settings → Secrets → VITE_BASE=/.  Default keeps the path.
+          VITE_BASE: ${{ vars.VITE_BASE || secrets.VITE_BASE || '/conciliacion-geo-v02/' }}
+          VITE_API_URL: ${{ vars.VITE_API_URL || secrets.VITE_API_URL || 'https://conciliacion-api.onrender.com' }}
+        run: npm run build
+
+      - name: Copy SPA fallback
+        # GH Pages won't serve index.html for unknown routes (e.g. /app).
+        # A 404.html that mirrors index.html lets the client router take over.
+        run: cp dist/index.html dist/404.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

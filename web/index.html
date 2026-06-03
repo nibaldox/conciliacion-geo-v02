@@ -2,11 +2,100 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Conciliación Geotécnica</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- ── Primary meta ──────────────────────────────────────── -->
+    <title>Conciliación Geotécnica — Diseño vs As-Built</title>
+    <meta
+      name="description"
+      content="Compara superficies 3D de diseño vs topografía real en minería a cielo abierto. Genera secciones transversales, evalúa cumplimiento contra tolerancias y exporta reportes Excel/Word/DXF."
+    />
+    <meta name="theme-color" content="#2F5496" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0f0f0f" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="generator" content="Conciliación Geotécnica v2" />
+
+    <!-- ── Icons & manifest ─────────────────────────────────── -->
+    <link rel="icon" type="image/svg+xml" href="./vite.svg" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+
+    <!-- ── Open Graph (Facebook, LinkedIn, Slack, Discord) ──── -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Conciliación Geotécnica — Diseño vs As-Built" />
+    <meta
+      property="og:description"
+      content="Herramienta web open-source para conciliación geotécnica de taludes en minería a cielo abierto. STL/OBJ/PLY/DXF en, Excel/Word/DXF out."
+    />
+    <meta property="og:image" content="./og/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="es_ES" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:site_name" content="Conciliación Geotécnica" />
+
+    <!-- ── Twitter / X ───────────────────────────────────────── -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Conciliación Geotécnica — Diseño vs As-Built" />
+    <meta
+      name="twitter:description"
+      content="Open-source geotechnical reconciliation for open-pit mines. STL → Excel/Word/DXF in minutes."
+    />
+    <meta name="twitter:image" content="./og/og-image.png" />
+
+    <!-- ── Performance hints ─────────────────────────────────── -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+    />
+
+    <!-- ── Structured data ───────────────────────────────────── -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Conciliación Geotécnica",
+        "applicationCategory": "EngineeringApplication",
+        "operatingSystem": "Web (any modern browser)",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "description": "Open-source web tool for geotechnical reconciliation of open-pit mine slopes. Compares design surfaces to as-built topography.",
+        "inLanguage": ["es", "en"]
+      }
+    </script>
+
+    <!-- Cesium config MUST run before any cesium import -->
+    <script>
+      // Resolved against the configured Vite base path so it works in
+      // both /conciliacion-geo-v02/ (default) and / (custom domain).
+      (function () {
+        var base = document.querySelector('base')?.href
+          || (function () {
+            var scripts = document.getElementsByTagName('script');
+            var re = /^(.*?)\/assets\//;
+            for (var i = 0; i < scripts.length; i++) {
+              var m = scripts[i].src.match(re);
+              if (m) return m[1] + '/';
+            }
+            return '/';
+          })();
+        window.CESIUM_BASE_URL = base + 'Cesium/';
+      })();
+    </script>
   </head>
   <body>
+    <noscript>
+      <div style="padding: 2rem; font-family: system-ui; text-align: center;">
+        <h1>JavaScript required</h1>
+        <p>Conciliación Geotécnica is a client-side React app. Please enable JavaScript to use it.</p>
+        <p>Conciliación Geotécnica es una aplicación React del lado del cliente. Por favor habilita JavaScript.</p>
+      </div>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

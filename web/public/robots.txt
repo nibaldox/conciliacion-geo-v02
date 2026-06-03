@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nibaldox.github.io/conciliacion-geo-v02/sitemap.xml

@@ -1,0 +1,30 @@
+{
+  "name": "Conciliación Geotécnica",
+  "short_name": "Conciliación",
+  "description": "Compara superficies 3D de diseño vs topografía real en minería a cielo abierto",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f0f0f",
+  "theme_color": "#2F5496",
+  "categories": ["productivity", "utilities", "engineering"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
