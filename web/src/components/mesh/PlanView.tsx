@@ -1,15 +1,13 @@
-import { useMemo } from 'react';
-import Plot from 'react-plotly.js';
+import { useEffect, useMemo, useState } from 'react';
 import { useMeshVertices, useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import type { SectionResponse } from '../../api/types';
 
-interface PlanViewProps {
-  /** Optional callback when user clicks on the plan view (for interactive section placement) */
-  onPointClick?: (coords: { x: number; y: number }) => void;
-}
+// Plotly.js is ~3 MB minified. We delay loading it until the user
+// actually opens the plan view (or its tab in Step 4) by using a
+// dynamic import inside useEffect. Until then, only this small
+// placeholder component is in memory.
 
-/** Compute section line endpoints from section metadata */
 function sectionEndpoints(sec: SectionResponse): { x: [number, number]; y: [number, number] } {
   const azimuthRad = (sec.azimuth * Math.PI) / 180;
   const dx = Math.sin(azimuthRad) * sec.length;
@@ -20,20 +18,59 @@ function sectionEndpoints(sec: SectionResponse): { x: [number, number]; y: [numb
   };
 }
 
-export function PlanView({ onPointClick }: PlanViewProps) {
+interface PlotlyDataSpec {
+  type: 'scattergl';
+  mode: 'markers' | 'lines';
+  x: number[];
+  y: number[];
+  marker?: Record<string, unknown>;
+  line?: Record<string, unknown>;
+  name?: string;
+  hovertemplate?: string;
+  text?: string[];
+  showlegend?: boolean;
+}
+
+interface PlotlyModuleSpec {
+  default: React.ComponentType<{
+    data: PlotlyDataSpec[];
+    layout: Record<string, unknown>;
+    config?: Record<string, unknown>;
+    useResizeHandler?: boolean;
+    style?: React.CSSProperties;
+    onClick?: (e: { points?: Array<{ x: number; y: number }> }) => void;
+  }>;
+}
+
+function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y: number }) => void }) {
   const { designMeshId, topoMeshId } = useSession();
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
   const { data: sections } = useSections();
+  const [Plotly, setPlotly] = useState<PlotlyModuleSpec | null>(null);
+
+  // Dynamic import — Plotly is ~3 MB and only needed when this view
+  // actually renders.
+  useEffect(() => {
+    let cancelled = false;
+    import('react-plotly.js')
+      .then((mod) => {
+        if (!cancelled) setPlotly(mod as unknown as PlotlyModuleSpec);
+      })
+      .catch(() => {
+        // Plotly's main field is heavy; if it fails we still show the
+        // empty state. Real failure surfaces via the error boundary.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isLoading = loadingDesign || loadingTopo;
   const hasNoData = !designVerts && !topoVerts;
 
-  // Build Plotly traces
-  const traces = useMemo(() => {
-    const t: Plotly.Data[] = [];
-
-    // Design mesh — blue dots colored by elevation
+  const traces: PlotlyDataSpec[] = useMemo(() => {
+    const t: PlotlyDataSpec[] = [];
     if (designVerts && designVerts.x.length > 0) {
       t.push({
         type: 'scattergl',
@@ -60,8 +97,6 @@ export function PlanView({ onPointClick }: PlanViewProps) {
         text: designVerts.z.map((z) => z.toFixed(1)),
       });
     }
-
-    // Topo mesh — green dots colored by elevation
     if (topoVerts && topoVerts.x.length > 0) {
       t.push({
         type: 'scattergl',
@@ -88,8 +123,6 @@ export function PlanView({ onPointClick }: PlanViewProps) {
         text: topoVerts.z.map((z) => z.toFixed(1)),
       });
     }
-
-    // Section lines as red lines
     if (sections && sections.length > 0) {
       sections.forEach((sec) => {
         const ep = sectionEndpoints(sec);
@@ -105,12 +138,10 @@ export function PlanView({ onPointClick }: PlanViewProps) {
         });
       });
     }
-
     return t;
   }, [designVerts, topoVerts, sections]);
 
-  // Plotly layout
-  const layout: Partial<Plotly.Layout> = useMemo(
+  const layout = useMemo(
     () => ({
       paper_bgcolor: 'transparent',
       plot_bgcolor: 'transparent',
@@ -127,23 +158,23 @@ export function PlanView({ onPointClick }: PlanViewProps) {
         gridcolor: '#e2e8f0',
         zerolinecolor: '#cbd5e1',
         tickfont: { size: 10, color: '#64748b' },
-        scaleanchor: 'x',
+        scaleanchor: 'x' as const,
         scaleratio: 1,
       },
       legend: {
-        orientation: 'h',
+        orientation: 'h' as const,
         x: 0.5,
-        xanchor: 'center',
+        xanchor: 'center' as const,
         y: -0.15,
         font: { size: 11, color: '#64748b' },
       },
-      dragmode: 'pan',
+      dragmode: 'pan' as const,
       autosize: true,
     }),
     [],
   );
 
-  const config: Partial<Plotly.Config> = useMemo(
+  const config = useMemo(
     () => ({
       scrollZoom: true,
       displayModeBar: true,
@@ -154,14 +185,9 @@ export function PlanView({ onPointClick }: PlanViewProps) {
     [],
   );
 
-  // ── Loading state ──
   if (isLoading) {
     return (
-      <div
-        data-slot="plan-view"
-        className="flex items-center justify-center h-full min-h-[400px] rounded-xl"
-        style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}
-      >
+      <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="animate-spin text-2xl">⏳</div>
           <p className="text-sm">Cargando vértices…</p>
@@ -170,25 +196,29 @@ export function PlanView({ onPointClick }: PlanViewProps) {
     );
   }
 
-  // ── No data state ──
   if (hasNoData) {
     return (
-      <div
-        data-slot="plan-view"
-        className="flex items-center justify-center h-full min-h-[400px] rounded-xl"
-        style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}
-      >
+      <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="text-3xl">🗺️</div>
-          <p className="text-sm text-center">
-            Cargue superficies para ver la vista en planta
-          </p>
+          <p className="text-sm text-center">Cargue superficies para ver la vista en planta</p>
         </div>
       </div>
     );
   }
 
-  // ── Plot ──
+  if (!Plotly) {
+    return (
+      <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
+          <div className="animate-spin text-2xl">⏳</div>
+          <p className="text-sm">Cargando Plotly (≈3 MB)…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const Plot = Plotly.default;
   return (
     <div data-slot="plan-view" className="h-full min-h-[400px] w-full">
       <Plot
@@ -198,12 +228,69 @@ export function PlanView({ onPointClick }: PlanViewProps) {
         useResizeHandler
         style={{ width: '100%', height: '100%', minHeight: '400px' }}
         onClick={(event) => {
-          if (onPointClick && event.points.length > 0) {
+          if (onPointClick && event.points && event.points.length > 0) {
             const pt = event.points[0];
-            onPointClick({ x: pt.x as number, y: pt.y as number });
+            onPointClick({ x: pt.x, y: pt.y });
           }
         }}
       />
     </div>
   );
+}
+
+export function PlanView({ onPointClick }: { onPointClick?: (coords: { x: number; y: number }) => void }) {
+  const { designMeshId, topoMeshId } = useSession();
+  const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
+  const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
+  const [requested, setRequested] = useState(false);
+
+  const isLoading = loadingDesign || loadingTopo;
+  const hasNoData = !designVerts && !topoVerts;
+
+  if (hasNoData) {
+    return (
+      <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
+          <div className="text-3xl">🗺️</div>
+          <p className="text-sm text-center">Cargue superficies para ver la vista en planta</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!requested) {
+    return (
+      <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
+        <div className="flex flex-col items-center gap-4 max-w-md text-center px-6">
+          <div className="text-5xl">🗺️</div>
+          <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+            Vista en planta con Plotly
+          </p>
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            Descarga diferida: ~3 MB de JS. Solo se carga cuando hacés clic.
+          </p>
+          <button
+            onClick={() => setRequested(true)}
+            className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue"
+            style={{ backgroundColor: 'var(--color-mine-blue)', color: '#fff' }}
+          >
+            Cargar vista en planta
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
+        <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
+          <div className="animate-spin text-2xl">⏳</div>
+          <p className="text-sm">Cargando vértices…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return <PlanViewImpl onPointClick={onPointClick} />;
 }
