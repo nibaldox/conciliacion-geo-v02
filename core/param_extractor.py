@@ -1,10 +1,17 @@
 """Parameter extraction from profiles and design vs as-built comparison."""
 
+import logging
+
 import numpy as np
 from dataclasses import dataclass, field
 from typing import List
 from scipy.interpolate import interp1d
 from scipy.ndimage import uniform_filter1d
+
+from core.blast_correlation import classify_berm_as_ramp
+from core.config import DETECTION, RAMP
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -96,7 +103,7 @@ def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: f
     segs_ang[valid] = np.abs(np.degrees(np.arctan2(dy[valid], dx_diff[valid])))
     spill_idx = len(segs_ang)
     for i in range(len(segs_ang) - 1, -1, -1):
-        if segs_ang[i] < 48.0 and np.any(segs_ang[:i] > 52.0):
+        if segs_ang[i] < DETECTION.spill_angle_pile and np.any(segs_ang[:i] > DETECTION.spill_angle_solid):
             spill_idx = i
         else:
             break
@@ -118,12 +125,14 @@ def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: f
 
 
 def extract_parameters(distances, elevations, section_name, sector,
-                       resolution=0.5, face_threshold=40.0,
-                       berm_threshold=20.0, max_berm_width=50.0):
+                       resolution=DETECTION.profile_resolution,
+                       face_threshold=DETECTION.face_threshold,
+                       berm_threshold=DETECTION.berm_threshold,
+                       max_berm_width=DETECTION.max_berm_width):
     """
     Extract geotechnical parameters using Vector Simplification (RDP).
     
-    1. Simplify profile using Ramer-Douglas-Peucker (epsilon=resolution/2)
+    1. Simplify profile using Ramer-Douglas-Peucker (epsilon=DETECTION.simplify_epsilon)
     2. Compute angles of simplified segments
     3. Classify and merge segments
     4. Extract bench geometry
@@ -139,7 +148,7 @@ def extract_parameters(distances, elevations, section_name, sector,
     # 1. Simplify
     # Epsilon determines how much "noise" we ignore. 
     # For accurate crests/toes, we want high precision.
-    epsilon = 0.1  # 10cm tolerance
+    epsilon = DETECTION.simplify_epsilon
     simplified = ramer_douglas_peucker(points, epsilon)
     
     if len(simplified) < 2:
@@ -229,7 +238,7 @@ def extract_parameters(distances, elevations, section_name, sector,
             
             bench_height = abs(crest[1] - toe[1])
             
-            if bench_height < 2.0:
+            if bench_height < DETECTION.min_bench_height:
                 continue
                 
             local_dx = dx[idx_start:idx_end]
@@ -237,7 +246,7 @@ def extract_parameters(distances, elevations, section_name, sector,
             local_len = dists[idx_start:idx_end]
             local_ang = angles[idx_start:idx_end]
             
-            steep_mask = local_ang > (face_threshold - 10)
+            steep_mask = local_ang > (face_threshold - DETECTION.face_threshold_margin)
             if np.sum(local_len[steep_mask]) > 0.1:
                 weighted_angle = np.average(local_ang[steep_mask], weights=local_len[steep_mask])
             else:
@@ -257,7 +266,7 @@ def extract_parameters(distances, elevations, section_name, sector,
             if len(raw_d) >= 3:
                 raw_face_pts = np.column_stack((raw_d, raw_e))
                 raw_face_pts = raw_face_pts[np.argsort(-raw_face_pts[:, 1])]
-                simplified_face = ramer_douglas_peucker(raw_face_pts, 0.03)
+                simplified_face = ramer_douglas_peucker(raw_face_pts, DETECTION.face_refine_epsilon)
                 if len(simplified_face) >= 3:
                     face_pts_for_analysis = simplified_face
             corrected_toe_x, corrected_angle, spill_pt = _detect_and_project_solid_toe(face_pts_for_analysis, face_threshold)
@@ -290,65 +299,8 @@ def extract_parameters(distances, elevations, section_name, sector,
         max_berm_width=max_berm_width,
     )
 
-    # check for leading berm (flat area before first bench)
-    if len(benches) > 0:
-        first_bench = benches[0]
-        first_x = min(first_bench.toe_distance, first_bench.crest_distance)
-        
-        # Check if distances increase or decrease
-        if distances[-1] > distances[0]:
-            # Increasing distance
-            mask_before = distances < first_x - 0.1
-        else:
-            # Decreasing distance
-            mask_before = distances > first_x + 0.1
-            
-        d_before = distances[mask_before]
-        e_before = elevations[mask_before]
-        
-        if len(d_before) > 1:
-            # Check average slope of this leading segment
-            slope_deg = np.degrees(np.arctan2(np.abs(e_before[-1] - e_before[0]), np.abs(d_before[-1] - d_before[0])))
-            
-            # If it's flat enough to be a berm (<= berm_threshold)
-            if slope_deg <= berm_threshold:
-                # Calculate horizontal width
-                width = np.abs(d_before[-1] - d_before[0])
-                first_bench.berm_width = float(width)
-                
-                # Check for ramp
-                if 15.0 <= width <= 42.0:
-                    first_bench.is_ramp = True
-
-    # check for trailing berm (flat area after last bench) as a fallback floor
-    if len(benches) == 1 and benches[-1].berm_width <= 0:
-        last_bench = benches[-1]
-        
-        # Check if distances increase or decrease
-        if distances[-1] > distances[0]:
-            # Increasing distance
-            mask_after = distances > last_bench.toe_distance + 0.1
-        else:
-            # Decreasing distance
-            mask_after = distances < last_bench.toe_distance - 0.1
-            
-        d_after = distances[mask_after]
-        e_after = elevations[mask_after]
-        
-        if len(d_after) > 1:
-            # Check average slope of this trailing segment
-            slope_deg = np.degrees(np.arctan2(np.abs(e_after[-1] - e_after[0]), np.abs(d_after[-1] - d_after[0])))
-            
-            # If it's flat enough to be a berm (<= berm_threshold)
-            if slope_deg <= berm_threshold:
-                # Calculate horizontal width
-                width = np.abs(d_after[-1] - d_after[0])
-                # Assign to last bench
-                last_bench.berm_width = float(width)
-                
-                # Check for ramp
-                if 15.0 <= width <= 42.0:
-                    last_bench.is_ramp = True
+    _apply_leading_berm(benches, distances, elevations, berm_threshold)
+    _apply_trailing_berm(benches, distances, elevations, berm_threshold)
 
     result.benches = benches
     
@@ -410,7 +362,7 @@ def _compute_berm_widths_from_profile(
         b_next.berm_width = width
         b_next.effective_berm_width = float(max(width - b_curr.spill_width, 0.0))
         
-        if 15.0 <= width <= 42.0:
+        if classify_berm_as_ramp(width):
             b_next.is_ramp = True
         else:
             b_next.is_ramp = False
@@ -419,6 +371,65 @@ def _compute_berm_widths_from_profile(
             b_next.group_break = True
         else:
             b_next.group_break = False
+
+
+def _flat_segment_width(d_sub, e_sub, berm_threshold):
+    """Return the horizontal width of a flat (≤ berm_threshold) segment, else 0.
+
+    Both `d_sub` and `e_sub` must be array-likes of equal length ≥ 2.
+    """
+    if len(d_sub) < 2:
+        return 0.0
+    slope = np.degrees(
+        np.arctan2(
+            np.abs(float(e_sub[-1]) - float(e_sub[0])),
+            np.abs(float(d_sub[-1]) - float(d_sub[0])),
+        )
+    )
+    if slope > berm_threshold:
+        return 0.0
+    return float(np.abs(float(d_sub[-1]) - float(d_sub[0])))
+
+
+def _apply_leading_berm(benches, distances, elevations, berm_threshold):
+    """If the flat area before the first bench is a berm, assign its width.
+
+    Also flags the bench as a ramp when the width is in the ramp-detection
+    range (RAMP.min_width .. RAMP.max_width).
+    """
+    if not benches:
+        return
+    first = benches[0]
+    first_x = min(first.toe_distance, first.crest_distance)
+    if distances[-1] > distances[0]:
+        mask = distances < first_x - 0.1
+    else:
+        mask = distances > first_x + 0.1
+    width = _flat_segment_width(distances[mask], elevations[mask], berm_threshold)
+    if width > 0:
+        first.berm_width = width
+        if classify_berm_as_ramp(width):
+            first.is_ramp = True
+
+
+def _apply_trailing_berm(benches, distances, elevations, berm_threshold):
+    """If the flat area after the last (only) bench is a berm, assign its width.
+
+    Only applied when there is exactly one bench and its berm has not yet
+    been set — i.e. as a fallback floor.
+    """
+    if len(benches) != 1 or benches[-1].berm_width > 0:
+        return
+    last = benches[-1]
+    if distances[-1] > distances[0]:
+        mask = distances > last.toe_distance + 0.1
+    else:
+        mask = distances < last.toe_distance - 0.1
+    width = _flat_segment_width(distances[mask], elevations[mask], berm_threshold)
+    if width > 0:
+        last.berm_width = width
+        if classify_berm_as_ramp(width):
+            last.is_ramp = True
 
 
 def _evaluate_status(deviation, tol_neg, tol_pos):
