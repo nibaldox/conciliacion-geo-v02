@@ -9,6 +9,12 @@ services:
       - conciliacion-data:/app/data
     environment:
       - DATABASE_URL=sqlite:///./data/conciliacion.db
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3); sys.exit(0 if r.status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
 
   web:
