@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { Header } from './Header';
 import { StepNav } from './StepNav';
 import { Sidebar } from './Sidebar';
@@ -10,13 +11,14 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const { currentStep } = useSession();
+  const { t } = useTranslation();
 
   const getStepTitle = () => {
     switch (currentStep) {
-      case 1: return 'Cargar Superficies';
-      case 2: return 'Definir Secciones';
-      case 3: return 'Análisis';
-      case 4: return 'Resultados';
+      case 1: return t('nav.step1');
+      case 2: return t('nav.step2');
+      case 3: return t('nav.step3');
+      case 4: return t('nav.step4');
       default: return '';
     }
   };
@@ -32,7 +34,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           <div className="px-6 py-3 border-b shrink-0" style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)' }}>
             <div className="max-w-7xl mx-auto">
               <h2 style={{ color: 'var(--color-text-primary)' }} className="text-xl font-semibold">
-                Paso {currentStep}: {getStepTitle()}
+                {t('app.title')} · {currentStep}/4 · {getStepTitle()}
               </h2>
             </div>
           </div>

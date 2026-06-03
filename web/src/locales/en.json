@@ -1,0 +1,120 @@
+{
+  "app": {
+    "title": "Geotechnical Reconciliation",
+    "tagline": "Design vs As-Built"
+  },
+  "nav": {
+    "step1": "Load Surfaces",
+    "step2": "Define Sections",
+    "step3": "Analysis",
+    "step4": "Results",
+    "previous": "Previous",
+    "next": "Next"
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Error",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "close": "Close",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "yes": "Yes",
+    "no": "No",
+    "n_sections_one": "{{count}} section",
+    "n_sections_other": "{{count}} sections",
+    "n_comparisons_one": "{{count}} comparison",
+    "n_comparisons_other": "{{count}} comparisons"
+  },
+  "language": {
+    "es": "Español",
+    "en": "English",
+    "toggle": "Change language"
+  },
+  "theme": {
+    "light": "Light theme",
+    "dark": "Dark theme",
+    "toggle": "Toggle theme"
+  },
+  "demo": {
+    "banner_active": "Demo mode",
+    "banner_active_detail": "Synthetic data ({{n_sections}}, {{n_comparisons}}). No backend calls.",
+    "banner_loading": "Loading sample data…",
+    "banner_error": "Could not load demo mode: {{error}}",
+    "exit": "Exit demo",
+    "try_title": "Don't have your own data?",
+    "try_subtitle": "Try the app with a 4-bench synthetic pit. No upload, no backend wait. Loads instantly from the CDN.",
+    "try_button": "▶ Try with sample data"
+  },
+  "step1": {
+    "title": "Load Surfaces",
+    "design": "Design",
+    "topo": "Topography",
+    "design_icon": "📐",
+    "topo_icon": "🏔️",
+    "drop_hint": "Drag or click to select",
+    "file_types": "STL / OBJ / PLY / DXF",
+    "uploading": "Uploading {{label}}…",
+    "max_size": "Maximum 500 MB per file. .stl and .xlsx files are excluded from the repository.",
+    "replace": "Replace",
+    "removing": "Removing…",
+    "unsupported_format": "Unsupported format. Use: {{formats}}",
+    "upload_failed": "Upload failed. Please try again.",
+    "plan_view_title_2d": "Plan view with Plotly",
+    "plan_view_subtitle_2d": "Deferred download: ~3 MB of JS. Only loads when you click.",
+    "plan_view_button_2d": "Load plan view",
+    "plan_view_no_data": "Load surfaces to see the plan view",
+    "plan_view_loading_verts": "Loading vertices…",
+    "plan_view_loading_plotly": "Loading Plotly (≈3 MB)…",
+    "view3d_title": "3D view with CesiumJS",
+    "view3d_subtitle": "Deferred download: ~4 MB of JS + ~22 MB of assets (Workers, Widgets). Only loads when you click.",
+    "view3d_button": "Load 3D view",
+    "view3d_no_data": "Load surfaces to see the 3D view",
+    "view3d_loading_verts": "Loading vertices…",
+    "view3d_loading_cesium": "Loading CesiumJS (≈4 MB)…"
+  },
+  "step2": {
+    "title": "Define Sections",
+    "tab_auto": "Automatic",
+    "tab_manual": "Manual",
+    "tab_click": "Click on Map",
+    "tab_file": "File",
+    "next_disabled": "Define at least one section to continue"
+  },
+  "step3": {
+    "title": "Analysis",
+    "run": "Run analysis",
+    "running": "Processing…",
+    "no_sections": "Load sections first",
+    "no_meshes": "Load surfaces first"
+  },
+  "step4": {
+    "title": "Results",
+    "tab_profiles": "Profiles",
+    "tab_table": "Table",
+    "tab_dashboard": "Dashboard",
+    "tab_bench_editor": "Benches",
+    "tab_export": "Export",
+    "tab_ai": "AI Report",
+    "section_label": "Section",
+    "no_results": "No results to show",
+    "loading_profiles": "Loading profiles…",
+    "loading_table": "Loading table…",
+    "loading_dashboard": "Loading dashboard…",
+    "loading_bench_editor": "Loading bench editor…",
+    "loading_ai": "Loading AI report…"
+  },
+  "compliance": {
+    "CUMPLE": "COMPLIES",
+    "FUERA DE TOLERANCIA": "OUT OF TOLERANCE",
+    "NO CUMPLE": "NON-COMPLIANT",
+    "NO CONSTRUIDO": "NOT BUILT",
+    "FALTA BANCO": "MISSING BENCH",
+    "EXTRA": "EXTRA",
+    "BANCO ADICIONAL": "ADDITIONAL BENCH",
+    "height": "Bench height",
+    "angle": "Face angle",
+    "berm": "Berm width"
+  }
+}

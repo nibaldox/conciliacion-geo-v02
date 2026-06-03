@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useUploadMesh, useDeleteMesh, useMeshInfo } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import { TryDemoButton } from '../demo/TryDemoButton';
@@ -22,15 +23,16 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
   const upload = useUploadMesh();
   const removeMesh = useDeleteMesh();
   const { data: meshInfo } = useMeshInfo(meshId);
+  const { t } = useTranslation();
 
-  const label = type === 'design' ? 'Diseño' : 'Topografía';
+  const label = type === 'design' ? t('step1.design') : t('step1.topo');
   const borderColor = type === 'design' ? 'blue' : 'green';
 
   const handleFile = useCallback(
     (file: File) => {
       const ext = '.' + file.name.split('.').pop()?.toLowerCase();
       if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-        alert(`Formato no soportado. Use: ${ACCEPTED_EXTENSIONS.join(', ')}`);
+        alert(t('step1.unsupported_format', { formats: ACCEPTED_EXTENSIONS.join(', ') }));
         return;
       }
       upload.mutate(
@@ -39,12 +41,12 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
           onSuccess: (res) => onSetMeshId(res.mesh_id),
           onError: (err) => {
             console.error('Upload failed:', err);
-            alert('Error al subir el archivo. Intente nuevamente.');
+            alert(t('step1.upload_failed'));
           },
         },
       );
     },
-    [upload, type, onSetMeshId],
+    [upload, type, onSetMeshId, t],
   );
 
   const handleDrop = useCallback(
@@ -82,7 +84,7 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
         style={{ borderColor: 'var(--color-border)' }}
       >
         <div className="animate-spin text-3xl mb-3" style={{ color: 'var(--color-mine-blue)' }}>⏳</div>
-        <p className="text-sm font-medium">Subiendo {label}…</p>
+        <p className="text-sm font-medium">{t('step1.uploading', { label })}</p>
         <p className="text-xs mt-1 opacity-70">
           {upload.variables?.file.name ?? ''}
         </p>
@@ -134,7 +136,7 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
             className="text-xs underline underline-offset-2 focus-visible:outline-none rounded px-2 py-0.5"
             style={{ color: 'var(--color-mine-blue)' }}
           >
-            Reemplazar
+            {t('step1.replace')}
           </button>
           <button
             onClick={handleRemove}
@@ -142,7 +144,7 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
             className="text-xs underline underline-offset-2 focus-visible:outline-none rounded px-2 py-0.5 disabled:opacity-50"
             style={{ color: 'var(--color-mine-red)' }}
           >
-            {removeMesh.isPending ? 'Eliminando…' : 'Eliminar'}
+            {removeMesh.isPending ? t('step1.removing') : t('common.delete')}
           </button>
         </div>
         <input
@@ -180,16 +182,16 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
       }
     >
       <div className="text-4xl mb-3" style={{ color: borderColor === 'blue' ? 'var(--color-mine-blue)' : 'var(--color-mine-green)' }}>
-        {type === 'design' ? '📐' : '🏔️'}
+        {type === 'design' ? t('step1.design_icon') : t('step1.topo_icon')}
       </div>
       <p className="font-medium" style={{ color: isDragging ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
         {label}
       </p>
       <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-        Arrastre o haga clic para seleccionar
+        {t('step1.drop_hint')}
       </p>
       <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-        STL / OBJ / PLY / DXF
+        {t('step1.file_types')}
       </p>
       <input
         ref={fileInputRef}
@@ -210,6 +212,7 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
 
 export function MeshUpload() {
   const { designMeshId, topoMeshId, setDesignMeshId, setTopoMeshId } = useSession();
+  const { t } = useTranslation();
   const bothUploaded = !!designMeshId && !!topoMeshId;
 
   return (
@@ -231,7 +234,7 @@ export function MeshUpload() {
       {/* File size hint */}
       {!bothUploaded && (
         <p className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
-          Máximo 500 MB por archivo. Los archivos .stl y .xlsx están excluidos del repositorio.
+          {t('step1.max_size')}
         </p>
       )}
 

@@ -1,0 +1,120 @@
+{
+  "app": {
+    "title": "Conciliación Geotécnica",
+    "tagline": "Diseño vs As-Built"
+  },
+  "nav": {
+    "step1": "Cargar Superficies",
+    "step2": "Definir Secciones",
+    "step3": "Análisis",
+    "step4": "Resultados",
+    "previous": "Anterior",
+    "next": "Siguiente"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "error": "Error",
+    "retry": "Reintentar",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "yes": "Sí",
+    "no": "No",
+    "n_sections": "{{count}} sección",
+    "n_sections_other": "{{count}} secciones",
+    "n_comparisons": "{{count}} comparación",
+    "n_comparisons_other": "{{count}} comparaciones"
+  },
+  "language": {
+    "es": "Español",
+    "en": "English",
+    "toggle": "Cambiar idioma"
+  },
+  "theme": {
+    "light": "Tema claro",
+    "dark": "Tema oscuro",
+    "toggle": "Cambiar tema"
+  },
+  "demo": {
+    "banner_active": "Modo demo",
+    "banner_active_detail": "Datos sintéticos ({{n_sections}}, {{n_comparisons}}). Sin llamadas al backend.",
+    "banner_loading": "Cargando datos de ejemplo…",
+    "banner_error": "No se pudo cargar el modo demo: {{error}}",
+    "exit": "Salir del demo",
+    "try_title": "¿Sin datos propios?",
+    "try_subtitle": "Probá la app con un pit sintético de 4 bancos. Sin subir nada, sin esperar al backend. Se carga al instante desde el CDN.",
+    "try_button": "▶ Probar con datos de ejemplo"
+  },
+  "step1": {
+    "title": "Cargar Superficies",
+    "design": "Diseño",
+    "topo": "Topografía",
+    "design_icon": "📐",
+    "topo_icon": "🏔️",
+    "drop_hint": "Arrastre o haga clic para seleccionar",
+    "file_types": "STL / OBJ / PLY / DXF",
+    "uploading": "Subiendo {{label}}…",
+    "max_size": "Máximo 500 MB por archivo. Los archivos .stl y .xlsx están excluidos del repositorio.",
+    "replace": "Reemplazar",
+    "removing": "Eliminando…",
+    "unsupported_format": "Formato no soportado. Use: {{formats}}",
+    "upload_failed": "Error al subir el archivo. Intente nuevamente.",
+    "plan_view_title_2d": "Vista en planta con Plotly",
+    "plan_view_subtitle_2d": "Descarga diferida: ~3 MB de JS. Solo se carga cuando hacés clic.",
+    "plan_view_button_2d": "Cargar vista en planta",
+    "plan_view_no_data": "Cargue superficies para ver la vista en planta",
+    "plan_view_loading_verts": "Cargando vértices…",
+    "plan_view_loading_plotly": "Cargando Plotly (≈3 MB)…",
+    "view3d_title": "Vista 3D con CesiumJS",
+    "view3d_subtitle": "Descarga diferida: ~4 MB de JS + ~22 MB de assets (Workers, Widgets). Solo se carga cuando hacés clic.",
+    "view3d_button": "Cargar vista 3D",
+    "view3d_no_data": "Cargue superficies para ver la vista 3D",
+    "view3d_loading_verts": "Cargando vértices…",
+    "view3d_loading_cesium": "Cargando CesiumJS (≈4 MB)…"
+  },
+  "step2": {
+    "title": "Definir Secciones",
+    "tab_auto": "Automático",
+    "tab_manual": "Manual",
+    "tab_click": "Clic en Mapa",
+    "tab_file": "Archivo",
+    "next_disabled": "Defina al menos una sección para continuar"
+  },
+  "step3": {
+    "title": "Análisis",
+    "run": "Ejecutar análisis",
+    "running": "Procesando…",
+    "no_sections": "Cargue secciones primero",
+    "no_meshes": "Cargue superficies primero"
+  },
+  "step4": {
+    "title": "Resultados",
+    "tab_profiles": "Perfiles",
+    "tab_table": "Tabla",
+    "tab_dashboard": "Dashboard",
+    "tab_bench_editor": "Bancos",
+    "tab_export": "Exportar",
+    "tab_ai": "Informe IA",
+    "section_label": "Sección",
+    "no_results": "No hay resultados para mostrar",
+    "loading_profiles": "Cargando perfiles…",
+    "loading_table": "Cargando tabla…",
+    "loading_dashboard": "Cargando dashboard…",
+    "loading_bench_editor": "Cargando editor de bancos…",
+    "loading_ai": "Cargando informe IA…"
+  },
+  "compliance": {
+    "CUMPLE": "CUMPLE",
+    "FUERA DE TOLERANCIA": "FUERA DE TOLERANCIA",
+    "NO CUMPLE": "NO CUMPLE",
+    "NO CONSTRUIDO": "NO CONSTRUIDO",
+    "FALTA BANCO": "FALTA BANCO",
+    "EXTRA": "EXTRA",
+    "BANCO ADICIONAL": "BANCO ADICIONAL",
+    "height": "Altura de banco",
+    "angle": "Ángulo de cara",
+    "berm": "Ancho de berma"
+  }
+}

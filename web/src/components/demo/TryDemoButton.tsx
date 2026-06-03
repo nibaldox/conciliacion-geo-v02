@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 
 /**
@@ -7,6 +8,7 @@ import { useSession } from '../../stores/session';
  */
 export function TryDemoButton() {
   const { demoMode, demoLoading, loadDemo } = useSession();
+  const { t } = useTranslation();
 
   if (demoMode) return null;  // banner is enough — no need for the button
 
@@ -21,11 +23,10 @@ export function TryDemoButton() {
     >
       <div className="text-2xl">🎮</div>
       <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-        ¿Sin datos propios?
+        {t('demo.try_title')}
       </p>
       <p className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
-        Probá la app con un pit sintético de 4 bancos. Sin subir nada,
-        sin esperar al backend. Se carga al instante desde el CDN.
+        {t('demo.try_subtitle')}
       </p>
       <button
         onClick={loadDemo}
@@ -37,7 +38,7 @@ export function TryDemoButton() {
           boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         }}
       >
-        {demoLoading ? '⏳ Cargando…' : '▶ Probar con datos de ejemplo'}
+        {demoLoading ? `⏳ ${t('common.loading')}` : t('demo.try_button')}
       </button>
     </div>
   );

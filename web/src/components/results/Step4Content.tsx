@@ -1,4 +1,5 @@
 import { Suspense, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SectionSelector } from './SectionSelector';
 import { ExportPanel } from '../export/ExportPanel';
 import {
@@ -13,23 +14,24 @@ import { useSession } from '../../stores/session';
 
 type ResultsTab = 'profiles' | 'table' | 'dashboard' | 'bench-editor' | 'export' | 'ai';
 
-const RESULT_TABS: { key: ResultsTab; label: string; icon: string }[] = [
-  { key: 'profiles', label: 'Perfiles', icon: '📈' },
-  { key: 'table', label: 'Tabla', icon: '📋' },
-  { key: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { key: 'bench-editor', label: 'Bancos', icon: '✏️' },
-  { key: 'export', label: 'Exportar', icon: '💾' },
-  { key: 'ai', label: 'Informe IA', icon: '🤖' },
+const RESULT_TABS: { key: ResultsTab; translationKey: string; icon: string }[] = [
+  { key: 'profiles', translationKey: 'step4.tab_profiles', icon: '📈' },
+  { key: 'table', translationKey: 'step4.tab_table', icon: '📋' },
+  { key: 'dashboard', translationKey: 'step4.tab_dashboard', icon: '📊' },
+  { key: 'bench-editor', translationKey: 'step4.tab_bench_editor', icon: '✏️' },
+  { key: 'export', translationKey: 'step4.tab_export', icon: '💾' },
+  { key: 'ai', translationKey: 'step4.tab_ai', icon: '🤖' },
 ];
 
 export function Step4Content() {
   const [activeTab, setActiveTab] = useState<ResultsTab>('profiles');
   const { prevStep } = useSession();
+  const { t } = useTranslation();
 
   return (
     <div className="flex flex-col h-full gap-4 min-h-0">
       {/* Tab bar */}
-      <div className="flex gap-2 shrink-0 overflow-x-auto" role="tablist" aria-label="Vistas de resultados">
+      <div className="flex gap-2 shrink-0 overflow-x-auto" role="tablist" aria-label={t('step4.title')}>
         {RESULT_TABS.map((tab) => (
           <button
             key={tab.key}
@@ -43,7 +45,7 @@ export function Step4Content() {
             }
           >
             <span className="mr-1.5">{tab.icon}</span>
-            {tab.label}
+            {t(tab.translationKey)}
           </button>
         ))}
       </div>
@@ -56,7 +58,7 @@ export function Step4Content() {
               <SectionSelector />
             </div>
             <div className="flex-1 min-h-0 bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <Suspense fallback={<LoadingSpinner message="Cargando perfiles…" />}>
+              <Suspense fallback={<LoadingSpinner message={t('step4.loading_profiles')} />}>
                 <div className="max-w-4xl mx-auto" style={{ height: '400px' }}>
                   <LazyProfileChart />
                 </div>
@@ -66,19 +68,19 @@ export function Step4Content() {
         )}
 
         {activeTab === 'table' && (
-          <Suspense fallback={<LoadingSpinner message="Cargando tabla…" />}>
+          <Suspense fallback={<LoadingSpinner message={t('step4.loading_table')} />}>
             <LazyResultsTable />
           </Suspense>
         )}
 
         {activeTab === 'dashboard' && (
-          <Suspense fallback={<LoadingSpinner message="Cargando dashboard…" />}>
+          <Suspense fallback={<LoadingSpinner message={t('step4.loading_dashboard')} />}>
             <LazyDashboard />
           </Suspense>
         )}
 
         {activeTab === 'bench-editor' && (
-          <Suspense fallback={<LoadingSpinner message="Cargando editor de bancos…" />}>
+          <Suspense fallback={<LoadingSpinner message={t('step4.loading_bench_editor')} />}>
             <LazyBenchEditor />
           </Suspense>
         )}
@@ -86,7 +88,7 @@ export function Step4Content() {
         {activeTab === 'export' && <ExportPanel />}
 
         {activeTab === 'ai' && (
-          <Suspense fallback={<LoadingSpinner message="Cargando informe IA…" />}>
+          <Suspense fallback={<LoadingSpinner message={t('step4.loading_ai')} />}>
             <LazyAIReporter />
           </Suspense>
         )}
@@ -99,7 +101,7 @@ export function Step4Content() {
           className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
           style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
         >
-          ← Anterior
+          ← {t('nav.previous')}
         </button>
       </div>
     </div>

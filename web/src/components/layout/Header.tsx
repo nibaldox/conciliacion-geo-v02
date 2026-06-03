@@ -1,10 +1,13 @@
+import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { useQueryClient } from '@tanstack/react-query';
 import { ThemeToggle } from './ThemeToggle';
+import { LanguageToggle } from './LanguageToggle';
 
 export function Header() {
   const { reset } = useSession();
   const queryClient = useQueryClient();
+  const { t } = useTranslation();
 
   const handleNewSession = () => {
     localStorage.removeItem('session_id');
@@ -27,22 +30,23 @@ export function Header() {
         </div>
         <div>
           <h1 className="text-lg font-bold" style={{ color: 'var(--color-text-primary)' }}>
-            Conciliación Geotécnica
+            {t('app.title')}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Diseño vs As-Built
+            {t('app.tagline')}
           </p>
         </div>
       </div>
       <div className="flex items-center gap-3">
         <ThemeToggle />
+        <LanguageToggle />
         <button
           onClick={handleNewSession}
           title="Iniciar nueva sesión"
           className="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors hover:opacity-80"
           style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)', backgroundColor: 'transparent' }}
         >
-          Nueva Sesión
+          {t('common.loading') === 'Loading…' ? 'New Session' : 'Nueva Sesión'}
         </button>
         <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>v2.0</span>
       </div>

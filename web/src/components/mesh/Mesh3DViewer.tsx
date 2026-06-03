@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMeshVertices, useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import type { SectionResponse, VerticesResponse } from '../../api/types';
@@ -286,6 +287,7 @@ export function Mesh3DViewer() {
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
   const { data: sections } = useSections();
+  const { t } = useTranslation();
   const isLoading = loadingDesign || loadingTopo;
   const hasNoData = !designVerts && !topoVerts;
   const [requested, setRequested] = useState(false);
@@ -300,7 +302,7 @@ export function Mesh3DViewer() {
       <div data-slot="mesh-3d-viewer" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="text-3xl">🌐</div>
-          <p className="text-sm text-center">Cargue superficies para ver la vista 3D</p>
+          <p className="text-sm text-center">{t('step1.view3d_no_data')}</p>
         </div>
       </div>
     );
@@ -312,18 +314,17 @@ export function Mesh3DViewer() {
         <div className="flex flex-col items-center gap-4 max-w-md text-center px-6">
           <div className="text-5xl">🌍</div>
           <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            Vista 3D con CesiumJS
+            {t('step1.view3d_title')}
           </p>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Descarga diferida: ~4 MB de JS + ~22 MB de assets (Workers, Widgets).
-            Solo se carga cuando hacés clic.
+            {t('step1.view3d_subtitle')}
           </p>
           <button
             onClick={() => setRequested(true)}
             className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue"
             style={{ backgroundColor: 'var(--color-mine-blue)', color: '#fff' }}
           >
-            Cargar vista 3D
+            {t('step1.view3d_button')}
           </button>
         </div>
       </div>
@@ -336,7 +337,7 @@ export function Mesh3DViewer() {
         <div className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
           <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
             <div className="animate-spin text-2xl">⏳</div>
-            <p className="text-sm">Cargando vértices…</p>
+            <p className="text-sm">{t('step1.view3d_loading_verts')}</p>
           </div>
         </div>
       ) : (

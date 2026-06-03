@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Suspense, lazy, useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useSession } from './stores/session';
 import { useTheme } from './stores/theme';
 
-// All four step components are lazy-loaded. The wizard's "current step"
+// All four step components are lazy loaded. The wizard's "current step"
 // state lives in zustand, so navigating between steps just swaps which
 // chunk React loads. This keeps the initial bundle (Step 1 only) as
 // small as possible — the bulk of the app's JS is in steps 2-4 and
@@ -48,6 +49,7 @@ function App() {
   }));
 
   const { isDark } = useTheme();
+  const { i18n } = useTranslation();
 
   // Apply dark class to root element
   useEffect(() => {
@@ -57,6 +59,17 @@ function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [isDark]);
+
+  // Sync <html lang> with i18n language so screen readers and
+  // browser translation prompts work correctly.
+  useEffect(() => {
+    const handler = (lng: string) => {
+      document.documentElement.lang = lng.startsWith('es') ? 'es' : 'en';
+    };
+    handler(i18n.language);
+    i18n.on('languageChanged', handler);
+    return () => i18n.off('languageChanged', handler);
+  }, [i18n]);
 
   return (
     <QueryClientProvider client={queryClient}>

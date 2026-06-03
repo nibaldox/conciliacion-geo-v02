@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 
 /**
@@ -9,6 +10,7 @@ import { useSession } from '../../stores/session';
  */
 export function DemoBanner() {
   const { demoMode, demoLoading, demoError, exitDemo, demoData } = useSession();
+  const { t } = useTranslation();
 
   if (!demoMode && !demoLoading && !demoError) return null;
 
@@ -23,14 +25,14 @@ export function DemoBanner() {
         <div className="flex items-center gap-2 text-sm">
           <span>⚠️</span>
           <span>
-            No se pudo cargar el modo demo: <code className="text-xs">{demoError}</code>
+            {t('demo.banner_error', { error: demoError })}
           </span>
         </div>
         <button
           onClick={exitDemo}
           className="text-xs underline underline-offset-2"
         >
-          Cerrar
+          {t('common.close')}
         </button>
       </div>
     );
@@ -45,12 +47,14 @@ export function DemoBanner() {
         style={{ backgroundColor: 'var(--color-surface-muted)', borderColor: 'var(--color-border)' }}
       >
         <div className="animate-spin text-base">⏳</div>
-        <span className="text-sm">Cargando datos de ejemplo…</span>
+        <span className="text-sm">{t('demo.banner_loading')}</span>
       </div>
     );
   }
 
   // ── Active state ──
+  const nS = demoData?.summary.n_sections ?? 0;
+  const nC = demoData?.summary.n_comparisons ?? 0;
   return (
     <div
       data-slot="demo-banner"
@@ -64,10 +68,12 @@ export function DemoBanner() {
       <div className="flex items-center gap-3 text-sm">
         <span className="text-base">🎮</span>
         <div>
-          <span className="font-semibold">Modo demo</span>
+          <span className="font-semibold">{t('demo.banner_active')}</span>
           <span className="ml-2 opacity-80">
-            Datos sintéticos ({demoData?.summary.n_sections ?? 0} secciones, {demoData?.summary.n_comparisons ?? 0} bancos analizados).
-            Sin llamadas al backend.
+            {t('demo.banner_active_detail', {
+              n_sections: t('common.n_sections', { count: nS }),
+              n_comparisons: t('common.n_comparisons', { count: nC }),
+            })}
           </span>
         </div>
       </div>
@@ -80,7 +86,7 @@ export function DemoBanner() {
           color: 'var(--color-text-primary)',
         }}
       >
-        Salir del demo
+        {t('demo.exit')}
       </button>
     </div>
   );

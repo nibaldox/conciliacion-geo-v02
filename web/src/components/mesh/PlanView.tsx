@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMeshVertices, useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import type { SectionResponse } from '../../api/types';
@@ -242,6 +243,7 @@ export function PlanView({ onPointClick }: { onPointClick?: (coords: { x: number
   const { designMeshId, topoMeshId } = useSession();
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
+  const { t } = useTranslation();
   const [requested, setRequested] = useState(false);
 
   const isLoading = loadingDesign || loadingTopo;
@@ -252,7 +254,7 @@ export function PlanView({ onPointClick }: { onPointClick?: (coords: { x: number
       <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="text-3xl">🗺️</div>
-          <p className="text-sm text-center">Cargue superficies para ver la vista en planta</p>
+          <p className="text-sm text-center">{t('step1.plan_view_no_data')}</p>
         </div>
       </div>
     );
@@ -264,17 +266,17 @@ export function PlanView({ onPointClick }: { onPointClick?: (coords: { x: number
         <div className="flex flex-col items-center gap-4 max-w-md text-center px-6">
           <div className="text-5xl">🗺️</div>
           <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            Vista en planta con Plotly
+            {t('step1.plan_view_title_2d')}
           </p>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Descarga diferida: ~3 MB de JS. Solo se carga cuando hacés clic.
+            {t('step1.plan_view_subtitle_2d')}
           </p>
           <button
             onClick={() => setRequested(true)}
             className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue"
             style={{ backgroundColor: 'var(--color-mine-blue)', color: '#fff' }}
           >
-            Cargar vista en planta
+            {t('step1.plan_view_button_2d')}
           </button>
         </div>
       </div>
@@ -286,7 +288,7 @@ export function PlanView({ onPointClick }: { onPointClick?: (coords: { x: number
       <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="animate-spin text-2xl">⏳</div>
-          <p className="text-sm">Cargando vértices…</p>
+          <p className="text-sm">{t('step1.plan_view_loading_verts')}</p>
         </div>
       </div>
     );
