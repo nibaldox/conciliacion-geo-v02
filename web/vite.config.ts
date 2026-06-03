@@ -61,11 +61,24 @@ export default defineConfig({
   // with its workers and CJS/ESM mixed structure
   optimizeDeps: {
     exclude: ['cesium'],
-    // mersenne-twister is a CJS Plotly dependency that Vite's esbuild
+    // cesium pulls in several CJS-only dependencies that Vite's esbuild
     // pre-bundler otherwise tries to import as ESM and breaks with
-    // "does not provide an export named 'default'". Forcing it into
-    // the include list tells Vite to pre-bundle it as CJS.
-    include: ['mersenne-twister'],
+    // "does not provide an export named 'default'". We keep cesium itself
+    // excluded (it's loaded from public/Cesium via the static-assets
+    // plugin), but its CJS transitive deps must be pre-bundled. Same
+    // applies to mersenne-twister, a Plotly dependency.
+    include: [
+      'mersenne-twister',
+      'urijs',
+      'protobufjs',
+      'dompurify',
+      'autolinker',
+      'lerc',
+      'meshoptimizer',
+      'rbush',
+      'topojson-client',
+      'bit-twiddle',
+    ],
   },
   server: {
     port: 5173,
