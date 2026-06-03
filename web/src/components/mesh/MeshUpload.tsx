@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { useUploadMesh, useDeleteMesh, useMeshInfo } from '../../api/hooks';
 import { useSession } from '../../stores/session';
+import { TryDemoButton } from '../demo/TryDemoButton';
 import type { MeshType } from '../../api/types';
 
 /** Accepted file extensions */
@@ -233,6 +234,9 @@ export function MeshUpload() {
           Máximo 500 MB por archivo. Los archivos .stl y .xlsx están excluidos del repositorio.
         </p>
       )}
+
+      {/* "Try with sample data" CTA — only visible in the empty state */}
+      {!bothUploaded && <TryDemoButton />}
     </div>
   );
 }

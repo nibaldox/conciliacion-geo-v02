@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import client from './client';
+import { useSession, DEMO_MESH_IDS } from '../stores/session';
 import type {
   MeshInfo,
   UploadResponse,
@@ -18,12 +19,48 @@ import type {
   ContourData,
 } from './types';
 
+// ─── Demo data helpers ──────────────────────────────────────
+//
+// When the session is in demo mode (set by useSession().loadDemo()),
+// the data hooks below short-circuit and return precomputed synthetic
+// data from the in-memory DemoData payload — no API calls are made.
+// This is what makes the "Try demo" button work end-to-end on
+// GitHub Pages with no backend running.
+
+
+function isDemoMeshId(meshId: string | null | undefined): boolean {
+  return meshId === DEMO_MESH_IDS.design || meshId === DEMO_MESH_IDS.topo;
+}
+
+
 // ─── Meshes ────────────────────────────────────────────────
 
 export function useMeshInfo(meshId: string | null) {
+  const { demoMode, demoData } = useSession();
   return useQuery({
-    queryKey: ['mesh', meshId],
-    queryFn: () => client.get<MeshInfo>(`/meshes/${meshId}/info`).then(r => r.data),
+    queryKey: ['mesh', meshId, demoMode],
+    queryFn: async () => {
+      if (demoMode && demoData && isDemoMeshId(meshId)) {
+        const kind = meshId === DEMO_MESH_IDS.design ? 'design' : 'topo';
+        const v = demoData.vertices[kind];
+        // Compute bounds from the (x, y, z) arrays we already have.
+        const xs = v.x, ys = v.y, zs = v.z;
+        return {
+          id: meshId!,
+          type: kind,
+          n_vertices: xs.length,
+          n_faces: 0,
+          bounds: {
+            min_x: Math.min(...xs), max_x: Math.max(...xs),
+            min_y: Math.min(...ys), max_y: Math.max(...ys),
+            min_z: Math.min(...zs), max_z: Math.max(...zs),
+          },
+          filename: kind === 'design' ? 'demo-design.stl' : 'demo-topo.stl',
+          uploaded_at: new Date().toISOString(),
+        } satisfies MeshInfo;
+      }
+      return client.get<MeshInfo>(`/meshes/${meshId}/info`).then(r => r.data);
+    },
     enabled: !!meshId,
   });
 }
@@ -45,10 +82,19 @@ export function useUploadMesh() {
   });
 }
 
-export function useMeshVertices(meshId: string | null, step = 8000) {
+export function useMeshVertices(meshId: string | null, _step = 8000) {
+  const { demoMode, demoData } = useSession();
   return useQuery({
-    queryKey: ['mesh-vertices', meshId, step],
-    queryFn: () => client.get<VerticesResponse>(`/meshes/${meshId}/vertices`, { params: { step } }).then(r => r.data),
+    queryKey: ['mesh-vertices', meshId, demoMode],
+    queryFn: async () => {
+      if (demoMode && demoData && isDemoMeshId(meshId)) {
+        const kind = meshId === DEMO_MESH_IDS.design ? 'design' : 'topo';
+        return demoData.vertices[kind] satisfies VerticesResponse;
+      }
+      return client
+        .get<VerticesResponse>(`/meshes/${meshId}/vertices`, { params: { step: _step } })
+        .then(r => r.data);
+    },
     enabled: !!meshId,
   });
 }
@@ -72,9 +118,22 @@ export function useMeshContours(meshId: string | null, interval = 15.0) {
 // ─── Sections ──────────────────────────────────────────────
 
 export function useSections() {
+  const { demoMode, demoData } = useSession();
   return useQuery({
-    queryKey: ['sections'],
-    queryFn: () => client.get<SectionResponse[]>('/sections').then(r => r.data),
+    queryKey: ['sections', demoMode],
+    queryFn: async () => {
+      if (demoMode && demoData) {
+        return demoData.sections.map((s, i) => ({
+          id: String(i),
+          name: s.section_name,
+          origin: s.origin,
+          azimuth: s.azimuth,
+          length: 400,            // matches the synthetic generator
+          sector: s.sector,
+        })) satisfies SectionResponse[];
+      }
+      return client.get<SectionResponse[]>('/sections').then(r => r.data);
+    },
   });
 }
 
@@ -171,10 +230,31 @@ export function useProcessStatus() {
 }
 
 export function useProfile(sectionId: string | null) {
+  const { demoMode, demoData } = useSession();
   return useQuery({
-    queryKey: ['profile', sectionId],
-    queryFn: () => client.get<ProfileData>(`/process/profiles/${sectionId}`).then(r => r.data),
-    enabled: !!sectionId,
+    queryKey: ['profile', sectionId, demoMode],
+    queryFn: async () => {
+      if (demoMode && demoData && sectionId !== null) {
+        const idx = parseInt(sectionId, 10);
+        const sec = demoData.sections[idx];
+        if (!sec) throw new Error(`Demo section ${sectionId} not found`);
+        return {
+          section_name: sec.section_name,
+          sector: sec.sector,
+          origin: sec.origin,
+          azimuth: sec.azimuth,
+          design: sec.design_profile,
+          topo: sec.topo_profile,
+          reconciled_design: null,
+          reconciled_topo: sec.reconciled_topo,
+          benches_topo: sec.benches_topo,
+        } satisfies ProfileData;
+      }
+      return client
+        .get<ProfileData>(`/process/profiles/${sectionId}`)
+        .then(r => r.data);
+    },
+    enabled: sectionId !== null,
   });
 }
 
@@ -193,9 +273,20 @@ export function useUpdateReconciled() {
 // ─── Results ───────────────────────────────────────────────
 
 export function useResults(section?: string) {
+  const { demoMode, demoData } = useSession();
   return useQuery({
-    queryKey: ['results', section],
-    queryFn: () => client.get<ComparisonResult[]>('/process/results', { params: section ? { section } : {} }).then(r => r.data),
+    queryKey: ['results', section, demoMode],
+    queryFn: async () => {
+      if (demoMode && demoData) {
+        const rows = demoData.comparisons;
+        return section ? rows.filter(r => r.section === section) : rows;
+      }
+      return client
+        .get<ComparisonResult[]>('/process/results', {
+          params: section ? { section } : {},
+        })
+        .then(r => r.data);
+    },
   });
 }
 

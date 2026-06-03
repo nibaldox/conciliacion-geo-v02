@@ -1,6 +1,7 @@
 import { Header } from './Header';
 import { StepNav } from './StepNav';
 import { Sidebar } from './Sidebar';
+import { DemoBanner } from '../demo/DemoBanner';
 import { useSession } from '../../stores/session';
 
 interface AppLayoutProps {
@@ -24,7 +25,7 @@ export function AppLayout({ children }: AppLayoutProps) {
     <div className="h-screen flex flex-col" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
       <Header />
       <StepNav />
-      
+
       <main className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">
           {/* Step title */}
@@ -35,7 +36,12 @@ export function AppLayout({ children }: AppLayoutProps) {
               </h2>
             </div>
           </div>
-          
+
+          {/* Demo banner — only visible when demo mode is on */}
+          <div className="px-6 pt-3 shrink-0 max-w-7xl w-full mx-auto">
+            <DemoBanner />
+          </div>
+
           {/* Content area */}
           <div className="flex-1 overflow-auto p-6 min-h-0" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
             <div className="max-w-7xl mx-auto h-full">
@@ -44,7 +50,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
         </div>
       </main>
-      
+
       <Sidebar />
     </div>
   );
