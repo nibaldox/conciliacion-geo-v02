@@ -3,6 +3,7 @@ import { useSession } from '../../stores/session';
 import { useQueryClient } from '@tanstack/react-query';
 import { ThemeToggle } from './ThemeToggle';
 import { LanguageToggle } from './LanguageToggle';
+import { KeyboardShortcutsHelp } from '../ui/KeyboardShortcutsHelp';
 
 export function Header() {
   const { reset, setView, demoMode } = useSession();
@@ -48,18 +49,21 @@ export function Header() {
           </div>
         </button>
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
+        <div className="hidden md:block">
+          <KeyboardShortcutsHelp />
+        </div>
         <ThemeToggle />
         <LanguageToggle />
         <button
           onClick={handleNewSession}
           title="Iniciar nueva sesión"
-          className="px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors hover:opacity-80"
+          className="hidden sm:inline-block px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors hover:opacity-80"
           style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)', backgroundColor: 'transparent' }}
         >
           {i18n.language === 'es' ? 'Nueva Sesión' : 'New Session'}
         </button>
-        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>v2.0</span>
+        <span className="text-xs hidden md:inline" style={{ color: 'var(--color-text-muted)' }}>v2.0</span>
       </div>
     </header>
   );

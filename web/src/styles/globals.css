@@ -2,6 +2,106 @@
 /* Fonts loaded via <link rel="stylesheet"> in index.html for better
    preconnect hints and to avoid blocking CSS parsing. */
 
+/* ── Tooltip component (CSS-only, themed) ────────────────────── */
+.conciliacion-tooltip {
+  position: relative;
+  display: inline-flex;
+  /* Sub-elements must still inherit the surrounding cursor */
+}
+.conciliacion-tooltip__bubble {
+  position: absolute;
+  z-index: 50;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  max-width: 18rem;
+  width: max-content;
+  pointer-events: none;
+  background-color: var(--color-text-primary, #111827);
+  color: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+  /* Position by data-side (default: above the trigger) */
+  bottom: calc(100% + 0.4rem);
+  left: 50%;
+  transform-origin: bottom center;
+  translate: -50% 0;
+  white-space: normal;
+}
+.conciliacion-tooltip[data-side="bottom"] .conciliacion-tooltip__bubble {
+  bottom: auto;
+  top: calc(100% + 0.4rem);
+  transform-origin: top center;
+}
+.conciliacion-tooltip[data-side="left"] .conciliacion-tooltip__bubble {
+  bottom: 50%;
+  left: auto;
+  right: calc(100% + 0.4rem);
+  transform-origin: right center;
+  translate: 0 50%;
+}
+.conciliacion-tooltip[data-side="right"] .conciliacion-tooltip__bubble {
+  bottom: 50%;
+  left: calc(100% + 0.4rem);
+  transform-origin: left center;
+  translate: 0 -50%;
+  /* Override the left:50% from the default top variant */
+  inset-inline-start: calc(100% + 0.4rem);
+}
+.conciliacion-tooltip:hover .conciliacion-tooltip__bubble,
+.conciliacion-tooltip:focus-within .conciliacion-tooltip__bubble {
+  opacity: 1;
+  transform: scale(1);
+}
+.conciliacion-tooltip[data-side="bottom"]:hover .conciliacion-tooltip__bubble,
+.conciliacion-tooltip[data-side="bottom"]:focus-within .conciliacion-tooltip__bubble {
+  translate: -50% 0;
+}
+.conciliacion-tooltip[data-side="left"]:hover .conciliacion-tooltip__bubble,
+.conciliacion-tooltip[data-side="left"]:focus-within .conciliacion-tooltip__bubble {
+  translate: 0 50%;
+}
+.conciliacion-tooltip[data-side="right"]:hover .conciliacion-tooltip__bubble,
+.conciliacion-tooltip[data-side="right"]:focus-within .conciliacion-tooltip__bubble {
+  translate: 0 -50%;
+}
+
+/* ── Skip-to-content link (a11y) ─────────────────────────── */
+.skip-to-content {
+  position: absolute;
+  top: -100px;
+  left: 0.5rem;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  background-color: var(--color-mine-blue, #2F5496);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 0.4rem;
+  text-decoration: none;
+  transition: top 120ms ease-out;
+}
+.skip-to-content:focus,
+.skip-to-content:focus-visible {
+  top: 0.5rem;
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* ── Visible focus ring everywhere ──────────────────────── */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-mine-blue, #2F5496);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Don't add a ring to elements that already have their own focus style */
+:where(button:focus-visible, a:focus-visible):where(.no-focus-ring, [class*="focus-visible:ring-"]) {
+  outline: none;
+}
+
 /* ── Dark mode selector (must be first) ────────────────────── */
 @custom-variant dark (&:where(.dark, .dark *));
 

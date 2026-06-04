@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Landing } from './components/landing/Landing';
+import { useHotkeys } from './hooks/useHotkeys';
 import { useSession } from './stores/session';
 import { useTheme } from './stores/theme';
 
@@ -51,7 +52,7 @@ function App() {
 
   const { isDark } = useTheme();
   const { i18n } = useTranslation();
-  const { view, setView } = useSession();
+  const { view, setView, setStep, nextStep, prevStep } = useSession();
 
   // Hash-based routing: #/app deep-links to the wizard without
   // needing a real router. The landing page is the default route.
@@ -67,6 +68,14 @@ function App() {
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, [setView]);
+
+  // Wizard step navigation via keyboard (only inside the app view)
+  useHotkeys('ArrowLeft', () => prevStep(), [view]);
+  useHotkeys('ArrowRight', () => nextStep(), [view]);
+  useHotkeys(['1', '2', '3', '4'], (e) => {
+    const target = parseInt(e.key, 10);
+    if (target >= 1 && target <= 4) setStep(target);
+  }, [view]);
 
   // Apply dark class to root element
   useEffect(() => {
