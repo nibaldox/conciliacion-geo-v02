@@ -3,12 +3,13 @@ import { Suspense, lazy, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { Landing } from './components/landing/Landing';
 import { useSession } from './stores/session';
 import { useTheme } from './stores/theme';
 
 // All four step components are lazy loaded. The wizard's "current step"
 // state lives in zustand, so navigating between steps just swaps which
-// chunk React loads. This keeps the initial bundle (Step 1 only) as
+// chunk React fetches. This keeps the initial bundle (Step 1 only) as
 // small as possible — the bulk of the app's JS is in steps 2-4 and
 // only fetches when the user actually navigates there.
 const LazyStep1 = lazy(() => import('./components/mesh/Step1Content').then(m => ({ default: m.Step1Content })));
@@ -50,6 +51,22 @@ function App() {
 
   const { isDark } = useTheme();
   const { i18n } = useTranslation();
+  const { view, setView } = useSession();
+
+  // Hash-based routing: #/app deep-links to the wizard without
+  // needing a real router. The landing page is the default route.
+  useEffect(() => {
+    const onHashChange = () => {
+      if (window.location.hash === '#/app') {
+        setView('app');
+      } else {
+        setView('landing');
+      }
+    };
+    onHashChange();  // sync initial state with current URL
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [setView]);
 
   // Apply dark class to root element
   useEffect(() => {
@@ -70,6 +87,19 @@ function App() {
     i18n.on('languageChanged', handler);
     return () => i18n.off('languageChanged', handler);
   }, [i18n]);
+
+  // Landing page lives outside the AppLayout (no header, no sidebar).
+  // It has its own minimal header/footer so the marketing surface
+  // doesn't look like an "empty app".
+  if (view === 'landing') {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <ErrorBoundary>
+          <Landing />
+        </ErrorBoundary>
+      </QueryClientProvider>
+    );
+  }
 
   return (
     <QueryClientProvider client={queryClient}>

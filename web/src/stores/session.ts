@@ -60,6 +60,12 @@ export interface DemoData {
 }
 
 interface SessionState {
+  // Top-level navigation. 'landing' shows the public marketing
+  // page (default for first-time visitors); 'app' shows the
+  // wizard. Hash routing (#/app) lets us deep-link straight to
+  // the wizard for power users.
+  view: 'landing' | 'app';
+
   // Wizard navigation
   currentStep: number;
 
@@ -84,6 +90,7 @@ interface SessionState {
   demoError: string | null;
 
   // Actions
+  setView: (view: 'landing' | 'app') => void;
   setStep: (step: number) => void;
   nextStep: () => void;
   prevStep: () => void;
@@ -98,6 +105,7 @@ interface SessionState {
 }
 
 const initialState = {
+  view: 'landing' as const,
   currentStep: 1,
   selectedSection: null,
   designMeshId: null,
@@ -119,6 +127,17 @@ export const DEMO_MESH_IDS = {
 export const useSession = create<SessionState>((set, get) => ({
   ...initialState,
 
+  setView: (view) => {
+    set({ view });
+    // Keep the URL hash in sync so the wizard can be deep-linked
+    // and the back button does the right thing.
+    if (typeof window !== 'undefined') {
+      const target = view === 'app' ? '#/app' : '#/';
+      if (window.location.hash !== target) {
+        window.history.replaceState(null, '', target);
+      }
+    }
+  },
   setStep: (step) => set({ currentStep: step }),
   nextStep: () => set((s) => ({ currentStep: Math.min(s.currentStep + 1, 4) })),
   prevStep: () => set((s) => ({ currentStep: Math.max(s.currentStep - 1, 1) })),
