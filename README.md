@@ -1,301 +1,277 @@
+# Conciliación Geotécnica — Diseño vs As-Built
 
-# ⛏️ Conciliación Geotécnica: Diseño vs As-Built
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com)
+[![React 19](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6)](https://www.typescriptlang.org)
+[![PWA](https://img.shields.io/badge/PWA-ready-5A29E4)](https://web.dev/progressive-web-apps/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-97%2F97-brightgreen)](tests/)
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)
-![React](https://img.shields.io/badge/React-19-61DAFB)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6)
-![License](https://img.shields.io/badge/License-MIT-green)
+> **Open-source geotechnical reconciliation for open-pit mining.** Compare
+> 3D design surfaces vs as-built topography, generate cross-sections,
+> evaluate compliance against configurable tolerances, export
+> professional Excel/Word/DXF reports. All in your browser.
+>
+> *Conciliación geotécnica open-source para minería a cielo abierto.
+> Compara superficies 3D de diseño vs topografía real, genera
+> secciones, evalúa cumplimiento contra tolerancias.*
 
-Herramienta avanzada para la conciliación geotécnica en minería a cielo abierto. Permite comparar superficies de diseño (fases) con levantamientos topográficos reales (As-Built) mediante el análisis automático de perfiles transversales.
-
-## 📸 Capturas de Pantalla
-
-| Carga de Datos y Configuración | Análisis de Perfiles |
-|:------------------------------:|:--------------------:|
-| ![Dashboard Overview](printscr/dashboard-overview.png) | ![Profile Analysis](printscr/profile-analysis.png) |
-| *Interfaz principal para carga de mallas y configuración de tolerancias* | *Visualización interactiva de perfiles con detección de bancos y bermas* |
-
-| Definición de Secciones | Reportes Detallados |
-|:-----------------------:|:-------------------:|
-| ![Section Definition](printscr/section-definition.png) | ![Parameter Settings](printscr/parameter-settings.png) |
-| *Generación automática y manual de secciones de corte* | *Configuración de parámetros de detección (RDP, ángulos)* |
-
----
-
-## 🏗️ Web App v2
-
-La versión 2 introduce una arquitectura moderna **React + FastAPI** que reemplaza la interfaz Streamlit legacy con una aplicación web de alto rendimiento.
-
-### Arquitectura
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  React 19 + TypeScript  (Vite)                          │
-│  ┌───────────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ │
-│  │  CesiumJS  │ │ Plotly.js│ │TanStack   │ │ Zustand  │ │
-│  │  3D View   │ │ Profiles │ │Table+Query│ │  State   │ │
-│  └─────┬──────┘ └────┬─────┘ └─────┬─────┘ └────┬─────┘ │
-│        └──────────────┴────────────┴─────────────┘       │
-│                          │  HTTP / REST                   │
-├──────────────────────────┼────────────────────────────────┤
-│  FastAPI  (Python)       │                                │
-│  ┌───────────┐ ┌────────┴──────┐ ┌──────────────────┐    │
-│  │  Routers   │ │ Core Library  │ │   SQLite DB      │    │
-│  │  /sessions │ │ mesh_handler  │ │   (sessions)     │    │
-│  │  /meshes   │ │ section_cutter│ │                  │    │
-│  │  /sections │ │ param_extract │ └──────────────────┘    │
-│  │  /export   │ │ excel_writer  │                         │
-│  └───────────┘ │ report_gen    │                         │
-│                └───────────────┘                         │
-└──────────────────────────────────────────────────────────┘
-```
-
-### Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| Frontend | React 19 | UI framework |
-| Frontend | TypeScript | Type safety |
-| Frontend | Vite 6 | Build tool & dev server |
-| Frontend | Tailwind CSS v4 | Utility-first styling |
-| Frontend | CesiumJS | 3D terrain visualization |
-| Frontend | Plotly.js | Interactive profile charts |
-| Frontend | TanStack Table | Data grid with sorting/filtering |
-| Frontend | TanStack Query | Server state management |
-| Frontend | Zustand | Client state management |
-| Backend | FastAPI | REST API framework |
-| Backend | SQLite | Session persistence |
-| Backend | trimesh | 3D mesh processing |
-| Backend | OpenAI / LM Studio | AI report generation |
+[Live demo](https://nibaldox.github.io/conciliacion-geo-v02/) ·
+[Architecture](ARCHITECTURE.md) ·
+[Deploy guide](web/DEPLOY.md) ·
+[Contributing](CONTRIBUTING.md)
 
 ---
 
-## 🚀 Quick Start
+## ⚡ Try it now — no signup
 
-### Docker (Production)
+The hosted demo is **free, public, and requires no account**:
+
+1. Open the [live site](https://nibaldox.github.io/conciliacion-geo-v02/)
+2. Click **🎮 Try with sample data**
+3. Browse the dashboard, 3D viewer, and exported reports
+4. (Optional) Click **Empezar** to upload your own `.stl`
+
+The frontend is hosted on GitHub Pages (free). The backend runs on
+Render.com (free tier) only when you upload your own data.
+
+---
+
+## ✨ Features
+
+- **Multi-format mesh support** — STL, OBJ, PLY, DXF
+- **Auto-section generation** — by start/end line, by polyline file, or click-on-map
+- **RDP + Hungarian matching** — robust bench / berm / face detection with no double-counting
+- **Compliance dashboard** — CUMPLE / FUERA / NO CUMPLE per sector, parameter, bench
+- **3D and 2D views** — CesiumJS for the terrain, Plotly for interactive profiles, Chart.js for charts
+- **Excel / Word / DXF exports** — formatted reports ready for engineering review
+- **Drill & Blast ↔ Geotech correlation** — project blast holes onto cross-sections, see which benches over- or under-excavated
+- **🌐 Bilingual UI** — Spanish (default) + English, switchable from the header
+- **📱 PWA** — installable, works offline, sub-330 KB initial bundle
+- **🎮 Demo mode** — pre-computed synthetic pit, 4 benches, 5 sections, 40 compliance rows, no upload needed
+- **🔓 Open source, MIT** — your data stays in your session, no hidden telemetry
+
+---
+
+## 🚀 Two ways to run it
+
+The project ships **two complete user interfaces** that share the
+same `core/` domain logic:
+
+### 1. Web app (recommended for sharing) — `web/`
+
+Modern React 19 + FastAPI architecture, deployed for free on
+GitHub Pages + Render.com. See [web/DEPLOY.md](web/DEPLOY.md)
+for the full guide.
 
 ```bash
-docker compose up --build
-```
-
-Frontend at `http://localhost:5173`, API at `http://localhost:8000`.
-
-### Development (Local)
-
-```bash
-# 1. Backend
+# Backend
 pip install -e .
 uvicorn api.main:app --reload --port 8000
 
-# 2. Frontend (separate terminal)
-cd web && npm install && npm run dev
+# Frontend (separate terminal)
+cd web && npm install && npm run dev    # → http://localhost:5173
 ```
 
-Or use the convenience script:
+### 2. Streamlit (the maintainer uses this daily) — `app.py`
+
+Single-file Streamlit app, no separate backend. **Not touched by
+recent v2 work** — the maintainer uses it for real work and the
+contributing guide explicitly forbids changes here.
 
 ```bash
-./dev.sh
+pip install -r requirements.txt
+streamlit run app.py                        # → http://localhost:8501
 ```
 
-### API Documentation
-
-Swagger UI available at `http://localhost:8000/docs` when the backend is running.
-
----
-
-## 🚀 Características Principales
-
-Esta aplicación automatiza el flujo de trabajo de conciliación geotécnica, reduciendo el tiempo de análisis de horas a minutos.
-
-### 1. Carga y Procesamiento de Mallas 3D
-*   Soporte para formatos **STL, OBJ, PLY, DXF**.
-*   Visualización interactiva de nubes de puntos y mallas trianguladas.
-*   Alineación automática de sistemas de coordenadas.
-
-### 2. Definición Flexible y Acumulativa de Secciones
-*   **Carga Multi-Archivo Acumulativa**: Soporte para la carga sucesiva de múltiples archivos DXF/CSV en memoria de forma acumulada y concurrente.
-*   **Sufijos de Sector Automáticos**: Los perfiles adoptan sufijos basados en el nombre de archivo origen (ej. `S01-f9`, `S02-f10`), facilitando la comparación paralela de múltiples sectores y fases de la mina sin colisiones.
-*   **Trazabilidad Espacial**: Columna `"Archivo"` integrada en la tabla de secciones del Paso 2 para conocer de manera unívoca la procedencia de cada línea de corte.
-*   **Métodos de Entrada**: Archivos de coordenadas, interactivo por clic en plano 3D, coordenadas manuales y equiespaciadas automáticas a lo largo de una línea de cresta.
-*   **Herramienta de Reinicio**: Botón `"Limpiar Secciones"` para vaciar el pool acumulativo e iniciar nuevas evaluaciones limpias al instante.
-
-### 3. Extracción Automática de Parámetros
-El algoritmo inteligente identifica y calcula:
-*   **Altura de Banco**: Distancia vertical entre pata y cresta.
-*   **Ancho de Berma Total y Desglose**:
-    *   **Ancho de Berma Total**: Distancia horizontal total calculada entre pata superior y cresta inferior.
-    *   **Berma de Derrame (Material Acumulado)**: Identificación del ancho ocupado por material suelto acumulado al pie del banco (`spill_width`), a partir de la estimación del punto de quiebre (knickpoint) por segunda derivada.
-    *   **Berma Efectiva**: Ancho de berma real útil y transitable (`effective_berm_width`), correspondiente a la berma total menos el derrame del banco superior.
-*   **Ángulo de Cara y Proyección Sólida**:
-    *   **Ángulo de Cara**: Inclinación de la cara de roca sana o competente.
-    *   **Pata Sólida Proyectada**: Reconstrucción de la línea de talud de roca competente mediante regresión lineal y proyección matemática hasta el nivel del piso, deduciendo la posición teórica original de la pata antes del derrame.
-*   **Ángulo Inter-rampa**: Pendiente global entre bancos.
-*   **Detección de Rampas**: Identificación automática de rampas basada en anchos de berma (15m - 42m).
-
-### 4. Conciliación Diseño vs Real
-*   **Matching Inteligente**: Algoritmo húngaro para emparejar bancos de diseño con los reales basado en elevación.
-*   **Semáforos de Cumplimiento**: Visualización rápida de desviaciones (Verde/Amarillo/Rojo) según tolerancias configurables.
-*   **Cálculo de Volúmenes**: Estimación de áreas de corte (sobre-excavación) y relleno (bancos colgados) por sección.
-
-### 5. Ergonomía Visual en Perfiles Cross-Section
-*   **Grilla Multicolumna Dinámica**: Selector en pantalla para visualizar perfiles en 1, 2 o 3 columnas de forma adaptativa, minimizando el scrolling vertical.
-*   **Cabecera de Mandos Compacta**: Mandos de control (área, semáforo, derrame, pozos, perfiles) reestructurados horizontalmente en una cabecera de 5 columnas para aprovechar al máximo el espacio de la aplicación.
-*   **Visualización Dinámica del Área de Derrame**: Representación visual premium de las pilas de derrame acumuladas al pie del talud como polígonos cerrados sombreados en color naranja semi-transparente (`rgba(255, 165, 0, 0.4)`), delimitados por la cara proyectada de roca sana, el piso horizontal y la topografía real.
-*   **Encuadre Bounding Box y Relación 1:1**: Centrado simétrico inteligente con un 5% de margen (padding) focalizado en el talud, forzando una escala geométrica estricta de 1:1 en pantalla.
-*   **Leyendas Simplificadas**: Caja de leyendas despejada de contaminación visual, ocultando trazas auxiliares (Deuda, Sobre-excavación, Info Bancos, Semáforos, Pozos) para reflejar únicamente las series clave: `Diseño`, `Topografía Real`, `Conciliado As-Built` y `Derrame`.
-
-### 6. Reportabilidad y Exportación de Alta Fidelidad
-*   **Tablas Interactivas**: Filtrado por Sector, Nivel y Sección. Ordenamiento flexible con coloreado de cumplimiento.
-*   **Exportación a Excel**: Reporte de parámetros y perforaciones compatible con software minero.
-*   **Generador de Informes Word (.docx) Dinámico**:
-    *   **Filtrado Integrado en Reportes**: El informe de Word y el ZIP de imágenes leen los filtros activos de la tabla (Sector, Nivel, Sección, Banco) en tiempo real.
-    *   **Exclusión de Secciones Vacías**: Omite secciones de la mina que no coincidan con la selección activa, generando un reporte Word enfocado únicamente en la zona buscada.
-    *   **Coherencia de Grilla e Imágenes**: Los gráficos exportados en Word y ZIP se alinean exactamente con la cota de referencia (`grid_ref`) y la altura de banco (`grid_height`) configuradas, preservando la escala y vistas seleccionadas.
-    *   **Anotaciones Focalizadas**: Muestra rótulos de bancos (`B1`, `Pa1`) de Matplotlib únicamente sobre las cotas filtradas.
-
-### 7. Asistente IA para Reportes 🤖
-*   **Generación Automática**: Redacción de informes ejecutivos en lenguaje natural.
-*   **Soporte Multi-Modelo**:
-    *   **Cloud**: OpenAI (GPT-3.5, GPT-4).
-    *   **Local**: Integración con LM Studio / Ollama para privacidad total de datos.
-*   **Análisis Inteligente**: Identificación de tendencias y recomendaciones operativas.
+Both interfaces call the same `core/` library (mesh cutting,
+parameter extraction, comparison, export) so results are
+identical.
 
 ---
 
-## 🛠️ Instalación
+## 📸 Screenshots
 
-1.  **Clonar el repositorio:**
-    ```bash
-    git clone https://github.com/nibaldox/conciliacion-geo-v02.git
-    cd conciliacion-geo-v02
-    ```
+The legacy Streamlit UI has screenshots in [`printscr/`](printscr/)
+that show the four-step workflow. The new React webapp is
+visually richer (3D Cesium viewer, drag-to-edit bench editor,
+compliance dashboard with traffic-light colour coding); we're
+in the process of capturing fresh screenshots — PRs welcome.
 
-2.  **Crear un entorno virtual (recomendado):**
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # En Windows: venv\Scripts\activate
-    ```
+| Dashboard overview (Streamlit, legacy) | Profile analysis (Streamlit, legacy) |
+|:--:|:--:|
+| ![dashboard](printscr/dashboard-overview.png) | ![profile](printscr/profile-analysis.png) |
 
-3.  **Instalar dependencias:**
-    ```bash
-    pip install -r requirements.txt
-    # o bien, instalar el paquete en modo desarrollo:
-    pip install -e .
-    ```
+| Section definition (Streamlit, legacy) | Parameter settings (Streamlit, legacy) |
+|:--:|:--:|
+| ![sections](printscr/section-definition.png) | ![params](printscr/parameter-settings.png) |
 
-4.  **Frontend (Web App v2):**
-    ```bash
-    cd web
-    npm install
-    ```
+---
 
-## ▶️ Uso
+## 🏗️ Architecture
 
-### Web App v2 (React + FastAPI)
+```
+                            ┌────────────────────────────┐
+                            │   GitHub Pages (static)    │
+                            │   nibaldox.github.io/...   │
+                            │   • React 19 + Vite 6      │
+                            │   • CesiumJS 1.140 (lazy)  │
+                            │   • Plotly 2.35 (lazy)     │
+                            │   • PWA + Workbox SW       │
+                            │   • i18n ES/EN             │
+                            │   • 330 KB initial bundle  │
+                            └─────────┬──────────────────┘
+                                      │ HTTPS + CORS allowlist
+                                      ▼
+                            ┌────────────────────────────┐
+                            │   Render.com (Docker)      │
+                            │   FastAPI + uvicorn        │
+                            │   • /api/v1/* routers      │
+                            │   • SQLite sessions        │
+                            │   • Health probes          │
+                            │   • Slowapi rate limit     │
+                            └─────────┬──────────────────┘
+                                      │
+                                      ▼
+                            ┌────────────────────────────┐
+                            │   core/  (shared domain)   │
+                            │   • mesh_handler           │
+                            │   • section_cutter         │
+                            │   • param_extractor        │
+                            │   • excel_writer           │
+                            │   • report_generator       │
+                            │   • blast_correlation      │
+                            └────────────────────────────┘
+```
+
+For the full breakdown see [ARCHITECTURE.md](ARCHITECTURE.md).
+For deploy step-by-step see [web/DEPLOY.md](web/DEPLOY.md).
+
+---
+
+## 🧪 Running tests
 
 ```bash
-# Start both servers
-./dev.sh
-
-# Or manually:
-uvicorn api.main:app --reload --port 8000   # Backend
-cd web && npm run dev                        # Frontend
+pytest tests/ -v                             # 97 backend tests
+python test_pipeline.py                      # end-to-end pipeline
+cd web && npm run build                      # TypeScript + Vite build
+cd web && npm run lint                       # ESLint
 ```
 
-### Streamlit (v1 + módulo Tronadura)
-
-```bash
-streamlit run app.py
-```
-
-`app.py` actúa como **router con dos módulos accesibles desde la barra lateral**:
-
-- **⛏️ Conciliación Geotécnica** — flujo de 4 pasos (carga → secciones → análisis → resultados)
-- **💥 Análisis de Tronadura** — Drill & Blast: sube un reporte de pozos (CSV/XLSX) y visualiza trayectorias 3D, correlación con las secciones geotécnicas y métricas de pasadura
-
-Columnas esperadas en el reporte de pozos (formato ENAEX): `Latitud_Geo`, `Longitud_Geo`, `Nombre_Banco`, `Inclinacion_real`, `Azimuth_real`, `longitud_real`, `Kilos_Cargados_real` (opcional), `fecha_tronadura` (opcional).
-
-### Línea de Comandos (CLI)
-
-```bash
-# Generación automática de secciones
-python cli.py --design diseno.stl --topo topo.stl --auto --start "1000,2000" --end "1500,2000" --n 10 --azimuth 0 --length 200
-
-# Con archivo JSON de secciones
-python cli.py --design diseno.stl --topo topo.stl --config ejemplo_secciones.json
-
-# Con tolerancias personalizadas y reporte Word
-python cli.py --design diseno.stl --topo topo.stl --config secciones.json \
-  --tol-height "1.0,1.5" --tol-angle "5.0,5.0" --report Reporte.docx
-```
-
-### Flujo de Trabajo Típico (UI)
-1.  **Cargar Superficies**: Sube tus archivos `.stl` de Diseño y Topografía.
-2.  **Definir Secciones**: Sube un archivo CSV/DXF con las líneas de corte, o dibújalas interactivamente.
-3.  **Procesar**: Haz clic en "Ejecutar Análisis".
-4.  **Analizar**: Revisa los perfiles interactivos y la tabla de resultados. Aplica filtros para focalizarte en áreas críticas.
-5.  **Exportar**: Descarga el reporte Excel para compartir los hallazgos.
+The frontend has no unit tests yet — Playwright is installed but
+not wired into CI. PRs adding Vitest + RTL would be very welcome.
 
 ---
 
-## ⚙️ Configuración
+## 🛠️ Project structure
 
-### Parámetros de Detección (ajustables en la UI)
+```
+core/             ← domain logic, imported by BOTH interfaces
+  blast_correlation.py   (Drill & Blast ↔ geotech correlation)
+  excel_writer.py
+  geom_utils.py
+  mesh_handler.py
+  param_extractor.py
+  report_generator.py
+  section_cutter.py
+  config.py                (frozen dataclasses with all defaults)
 
-| Parámetro | Default | Descripción |
-|-----------|---------|-------------|
-| `face_threshold` | 40° | Ángulo mínimo para clasificar un segmento como "Cara" |
-| `berm_threshold` | 20° | Ángulo máximo para clasificar un segmento como "Berma" |
-| `simplify_epsilon` | — | Tolerancia RDP para suavizar perfiles ruidosos |
+api/              ← FastAPI backend (modular, /api/v1/*)
+  routers/        (meshes, sections, process, export, settings, ai)
+  middleware*.py  (request id, structured log, rate limit)
+  main.py         (app factory + lifespan + health probes)
 
-### Tolerancias de Cumplimiento (configurables por parámetro)
+web/              ← React 19 + Vite 6 + CesiumJS frontend
+  src/components/  (wizard steps, demo, landing, ui primitives)
+  src/locales/     (es.json, en.json)
+  src/api/         (axios client, TanStack Query hooks)
+  public/demo/     (synthetic STLs + precomputed.json for demo mode)
+  DEPLOY.md        (step-by-step deploy guide)
 
-| Parámetro | Tolerancia Default |
-|-----------|-------------------|
-| Altura de banco | ±1.0 / +1.5 m |
-| Ángulo de cara | ±5.0° |
-| Ancho de berma | mín. 6.0 m |
-| Ángulo inter-rampa | −3.0° / +2.0° |
-
-**Estado triad**: CUMPLE / FUERA DE TOLERANCIA (hasta 1.5× tolerancia) / NO CUMPLE (>1.5× tolerancia).
-
----
-
-## 🧪 Desarrollo
-
-```bash
-pytest tests/ -v                    # Suite de tests unitarios
-python test_pipeline.py             # Test de integración con datos sintéticos
-uvicorn api.main:app --reload       # API de desarrollo (:8000)
-cd web && npm run dev               # Frontend de desarrollo (:5173)
+app.py / ui/      ← LEGACY Streamlit UI (do not modify)
+scripts/          ← one-off generators (demo data, etc.)
+tests/            ← pytest suite for core/ + api/
+ARCHITECTURE.md   ← architecture overview
+AGENTS.md         ← entry point for AI agents
+CONTRIBUTING.md   ← contribution guide
+CODE_OF_CONDUCT.md
+LICENSE           ← MIT
 ```
 
-### Convenciones
+---
 
-- **Código**: Inglés (variables, funciones, docstrings)
-- **UI/labels**: Español
-- **Unidades**: metros (m), grados (°), porcentaje (%)
-- **Coordenadas**: Este (X), Norte (Y), Elevación (Z) — sistema minero estándar
-- **Azimut**: Grados desde Norte, sentido horario (N=0°, E=90°, S=180°, W=270°)
+## 🌐 Internationalization
+
+UI strings live in `web/src/locales/{es,en}.json`. To add a new
+key:
+
+1. Add it to BOTH `es.json` and `en.json` under the right namespace
+   (`nav`, `common`, `demo`, `step1`..`step4`, `compliance`,
+   `tooltip`, `shortcuts`, `landing`)
+2. Use it in the component: `const { t } = useTranslation(); t('key')`
+3. For counts, use ICU plurals: `t('common.n_sections', { count: n })`
+   with `_one` / `_other` keys
+
+The language is persisted in `localStorage` and the `<html lang>`
+attribute is kept in sync (for screen readers).
 
 ---
 
-## 🤖 Configuración IA (Agente de Reportes)
-Para habilitar la generación de informes con Inteligencia Artificial:
-1.  Activa el checkbox **"Habilitar Asistente IA"** en la barra lateral.
-2.  Selecciona el Proveedor:
-    *   **OpenAI**: Ingresa tu API Key (no se guarda, solo se usa en sesión).
-    *   **Local**: Asegúrate de tener **LM Studio** u **Ollama** corriendo (ej. `http://localhost:1234/v1`).
-3.  Ve a la pestaña **"🤖 Informe IA"** en Resultados y genera tu reporte.
+## 🔭 Observability (opt-in)
 
-## 🤝 Contribución
+All telemetry is **off by default** — the site ships zero
+observability unless you opt in. See [web/DEPLOY.md](web/DEPLOY.md)
+for setup.
 
-¡Las contribuciones son bienvenidas! Por favor, abre un issue para discutir cambios mayores o envía un Pull Request directo.
+| Tool | What | Env var |
+|---|---|---|
+| Sentry (frontend) | JS errors, perf, replays on error | `VITE_SENTRY_DSN` |
+| Sentry (backend) | Python exceptions, slow requests | `SENTRY_DSN` |
+| Plausible / CF / etc. | Privacy-friendly page views | `VITE_ANALYTICS_URL` |
+| UptimeRobot | Is `/api/v1/health` 200 every 5 min? | (no env var — set up at uptimerobot.com) |
 
-## 📄 Licencia
-
-Este proyecto es de uso privado. Todos los derechos reservados.
+Mesh file names never leave your server (`send_default_pii=False`
+on the backend; query strings are stripped before Sentry reports
+on the frontend).
 
 ---
-*Desarrollado con ❤️ para la minería moderna.*
+
+## 🤝 Contributing
+
+We love PRs! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full
+guide. Highlights:
+
+- **Streamlit (`app.py`, `ui/`, `core/`, `cli.py`) is OFF-LIMITS** — the
+  maintainer uses it daily for real work. New work goes in
+  `web/` and `api/`, and must be **additive**.
+- **Both locales, always** — when adding a UI string, add it to
+  BOTH `es.json` and `en.json`.
+- **Conventional commits** (`feat:`, `fix:`, `refactor:`, `test:`,
+  `docs:`, `chore:`). No `Co-Authored-By:`. No AI attribution.
+- **The maintainer triages fast** if your PR description is clear
+  and you've filled in the PR template.
+
+Our [Code of Conduct](CODE_OF_CONDUCT.md) is Contributor Covenant
+2.1.
+
+---
+
+## 📜 License
+
+[MIT](LICENSE) — do what you want, just keep the copyright
+notice. If you build something cool on top of this, we'd love
+to hear about it.
+
+---
+
+## 🙋 Maintainer
+
+- **Nibaldo Aviles** ([@nibaldox](https://github.com/nibaldox)) —
+  geotechnical engineer who needed this for real projects and
+  decided to share.
+
+## 🌟 Star history
+
+If this saved you a few days of work, a star on GitHub helps
+others find it. ⭐
