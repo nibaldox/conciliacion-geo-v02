@@ -191,6 +191,18 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+    // public/Cesium/ has ~thousands of files (Workers, Assets,
+    // Widgets) copied at build time. Watching them exhausts the
+    // inotify limit (ENOSPC) on most Linux systems. They're served
+    // as static assets by Vite's dev server without watching, so
+    // this is purely a HMR optimisation.
+    watch: {
+      ignored: [
+        '**/public/Cesium/**',
+        '**/node_modules/**',
+        '**/dist/**',
+      ],
+    },
   },
   build: {
     rollupOptions: {
