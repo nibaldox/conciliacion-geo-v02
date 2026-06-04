@@ -3,7 +3,6 @@ import { Suspense, lazy, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Landing } from './components/landing/Landing';
 import { useHotkeys } from './hooks/useHotkeys';
 import { useSession } from './stores/session';
 import { useTheme } from './stores/theme';
@@ -52,30 +51,15 @@ function App() {
 
   const { isDark } = useTheme();
   const { i18n } = useTranslation();
-  const { view, setView, setStep, nextStep, prevStep } = useSession();
+  const { setStep, nextStep, prevStep } = useSession();
 
-  // Hash-based routing: #/app deep-links to the wizard without
-  // needing a real router. The landing page is the default route.
-  useEffect(() => {
-    const onHashChange = () => {
-      if (window.location.hash === '#/app') {
-        setView('app');
-      } else {
-        setView('landing');
-      }
-    };
-    onHashChange();  // sync initial state with current URL
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, [setView]);
-
-  // Wizard step navigation via keyboard (only inside the app view)
-  useHotkeys('ArrowLeft', () => prevStep(), [view]);
-  useHotkeys('ArrowRight', () => nextStep(), [view]);
+  // Wizard step navigation via keyboard
+  useHotkeys('ArrowLeft', () => prevStep());
+  useHotkeys('ArrowRight', () => nextStep());
   useHotkeys(['1', '2', '3', '4'], (e) => {
     const target = parseInt(e.key, 10);
     if (target >= 1 && target <= 4) setStep(target);
-  }, [view]);
+  });
 
   // Apply dark class to root element
   useEffect(() => {
@@ -96,19 +80,6 @@ function App() {
     i18n.on('languageChanged', handler);
     return () => i18n.off('languageChanged', handler);
   }, [i18n]);
-
-  // Landing page lives outside the AppLayout (no header, no sidebar).
-  // It has its own minimal header/footer so the marketing surface
-  // doesn't look like an "empty app".
-  if (view === 'landing') {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <ErrorBoundary>
-          <Landing />
-        </ErrorBoundary>
-      </QueryClientProvider>
-    );
-  }
 
   return (
     <QueryClientProvider client={queryClient}>

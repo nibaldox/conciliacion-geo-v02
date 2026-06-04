@@ -6,7 +6,7 @@ import { LanguageToggle } from './LanguageToggle';
 import { KeyboardShortcutsHelp } from '../ui/KeyboardShortcutsHelp';
 
 export function Header() {
-  const { reset, setView, demoMode } = useSession();
+  const { reset, demoMode } = useSession();
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
 
@@ -17,9 +17,7 @@ export function Header() {
     window.location.href = window.location.pathname;
   };
 
-  const handleGoHome = () => {
-    setView('landing');
-  };
+  const handleGoHome = handleNewSession;
 
   return (
     <header
