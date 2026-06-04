@@ -51,6 +51,13 @@ jobs:
           # Settings → Secrets → VITE_BASE=/.  Default keeps the path.
           VITE_BASE: ${{ vars.VITE_BASE || secrets.VITE_BASE || '/conciliacion-geo-v02/' }}
           VITE_API_URL: ${{ vars.VITE_API_URL || secrets.VITE_API_URL || 'https://conciliacion-api.onrender.com' }}
+          # Observability (Phase 8) — leave unset to disable.
+          # Both Sentry and the Plausible-style analytics beacon are
+          # no-ops when their env vars are absent, so the bundle ships
+          # zero observability code by default.
+          VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN || secrets.VITE_SENTRY_DSN || '' }}
+          VITE_ANALYTICS_URL: ${{ vars.VITE_ANALYTICS_URL || secrets.VITE_ANALYTICS_URL || '' }}
+          VITE_RELEASE: ${{ github.sha }}
         run: npm run build
 
       - name: Copy SPA fallback

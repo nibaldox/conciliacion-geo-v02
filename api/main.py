@@ -29,6 +29,45 @@ logging.basicConfig(
 
 
 # ---------------------------------------------------------------------------
+# Observability — Sentry (opt-in via SENTRY_DSN)
+# ---------------------------------------------------------------------------
+#
+# The Sentry SDK is imported lazily so environments without the
+# dependency still work. When SENTRY_DSN is unset (the default for
+# local dev), this is a no-op. Set the env var in Render / CI to
+# enable error capture + performance monitoring.
+
+_SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+if _SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+            release=os.environ.get("SENTRY_RELEASE", "conciliacion-api@dev"),
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            # Don't send PII (the user's mesh filenames contain
+            # project names that the maintainer may not want
+            # shared with Sentry's third-party processor).
+            send_default_pii=False,
+            integrations=[
+                FastApiIntegration(),
+                StarletteIntegration(),
+            ],
+        )
+        logger.info("Sentry enabled (dsn host: %s)", _SENTRY_DSN.split("@")[-1])
+    except ImportError:
+        logger.warning("SENTRY_DSN set but sentry-sdk not installed; pip install sentry-sdk[fastapi]")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to init Sentry: %s", exc)
+else:
+    logger.info("Sentry disabled (SENTRY_DSN not set)")
+
+
+# ---------------------------------------------------------------------------
 # Lifespan: init DB on startup, cleanup on shutdown
 # ---------------------------------------------------------------------------
 

@@ -93,3 +93,99 @@ cd api && uvicorn api.main:app --reload --port 8000
 # Terminal 2
 cd web && VITE_API_URL=http://localhost:8000 npm run dev
 ```
+
+## Observability
+
+All observability is **opt-in**. The site ships with zero telemetry
+by default — to enable anything, set the env var in your deploy
+provider.
+
+### Sentry (errors + performance)
+
+Sentry is the most actionable tool: it captures uncaught
+exceptions, slow transactions, and console errors. Free tier is
+5K errors/month + 10K transactions/month, plenty for a
+small app.
+
+**1. Create a Sentry project** at [sentry.io](https://sentry.io) →
+New Project → JavaScript (browser) for the frontend, and
+Python (FastAPI) for the backend. You'll get a DSN that looks
+like `https://abc123@o987.ingest.sentry.io/123`.
+
+**2. Frontend** — set `VITE_SENTRY_DSN` as a GitHub Actions
+secret (Settings → Secrets → Actions → New repository
+secret). The next push to `main` bakes it into the bundle.
+Alternatively, set it in the `vars.VITE_SENTRY_DSN` GitHub
+environment variable for non-sensitive defaults.
+
+**3. Backend** — set `SENTRY_DSN` in Render → Environment
+(also set `SENTRY_ENVIRONMENT=production`). The next deploy
+will start sending errors.
+
+**4. Test it** — throw a test exception in your browser console:
+```js
+throw new Error('test')
+```
+It should appear in your Sentry dashboard within ~30s.
+
+### UptimeRobot (is the site up?)
+
+Free plan: monitor up to 50 URLs, 5-minute interval, email/SMS
+alerts. Setup:
+
+1. Create a free account at [uptimerobot.com](https://uptimerobot.com).
+2. **Add New Monitor → HTTP(s)**.
+3. **URL**: `https://conciliacion-api.onrender.com/api/v1/health`
+   (use your actual Render URL).
+4. **Monitoring interval**: 5 minutes (free tier limit).
+5. **Alert contacts**: add your email.
+
+The `/api/v1/health` endpoint returns `{"status":"ok","version":"..."}`
+when up. UptimeRobot will alert you within ~5 min if it goes
+down. (The Render free tier sleeps after 15 min of inactivity,
+so the first request after a quiet period takes 30-60s —
+consider setting UptimeRobot to a 5-min interval, not 1-min, to
+avoid false alerts during cold starts.)
+
+For a public status page, point a custom domain at
+[BetterUptime](https://betteruptime.com) (also free, nicer UI).
+
+### Plausible-style analytics (privacy-friendly visitor count)
+
+We support any self-hosted or SaaS analytics that loads a single
+`<script src=...>` tag. No cookie banner required (these tools are
+GDPR-compliant by design).
+
+**Plausible** (recommended, paid SaaS but very cheap — $9/mo
+for 100K events, or self-host the open-source version free):
+
+1. Sign up at [plausible.io](https://plausible.io), add your
+   domain (`nibaldox.github.io` and/or your custom domain).
+2. Plausible gives you a snippet like
+   `https://plausible.io/js/script.js`. Set that as
+   `VITE_ANALYTICS_URL` in GitHub Secrets.
+
+**Alternatives** that work with the same `VITE_ANALYTICS_URL` slot:
+- **Cloudflare Web Analytics** — free if your DNS is on
+  Cloudflare; the beacon is at
+  `https://static.cloudflareinsights.com/beacon.min.js`.
+- **GoatCounter** — free, open source, self-hostable.
+- **Simple Analytics** — paid but very privacy-friendly.
+
+To disable analytics entirely, leave `VITE_ANALYTICS_URL` unset.
+
+### What gets sent where
+
+| Event | Frontend → | Backend → |
+|---|---|---|
+| Uncaught JS exception | Sentry (if `VITE_SENTRY_DSN` set) | — |
+| Unhandled rejection | Sentry | Sentry (if `SENTRY_DSN` set) |
+| Page view | Plausible (if `VITE_ANALYTICS_URL` set) | — |
+| API request timing | Sentry (10% sample) | Sentry (10% sample) |
+| API error (4xx/5xx) | — | Sentry (5xx only) |
+| Health check (`/api/v1/health`) | — | UptimeRobot only — not sent to Sentry |
+
+Mesh file names and uploaded data **never** leave your server
+(Sentry has `send_default_pii=False` on the backend integration;
+the frontend strips query strings before sending).
+

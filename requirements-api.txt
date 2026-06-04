@@ -16,3 +16,5 @@ pandas>=2.2
 # Production middleware (opt-in via env vars — safe to install even
 # when disabled, since the middleware module no-ops in that case).
 slowapi>=0.1.9
+# Observability (opt-in via SENTRY_DSN — no-op when unset).
+sentry-sdk[fastapi]>=2.0

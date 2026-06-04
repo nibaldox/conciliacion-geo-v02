@@ -5,6 +5,12 @@ import './cesium-config'
 // doesn't return keys on first paint).
 import './i18n'
 
+// Observability (Sentry + Plausible) — runs BEFORE React mounts so a
+// crash during initial render is still captured. Both are no-ops
+// unless their env vars are set; see web/DEPLOY.md.
+import { initObservability } from './observability'
+initObservability()
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles/globals.css'

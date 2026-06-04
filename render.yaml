@@ -77,3 +77,14 @@ services:
         value: "1"
       - key: CONCILIATION_WORKERS
         value: "2"
+
+      # ── Observability (Phase 8) ────────────────────────────────
+      # Sentry: leave SENTRY_DSN blank to disable. To enable, paste
+      # your Sentry project's DSN here (or in Render's "Environment"
+      # section). Free tier: 5K errors/mo, 10K transactions/mo.
+      - key: SENTRY_DSN
+        value: ""
+      - key: SENTRY_ENVIRONMENT
+        value: production
+      - key: SENTRY_TRACES_SAMPLE_RATE
+        value: "0.1"
