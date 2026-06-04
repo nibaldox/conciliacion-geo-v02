@@ -191,16 +191,20 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
-    // public/Cesium/ has ~thousands of files (Workers, Assets,
-    // Widgets) copied at build time. Watching them exhausts the
-    // inotify limit (ENOSPC) on most Linux systems. They're served
-    // as static assets by Vite's dev server without watching, so
-    // this is purely a HMR optimisation.
+    // Use polling for file watching. Avoids the inotify ENOSPC
+    // issue on systems with many files in node_modules + Cesium
+    // static assets (~33K total). Adds ~50-100ms to HMR but
+    // keeps the dev server working on the default 65K watcher
+    // limit. Override with the env var VITE_USE_NATIVE_WATCH=true
+    // to get faster HMR on systems where you've bumped the limit.
     watch: {
+      usePolling: !process.env.VITE_USE_NATIVE_WATCH,
+      interval: 200,
       ignored: [
         '**/public/Cesium/**',
         '**/node_modules/**',
         '**/dist/**',
+        '**/.git/**',
       ],
     },
   },
