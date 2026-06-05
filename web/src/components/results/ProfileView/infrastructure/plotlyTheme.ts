@@ -65,19 +65,9 @@ function resolveTokens(): {
 export function createPlotlyConfig(): Partial<Config> {
   return {
     displaylogo: false,
+    displayModeBar: false,  // hide the ⚙️ modeBar entirely — we have
+                            // our own cross-link UI and prev/next nav
     responsive: true,
-    // No zoom/pan/select toolbar — we have our own cross-link UI.
-    // (Set `scrollZoom: false` to be explicit; default is already false.)
-    modeBarButtonsToRemove: [
-      'zoom2d',
-      'pan2d',
-      'select2d',
-      'lasso2d',
-      'zoomIn2d',
-      'zoomOut2d',
-      'autoScale2d',
-      'resetScale2d',
-    ] as Partial<Config>['modeBarButtonsToRemove'],
     toImageButtonOptions: {
       format: 'png' as const,
       filename: 'cross_section',
@@ -142,19 +132,19 @@ export function createPlotlyLayout(): Partial<Layout> {
 /** Style for the design polyline. */
 export function designLineStyle(): Partial<ScatterLine> {
   const t = resolveTokens();
-  return { color: t.designLine, width: 2.5, shape: 'linear' };
+  return { color: t.designLine, width: 3, shape: 'linear' };
 }
 
 /** Style for the topo polyline. */
 export function topoLineStyle(): Partial<ScatterLine> {
   const t = resolveTokens();
-  return { color: t.topoLine, width: 2.5, shape: 'linear' };
+  return { color: t.topoLine, width: 3, shape: 'linear' };
 }
 
 /** Style for reconciled (dashed) polylines. */
 export function reconciledLineStyle(): Partial<ScatterLine> {
   const t = resolveTokens();
-  return { color: t.reconciledDash, width: 1.5, dash: 'dash', shape: 'linear' };
+  return { color: t.reconciledDash, width: 2, dash: 'dash', shape: 'linear' };
 }
 
 /** Marker style for a bench crest, color-coded by status. */

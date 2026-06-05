@@ -62,6 +62,11 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
   // ── 2. Build the layout (pure, depends on viewModel + theme) ─
   const layout = useMemo<Partial<Layout>>(() => {
     const base = createPlotlyLayout();
+    // Compute explicit axis ranges from the data so the chart is
+    // tight around the profile (no huge empty areas). We use
+    // 8% padding on each side — enough to leave breathing room
+    // without wasting viewport on whitespace.
+    const { xRange, yRange } = computeAxisRanges(viewModel, height);
     return {
       ...base,
       // We extend the layout with view-model-specific bits: title
@@ -77,12 +82,17 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
         ...(base.yaxis as Partial<Layout['yaxis']>),
         scaleanchor: 'x',
         scaleratio: 1,
+        range: yRange,
+      },
+      xaxis: {
+        ...(base.xaxis as Partial<Layout['xaxis']>),
+        range: xRange,
       },
       // The chart's hover/click routing is handled by the onHover
       // and onClick callbacks we attach to the Plot component,
       // not by Plotly's built-in modes.
     };
-  }, [height]);
+  }, [height, viewModel]);
 
   const config = useMemo<Partial<Config>>(() => createPlotlyConfig(), []);
 
@@ -146,6 +156,94 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
   );
 }
 
+// ─── Pure: compute axis ranges ───────────────────────────────
+
+/**
+ * Derive the x/y axis ranges from the view model so the chart is
+ * tight around the profile. Without this, Plotly's auto-fit adds
+ * 50%+ whitespace, making the profile look like a tiny squiggle
+ * lost in a sea of grid lines.
+ *
+ * @param paddingPct 0..1 — fraction of the data range to add on
+ *  each side. 0.08 (8%) gives breathing room without waste.
+ *
+ * Falls back to a sensible default when there's no data.
+ */
+/**
+ * Derive the x/y axis ranges from the view model so the chart is
+ * tight around the profile. Without this, Plotly's auto-fit adds
+ * 50%+ whitespace, making the profile look like a tiny squiggle
+ * lost in a sea of grid lines.
+ *
+ * @param paddingPct 0..1 — fraction of the data range to add on
+ *  each side. 0.08 (8%) gives breathing room without waste.
+ *
+ * Falls back to a sensible default when there's no data.
+ */
+export function computeAxisRanges(
+  vm: ProfileViewModel,
+  _height: number,
+  paddingPct = 0.08,
+): { xRange: [number, number]; yRange: [number, number] } {
+  let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+  for (const line of vm.lines) {
+    for (const p of line.points) {
+      if (Number.isFinite(p.distance)) {
+        if (p.distance < xMin) xMin = p.distance;
+        if (p.distance > xMax) xMax = p.distance;
+      }
+      if (Number.isFinite(p.elevation)) {
+        if (p.elevation < yMin) yMin = p.elevation;
+        if (p.elevation > yMax) yMax = p.elevation;
+      }
+    }
+  }
+  for (const b of vm.benches) {
+    if (Number.isFinite(b.crestDistance)) {
+      if (b.crestDistance < xMin) xMin = b.crestDistance;
+      if (b.crestDistance > xMax) xMax = b.crestDistance;
+    }
+    if (Number.isFinite(b.toeDistance)) {
+      if (b.toeDistance < xMin) xMin = b.toeDistance;
+      if (b.toeDistance > xMax) xMax = b.toeDistance;
+    }
+    if (Number.isFinite(b.crestElevation)) {
+      if (b.crestElevation < yMin) yMin = b.crestElevation;
+      if (b.crestElevation > yMax) yMax = b.crestElevation;
+    }
+    if (Number.isFinite(b.toeElevation)) {
+      if (b.toeElevation < yMin) yMin = b.toeElevation;
+      if (b.toeElevation > yMax) yMax = b.toeElevation;
+    }
+  }
+
+  // Fallback for empty data: a 100m × 30m default.
+  if (!Number.isFinite(xMin) || !Number.isFinite(xMax)) {
+    return { xRange: [0, 100], yRange: [0, 30] };
+  }
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+    yMin = xMin;
+    yMax = xMin + 1;
+  }
+
+  const xSpan = xMax - xMin;
+  const ySpan = yMax - yMin;
+  // For the y-axis, ensure at least a 20m window — many real
+  // benches have only a few metres of elevation change, and
+  // a 2m range with 1:1 scaleanchor would render the whole
+  // profile in a 2m wide strip horizontally.
+  const minYSpan = 20;
+  const ySpanFinal = Math.max(ySpan, minYSpan);
+  const yMid = (yMin + yMax) / 2;
+  const yMinFinal = yMid - ySpanFinal / 2;
+  const yMaxFinal = yMid + ySpanFinal / 2;
+
+  return {
+    xRange: [xMin - xSpan * paddingPct, xMax + xSpan * paddingPct],
+    yRange: [yMinFinal - ySpanFinal * paddingPct, yMaxFinal + ySpanFinal * paddingPct],
+  };
+}
+
 // ─── Pure: build Plotly traces ───────────────────────────────
 
 /**
@@ -183,6 +281,11 @@ export function buildTraces(
   const topo = vm.lines.find((l) => l.kind === 'topo');
   if (topo && topo.points.length > 0) {
     traces.push(buildPolyline(topo, 'Topografía', topoLineStyle()));
+    // Subtle "ground" fill under the topo line so the profile
+    // doesn't look like a floating squiggle. Uses 'tozeroy' to
+    // fill down to y=0 of the axis (the y range is set tight so
+    // this looks like filling the area below the profile).
+    traces.push(buildGroundFill(topo, isDark));
   }
 
   // 4. Reconciled design (when toggled on, if data exists)
@@ -221,6 +324,29 @@ function buildPolyline(
     line: style,
     hovertemplate: '%{x:.1f} m, %{y:.1f} m<extra>' + name + '</extra>',
     showlegend: true,
+  };
+}
+
+function buildGroundFill(
+  topo: ProfileLine,
+  isDark: boolean,
+): Partial<Plotly.PlotData> {
+  // We use 'tozeroy' which fills down to the y-axis minimum. The
+  // y-axis is already set tight to the data, so the fill visually
+  // anchors the topography to the bottom of the chart. Very
+  // subtle green so it never competes with the actual lines.
+  return {
+    type: 'scatter',
+    mode: 'lines',
+    name: 'Terreno',
+    x: topo.points.map((p) => p.distance),
+    y: topo.points.map((p) => p.elevation),
+    fill: 'tozeroy',
+    fillcolor: isDark ? 'rgba(46,125,50,0.06)' : 'rgba(46,125,50,0.04)',
+    line: { color: 'transparent', width: 0 },
+    hovertemplate: 'skip',
+    hoverinfo: 'skip',
+    showlegend: false,
   };
 }
 

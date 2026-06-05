@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildTraces } from '../ProfileChart';
+import { buildTraces, computeAxisRanges } from '../ProfileChart';
 import type { ProfileViewModel } from '../../domain/types';
 import type { FilterState } from '../../domain/filters';
 import { DEFAULT_FILTER_STATE } from '../../domain/filters';
@@ -189,5 +189,61 @@ describe('buildTraces', () => {
   it('handles an empty view model (no lines, no benches)', () => {
     const traces = buildTraces(makeViewModel(), makeFilterState(), stubCrossLink, false);
     expect(traces).toEqual([]);
+  });
+});
+
+describe('computeAxisRanges', () => {
+  it('returns tight x and y ranges with 8% padding by default', () => {
+    const vm = makeViewModel({
+      lines: [
+        { kind: 'design', points: [
+          { distance: 0, elevation: 100 },
+          { distance: 100, elevation: 80 },
+        ] },
+      ],
+      benches: [makeBench({ crestDistance: 50, toeDistance: 70, crestElevation: 90, toeElevation: 85 })],
+    });
+    const { xRange, yRange } = computeAxisRanges(vm, 480);
+    // x: data 0-100, +8% padding on each side = -8 to 108
+    expect(xRange[0]).toBeCloseTo(-8, 5);
+    expect(xRange[1]).toBeCloseTo(108, 5);
+    // y: data 80-100, span 20. Mid 90, ±10. + 8% padding.
+    expect(yRange[0]).toBeLessThanOrEqual(80);
+    expect(yRange[1]).toBeGreaterThanOrEqual(100);
+  });
+
+  it('enforces a minimum y-axis span of 20m so flat benches are visible', () => {
+    const vm = makeViewModel({
+      lines: [
+        { kind: 'design', points: [
+          { distance: 0, elevation: 100 },
+          { distance: 50, elevation: 101 },
+        ] },
+      ],
+    });
+    const { yRange } = computeAxisRanges(vm, 480);
+    expect(yRange[1] - yRange[0]).toBeGreaterThanOrEqual(20);
+  });
+
+  it('falls back to a sensible default when there is no data', () => {
+    const vm = makeViewModel();
+    const { xRange, yRange } = computeAxisRanges(vm, 480);
+    expect(xRange[1] - xRange[0]).toBeGreaterThan(0);
+    expect(yRange[1] - yRange[0]).toBeGreaterThan(0);
+  });
+
+  it('honors a custom padding percentage', () => {
+    const vm = makeViewModel({
+      lines: [
+        { kind: 'design', points: [
+          { distance: 0, elevation: 100 },
+          { distance: 100, elevation: 80 },
+        ] },
+      ],
+    });
+    const { xRange } = computeAxisRanges(vm, 480, 0.25);
+    // 25% padding on each side → -25 to 125
+    expect(xRange[0]).toBeCloseTo(-25, 5);
+    expect(xRange[1]).toBeCloseTo(125, 5);
   });
 });
