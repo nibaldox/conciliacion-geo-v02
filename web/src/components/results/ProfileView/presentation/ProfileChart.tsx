@@ -68,6 +68,16 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
       // is rendered in SectionHeader (above), so plotly title is off.
       title: undefined,
       height,
+      // CRITICAL: lock the y-axis to the x-axis scale (1:1). Both
+      // are in metres, so 1m horizontal = 1m vertical. Without this,
+      // Plotly auto-fits the y-axis range and the slope angles look
+      // completely wrong (the mine cross-section appears flat when
+      // it should be visibly steep). Streamlit's old code had this.
+      yaxis: {
+        ...(base.yaxis as Partial<Layout['yaxis']>),
+        scaleanchor: 'x',
+        scaleratio: 1,
+      },
       // The chart's hover/click routing is handled by the onHover
       // and onClick callbacks we attach to the Plot component,
       // not by Plotly's built-in modes.

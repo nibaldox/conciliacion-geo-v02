@@ -1,25 +1,30 @@
 /**
  * ProfileView — the orchestrator. Ties everything together.
  *
+ * Compact layout (target: 1080p without scrolling):
+ *  ┌────────────────────────────────────────────────────────────┐
+ *  │  SectionHeader (with prev/next arrows on the right)         │  ~52px
+ *  ├────────────────────────────────────────────────────────────┤
+ *  │  FilterBar (4 toggles)                                       │  ~48px
+ *  ├──────────────────────────────────┬─────────────────────────┤
+ *  │                                  │  BenchTable             │
+ *  │  ProfileChart (with floating     │  (sortable, all benches │  ~520px
+ *  │  prev/next overlay arrows)       │   visible)              │
+ *  │                                  │                         │
+ *  ├──────────────────────────────────┴─────────────────────────┤
+ *  │  ComplianceSummary card                                    │  ~96px
+ *  └────────────────────────────────────────────────────────────┘
+ *  ← nav: ← Anterior
+ *
+ * Total ~720px tall + ~60px wizard nav ≈ 780px. Fits in 1080p
+ * with browser chrome.
+ *
  * Owns:
  *  - useFilterState  (FilterState + URL/localStorage persistence)
  *  - useCrossLinkState (hovered/selected bench, chart↔table coord)
  *  - useProfileViewModel (API → ProfileViewModel)
  *
- * Renders, in order:
- *  - SectionHeader (section metadata)
- *  - FilterBar (4 toggles + optional blast)
- *  - ProfileChart (Plotly, cross-link enabled)
- *  - BenchTable (sortable, cross-link enabled, scrolls to selected row)
- *  - ComplianceSummary (counts + stacked bar)
- *
- * Loading state: subtle skeleton, no spinner (we use spinner atoms
- * elsewhere — this is full-width so we keep it calm).
- *
- * No-data state: when no section is selected, show a centered
- * placeholder pointing to the section selector.
- *
- * Error state: inline ErrorBanner-like block with the message.
+ * Handles 4 states: no selection, loading, error, data.
  */
 
 import { useEffect } from 'react';
@@ -27,6 +32,7 @@ import { useTranslation } from 'react-i18next';
 import { SectionHeader } from './SectionHeader';
 import { FilterBar } from './FilterBar';
 import { ProfileChart } from './ProfileChart';
+import { SectionNavigator } from './SectionNavigator';
 import { BenchTable } from './BenchTable';
 import { ComplianceSummary } from './ComplianceSummary';
 import { useFilterState, useCrossLinkState, useProfileViewModel } from '../application';
@@ -34,11 +40,7 @@ import { useSession } from '../../../../stores/session';
 import { Spinner } from '../../../ui/Spinner';
 
 export interface ProfileViewProps {
-  /** Optional: a flag the parent can pass to tell us blast data is
-   *  available. When false, the FilterBar hides the blast holes
-   *  toggle. Defaults to false. */
   readonly blastDataAvailable?: boolean;
-  /** Optional: timestamp of the last run, for the SectionHeader. */
   readonly lastRunAt?: string | null;
 }
 
@@ -49,14 +51,11 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
   const crossLink = useCrossLinkState();
   const { viewModel, isLoading, error } = useProfileViewModel(selectedSectionId);
 
-  // Reset cross-link when the section changes — the previous
-  // bench is from a different section now, highlighting it
-  // would be misleading.
+  // Reset cross-link when the section changes
   useEffect(() => {
     crossLink.clear();
   }, [selectedSectionId, crossLink]);
 
-  // ── No selection state ────────────────────────────────────
   if (!selectedSectionId) {
     return (
       <EmptyState
@@ -68,12 +67,10 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
     );
   }
 
-  // ── Loading state ─────────────────────────────────────────
   if (isLoading && !viewModel) {
     return <LoadingState />;
   }
 
-  // ── Error state ───────────────────────────────────────────
   if (error) {
     return (
       <ErrorState
@@ -83,7 +80,6 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
     );
   }
 
-  // ── No data yet (selected but not loaded) ─────────────────
   if (!viewModel) {
     return <LoadingState />;
   }
@@ -92,26 +88,36 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
     <div
       data-slot="profile-view"
       data-section-id={selectedSectionId}
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-2 h-full"
     >
       <SectionHeader
         section={viewModel.section}
         benchCount={viewModel.benches.length}
         lastRunAt={lastRunAt}
       />
-      <FilterBar
-        blastDataAvailable={blastDataAvailable}
-      />
-      <ProfileChart
-        viewModel={viewModel}
-        filterState={filter.state}
-        crossLink={crossLink}
-      />
-      <BenchTable
-        benches={viewModel.benches}
-        crossLink={crossLink}
-        scrollToBenchNumber={crossLink.selected}
-      />
+      <FilterBar blastDataAvailable={blastDataAvailable} />
+
+      {/* Main row: chart on the left, table on the right.
+       *  Chart keeps a 1:1 aspect via scaleanchor; height auto-
+       *  fits the available viewport. */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-2 min-h-0">
+        <div className="relative rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+          <SectionNavigator variant="overlay" showLabels />
+          <ProfileChart
+            viewModel={viewModel}
+            filterState={filter.state}
+            crossLink={crossLink}
+          />
+        </div>
+        <div className="min-h-0 overflow-hidden">
+          <BenchTable
+            benches={viewModel.benches}
+            crossLink={crossLink}
+            scrollToBenchNumber={crossLink.selected}
+          />
+        </div>
+      </div>
+
       <ComplianceSummary benches={viewModel.benches} />
     </div>
   );

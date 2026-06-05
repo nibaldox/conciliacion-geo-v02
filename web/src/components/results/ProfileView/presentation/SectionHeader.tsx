@@ -8,6 +8,7 @@
 
 import { useTranslation } from 'react-i18next';
 import { MetricValue } from './atoms/MetricValue';
+import { SectionNavigator } from './SectionNavigator';
 import type { SectionMeta } from '../domain/types';
 import { formatStatus } from '../domain/status';
 
@@ -72,7 +73,7 @@ export function SectionHeader({ section, benchCount, lastRunAt }: SectionHeaderP
 
       {lastRunAt && (
         <span
-          className="text-[11px] tabular-nums"
+          className="text-[11px] tabular-nums hidden lg:inline"
           style={{ color: 'var(--color-text-muted)' }}
           title={lastRunAt}
         >
@@ -82,6 +83,8 @@ export function SectionHeader({ section, benchCount, lastRunAt }: SectionHeaderP
           })}
         </span>
       )}
+
+      <SectionNavigator variant="compact" />
     </header>
   );
 }

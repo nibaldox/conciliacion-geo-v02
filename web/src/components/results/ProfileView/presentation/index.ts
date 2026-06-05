@@ -11,6 +11,9 @@ export type { ProfileChartProps } from './ProfileChart';
 export { SectionHeader } from './SectionHeader';
 export type { SectionHeaderProps } from './SectionHeader';
 
+export { SectionNavigator } from './SectionNavigator';
+export type { SectionNavigatorProps } from './SectionNavigator';
+
 export { BenchTable } from './BenchTable';
 export type { BenchTableProps } from './BenchTable';
 

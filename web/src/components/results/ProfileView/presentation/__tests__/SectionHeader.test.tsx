@@ -1,7 +1,22 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { SectionHeader } from '../SectionHeader';
 import type { SectionMeta } from '../../domain/types';
+
+// Mock the API adapter so SectionHeader (which now embeds
+// SectionNavigator) doesn't need a real QueryClient.
+vi.mock('../../infrastructure/apiAdapter', () => ({
+  useSectionsQuery: () => ({ data: [], isLoading: false, error: null }),
+}));
+
+// Mock the session store. SectionNavigator uses useSession to read
+// selectedSection + call setSelectedSection.
+vi.mock('../../../../../stores/session', () => ({
+  useSession: (selector?: (s: { selectedSection: string | null; setSelectedSection: () => void }) => unknown) => {
+    const state = { selectedSection: null, setSelectedSection: () => {} };
+    return selector ? selector(state) : state;
+  },
+}));
 
 const META: SectionMeta = {
   id: 'sec-1',
