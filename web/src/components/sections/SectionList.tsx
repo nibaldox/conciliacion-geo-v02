@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useSections,
   useDeleteSection,
@@ -17,6 +18,7 @@ export function SectionList() {
   const deleteMutation = useDeleteSection();
   const clearMutation = useClearSections();
   const updateMutation = useUpdateSection();
+  const { t } = useTranslation();
 
   const [editState, setEditState] = useState<EditState | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -80,7 +82,7 @@ export function SectionList() {
     return (
       <div className="flex items-center justify-center py-12" style={{ color: 'var(--color-text-muted)' }}>
         <span className="animate-spin inline-block w-5 h-5 border-2 rounded-full mr-3" style={{ borderColor: 'var(--color-border)', borderTopColor: 'var(--color-mine-blue)' }} />
-        Cargando secciones...
+        {t('section_list.loading')}
       </div>
     );
   }
@@ -92,9 +94,9 @@ export function SectionList() {
     return (
       <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <span className="text-4xl block mb-3">&#128203;</span>
-        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>No hay secciones definidas</p>
+        <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('section_list.empty_title')}</p>
         <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-          Use las opciones de arriba para generar secciones
+          {t('section_list.empty_subtitle')}
         </p>
       </div>
     );
@@ -106,7 +108,7 @@ export function SectionList() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-            Secciones Definidas
+            {t('section_list.header')}
           </h3>
           <span className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 rounded-full text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-mine-blue)' }}>
             {items.length}
@@ -123,10 +125,10 @@ export function SectionList() {
           }
         >
           {clearMutation.isPending
-            ? 'Eliminando...'
+            ? t('section_list.clearing')
             : confirmClear
-              ? 'Confirmar: Eliminar Todas'
-              : 'Eliminar Todas'}
+              ? t('section_list.clear_confirm')
+              : t('section_list.clear_button')}
         </button>
       </div>
 
@@ -136,22 +138,22 @@ export function SectionList() {
           <thead>
             <tr style={{ backgroundColor: 'var(--color-surface-muted)', borderBottom: '1px solid var(--color-border)' }}>
               <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                Nombre
+                {t('section_list.col_name')}
               </th>
               <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                Origen
+                {t('section_list.col_origin')}
               </th>
               <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                Azimuth
+                {t('section_list.col_azimuth')}
               </th>
               <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                Longitud
+                {t('section_list.col_length')}
               </th>
               <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                Sector
+                {t('section_list.col_sector')}
               </th>
               <th className="text-right py-2.5 px-3 font-semibold w-28" style={{ color: 'var(--color-text-secondary)' }}>
-                Acciones
+                {t('section_list.col_actions')}
               </th>
             </tr>
           </thead>
@@ -249,14 +251,14 @@ export function SectionList() {
                           className="px-2 py-1 text-xs font-medium rounded transition-colors disabled:opacity-50"
                           style={{ color: 'var(--color-mine-green)' }}
                         >
-                          Guardar
+                          {t('section_list.save')}
                         </button>
                         <button
                           onClick={cancelEdit}
                           className="px-2 py-1 text-xs font-medium rounded transition-colors"
                           style={{ color: 'var(--color-text-muted)' }}
                         >
-                          Cancelar
+                          {t('section_list.cancel')}
                         </button>
                       </div>
                     </td>
@@ -292,7 +294,7 @@ export function SectionList() {
                         className="px-2 py-1 text-xs font-medium rounded transition-colors"
                         style={{ color: 'var(--color-mine-blue)' }}
                       >
-                        Editar
+                        {t('section_list.edit')}
                       </button>
                       <button
                         onClick={() => handleDelete(section.id)}
@@ -300,7 +302,7 @@ export function SectionList() {
                         className="px-2 py-1 text-xs font-medium rounded transition-colors disabled:opacity-50"
                         style={{ color: 'var(--color-mine-red)' }}
                       >
-                        Eliminar
+                        {t('common.delete')}
                       </button>
                     </div>
                   </td>

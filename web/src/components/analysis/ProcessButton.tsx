@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useProcess, useProcessStatus } from '../../api/hooks';
 import { useSettings } from '../../api/hooks';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
@@ -6,6 +7,7 @@ export function ProcessButton() {
   const processMutation = useProcess();
   const { data: status } = useProcessStatus();
   const { data: settings } = useSettings();
+  const { t } = useTranslation();
 
   const isProcessing = status?.status === 'processing';
   const isComplete = status?.status === 'complete';
@@ -41,7 +43,7 @@ export function ProcessButton() {
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
           )}
-          {isProcessing || isPending ? 'Procesando...' : '▶ Iniciar Procesamiento'}
+          {isProcessing || isPending ? t('step3.running') : t('step3.start_processing')}
         </button>
       )}
 
@@ -50,10 +52,10 @@ export function ProcessButton() {
         <div className="flex flex-col items-center gap-2 px-8 py-4 rounded-xl" style={{ backgroundColor: 'var(--status-ok-bg)', border: '1px solid var(--status-ok-border)' }}>
           <div className="flex items-center gap-2 font-semibold text-lg" style={{ color: 'var(--status-ok-text)' }}>
             <span className="text-2xl">✓</span>
-            Procesamiento Completo
+            {t('step3.complete_title')}
           </div>
           <p className="text-sm" style={{ color: 'var(--status-ok-text)', opacity: 0.8 }}>
-            {status?.n_results ?? 0} resultados generados
+            {t('step3.n_results', { count: status?.n_results ?? 0 })}
           </p>
         </div>
       )}
@@ -62,17 +64,17 @@ export function ProcessButton() {
       {isError && (
         <div className="flex flex-col items-center gap-3 px-8 py-4 rounded-xl" style={{ backgroundColor: 'var(--status-nok-bg)', border: '1px solid var(--status-nok-border)' }}>
           <div className="font-semibold text-lg" style={{ color: 'var(--status-nok-text)' }}>
-            Error en el procesamiento
+            {t('step3.error_title')}
           </div>
           <p className="text-sm" style={{ color: 'var(--status-nok-text)', opacity: 0.8 }}>
-            Hubo un error al procesar las secciones. Intenta nuevamente.
+            {t('step3.error_detail')}
           </p>
           <button
             onClick={handleProcess}
             className="px-6 py-2 text-white rounded-lg font-medium transition-colors"
             style={{ backgroundColor: 'var(--color-mine-red)' }}
           >
-            Reintentar
+            {t('step3.retry')}
           </button>
         </div>
       )}

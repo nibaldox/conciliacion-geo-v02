@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useFileSections } from '../../api/hooks';
 
 type AzMode = 'perpendicular' | 'local_slope';
@@ -6,6 +7,7 @@ type AzMode = 'perpendicular' | 'local_slope';
 const ACCEPTED_EXTENSIONS = ['.csv', '.txt', '.dxf'];
 
 export function SectionFileUpload() {
+  const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [spacing, setSpacing] = useState(20);
   const [length, setLength] = useState(200);
@@ -102,17 +104,17 @@ export function SectionFileUpload() {
               className="ml-4 text-xs font-medium"
               style={{ color: 'var(--color-mine-red)' }}
             >
-              Quitar
+              {t('section_form_file.remove')}
             </button>
           </div>
         ) : (
           <div>
             <span className="text-3xl mb-3 block">&#128228;</span>
             <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              Arrastra un archivo aquí o haz clic para seleccionar
+              {t('section_form_file.drop_hint')}
             </p>
             <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              Formatos: CSV, TXT, DXF
+              {t('section_form_file.drop_formats')}
             </p>
           </div>
         )}
@@ -122,7 +124,7 @@ export function SectionFileUpload() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Espaciamiento (m)
+            {t('section_form_file.spacing')}
           </label>
           <input
             type="number"
@@ -137,7 +139,7 @@ export function SectionFileUpload() {
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Longitud (m)
+            {t('section_form_file.length')}
           </label>
           <input
             type="number"
@@ -152,7 +154,7 @@ export function SectionFileUpload() {
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Sector
+            {t('section_form_file.sector')}
           </label>
           <input
             type="text"
@@ -160,13 +162,13 @@ export function SectionFileUpload() {
             onChange={(e) => setSector(e.target.value)}
             className="w-full rounded-md px-3 py-2 text-sm outline-none"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            placeholder="Ej: Norte"
+            placeholder={t('section_form_file.sector_placeholder')}
           />
         </div>
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Método de Azimuth
+            {t('section_form_file.az_method')}
           </label>
           <select
             value={azMode}
@@ -174,8 +176,8 @@ export function SectionFileUpload() {
             className="w-full rounded-md px-3 py-2 text-sm outline-none"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           >
-            <option value="perpendicular">Perpendicular a la cresta</option>
-            <option value="local_slope">Pendiente local del diseño</option>
+            <option value="perpendicular">{t('section_form_file.az_perpendicular')}</option>
+            <option value="local_slope">{t('section_form_file.az_local_slope')}</option>
           </select>
         </div>
       </div>
@@ -191,22 +193,22 @@ export function SectionFileUpload() {
           {mutation.isPending ? (
             <span className="flex items-center gap-2">
               <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
-              Procesando...
+              {t('section_form_file.submitting')}
             </span>
           ) : (
-            'Generar desde Archivo'
+            t('section_form_file.submit')
           )}
         </button>
 
         {mutation.isError && (
           <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
-            Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudieron generar las secciones'}
+            {t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_file.error_generic')}
           </p>
         )}
 
         {mutation.isSuccess && (
           <p className="text-sm font-medium" style={{ color: 'var(--color-mine-green)' }}>
-            Secciones generadas desde archivo correctamente
+            {t('section_form_file.success')}
           </p>
         )}
       </div>

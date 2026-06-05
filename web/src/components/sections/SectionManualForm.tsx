@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useManualSections } from '../../api/hooks';
 import type { SectionCreate } from '../../api/types';
 
@@ -20,6 +21,7 @@ function createEmptyRow(index: number): RowData {
 }
 
 export function SectionManualForm() {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<RowData[]>([createEmptyRow(0)]);
   const [successCount, setSuccessCount] = useState<number | null>(null);
   const mutation = useManualSections();
@@ -71,22 +73,22 @@ export function SectionManualForm() {
           <thead>
             <tr style={{ borderBottom: '1px solid var(--color-border)' }}>
               <th className="text-left py-2 px-2 font-semibold w-24" style={{ color: 'var(--color-text-secondary)' }}>
-                Nombre
+                {t('section_form_manual.col_name')}
               </th>
               <th className="text-left py-2 px-2 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                Origen X
+                {t('section_form_manual.col_origin_x')}
               </th>
               <th className="text-left py-2 px-2 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                Origen Y
+                {t('section_form_manual.col_origin_y')}
               </th>
               <th className="text-left py-2 px-2 font-semibold w-24" style={{ color: 'var(--color-text-secondary)' }}>
-                Azimuth (°)
+                {t('section_form_manual.col_azimuth')}
               </th>
               <th className="text-left py-2 px-2 font-semibold w-28" style={{ color: 'var(--color-text-secondary)' }}>
-                Longitud (m)
+                {t('section_form_manual.col_length')}
               </th>
               <th className="text-left py-2 px-2 font-semibold w-28" style={{ color: 'var(--color-text-secondary)' }}>
-                Sector
+                {t('section_form_manual.col_sector')}
               </th>
               <th className="w-20" />
             </tr>
@@ -177,7 +179,7 @@ export function SectionManualForm() {
                     onChange={(e) => updateField(idx, 'sector', e.target.value)}
                     className="w-full rounded px-2 py-1.5 text-sm outline-none"
                     style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-                    placeholder="Ej: Norte"
+                    placeholder={t('section_form_manual.col_sector_placeholder')}
                   />
                 </td>
                 <td className="py-1.5 px-2">
@@ -187,9 +189,9 @@ export function SectionManualForm() {
                     disabled={rows.length <= 1}
                     className="text-xs font-medium transition-colors disabled:cursor-not-allowed"
                     style={{ color: rows.length <= 1 ? 'var(--color-text-muted)' : 'var(--color-mine-red)' }}
-                    title="Eliminar fila"
+                    title={t('section_form_manual.delete_row')}
                   >
-                    Eliminar
+                    {t('common.delete')}
                   </button>
                 </td>
               </tr>
@@ -206,7 +208,7 @@ export function SectionManualForm() {
           className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
         >
-          + Agregar Fila
+          {t('section_form_manual.add_row')}
         </button>
 
         <button
@@ -218,22 +220,22 @@ export function SectionManualForm() {
           {mutation.isPending ? (
             <span className="flex items-center gap-2">
               <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
-              Guardando...
+              {t('section_form_manual.submitting')}
             </span>
           ) : (
-            'Guardar Secciones'
+            t('section_form_manual.submit')
           )}
         </button>
 
         {mutation.isError && (
           <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
-            Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudieron guardar las secciones'}
+            {t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_manual.error_generic')}
           </p>
         )}
 
         {successCount !== null && (
           <p className="text-sm font-medium" style={{ color: 'var(--color-mine-green)' }}>
-            Se guardaron {successCount} secciones correctamente
+            {t('section_form_manual.success', { count: successCount })}
           </p>
         )}
       </div>

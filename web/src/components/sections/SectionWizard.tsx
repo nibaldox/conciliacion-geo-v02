@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { SectionAutoForm } from './SectionAutoForm';
 import { SectionManualForm } from './SectionManualForm';
 import { SectionClickForm } from './SectionClickForm';
@@ -10,11 +11,11 @@ import { useSections } from '../../api/hooks';
 
 type SectionTab = 'auto' | 'manual' | 'click' | 'file';
 
-const TABS: { key: SectionTab; label: string; icon: string }[] = [
-  { key: 'auto', label: 'Automático', icon: '⚡' },
-  { key: 'manual', label: 'Manual', icon: '✏️' },
-  { key: 'click', label: 'Clic en Mapa', icon: '📍' },
-  { key: 'file', label: 'Archivo', icon: '📁' },
+const TAB_KEYS: { key: SectionTab; translationKey: string; icon: string }[] = [
+  { key: 'auto', translationKey: 'step2.tab_auto', icon: '⚡' },
+  { key: 'manual', translationKey: 'step2.tab_manual', icon: '✏️' },
+  { key: 'click', translationKey: 'step2.tab_click', icon: '📍' },
+  { key: 'file', translationKey: 'step2.tab_file', icon: '📁' },
 ];
 
 export function SectionWizard() {
@@ -22,6 +23,7 @@ export function SectionWizard() {
   const [clickHandler, setClickHandler] = useState<((x: number, y: number) => void) | null>(null);
   const { prevStep, nextStep } = useSession();
   const { data: sections } = useSections();
+  const { t } = useTranslation();
 
   const sectionCount = sections?.length ?? 0;
 
@@ -46,8 +48,8 @@ export function SectionWizard() {
   return (
     <div className="flex flex-col h-full gap-4">
       {/* Tab bar */}
-      <div className="flex gap-2 overflow-x-auto shrink-0" role="tablist" aria-label="Método de creación de secciones">
-        {TABS.map((tab) => (
+      <div className="flex gap-2 overflow-x-auto shrink-0" role="tablist" aria-label={t('step2.tablist_aria')}>
+        {TAB_KEYS.map((tab) => (
           <button
             key={tab.key}
             role="tab"
@@ -60,7 +62,7 @@ export function SectionWizard() {
             }
           >
             <span className="mr-1.5">{tab.icon}</span>
-            {tab.label}
+            {t(tab.translationKey)}
           </button>
         ))}
       </div>
@@ -97,7 +99,7 @@ export function SectionWizard() {
           className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
           style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
         >
-          ← Anterior
+          {t('step2.prev')}
         </button>
         <button
           onClick={nextStep}
@@ -108,7 +110,7 @@ export function SectionWizard() {
             : { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', cursor: 'not-allowed' }
           }
         >
-          Siguiente →
+          {t('step2.next')}
         </button>
       </div>
     </div>

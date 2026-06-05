@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useClickSection, useSections } from '../../api/hooks';
 import type { SectionClickParams } from '../../api/types';
 
@@ -8,6 +9,7 @@ interface SectionClickFormProps {
 }
 
 export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormProps) {
+  const { t } = useTranslation();
   const [length, setLength] = useState(200);
   const [sector, setSector] = useState('');
   const [azMode, setAzMode] = useState<'auto' | 'manual'>('auto');
@@ -40,6 +42,8 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
     };
   }, [onRegisterClickHandler, handleMapClick]);
 
+  const nAdded = sections?.length ?? 0;
+
   return (
     <div className="space-y-5">
       {/* Instructions */}
@@ -47,10 +51,10 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
         <span className="text-2xl">&#x1F4CD;</span>
         <div>
           <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-            Haga clic en la vista en planta para agregar secciones
+            {t('section_form_click.instruction_title')}
           </p>
           <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
-            Configure los parámetros abajo y luego haga clic en el mapa.
+            {t('section_form_click.instruction_subtitle')}
           </p>
         </div>
       </div>
@@ -59,7 +63,7 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Longitud (m)
+            {t('section_form_click.length')}
           </label>
           <input
             type="number"
@@ -74,7 +78,7 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Sector
+            {t('section_form_click.sector')}
           </label>
           <input
             type="text"
@@ -82,13 +86,13 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
             onChange={(e) => setSector(e.target.value)}
             className="w-full rounded-md px-3 py-2 text-sm outline-none"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            placeholder="Ej: Norte"
+            placeholder={t('section_form_click.sector_placeholder')}
           />
         </div>
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Modo Azimuth
+            {t('section_form_click.az_mode')}
           </label>
           <select
             value={azMode}
@@ -96,15 +100,15 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
             className="w-full rounded-md px-3 py-2 text-sm outline-none"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           >
-            <option value="auto">Automático</option>
-            <option value="manual">Manual</option>
+            <option value="auto">{t('section_form_click.az_auto')}</option>
+            <option value="manual">{t('section_form_click.az_manual')}</option>
           </select>
         </div>
 
         {azMode === 'manual' && (
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-              Azimuth (°)
+              {t('section_form_click.azimuth')}
             </label>
             <input
               type="number"
@@ -124,23 +128,23 @@ export function SectionClickForm({ onRegisterClickHandler }: SectionClickFormPro
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center justify-center w-8 h-8 rounded-full text-white text-sm font-bold" style={{ backgroundColor: 'var(--color-mine-blue)' }}>
-            {sections?.length ?? 0}
+            {nAdded}
           </span>
           <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            secciones agregadas
+            {t('section_form_click.n_added', { count: nAdded })}
           </span>
         </div>
 
         {mutation.isPending && (
           <span className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-mine-blue)' }}>
             <span className="animate-spin inline-block w-4 h-4 border-2 rounded-full" style={{ borderColor: 'var(--color-mine-blue)', borderTopColor: 'transparent' }} />
-            Agregando...
+            {t('section_form_click.adding')}
           </span>
         )}
 
         {mutation.isError && (
           <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
-            Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudo agregar la sección'}
+            {t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_click.error_generic')}
           </p>
         )}
       </div>

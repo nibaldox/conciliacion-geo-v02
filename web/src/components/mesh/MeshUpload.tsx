@@ -172,6 +172,7 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
       onClick={() => fileInputRef.current?.click()}
       role="button"
       tabIndex={0}
+      aria-label={t('step1.drop_zone_aria')}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click();
       }}

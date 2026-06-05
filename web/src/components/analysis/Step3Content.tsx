@@ -73,7 +73,7 @@ export function Step3Content() {
             {t('step3.title')}
           </h3>
           <p className="text-sm max-w-md" style={{ color: 'var(--color-text-muted)' }}>
-            {t('step3.run')} — corta, extrae parámetros y compara diseño vs as-built.
+            {t('step3.subtitle')}
           </p>
         </div>
 
@@ -88,7 +88,7 @@ export function Step3Content() {
             className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
           >
-            ← {t('nav.previous')}
+            {t('step3.prev')}
           </button>
           <button
             onClick={nextStep}
@@ -96,7 +96,7 @@ export function Step3Content() {
             className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ backgroundColor: 'var(--color-mine-blue)', color: '#fff' }}
           >
-            {t('step4.title')} →
+            {t('step3.next')}
           </button>
         </div>
       </div>
@@ -104,11 +104,11 @@ export function Step3Content() {
       {/* Right column — Settings panel */}
       <div className="w-full md:w-80 rounded-xl shadow-sm p-4 md:p-5 self-start shrink-0 overflow-auto max-h-full" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <h4 className="font-semibold mb-4 text-sm" style={{ color: 'var(--color-text-primary)' }}>
-          {t('step3.title')}
+          {t('step3.settings_title')}
         </h4>
 
         <div className="space-y-4">
-          <LabeledField label="Resolución (m)" tooltipKey="tooltip.simplify_epsilon">
+          <LabeledField label={t('step3.params_resolution')} tooltipKey="tooltip.simplify_epsilon">
             <input
               type="number"
               step={0.1}
@@ -121,7 +121,7 @@ export function Step3Content() {
             />
           </LabeledField>
 
-          <LabeledField label="Umbral de cara (°)" tooltipKey="tooltip.face_threshold">
+          <LabeledField label={t('step3.params_face')} tooltipKey="tooltip.face_threshold">
             <input
               type="number"
               step={1}
@@ -134,7 +134,7 @@ export function Step3Content() {
             />
           </LabeledField>
 
-          <LabeledField label="Umbral de berma (°)" tooltipKey="tooltip.berm_threshold">
+          <LabeledField label={t('step3.params_berm')} tooltipKey="tooltip.berm_threshold">
             <input
               type="number"
               step={1}
@@ -154,7 +154,7 @@ export function Step3Content() {
           className="mt-4 w-full px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ backgroundColor: 'var(--color-mine-blue)' }}
         >
-          {updateSettings.isPending ? `⏳ ${t('common.loading')}` : 'Guardar Parámetros'}
+          {updateSettings.isPending ? `⏳ ${t('common.loading')}` : t('step3.save')}
         </button>
       </div>
     </div>

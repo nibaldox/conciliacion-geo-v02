@@ -9,6 +9,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useResults } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import {
@@ -20,26 +21,22 @@ import {
 } from '../../utils/format';
 import type { ComparisonResult, MatchType } from '../../api/types';
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, t }: { status: string; t: (k: string) => string }) {
   const cls = getStatusClass(status);
   if (!cls) return <span className="text-gray-400 text-xs">—</span>;
   return (
     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
-      {status}
+      {t(`compliance.${status}`)}
     </span>
   );
 }
 
-function MatchBadge({ type }: { type: MatchType }) {
+function MatchBadge({ type, t }: { type: MatchType; t: (k: string) => string }) {
   const cls = getMatchClass(type);
-  const labels: Record<MatchType, string> = {
-    MATCH: 'Match',
-    MISSING: 'Faltante',
-    EXTRA: 'Extra',
-  };
+  const key = `table.status_${type.toLowerCase()}`;
   return (
     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
-      {labels[type] ?? type}
+      {t(key)}
     </span>
   );
 }
@@ -47,6 +44,7 @@ function MatchBadge({ type }: { type: MatchType }) {
 export function ResultsTable() {
   const { filters } = useSession();
   const { data: results, isLoading, error } = useResults();
+  const { t } = useTranslation();
 
   const [sorting, setSorting] = useState<SortingState>([]);
 
@@ -72,25 +70,25 @@ export function ResultsTable() {
     () => [
       {
         accessorKey: 'section',
-        header: 'Sección',
+        header: t('table.col_section'),
         size: 100,
       },
       {
         accessorKey: 'bench_num',
-        header: 'Banco',
+        header: t('table.col_bench'),
         size: 70,
         cell: ({ getValue }) => `B${getValue<number>()}`,
       },
       {
         accessorKey: 'type',
-        header: 'Tipo',
+        header: t('table.col_type'),
         size: 90,
-        cell: ({ getValue }) => <MatchBadge type={getValue() as MatchType} />,
+        cell: ({ getValue }) => <MatchBadge type={getValue() as MatchType} t={t} />,
       },
       // Height group
       {
         accessorKey: 'height_design',
-        header: 'Alt. Diseño (m)',
+        header: t('table.col_height_design'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
@@ -98,7 +96,7 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'height_real',
-        header: 'Alt. Real (m)',
+        header: t('table.col_height_real'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
@@ -106,7 +104,7 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'height_dev',
-        header: 'Desv. (m)',
+        header: t('table.col_height_dev'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
@@ -114,14 +112,14 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'height_status',
-        header: 'Estado',
+        header: t('table.col_height_status'),
         size: 110,
-        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
+        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} t={t} />,
       },
       // Angle group
       {
         accessorKey: 'angle_design',
-        header: 'Áng. Diseño (°)',
+        header: t('table.col_angle_design'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatDegrees(getValue<number | null>())}</span>
@@ -129,7 +127,7 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'angle_real',
-        header: 'Áng. Real (°)',
+        header: t('table.col_angle_real'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatDegrees(getValue<number | null>())}</span>
@@ -137,7 +135,7 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'angle_dev',
-        header: 'Desv. (°)',
+        header: t('table.col_angle_dev'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
@@ -145,14 +143,14 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'angle_status',
-        header: 'Estado',
+        header: t('table.col_angle_status'),
         size: 110,
-        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
+        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} t={t} />,
       },
       // Berm group
       {
         accessorKey: 'berm_design',
-        header: 'Berma D. (m)',
+        header: t('table.col_berm_design'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
@@ -160,7 +158,7 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'berm_real',
-        header: 'Berma R. (m)',
+        header: t('table.col_berm_real'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
@@ -168,7 +166,7 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'berm_min',
-        header: 'Mín. (m)',
+        header: t('table.col_berm_min'),
         size: 90,
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
@@ -176,12 +174,12 @@ export function ResultsTable() {
       },
       {
         accessorKey: 'berm_status',
-        header: 'Estado',
+        header: t('table.col_berm_status'),
         size: 110,
-        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
+        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} t={t} />,
       },
     ],
-    [],
+    [t],
   );
 
   const table = useReactTable({
@@ -204,7 +202,7 @@ export function ResultsTable() {
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
         </svg>
-        Cargando resultados...
+        {t('table.loading')}
       </div>
     );
   }
@@ -212,7 +210,7 @@ export function ResultsTable() {
   if (error) {
     return (
       <div className="flex items-center justify-center h-64 text-sm" style={{ color: '#ef4444' }}>
-        Error al cargar los resultados
+        {t('table.loading_error')}
       </div>
     );
   }
@@ -220,7 +218,7 @@ export function ResultsTable() {
   if (filteredData.length === 0) {
     return (
       <div className="flex items-center justify-center h-64 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-        No hay resultados disponibles. Ejecuta el procesamiento primero.
+        {t('table.empty')}
       </div>
     );
   }
@@ -280,11 +278,13 @@ export function ResultsTable() {
       <div className="flex items-center justify-between text-sm px-1" style={{ color: 'var(--color-text-muted)' }}>
         <div className="flex items-center gap-2">
           <span>
-            Página {table.getState().pagination.pageIndex + 1} de{' '}
-            {table.getPageCount()}
+            {t('table.page_info', {
+              page: table.getState().pagination.pageIndex + 1,
+              total: table.getPageCount(),
+            })}
           </span>
           <span style={{ color: 'var(--color-border-strong)' }}>|</span>
-          <span>{filteredData.length} resultados</span>
+          <span>{t('table.n_results', { count: filteredData.length })}</span>
         </div>
         <div className="flex items-center gap-1">
           <button

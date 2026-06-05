@@ -70,6 +70,7 @@ interface CesiumViewerProps {
 }
 
 function CesiumViewerImpl({ designVerts, topoVerts, sections, selectedSection }: CesiumViewerProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<CesiumAPI['Viewer'] | null>(null);
   const pointsRef = useRef<CesiumAPI['PointPrimitiveCollection'] | null>(null);
@@ -96,7 +97,7 @@ function CesiumViewerImpl({ designVerts, topoVerts, sections, selectedSection }:
         });
       })
       .catch((err) => {
-        if (!cancelled) setError(`Error al cargar CesiumJS: ${err instanceof Error ? err.message : String(err)}`);
+        if (!cancelled) setError(t('viewer.cesium_load_error', { message: err instanceof Error ? err.message : String(err) }));
       });
     return () => {
       cancelled = true;
@@ -138,7 +139,7 @@ function CesiumViewerImpl({ designVerts, topoVerts, sections, selectedSection }:
         linesRef.current = null;
       };
     } catch (err) {
-      setError(`Error al inicializar CesiumJS: ${err instanceof Error ? err.message : String(err)}`);
+      setError(t('viewer.cesium_init_error', { message: err instanceof Error ? err.message : String(err) }));
     }
   }, [Cesium]);
 
@@ -267,7 +268,7 @@ function CesiumViewerImpl({ designVerts, topoVerts, sections, selectedSection }:
       <div className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="animate-spin text-2xl">⏳</div>
-          <p className="text-sm">Cargando CesiumJS (≈4 MB)…</p>
+          <p className="text-sm">{t('viewer.cesium_loading')}</p>
         </div>
       </div>
     );

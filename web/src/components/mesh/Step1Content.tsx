@@ -1,4 +1,5 @@
 import { Suspense, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { MeshUpload } from './MeshUpload';
 import { LazyContourChart, LazyMesh3DViewer } from '../lazy';
 import { LoadingSpinner } from '../LoadingSpinner';
@@ -10,6 +11,7 @@ export function Step1Content() {
   const { designMeshId, topoMeshId, nextStep } = useSession();
   const bothUploaded = !!designMeshId && !!topoMeshId;
   const [viewMode, setViewMode] = useState<ViewMode>('2d');
+  const { t } = useTranslation();
 
   return (
     <div
@@ -17,17 +19,17 @@ export function Step1Content() {
       className="flex flex-col h-full gap-4 min-h-0"
     >
       {/* Top half: Mesh Upload zones */}
-      <section aria-label="Carga de superficies" className="shrink-0">
+      <section aria-label={t('step1.upload_zones_aria')} className="shrink-0">
         <MeshUpload />
       </section>
 
       {/* Bottom half: Plan View / 3D Viewer with toggle */}
       <section
-        aria-label="Vista del terreno"
+        aria-label={t('step1.viewer_aria')}
         className="flex-1 min-h-[300px] rounded-xl overflow-hidden flex flex-col gap-2 shrink-0"
       >
         {/* 2D / 3D toggle */}
-        <div className="flex gap-1 self-start" role="tablist" aria-label="Tipo de vista">
+        <div className="flex gap-1 self-start" role="tablist" aria-label={t('step1.viewer_type_aria')}>
           <button
             role="tab"
             aria-selected={viewMode === '2d'}
@@ -38,7 +40,7 @@ export function Step1Content() {
               : { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)' }
             }
           >
-            Curvas de Nivel
+            {t('step1.tab_2d')}
           </button>
           <button
             role="tab"
@@ -50,13 +52,13 @@ export function Step1Content() {
               : { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)' }
             }
           >
-            Vista 3D
+            {t('step1.tab_3d')}
           </button>
         </div>
 
         {/* Viewer */}
         <div className="flex-1 min-h-0">
-          <Suspense fallback={<LoadingSpinner message="Cargando vista…" />}>
+          <Suspense fallback={<LoadingSpinner message={t('step1.loading_view')} />}>
             {viewMode === '2d' ? (
               <LazyContourChart />
             ) : (
@@ -77,7 +79,7 @@ export function Step1Content() {
             : { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', cursor: 'not-allowed' }
           }
         >
-          Siguiente →
+          {t('step1.next')}
         </button>
       </div>
     </div>

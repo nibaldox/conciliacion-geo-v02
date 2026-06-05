@@ -101,7 +101,7 @@ export function Step4Content() {
           className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
           style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
         >
-          ← {t('nav.previous')}
+          {t('step4.prev')}
         </button>
       </div>
     </div>

@@ -1,15 +1,17 @@
+import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../stores/theme';
 
 export function ThemeToggle() {
   const { isDark, toggle } = useTheme();
+  const { t } = useTranslation();
 
   return (
     <button
       onClick={toggle}
-      title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+      title={isDark ? t('theme.switch_to_light') : t('theme.switch_to_dark')}
       className="w-9 h-9 flex items-center justify-center rounded-lg transition-colors"
       style={{ color: 'var(--color-text-secondary)' }}
-      aria-label={isDark ? 'Modo claro' : 'Modo oscuro'}
+      aria-label={isDark ? t('theme.aria_light') : t('theme.aria_dark')}
     >
       {/* Sun icon (dark mode → click for light) */}
       <svg

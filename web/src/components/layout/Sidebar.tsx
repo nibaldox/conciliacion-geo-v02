@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSettings, useUpdateSettings } from '../../api/hooks';
 import type { ProcessSettings } from '../../api/types';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
@@ -6,6 +7,7 @@ import { DEFAULT_SETTINGS } from '../../utils/constants';
 const inputCls = "w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors focus:ring-2 focus:ring-mine-blue/30";
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const { data: settings, isLoading, isError } = useSettings();
   const updateSettings = useUpdateSettings();
@@ -47,7 +49,8 @@ export function Sidebar() {
         onClick={() => setIsOpen(!isOpen)}
         className="fixed right-0 top-1/2 -translate-y-1/2 z-40 text-white px-2 py-4 rounded-l-lg shadow-lg transition-colors"
         style={{ backgroundColor: 'var(--color-mine-blue)' }}
-        title="Configuración"
+        title={t('sidebar.toggle')}
+        aria-label={t('sidebar.toggle')}
       >
         ⚙
       </button>
@@ -62,11 +65,12 @@ export function Sidebar() {
             className="flex items-center justify-between p-4 border-b"
             style={{ borderColor: 'var(--color-border)' }}
           >
-            <h2 className="font-bold" style={{ color: 'var(--color-text-primary)' }}>Configuración</h2>
+            <h2 className="font-bold" style={{ color: 'var(--color-text-primary)' }}>{t('sidebar.title')}</h2>
             <button
               onClick={() => setIsOpen(false)}
               className="text-xl transition-colors"
               style={{ color: 'var(--color-text-muted)' }}
+              aria-label={t('sidebar.close')}
             >
               ✕
             </button>
@@ -75,7 +79,7 @@ export function Sidebar() {
           {isLoading && (
             <div className="p-4">
               <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-                Conectando con la API...
+                {t('sidebar.loading')}
               </p>
             </div>
           )}
@@ -83,7 +87,7 @@ export function Sidebar() {
           {isError && !isLoading && (
             <div className="p-4">
               <p className="text-sm" style={{ color: '#ef4444' }}>
-                No se pudo conectar con la API.
+                {t('sidebar.error')}
               </p>
             </div>
           )}
@@ -93,12 +97,12 @@ export function Sidebar() {
               {/* Process parameters */}
               <section>
                 <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-                  Parámetros de Procesamiento
+                  {t('sidebar.process_title')}
                 </h3>
                 <div className="space-y-3">
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      Resolución (m)
+                      {t('sidebar.resolution')}
                     </label>
                     <input
                       type="number"
@@ -112,7 +116,7 @@ export function Sidebar() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      Umbral de cara (°)
+                      {t('sidebar.face_threshold')}
                     </label>
                     <input
                       type="number"
@@ -127,7 +131,7 @@ export function Sidebar() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      Umbral de berma (°)
+                      {t('sidebar.berm_threshold')}
                     </label>
                     <input
                       type="number"
@@ -146,11 +150,11 @@ export function Sidebar() {
               {/* Tolerances */}
               <section>
                 <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-secondary)' }}>
-                  Tolerancias de Aceptabilidad
+                  {t('sidebar.tolerances_title')}
                 </h3>
                 <div className="space-y-3">
                   <div>
-                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>Altura de banco (m)</p>
+                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_bench_height')}</p>
                     <div className="flex gap-2">
                       <input
                         type="number"
@@ -183,11 +187,11 @@ export function Sidebar() {
                         style={inputStyle}
                       />
                     </div>
-                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>Neg (−) / Pos (+)</p>
+                    <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tolerance_neg_pos')}</p>
                   </div>
 
                   <div>
-                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>Ángulo de cara (°)</p>
+                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_face_angle')}</p>
                     <div className="flex gap-2">
                       <input
                         type="number"
@@ -224,7 +228,7 @@ export function Sidebar() {
 
                   <div>
                     <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      Ancho mínimo de berma (m)
+                      {t('sidebar.tol_berm_min')}
                     </label>
                     <input
                       type="number"
@@ -244,7 +248,7 @@ export function Sidebar() {
                   </div>
 
                   <div>
-                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>Ángulo inter-rampa (°)</p>
+                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_inter_ramp')}</p>
                     <div className="flex gap-2">
                       <input
                         type="number"
@@ -280,7 +284,7 @@ export function Sidebar() {
                   </div>
 
                   <div>
-                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>Ángulo global (°)</p>
+                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_overall')}</p>
                     <div className="flex gap-2">
                       <input
                         type="number"
@@ -324,7 +328,7 @@ export function Sidebar() {
                 className="w-full px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-mine-blue)' }}
               >
-                {updateSettings.isPending ? 'Guardando...' : 'Guardar Cambios'}
+                {updateSettings.isPending ? t('sidebar.saving') : t('sidebar.save')}
               </button>
             </div>
           )}

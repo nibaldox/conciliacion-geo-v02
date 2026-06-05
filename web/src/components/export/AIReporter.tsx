@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import { useAIProviders, useAIModels } from '../../api/hooks';
 
@@ -21,6 +22,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 // ─── Component ───────────────────────────────────────────────
 
 export function AIReporter() {
+  const { t } = useTranslation();
   const [options, setOptions] = useState<AIOptions>({
     provider: 'ollama',
     model: '',
@@ -210,7 +212,7 @@ export function AIReporter() {
                     <span
                       className="inline-block w-2 h-2 rounded-full"
                       style={loading ? { backgroundColor: 'var(--color-border-strong)', animation: 'pulse 1.5s infinite' } : available ? { backgroundColor: 'var(--color-mine-green)' } : { backgroundColor: 'var(--color-mine-red)' }}
-                      title={loading ? 'Detectando...' : available ? 'Disponible' : 'No disponible'}
+                      title={loading ? t('ai.status_detecting') : available ? t('ai.status_available') : t('ai.status_unavailable')}
                     />
                     {PROVIDER_LABELS[prov]}
                   </button>
@@ -222,7 +224,7 @@ export function AIReporter() {
           {/* Model selector */}
           <div className="flex-1">
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Modelo
+              {t('ai.model')}
             </label>
             <select
               value={options.model}
@@ -238,7 +240,7 @@ export function AIReporter() {
                 ))
               ) : (
                 <option value="">
-                  {providersLoading ? 'Cargando modelos...' : 'Sin modelos detectados'}
+                  {providersLoading ? t('ai.loading_models') : t('ai.no_models')}
                 </option>
               )}
             </select>
@@ -254,7 +256,7 @@ export function AIReporter() {
                 style={{ backgroundColor: 'var(--color-mine-blue)' }}
               >
                 <span>✨</span>
-                Generar Informe con IA
+                {t('ai.generate')}
               </button>
             ) : (
               <button
@@ -266,7 +268,7 @@ export function AIReporter() {
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                 </svg>
-                Detener
+                {t('ai.stop')}
               </button>
             )}
           </div>
@@ -275,22 +277,22 @@ export function AIReporter() {
         {/* No providers available — install instructions */}
         {!anyProviderAvailable && !providersLoading && (
           <div className="mt-4 rounded-lg p-4 text-sm" style={{ backgroundColor: 'var(--status-warn-bg)', border: '1px solid var(--status-warn-border)' }}>
-            <p className="font-semibold mb-2" style={{ color: 'var(--status-warn-text)' }}>No se detectaron proveedores de IA locales.</p>
-            <p className="mb-1" style={{ color: 'var(--status-warn-text)' }}>Instala al menos uno para generar informes:</p>
+            <p className="font-semibold mb-2" style={{ color: 'var(--status-warn-text)' }}>{t('ai.no_providers')}</p>
+            <p className="mb-1" style={{ color: 'var(--status-warn-text)' }}>{t('ai.install_prompt')}</p>
             <ul className="list-disc list-inside space-y-1 ml-2">
               <li style={{ color: 'var(--status-warn-text)' }}>
-                <strong>Ollama:</strong>{' '}
+                <strong>{t('ai.ollama_install_label')}</strong>{' '}
                 <code className="px-1.5 py-0.5 rounded text-xs" style={{ backgroundColor: 'var(--status-warn-border)' }}>
                   curl -fsSL https://ollama.com/install.sh | sh && ollama pull llama3.1:8b
                 </code>
               </li>
               <li style={{ color: 'var(--status-warn-text)' }}>
-                <strong>LM Studio:</strong>{' '}
-                Descarga desde{' '}
-                <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--status-warn-text)', textDecoration: 'underline' }}>
-                  lmstudio.ai
-                </a>{' '}
-                y habilita el servidor local.
+                <strong>{t('ai.lmstudio_install_label')}</strong>{' '}
+                {t('ai.lmstudio_install_detail', { link: (
+                  <a href="https://lmstudio.ai" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--status-warn-text)', textDecoration: 'underline' }}>
+                    lmstudio.ai
+                  </a>
+                )})}
               </li>
             </ul>
           </div>
@@ -306,7 +308,7 @@ export function AIReporter() {
             className="px-3 py-1.5 text-white rounded-lg text-xs font-medium"
             style={{ backgroundColor: 'var(--color-mine-red)' }}
           >
-            Reintentar
+            {t('ai.retry')}
           </button>
         </div>
       )}
@@ -317,14 +319,14 @@ export function AIReporter() {
           {/* Header */}
           <div className="px-5 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--color-border)' }}>
             <h4 className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>
-              Informe Generado
+              {t('ai.report_title')}
             </h4>
             {isGenerating && (
               <div className="flex items-center gap-1.5">
                 <span className="inline-block w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-mine-blue)', animationDelay: '0ms' }} />
                 <span className="inline-block w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-mine-blue)', animationDelay: '150ms' }} />
                 <span className="inline-block w-1.5 h-1.5 rounded-full animate-bounce" style={{ backgroundColor: 'var(--color-mine-blue)', animationDelay: '300ms' }} />
-                <span className="text-xs ml-1" style={{ color: 'var(--color-text-muted)' }}>Generando...</span>
+                <span className="text-xs ml-1" style={{ color: 'var(--color-text-muted)' }}>{t('ai.generating')}</span>
               </div>
             )}
           </div>
@@ -349,14 +351,14 @@ export function AIReporter() {
             className="px-4 py-2.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
-            📋 Copiar al portapapeles
+            {t('ai.copy')}
           </button>
           <button
             onClick={handleDownload}
             className="px-4 py-2.5 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
             style={{ backgroundColor: 'var(--color-mine-blue)' }}
           >
-            💾 Descargar
+            {t('ai.download')}
           </button>
         </div>
       )}

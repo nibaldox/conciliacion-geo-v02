@@ -1,7 +1,9 @@
+import { useTranslation } from 'react-i18next';
 import { useProcessStatus } from '../../api/hooks';
 
 export function ProcessProgress() {
   const { data: status } = useProcessStatus();
+  const { t } = useTranslation();
 
   if (!status || status.status === 'idle') return null;
 
@@ -17,20 +19,19 @@ export function ProcessProgress() {
       {/* Progress text */}
       {isProcessing && (
         <p className="text-sm text-center" style={{ color: 'var(--color-text-secondary)' }}>
-          Procesando sección <span className="font-semibold">{current ?? '...'}</span> de{' '}
-          <span className="font-semibold">{total}</span>...
+          {t('step3.processing_section', { current: current ?? '...', total })}
         </p>
       )}
 
       {isComplete && (
         <p className="text-sm text-center font-medium" style={{ color: 'var(--status-ok-text)' }}>
-          ✓ Procesamiento completado — {status.n_results} resultados generados
+          {t('step3.complete', { count: status.n_results })}
         </p>
       )}
 
       {status.status === 'error' && (
         <p className="text-sm text-center font-medium" style={{ color: 'var(--status-nok-text)' }}>
-          Error durante el procesamiento
+          {t('step3.error')}
         </p>
       )}
 
@@ -47,7 +48,7 @@ export function ProcessProgress() {
 
       {/* Progress numbers */}
       <div className="flex justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        <span>{completed} / {total} secciones</span>
+        <span>{t('step3.n_completed', { completed, total })}</span>
         <span>{Math.round(progressPct)}%</span>
       </div>
     </div>

@@ -44,6 +44,7 @@ interface PlotlyModuleSpec {
 }
 
 function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y: number }) => void }) {
+  const { t } = useTranslation();
   const { designMeshId, topoMeshId } = useSession();
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
@@ -71,9 +72,9 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
   const hasNoData = !designVerts && !topoVerts;
 
   const traces: PlotlyDataSpec[] = useMemo(() => {
-    const t: PlotlyDataSpec[] = [];
+    const acc: PlotlyDataSpec[] = [];
     if (designVerts && designVerts.x.length > 0) {
-      t.push({
+      acc.push({
         type: 'scattergl',
         mode: 'markers',
         x: designVerts.x,
@@ -92,14 +93,13 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
             tickfont: { size: 9, color: '#94a3b8' },
           },
         },
-        name: 'Diseño',
-        hovertemplate:
-          'Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m<extra>Diseño</extra>',
+        name: t('viewer.design_label'),
+        hovertemplate: t('viewer.tooltip') + '<extra>' + t('viewer.design_label') + '</extra>',
         text: designVerts.z.map((z) => z.toFixed(1)),
       });
     }
     if (topoVerts && topoVerts.x.length > 0) {
-      t.push({
+      acc.push({
         type: 'scattergl',
         mode: 'markers',
         x: topoVerts.x,
@@ -118,16 +118,15 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
             tickfont: { size: 9, color: '#94a3b8' },
           },
         },
-        name: 'Topografía',
-        hovertemplate:
-          'Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m<extra>Topografía</extra>',
+        name: t('viewer.topo_label'),
+        hovertemplate: t('viewer.tooltip') + '<extra>' + t('viewer.topo_label') + '</extra>',
         text: topoVerts.z.map((z) => z.toFixed(1)),
       });
     }
     if (sections && sections.length > 0) {
       sections.forEach((sec) => {
         const ep = sectionEndpoints(sec);
-        t.push({
+        acc.push({
           type: 'scattergl',
           mode: 'lines',
           x: ep.x,
@@ -139,7 +138,7 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
         });
       });
     }
-    return t;
+    return acc;
   }, [designVerts, topoVerts, sections]);
 
   const layout = useMemo(
@@ -191,7 +190,7 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
       <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="animate-spin text-2xl">⏳</div>
-          <p className="text-sm">Cargando vértices…</p>
+          <p className="text-sm">{t('viewer.loading_vertices')}</p>
         </div>
       </div>
     );
@@ -202,7 +201,7 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
       <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="text-3xl">🗺️</div>
-          <p className="text-sm text-center">Cargue superficies para ver la vista en planta</p>
+          <p className="text-sm text-center">{t('viewer.empty_plan')}</p>
         </div>
       </div>
     );
@@ -213,7 +212,7 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
       <div data-slot="plan-view" className="flex items-center justify-center h-full min-h-[400px] rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <div className="animate-spin text-2xl">⏳</div>
-          <p className="text-sm">Cargando Plotly (≈3 MB)…</p>
+          <p className="text-sm">{t('viewer.plotly_loading')}</p>
         </div>
       </div>
     );
@@ -240,10 +239,10 @@ function PlanViewImpl({ onPointClick }: { onPointClick?: (coords: { x: number; y
 }
 
 export function PlanView({ onPointClick }: { onPointClick?: (coords: { x: number; y: number }) => void }) {
+  const { t } = useTranslation();
   const { designMeshId, topoMeshId } = useSession();
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
-  const { t } = useTranslation();
   const [requested, setRequested] = useState(false);
 
   const isLoading = loadingDesign || loadingTopo;

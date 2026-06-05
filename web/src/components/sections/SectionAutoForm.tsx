@@ -1,6 +1,6 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAutoSections } from '../../api/hooks';
-import { AZ_METHODS } from '../../utils/constants';
 import type { SectionAutoParams } from '../../api/types';
 
 const INITIAL: Omit<SectionAutoParams, 'azimuth'> & { azimuth: number } = {
@@ -14,7 +14,14 @@ const INITIAL: Omit<SectionAutoParams, 'azimuth'> & { azimuth: number } = {
   azimuth: 0,
 };
 
+const AZ_OPTION_KEYS: Record<string, string> = {
+  perpendicular: 'section_form_auto.az_perpendicular',
+  fixed: 'section_form_auto.az_fixed',
+  local_slope: 'section_form_auto.az_local_slope',
+};
+
 export function SectionAutoForm() {
+  const { t } = useTranslation();
   const [form, setForm] = useState(INITIAL);
   const [successCount, setSuccessCount] = useState<number | null>(null);
   const mutation = useAutoSections();
@@ -65,12 +72,12 @@ export function SectionAutoForm() {
       <div className="grid grid-cols-2 gap-4">
         <fieldset className="rounded-lg p-4" style={{ border: '1px solid var(--color-border)' }}>
           <legend className="text-sm font-semibold px-2" style={{ color: 'var(--color-text-secondary)' }}>
-            Punto de Inicio
+            {t('section_form_auto.start_legend')}
           </legend>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                Este (X)
+                {t('section_form_auto.east')}
               </label>
               <input
                 type="number"
@@ -84,7 +91,7 @@ export function SectionAutoForm() {
             </div>
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                Norte (Y)
+                {t('section_form_auto.north')}
               </label>
               <input
                 type="number"
@@ -101,12 +108,12 @@ export function SectionAutoForm() {
 
         <fieldset className="rounded-lg p-4" style={{ border: '1px solid var(--color-border)' }}>
           <legend className="text-sm font-semibold px-2" style={{ color: 'var(--color-text-secondary)' }}>
-            Punto Final
+            {t('section_form_auto.end_legend')}
           </legend>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                Este (X)
+                {t('section_form_auto.east')}
               </label>
               <input
                 type="number"
@@ -120,7 +127,7 @@ export function SectionAutoForm() {
             </div>
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                Norte (Y)
+                {t('section_form_auto.north')}
               </label>
               <input
                 type="number"
@@ -140,7 +147,7 @@ export function SectionAutoForm() {
       <div className="grid grid-cols-3 gap-4">
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Número de Secciones
+            {t('section_form_auto.n_sections')}
           </label>
           <input
             type="number"
@@ -155,7 +162,7 @@ export function SectionAutoForm() {
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Longitud (m)
+            {t('section_form_auto.length')}
           </label>
           <input
             type="number"
@@ -170,7 +177,7 @@ export function SectionAutoForm() {
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Sector
+            {t('section_form_auto.sector')}
           </label>
           <input
             type="text"
@@ -178,7 +185,7 @@ export function SectionAutoForm() {
             onChange={(e) => update('sector', e.target.value)}
             className="w-full rounded-md px-3 py-2 text-sm outline-none"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            placeholder="Ej: Norte"
+            placeholder={t('section_form_auto.sector_placeholder')}
           />
         </div>
       </div>
@@ -187,7 +194,7 @@ export function SectionAutoForm() {
       <div className="grid grid-cols-3 gap-4">
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Método de Azimuth
+            {t('section_form_auto.az_method')}
           </label>
           <select
             value={form.az_method}
@@ -197,9 +204,9 @@ export function SectionAutoForm() {
             className="w-full rounded-md px-3 py-2 text-sm outline-none"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           >
-            {AZ_METHODS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
+            {Object.entries(AZ_OPTION_KEYS).map(([value, key]) => (
+              <option key={value} value={value}>
+                {t(key)}
               </option>
             ))}
           </select>
@@ -208,7 +215,7 @@ export function SectionAutoForm() {
         {form.az_method === 'fixed' && (
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-              Azimuth Fijo (°)
+              {t('section_form_auto.fixed_az')}
             </label>
             <input
               type="number"
@@ -237,22 +244,22 @@ export function SectionAutoForm() {
           {mutation.isPending ? (
             <span className="flex items-center gap-2">
               <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
-              Generando...
+              {t('section_form_auto.submitting')}
             </span>
           ) : (
-            'Generar Secciones'
+            t('section_form_auto.submit')
           )}
         </button>
 
         {mutation.isError && (
           <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
-            Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudieron generar las secciones'}
+            {t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_auto.error_generic')}
           </p>
         )}
 
         {successCount !== null && (
           <p className="text-sm font-medium" style={{ color: 'var(--color-mine-green)' }}>
-            Se generaron {successCount} secciones correctamente
+            {t('section_form_auto.success', { count: successCount })}
           </p>
         )}
       </div>

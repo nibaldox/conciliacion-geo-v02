@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useExportExcel,
   useExportWord,
@@ -14,6 +15,7 @@ interface ExportForm {
 }
 
 export function ExportPanel() {
+  const { t } = useTranslation();
   const exportExcel = useExportExcel();
   const exportWord = useExportWord();
   const exportDxf = useExportDxf();
@@ -47,57 +49,57 @@ export function ExportPanel() {
       {/* Project info form */}
       <div className="rounded-xl shadow-sm p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
         <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
-          Información del Proyecto
+          {t('export.title')}
         </h4>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Proyecto
+              {t('export.project')}
             </label>
             <input
               type="text"
               value={form.project}
               onChange={(e) => handleFieldChange('project', e.target.value)}
-              placeholder="Nombre del proyecto"
+              placeholder={t('export.project_placeholder')}
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"
               style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Autor
+              {t('export.author')}
             </label>
             <input
               type="text"
               value={form.author}
               onChange={(e) => handleFieldChange('author', e.target.value)}
-              placeholder="Nombre del autor"
+              placeholder={t('export.author_placeholder')}
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"
               style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Operación
+              {t('export.operation')}
             </label>
             <input
               type="text"
               value={form.operation}
               onChange={(e) => handleFieldChange('operation', e.target.value)}
-              placeholder="Nombre de la operación"
+              placeholder={t('export.operation_placeholder')}
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"
               style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
           </div>
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Fase
+              {t('export.phase')}
             </label>
             <input
               type="text"
               value={form.phase}
               onChange={(e) => handleFieldChange('phase', e.target.value)}
-              placeholder="Fase del proyecto"
+              placeholder={t('export.phase_placeholder')}
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"
               style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
             />
@@ -108,28 +110,28 @@ export function ExportPanel() {
       {/* Export buttons */}
       <div className="grid grid-cols-4 gap-3">
         <ExportButton
-          label="Exportar Excel"
+          label={t('export.excel')}
           icon="📊"
           loading={exportExcel.isPending}
           disabled={isAnyExporting}
           onClick={() => exportExcel.mutate(projectParams)}
         />
         <ExportButton
-          label="Exportar Word"
+          label={t('export.word')}
           icon="📄"
           loading={exportWord.isPending}
           disabled={isAnyExporting}
           onClick={() => exportWord.mutate(projectParams)}
         />
         <ExportButton
-          label="Exportar DXF"
+          label={t('export.dxf')}
           icon="📐"
           loading={exportDxf.isPending}
           disabled={isAnyExporting}
           onClick={() => exportDxf.mutate()}
         />
         <ExportButton
-          label="Exportar Imágenes"
+          label={t('export.images')}
           icon="🖼️"
           loading={exportImages.isPending}
           disabled={isAnyExporting}
@@ -140,7 +142,7 @@ export function ExportPanel() {
       {/* Error feedback */}
       {(exportExcel.isError || exportWord.isError || exportDxf.isError || exportImages.isError) && (
         <p className="text-xs text-center" style={{ color: 'var(--color-mine-red)' }}>
-          Error al exportar. Verifica que existan resultados procesados.
+          {t('export.error')}
         </p>
       )}
     </div>

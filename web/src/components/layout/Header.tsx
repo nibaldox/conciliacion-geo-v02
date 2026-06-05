@@ -8,7 +8,7 @@ import { KeyboardShortcutsHelp } from '../ui/KeyboardShortcutsHelp';
 export function Header() {
   const { reset, demoMode } = useSession();
   const queryClient = useQueryClient();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
 
   const handleNewSession = () => {
     localStorage.removeItem('session_id');
@@ -28,7 +28,7 @@ export function Header() {
         <button
           onClick={handleGoHome}
           className="flex items-center gap-3 rounded-lg px-2 py-1 -ml-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2"
-          title={i18n.language === 'es' ? 'Volver al inicio' : 'Back to home'}
+          title={t('header.go_home')}
         >
           <div
             className="flex items-center justify-center w-10 h-10 rounded-lg text-white font-bold text-lg"
@@ -55,13 +55,15 @@ export function Header() {
         <LanguageToggle />
         <button
           onClick={handleNewSession}
-          title="Iniciar nueva sesión"
+          title={t('header.new_session')}
           className="hidden sm:inline-block px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors hover:opacity-80"
           style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)', backgroundColor: 'transparent' }}
         >
-          {i18n.language === 'es' ? 'Nueva Sesión' : 'New Session'}
+          {t('header.new_session')}
         </button>
-        <span className="text-xs hidden md:inline" style={{ color: 'var(--color-text-muted)' }}>v2.0</span>
+        <span className="text-xs hidden md:inline" style={{ color: 'var(--color-text-muted)' }}>
+          {t('header.version')} 2.0
+        </span>
       </div>
     </header>
   );
