@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useSections,
@@ -22,6 +22,25 @@ export function SectionList() {
 
   const [editState, setEditState] = useState<EditState | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+
+  // Auto-cancel the confirm-clear armed state after 5s of inactivity
+  // (so a user who clicks once and walks away doesn't leave a red
+  // "Confirmar: Eliminar Todas" button waiting for an accidental 2nd
+  // click). Esc also cancels.
+  useEffect(() => {
+    if (!confirmClear) return;
+    const id = setTimeout(() => setConfirmClear(false), 5000);
+    return () => clearTimeout(id);
+  }, [confirmClear]);
+
+  useEffect(() => {
+    if (!confirmClear) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setConfirmClear(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [confirmClear]);
 
   const startEdit = (section: SectionResponse) => {
     setEditState({

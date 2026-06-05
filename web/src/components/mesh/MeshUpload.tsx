@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useUploadMesh, useDeleteMesh, useMeshInfo } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import { TryDemoButton } from '../demo/TryDemoButton';
+import { ErrorBanner } from '../ui/ErrorBanner';
 import type { MeshType } from '../../api/types';
 
 /** Accepted file extensions */
@@ -20,6 +21,7 @@ interface DropZoneProps {
 function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const upload = useUploadMesh();
   const removeMesh = useDeleteMesh();
   const { data: meshInfo } = useMeshInfo(meshId);
@@ -32,16 +34,19 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
     (file: File) => {
       const ext = '.' + file.name.split('.').pop()?.toLowerCase();
       if (!ACCEPTED_EXTENSIONS.includes(ext)) {
-        alert(t('step1.unsupported_format', { formats: ACCEPTED_EXTENSIONS.join(', ') }));
+        setUploadError(t('step1.unsupported_format', { formats: ACCEPTED_EXTENSIONS.join(', ') }));
         return;
       }
       upload.mutate(
         { file, type },
         {
-          onSuccess: (res) => onSetMeshId(res.mesh_id),
+          onSuccess: (res) => {
+            setUploadError(null);
+            onSetMeshId(res.mesh_id);
+          },
           onError: (err) => {
             console.error('Upload failed:', err);
-            alert(t('step1.upload_failed'));
+            setUploadError(t('step1.upload_failed'));
           },
         },
       );
@@ -164,24 +169,26 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
 
   // ── Empty drop zone ──
   return (
-    <div
-      data-slot="mesh-upload-zone"
-      onDrop={handleDrop}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onClick={() => fileInputRef.current?.click()}
-      role="button"
-      tabIndex={0}
-      aria-label={t('step1.drop_zone_aria')}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click();
-      }}
-      className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 cursor-pointer transition-all min-h-[220px] focus-visible:outline-none"
-      style={isDragging
-        ? { borderColor: 'var(--color-mine-blue)', backgroundColor: 'var(--color-surface-muted)' }
-        : { borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }
-      }
-    >
+    <div className="flex flex-col">
+      <ErrorBanner message={uploadError} onDismiss={() => setUploadError(null)} autoDismissMs={6000} />
+      <div
+        data-slot="mesh-upload-zone"
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={() => fileInputRef.current?.click()}
+        role="button"
+        tabIndex={0}
+        aria-label={t('step1.drop_zone_aria')}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click();
+        }}
+        className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 cursor-pointer transition-all min-h-[220px] focus-visible:outline-none"
+        style={isDragging
+          ? { borderColor: 'var(--color-mine-blue)', backgroundColor: 'var(--color-surface-muted)' }
+          : { borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }
+        }
+      >
       <div className="text-4xl mb-3" style={{ color: borderColor === 'blue' ? 'var(--color-mine-blue)' : 'var(--color-mine-green)' }}>
         {type === 'design' ? t('step1.design_icon') : t('step1.topo_icon')}
       </div>
@@ -205,6 +212,7 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
           e.target.value = '';
         }}
       />
+      </div>
     </div>
   );
 }

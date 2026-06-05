@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettings, useUpdateSettings } from '../../api/hooks';
 import type { ProcessSettings } from '../../api/types';
@@ -36,6 +36,23 @@ export function Sidebar() {
   const handleProcessChange = <K extends keyof ProcessSettings>(key: K, value: number) => {
     setProcessSettings((prev) => ({ ...prev, [key]: value }));
   };
+
+  // Debounced settings save: tolerance inputs used to call
+  // updateSettings.mutate on every keystroke (one API call per
+  // digit). Now we coalesce them to one call 400ms after the user
+  // stops typing. handleSave (button) still flushes immediately.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveSettings = (payload: Parameters<typeof updateSettings.mutate>[0]) => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      updateSettings.mutate(payload);
+    }, 400);
+  };
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
 
   const inputStyle: React.CSSProperties = {
     backgroundColor: 'var(--color-surface)',
@@ -164,7 +181,7 @@ export function Sidebar() {
                         value={settings.tolerances.bench_height.neg}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, bench_height: { ...settings.tolerances.bench_height, neg: val } },
                           });
@@ -179,7 +196,7 @@ export function Sidebar() {
                         value={settings.tolerances.bench_height.pos}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, bench_height: { ...settings.tolerances.bench_height, pos: val } },
                           });
@@ -201,7 +218,7 @@ export function Sidebar() {
                         value={settings.tolerances.face_angle.neg}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, face_angle: { ...settings.tolerances.face_angle, neg: val } },
                           });
@@ -216,7 +233,7 @@ export function Sidebar() {
                         value={settings.tolerances.face_angle.pos}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, face_angle: { ...settings.tolerances.face_angle, pos: val } },
                           });
@@ -238,7 +255,7 @@ export function Sidebar() {
                       value={settings.tolerances.berm_width.min}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
-                        if (!isNaN(val)) updateSettings.mutate({
+                        if (!isNaN(val)) saveSettings({
                           process: processSettings,
                           tolerances: { ...settings.tolerances, berm_width: { min: val } },
                         });
@@ -258,7 +275,7 @@ export function Sidebar() {
                         value={settings.tolerances.inter_ramp_angle.neg}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, inter_ramp_angle: { ...settings.tolerances.inter_ramp_angle, neg: val } },
                           });
@@ -273,7 +290,7 @@ export function Sidebar() {
                         value={settings.tolerances.inter_ramp_angle.pos}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, inter_ramp_angle: { ...settings.tolerances.inter_ramp_angle, pos: val } },
                           });
@@ -294,7 +311,7 @@ export function Sidebar() {
                         value={settings.tolerances.overall_angle.neg}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, overall_angle: { ...settings.tolerances.overall_angle, neg: val } },
                           });
@@ -309,7 +326,7 @@ export function Sidebar() {
                         value={settings.tolerances.overall_angle.pos}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) updateSettings.mutate({
+                          if (!isNaN(val)) saveSettings({
                             process: processSettings,
                             tolerances: { ...settings.tolerances, overall_angle: { ...settings.tolerances.overall_angle, pos: val } },
                           });
