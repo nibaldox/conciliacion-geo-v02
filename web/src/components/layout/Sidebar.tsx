@@ -5,7 +5,8 @@ import type { ProcessSettings } from '../../api/types';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
 import { Button } from '../ui/Button';
 
-const inputCls = "w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors focus:ring-2 focus:ring-mine-blue/30";
+const inputCls =
+  "w-full px-3 py-2 border rounded-md text-sm outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono";
 
 export function Sidebar() {
   const { t } = useTranslation();
