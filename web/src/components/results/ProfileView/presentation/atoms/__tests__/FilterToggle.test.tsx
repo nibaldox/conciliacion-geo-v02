@@ -15,6 +15,15 @@ describe('FilterToggle — switch variant', () => {
     expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
   });
 
+  it('exposes data-checked on the wrapper for CSS/test targeting', () => {
+    const { rerender } = render(
+      <FilterToggle checked={false} onChange={() => {}} label="x" />,
+    );
+    expect(screen.getByRole('switch')).toHaveAttribute('data-checked', 'false');
+    rerender(<FilterToggle checked={true} onChange={() => {}} label="x" />);
+    expect(screen.getByRole('switch')).toHaveAttribute('data-checked', 'true');
+  });
+
   it('calls onChange with the opposite value on click', async () => {
     const onChange = vi.fn();
     render(<FilterToggle checked={false} onChange={onChange} label="Show" />);
@@ -41,15 +50,15 @@ describe('FilterToggle — switch variant', () => {
 });
 
 describe('FilterToggle — chip variant', () => {
-  it('shows a checkmark only when checked', () => {
+  it('shows a filled marker (●) only when checked', () => {
     const { rerender } = render(
       <FilterToggle variant="chip" checked={false} onChange={() => {}} label="CUMPLE" />,
     );
-    expect(screen.queryByText('✓')).not.toBeInTheDocument();
+    expect(screen.queryByText('●')).not.toBeInTheDocument();
     rerender(
       <FilterToggle variant="chip" checked={true} onChange={() => {}} label="CUMPLE" />,
     );
-    expect(screen.getByText('✓')).toBeInTheDocument();
+    expect(screen.getByText('●')).toBeInTheDocument();
   });
 
   it('toggles via click', async () => {
