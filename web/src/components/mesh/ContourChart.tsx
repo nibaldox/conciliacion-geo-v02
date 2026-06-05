@@ -17,6 +17,33 @@ import { useTheme } from '../../stores/theme';
 
 Chart.register(CategoryScale, LinearScale, LineElement, PointElement, Title, Tooltip, Legend);
 
+export interface ContourBounds {
+  xmin: number;
+  xmax: number;
+  ymin: number;
+  ymax: number;
+}
+
+/**
+ * Compute the natural aspect ratio of the contour data so 1m
+ * horizontal = 1m vertical on screen. Without this, Chart.js
+ * stretches the y axis to fill the container, which visually
+ * deforms the contour lines (steep slopes look like ripples).
+ *
+ * Falls back to 1 (square) when bounds are missing, zero, or
+ * inverted. The fallback is a conservative default — better a
+ * square chart than a divide-by-zero crash.
+ */
+export function computeContourAspectRatio(
+  bounds: ContourBounds | undefined,
+): number {
+  if (!bounds) return 1;
+  const dx = bounds.xmax - bounds.xmin;
+  const dy = bounds.ymax - bounds.ymin;
+  if (dx <= 0 || dy <= 0) return 1;
+  return dx / dy;
+}
+
 export function ContourChart() {
   const { designMeshId } = useSession();
   const { data: contourData, isLoading, error } = useMeshContours(designMeshId);
@@ -115,9 +142,16 @@ export function ContourChart() {
 
   const chartOptions = useMemo(() => {
     const bounds = contourData?.bounds;
+    // Compute the data's natural aspect ratio so 1m horizontal =
+    // 1m vertical (a contour line that "looks square" on the
+    // ground doesn't get squashed/stretched on screen).
+    // Falls back to a square aspect if no bounds yet.
+    const aspectRatio = computeContourAspectRatio(bounds);
+
     return {
       responsive: true,
-      maintainAspectRatio: false,
+      maintainAspectRatio: true,  // honor the geo aspect ratio above
+      aspectRatio,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -161,6 +195,8 @@ export function ContourChart() {
           grid: { color: gridColor },
           ticks: { color: textColor, font: { size: 10 }, maxTicksLimit: 10 },
           border: { color: isDark ? '#2e2e2e' : '#e5e7eb' },
+          // Lock y aspect to x so 1m horizontal = 1m vertical.
+          // Without this, Chart.js stretches y to fill the container.
           ...(bounds ? { min: bounds.ymin, max: bounds.ymax } : {}),
         },
       },
