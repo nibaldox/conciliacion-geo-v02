@@ -113,24 +113,30 @@ export function FilterToggle({
       data-checked={checked}
       data-variant={variant}
       className={[
-        // Vertical alignment: the track is 16px tall, the label is
-        // ~14px line-height. The whole button is 28px so we have
-        // ~6px on each side as breathing room. The label and
-        // track both use `items-center` so they sit on the same
-        // baseline.
-        'group inline-flex items-center gap-2 h-7 px-2 rounded-md text-[11px] font-semibold',
+        // All toggles share the same outer dimensions so they sit on
+        // the same baseline in the FilterBar. `box-border` (the
+        // Tailwind default) means the 1px border is INSIDE the
+        // button's width, so the X position doesn't shift between
+        // OFF (border: surface) and ON (border: accent).
+        'group inline-flex items-center justify-center gap-2 h-7 px-2.5 rounded-md text-[11px] font-semibold',
         'transition-colors duration-150 select-none whitespace-nowrap',
+        'border',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
         disabled
           ? 'opacity-40 cursor-not-allowed'
           : 'cursor-pointer',
       ].join(' ')}
       style={{
+        // Both states have a visible box. OFF is dark with a
+        // subtle border, ON is the accent color. The visual weight
+        // is now consistent, so toggles don't appear "misaligned"
+        // when comparing ON and OFF in the same row.
         backgroundColor: checked
           ? `color-mix(in srgb, ${ACCENT_VAR[accent]} 14%, transparent)`
-          : 'transparent',
-        border: '1px solid',
-        borderColor: checked ? ACCENT_VAR[accent] : 'var(--color-border)',
+          : 'var(--color-surface-raised)',
+        borderColor: checked
+          ? ACCENT_VAR[accent]
+          : 'var(--color-border-strong)',
       }}
     >
       {/* Leading marker — the strongest ON/OFF cue. */}

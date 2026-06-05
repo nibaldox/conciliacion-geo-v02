@@ -24,6 +24,17 @@ describe('FilterToggle — switch variant', () => {
     expect(screen.getByRole('switch')).toHaveAttribute('data-checked', 'true');
   });
 
+  it('gives OFF toggles a visible box (background + border) so they align with ON ones', () => {
+    render(<FilterToggle checked={false} onChange={() => {}} label="x" />);
+    const btn = screen.getByRole('switch');
+    // The OFF state must have a non-transparent background so the
+    // button reads as a "box" with consistent visual weight next
+    // to the ON state in the same FilterBar row.
+    expect(btn.style.backgroundColor).not.toBe('');
+    expect(btn.style.backgroundColor).not.toBe('transparent');
+    expect(btn.style.borderColor).not.toBe('');
+  });
+
   it('calls onChange with the opposite value on click', async () => {
     const onChange = vi.fn();
     render(<FilterToggle checked={false} onChange={onChange} label="Show" />);
