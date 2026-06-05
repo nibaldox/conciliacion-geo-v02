@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFileSections } from '../../api/hooks';
+import { Button } from '../ui/Button';
 
 type AzMode = 'perpendicular' | 'local_slope';
 
@@ -184,21 +185,13 @@ export function SectionFileUpload() {
 
       {/* Submit */}
       <div className="flex items-center gap-4">
-        <button
+        <Button
           type="submit"
           disabled={!file || mutation.isPending}
-          className="px-5 py-2.5 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ backgroundColor: 'var(--color-mine-blue)' }}
+          loading={mutation.isPending}
         >
-          {mutation.isPending ? (
-            <span className="flex items-center gap-2">
-              <span className="animate-spin inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
-              {t('section_form_file.submitting')}
-            </span>
-          ) : (
-            t('section_form_file.submit')
-          )}
-        </button>
+          {mutation.isPending ? t('section_form_file.submitting') : t('section_form_file.submit')}
+        </Button>
 
         {mutation.isError && (
           <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>

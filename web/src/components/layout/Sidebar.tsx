@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useSettings, useUpdateSettings } from '../../api/hooks';
 import type { ProcessSettings } from '../../api/types';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
+import { Button } from '../ui/Button';
 
 const inputCls = "w-full px-3 py-2 border rounded-lg text-sm outline-none transition-colors focus:ring-2 focus:ring-mine-blue/30";
 
@@ -322,14 +323,14 @@ export function Sidebar() {
               </section>
 
               {/* Save button */}
-              <button
+              <Button
                 onClick={handleSave}
                 disabled={updateSettings.isPending}
-                className="w-full px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
-                style={{ backgroundColor: 'var(--color-mine-blue)' }}
+                loading={updateSettings.isPending}
+                fullWidth
               >
                 {updateSettings.isPending ? t('sidebar.saving') : t('sidebar.save')}
-              </button>
+              </Button>
             </div>
           )}
         </div>

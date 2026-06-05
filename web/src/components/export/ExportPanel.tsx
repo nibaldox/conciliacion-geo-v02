@@ -6,6 +6,7 @@ import {
   useExportDxf,
   useExportImages,
 } from '../../api/hooks';
+import { Button } from '../ui/Button';
 
 interface ExportForm {
   project: string;
@@ -165,24 +166,16 @@ function ExportButton({
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button
+      variant="secondary"
       onClick={onClick}
       disabled={disabled}
-      className="flex flex-col items-center gap-2 px-4 py-4 rounded-xl shadow-sm transition-all duration-200"
-      style={disabled
-        ? { backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', cursor: 'not-allowed', border: '1px solid var(--color-border)' }
-        : { backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }
-      }
+      loading={loading}
+      fullWidth
+      className="!flex-col !gap-2 !px-4 !py-4"
     >
-      {loading ? (
-        <svg className="animate-spin h-6 w-6" style={{ color: 'var(--color-mine-blue)' }} viewBox="0 0 24 24" fill="none">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-      ) : (
-        <span className="text-2xl">{icon}</span>
-      )}
+      {!loading && <span className="text-2xl">{icon}</span>}
       <span className="text-xs font-medium">{label}</span>
-    </button>
+    </Button>
   );
 }

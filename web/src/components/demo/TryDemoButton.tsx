@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
+import { Button } from '../ui/Button';
 
 /**
  * CTA shown in the mesh-upload empty state. Triggers demo mode:
@@ -28,18 +29,9 @@ export function TryDemoButton() {
       <p className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
         {t('demo.try_subtitle')}
       </p>
-      <button
-        onClick={loadDemo}
-        disabled={demoLoading}
-        className="mt-1 px-4 py-2 rounded-lg text-sm font-semibold transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue"
-        style={{
-          backgroundColor: 'var(--color-mine-blue)',
-          color: '#fff',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-        }}
-      >
-        {demoLoading ? `⏳ ${t('common.loading')}` : t('demo.try_button')}
-      </button>
+      <Button onClick={loadDemo} loading={demoLoading} className="mt-1">
+        {demoLoading ? t('common.loading') : t('demo.try_button')}
+      </Button>
     </div>
   );
 }

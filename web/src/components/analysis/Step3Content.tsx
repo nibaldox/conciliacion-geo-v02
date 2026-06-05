@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ProcessButton } from './ProcessButton';
 import { ProcessProgress } from './ProcessProgress';
 import { Tooltip } from '../ui/Tooltip';
+import { Button } from '../ui/Button';
 import { useSession } from '../../stores/session';
 import { useProcessStatus, useSettings, useUpdateSettings } from '../../api/hooks';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
@@ -82,22 +83,12 @@ export function Step3Content() {
 
         {/* Navigation */}
         <div className="flex items-center gap-4 mt-2">
-          <button
-            onClick={prevStep}
-            disabled={isProcessing}
-            className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
-          >
+          <Button variant="secondary" onClick={prevStep} disabled={isProcessing}>
             {t('step3.prev')}
-          </button>
-          <button
-            onClick={nextStep}
-            disabled={!isComplete}
-            className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ backgroundColor: 'var(--color-mine-blue)', color: '#fff' }}
-          >
+          </Button>
+          <Button onClick={nextStep} disabled={!isComplete}>
             {t('step3.next')}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -148,14 +139,15 @@ export function Step3Content() {
           </LabeledField>
         </div>
 
-        <button
+        <Button
           onClick={handleSaveSettings}
           disabled={isProcessing || updateSettings.isPending}
-          className="mt-4 w-full px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ backgroundColor: 'var(--color-mine-blue)' }}
+          loading={updateSettings.isPending}
+          fullWidth
+          className="mt-4"
         >
-          {updateSettings.isPending ? `⏳ ${t('common.loading')}` : t('step3.save')}
-        </button>
+          {updateSettings.isPending ? t('common.loading') : t('step3.save')}
+        </Button>
       </div>
     </div>
   );
