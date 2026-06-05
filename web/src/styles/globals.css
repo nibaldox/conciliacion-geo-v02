@@ -102,25 +102,97 @@
   outline: none;
 }
 
-/* ── Dark mode selector (must be first) ────────────────────── */
+/* ── Dark mode selector (legacy — kept for compatibility) ──── */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ── Theme tokens — Light mode ───────────────────────────────── */
+/* ── Theme tokens — Mission Control / Dark by default ──────────
+ * The new design uses a deep blue-black surface with neon
+ * status colors. Inter for body, JetBrains Mono / ui-monospace
+ * for technical content (coords, IDs, status codes). The
+ * monospace stack uses system fonts to avoid the ~200KB web
+ * font payload — looks the same on dev as in prod.
+ * ──────────────────────────────────────────────────────────── */
 @theme {
+  /* Brand data colors — brighter for dark backgrounds */
+  --color-mine-blue: #3b82f6;
+  --color-mine-green: #10b981;
+  --color-mine-yellow: #f59e0b;
+  --color-mine-red: #ef4444;
+  --color-mine-gray: #9ca3af;
+
+  /* Surfaces — deep blue-black, the "void" of the design */
+  --color-surface: #0a0e14;
+  --color-surface-raised: #11141a;
+  --color-surface-muted: #161a21;
+  --color-surface-sunken: #050709;
+
+  /* Borders — subtle, with a dashed variant for "field" cards */
+  --color-border: #1f2937;
+  --color-border-strong: #374151;
+  --color-border-dashed: #4b5563;
+
+  /* Text — off-white, never pure #fff (causes eye strain) */
+  --color-text-primary: #f5f5f5;
+  --color-text-secondary: #a3a3a3;
+  --color-text-muted: #6b7280;
+  --color-text-dim: #4b5563;
+
+  /* Accent — orange/amber, used for active step + CTAs */
+  --color-accent: #f97316;
+  --color-accent-bright: #fb923c;
+  --color-accent-bg: rgba(249, 115, 22, 0.12);
+
+  /* Status colors (semi-transparent bg + bright fg) */
+  --status-ok-bg: rgba(16, 185, 129, 0.10);
+  --status-ok-text: #34d399;
+  --status-ok-border: #059669;
+  --status-warn-bg: rgba(245, 158, 11, 0.10);
+  --status-warn-text: #fbbf24;
+  --status-warn-border: #d97706;
+  --status-nok-bg: rgba(239, 68, 68, 0.10);
+  --status-nok-text: #f87171;
+  --status-nok-border: #dc2626;
+  --status-missing-bg: rgba(107, 114, 128, 0.10);
+  --status-missing-text: #9ca3af;
+  --status-missing-border: #4b5563;
+  --status-extra-bg: rgba(139, 92, 246, 0.10);
+  --status-extra-text: #a78bfa;
+  --status-extra-border: #7c3aed;
+
+  /* Fonts — system stack to keep the bundle small */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code',
+    Menlo, Consolas, monospace;
+
+  /* Shadows — more pronounced for dark surfaces */
+  --shadow-glow-accent: 0 0 20px rgba(249, 115, 22, 0.15);
+  --shadow-glow-ok: 0 0 16px rgba(16, 185, 129, 0.20);
+  --shadow-glow-warn: 0 0 16px rgba(245, 158, 11, 0.20);
+  --shadow-glow-nok: 0 0 16px rgba(239, 68, 68, 0.20);
+}
+
+/* ── Light mode (legacy — opt-in via .light class) ───────────── */
+.light {
+  --color-surface: #ffffff;
+  --color-surface-raised: #f9fafb;
+  --color-surface-muted: #f3f4f6;
+  --color-surface-sunken: #fafafa;
+  --color-border: #e5e7eb;
+  --color-border-strong: #d1d5db;
+  --color-border-dashed: #9ca3af;
+  --color-text-primary: #111827;
+  --color-text-secondary: #4b5563;
+  --color-text-muted: #9ca3af;
+  --color-text-dim: #d1d5db;
+  --color-accent: #ea580c;
+  --color-accent-bright: #f97316;
+  --color-accent-bg: rgba(234, 88, 12, 0.08);
+
   --color-mine-blue: #2F5496;
   --color-mine-green: #2E7D32;
   --color-mine-yellow: #F9A825;
   --color-mine-red: #C62828;
-  --color-mine-gray: #757575;
-
-  --color-surface: #ffffff;
-  --color-surface-raised: #f9fafb;
-  --color-surface-muted: #f3f4f6;
-  --color-border: #e5e7eb;
-  --color-border-strong: #d1d5db;
-  --color-text-primary: #111827;
-  --color-text-secondary: #4b5563;
-  --color-text-muted: #9ca3af;
 
   --status-ok-bg: #ecfdf5;
   --status-ok-text: #065f46;
@@ -139,37 +211,9 @@
   --status-extra-border: #ddd6fe;
 }
 
-/* ── Theme tokens — Dark mode ────────────────────────────────── */
-.dark {
-  --color-surface: #0f0f0f;
-  --color-surface-raised: #171717;
-  --color-surface-muted: #1f1f1f;
-  --color-border: #2e2e2e;
-  --color-border-strong: #404040;
-  --color-text-primary: #e5e5e5;
-  --color-text-secondary: #a3a3a3;
-  --color-text-muted: #6b6b6b;
-
-  --status-ok-bg: #052e16;
-  --status-ok-text: #86efac;
-  --status-ok-border: #166534;
-  --status-warn-bg: #1c1400;
-  --status-warn-text: #fde047;
-  --status-warn-border: #854d0e;
-  --status-nok-bg: #1c0505;
-  --status-nok-text: #fca5a5;
-  --status-nok-border: #991b1b;
-  --status-missing-bg: #1a1a1a;
-  --status-missing-text: #a3a3a3;
-  --status-missing-border: #404040;
-  --status-extra-bg: #1e1b4b;
-  --status-extra-text: #c4b5fd;
-  --status-extra-border: #4c1d95;
-}
-
 /* ── Base styles ─────────────────────────────────────────────── */
 body {
-  font-family: 'Plus Jakarta Sans', 'Outfit', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   background-color: var(--color-surface);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;

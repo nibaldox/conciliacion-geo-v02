@@ -27,15 +27,16 @@ function resolveTokens(): {
   fontFamily: string;
 } {
   if (typeof window === 'undefined') {
-    // SSR safety — fall back to a safe light theme.
+    // SSR safety — fall back to a safe dark theme (matches the
+    // Mission Control aesthetic that's the default in :root).
     return {
       bg: 'transparent',
-      surface: '#ffffff',
-      textPrimary: '#111827',
+      surface: '#0a0e14',
+      textPrimary: '#f5f5f5',
       textMuted: '#6b7280',
-      gridLine: 'rgba(0,0,0,0.06)',
-      designLine: '#2F5496',
-      topoLine: '#2E7D32',
+      gridLine: 'rgba(255,255,255,0.08)',
+      designLine: '#3b82f6',
+      topoLine: '#10b981',
       reconciledDash: '#94a3b8',
       fontFamily: 'system-ui, -apple-system, sans-serif',
     };
@@ -45,12 +46,12 @@ function resolveTokens(): {
     cs.getPropertyValue(name).trim() || fallback;
   return {
     bg: 'transparent',
-    surface: read('--color-surface', '#ffffff'),
-    textPrimary: read('--color-text-primary', '#111827'),
+    surface: read('--color-surface', '#0a0e14'),
+    textPrimary: read('--color-text-primary', '#f5f5f5'),
     textMuted: read('--color-text-muted', '#6b7280'),
-    gridLine: read('--color-border', 'rgba(0,0,0,0.06)'),
-    designLine: read('--color-mine-blue', '#2F5496'),
-    topoLine: read('--color-mine-green', '#2E7D32'),
+    gridLine: read('--color-border', 'rgba(255,255,255,0.08)'),
+    designLine: read('--color-mine-blue', '#3b82f6'),
+    topoLine: read('--color-mine-green', '#10b981'),
     reconciledDash: read('--color-text-muted', '#94a3b8'),
     fontFamily: read(
       '--font-sans',

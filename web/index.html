@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" class="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -10,9 +10,8 @@
       name="description"
       content="Compara superficies 3D de diseño vs topografía real en minería a cielo abierto. Genera secciones transversales, evalúa cumplimiento contra tolerancias y exporta reportes Excel/Word/DXF."
     />
-    <meta name="theme-color" content="#2F5496" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#0f0f0f" media="(prefers-color-scheme: dark)" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0a0e14" />
+    <meta name="color-scheme" content="dark" />
     <meta name="generator" content="Conciliación Geotécnica v2" />
 
     <!-- ── Icons & manifest ─────────────────────────────────── -->
@@ -43,13 +42,10 @@
     />
     <meta name="twitter:image" content="./og/og-image.png" />
 
-    <!-- ── Performance hints ─────────────────────────────────── -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
-    />
+    <!-- ── Fonts: system stack (no web fonts to keep the bundle small).
+         Inter / JetBrains Mono fall back to system-ui / ui-monospace
+         so the design is consistent on every machine without
+         preconnect/preload overhead. ──────────────────────────── -->
 
     <!-- ── Structured data ───────────────────────────────────── -->
     <script type="application/ld+json">
@@ -88,7 +84,7 @@
       })();
     </script>
   </head>
-  <body>
+  <body style="background-color: #0a0e14; color: #f5f5f5;">
     <noscript>
       <div style="padding: 2rem; font-family: system-ui; text-align: center;">
         <h1>JavaScript required</h1>
