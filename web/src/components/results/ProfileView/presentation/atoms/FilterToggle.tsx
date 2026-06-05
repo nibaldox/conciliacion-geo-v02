@@ -118,7 +118,7 @@ export function FilterToggle({
         // Tailwind default) means the 1px border is INSIDE the
         // button's width, so the X position doesn't shift between
         // OFF (border: surface) and ON (border: accent).
-        'group inline-flex items-center justify-center gap-2 h-7 px-2.5 rounded-md text-[11px] font-semibold',
+        'group inline-flex items-center justify-center gap-2.5 h-7 px-2.5 rounded-md text-[11px] font-semibold',
         'transition-colors duration-150 select-none whitespace-nowrap',
         'border',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
@@ -151,10 +151,14 @@ export function FilterToggle({
         }}
       />
 
-      {/* The track — secondary cue. */}
+      {/* The track — secondary cue.
+       * overflow-hidden clips the thumb to the pill shape; without
+       * it the thumb bleeds onto the first letter of the label.
+       * min-w-6 protects the track from being collapsed to 0 by a
+       * flex shrink edge case. */}
       <span
         aria-hidden="true"
-        className="relative inline-block h-3.5 w-6 rounded-full transition-colors shrink-0"
+        className="relative inline-block h-3.5 w-6 min-w-6 rounded-full transition-colors shrink-0 overflow-hidden"
         style={{
           backgroundColor: checked ? ACCENT_VAR[accent] : 'var(--color-border-strong)',
         }}
@@ -162,7 +166,7 @@ export function FilterToggle({
         <span
           className="absolute top-0.5 h-2.5 w-2.5 rounded-full transition-transform"
           style={{
-            transform: `translateX(${checked ? '14px' : '2px'})`,
+            transform: `translateX(${checked ? '13px' : '2px'})`,
             backgroundColor: '#0a0e14',
             boxShadow: checked
               ? `0 0 0 1.5px ${ACCENT_VAR[accent]}`
@@ -171,8 +175,10 @@ export function FilterToggle({
         />
       </span>
 
-      {/* The label — primary cue. Color + weight change. */}
-      <span style={labelStyle}>{label}</span>
+      {/* The label — primary cue. Color + weight change.
+       * pl-2 ensures at least 8px of breathing room from the
+       * track even if a future change shrinks the gap. */}
+      <span style={labelStyle} className="pl-2">{label}</span>
 
       {badge != null && (
         <span

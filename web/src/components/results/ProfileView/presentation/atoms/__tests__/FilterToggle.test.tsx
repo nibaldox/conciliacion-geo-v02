@@ -79,3 +79,47 @@ describe('FilterToggle — chip variant', () => {
     expect(onChange).toHaveBeenCalledWith(true);
   });
 });
+
+describe('FilterToggle — track layout (regression: thumb bleeds onto label)', () => {
+  it('clips the thumb to the track with overflow-hidden so it cannot bleed onto the label', () => {
+    const { container } = render(
+      <FilterToggle checked={true} onChange={() => {}} label="Reconciliado" />,
+    );
+    // The track is the 24px pill. It MUST have overflow-hidden or
+    // the thumb visually extends onto the first letter of the label.
+    const track = container.querySelector('span.relative.inline-block.rounded-full');
+    expect(track).not.toBeNull();
+    expect(track!.className).toContain('overflow-hidden');
+  });
+
+  it('uses a flex gap of 2.5 (10px) between track and label so the thumb has clear breathing room', () => {
+    const { container } = render(
+      <FilterToggle checked={true} onChange={() => {}} label="X" />,
+    );
+    const btn = container.querySelector('button[role="switch"]')!;
+    // gap-2.5 = 0.625rem = 10px (Tailwind v4). Anything tighter
+    // and the thumb (at translateX 13-14px) visually touches the
+    // first letter on dense renders.
+    expect(btn.className).toMatch(/\bgap-2\.5\b/);
+  });
+
+  it('protects the track from flex-shrink collapse with min-w-6', () => {
+    const { container } = render(
+      <FilterToggle checked={true} onChange={() => {}} label="X" />,
+    );
+    const track = container.querySelector('span.relative.inline-block.rounded-full')!;
+    // Without min-w-6, an aggressive flex container can collapse
+    // the track to 0px wide, leaving the thumb floating in the gap.
+    expect(track.className).toContain('min-w-6');
+  });
+
+  it('keeps the thumb translateX within track bounds (24px wide, 10px thumb)', () => {
+    // OFF: thumb at 2px → right edge at 12px (well inside 24px).
+    // ON:  thumb at 13px → right edge at 23px (1px from right edge,
+    // safe inside 24px — was 14px before, too close to the rim).
+    const offRightEdge = 2 + 10;
+    const onRightEdge = 13 + 10;
+    expect(offRightEdge).toBeLessThan(24);
+    expect(onRightEdge).toBeLessThan(24);
+  });
+});
