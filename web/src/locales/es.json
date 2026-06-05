@@ -331,6 +331,18 @@
     "topo_label": "Topografía",
     "tooltip": "Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m"
   },
+  "wizard": {
+    "nav_label": "Progreso del asistente",
+    "step": "Paso",
+    "hint_mesh_design": "Cargue la superficie de diseño para continuar",
+    "hint_mesh_topo": "Cargue la topografía as-built para continuar",
+    "hint_step2_needs_meshes": "Paso 1: cargue ambas superficies primero",
+    "hint_step2_no_sections": "Defina al menos una sección para continuar",
+    "hint_step3_needs_sections": "Paso 2: defina al menos una sección primero",
+    "hint_step3_needs_run": "Ejecute el análisis para ver resultados",
+    "hint_step4_needs_run": "Paso 3: ejecute el análisis para generar resultados",
+    "hint_step4_running": "Análisis en curso…"
+  },
   "compliance": {
     "CUMPLE": "CUMPLE",
     "FUERA DE TOLERANCIA": "FUERA DE TOLERANCIA",

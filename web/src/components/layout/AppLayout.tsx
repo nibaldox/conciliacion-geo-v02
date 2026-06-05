@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Header } from './Header';
-import { StepNav } from './StepNav';
+import { WizardProgress } from './WizardProgress';
 import { Sidebar } from './Sidebar';
 import { DemoBanner } from '../demo/DemoBanner';
 import { useSession } from '../../stores/session';
@@ -30,7 +30,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         Skip to main content
       </a>
       <Header />
-      <StepNav />
+      <WizardProgress />
 
       <main id="main-content" tabIndex={-1} className="flex-1 overflow-hidden">
         <div className="h-full flex flex-col">

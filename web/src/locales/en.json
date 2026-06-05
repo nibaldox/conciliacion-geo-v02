@@ -331,6 +331,18 @@
     "topo_label": "Topography",
     "tooltip": "East: %{x:.1f}m<br>North: %{y:.1f}m<br>Elev: %{text:.1f}m"
   },
+  "wizard": {
+    "nav_label": "Wizard progress",
+    "step": "Step",
+    "hint_mesh_design": "Upload the design surface to continue",
+    "hint_mesh_topo": "Upload the as-built topography to continue",
+    "hint_step2_needs_meshes": "Step 1: upload both surfaces first",
+    "hint_step2_no_sections": "Define at least one section to continue",
+    "hint_step3_needs_sections": "Step 2: define at least one section first",
+    "hint_step3_needs_run": "Run the analysis to see results",
+    "hint_step4_needs_run": "Step 3: run the analysis to generate results",
+    "hint_step4_running": "Analysis in progress…"
+  },
   "compliance": {
     "CUMPLE": "COMPLIES",
     "FUERA DE TOLERANCIA": "OUT OF TOLERANCE",
