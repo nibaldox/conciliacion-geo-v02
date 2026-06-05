@@ -52,10 +52,13 @@ export {
   useComplianceStats,
 } from './application';
 
-// Presentation atoms
+// Presentation components
 export {
+  FilterBar,
+  ProfileChart,
   StatusPill,
   FilterToggle,
   MetricValue,
   StatusDot,
-} from './presentation/atoms';
+} from './presentation';
+export type { FilterBarProps, ProfileChartProps } from './presentation';
