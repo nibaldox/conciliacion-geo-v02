@@ -41,7 +41,6 @@ export function MetricValue({
   value,
   unit,
   size = 'md',
-  muted = false,
   accent,
   title,
 }: MetricValueProps) {
@@ -58,18 +57,28 @@ export function MetricValue({
       <span
         className={[
           'uppercase tracking-wider font-medium',
-          muted ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-muted)]',
           LABEL_SIZE[size],
         ].join(' ')}
+        style={{
+          color: 'var(--color-text-muted)',
+          fontFamily: 'var(--font-mono)',
+        }}
       >
         {label}
       </span>
-      <span className={[VALUE_SIZE[size], 'font-semibold tabular-nums'].join(' ')} style={style}>
+      <span
+        className={[VALUE_SIZE[size], 'font-semibold tabular-nums'].join(' ')}
+        style={style}
+      >
         {value}
       </span>
       {unit && (
         <span
-          className={['tabular-nums text-[var(--color-text-muted)]', LABEL_SIZE[size]].join(' ')}
+          className={['tabular-nums', LABEL_SIZE[size]].join(' ')}
+          style={{
+            color: 'var(--color-text-muted)',
+            fontFamily: 'var(--font-mono)',
+          }}
         >
           {unit}
         </span>
