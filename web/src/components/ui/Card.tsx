@@ -41,6 +41,9 @@ export interface CardProps {
   readonly children?: ReactNode;
   /** Click handler. Renders as a button if provided, div otherwise. */
   readonly onClick?: () => void;
+  /** Any extra data-* attribute (data-slot, data-testid, etc.).
+   *  Spread onto the root element for E2E test targeting. */
+  readonly [key: `data-${string}`]: string | undefined;
 }
 
 const VARIANT_STYLES: Record<Variant, React.CSSProperties> = {

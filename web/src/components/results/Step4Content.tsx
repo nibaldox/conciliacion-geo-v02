@@ -1,3 +1,13 @@
+/**
+ * Step4Content — the "RESULTADOS" step (MISIÓN 04).
+ *
+ * Mission Control layout: a row of uppercase mono tabs at the
+ * top, the active tab's content fills the rest, and a left-
+ * aligned back button at the bottom. The ProfileView is the
+ * centerpiece (built earlier with clean architecture; it just
+ * needs the new Card/StatusBar atoms which it already uses).
+ */
+
 import { Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SectionSelector } from './SectionSelector';
@@ -10,6 +20,7 @@ import {
 } from '../lazy';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { ProfileView } from './ProfileView';
+import { Button, StatusBar } from '../ui';
 import { useSession } from '../../stores/session';
 
 type ResultsTab = 'profiles' | 'table' | 'dashboard' | 'bench-editor' | 'export' | 'ai';
@@ -30,21 +41,35 @@ export function Step4Content() {
 
   return (
     <div className="flex flex-col h-full gap-4 min-h-0">
-      {/* Tab bar */}
-      <div className="flex gap-2 shrink-0 overflow-x-auto" role="tablist" aria-label={t('step4.title')}>
+      {/* Tab bar — uppercase mono, like a console menu */}
+      <div
+        className="flex gap-1 shrink-0 overflow-x-auto p-1"
+        role="tablist"
+        aria-label={t('step4.title')}
+        style={{
+          backgroundColor: 'var(--color-surface-raised)',
+          border: '1px solid var(--color-border)',
+          borderRadius: '0.5rem',
+        }}
+      >
         {RESULT_TABS.map((tab) => (
           <button
             key={tab.key}
             role="tab"
             aria-selected={activeTab === tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className="shrink-0 px-4 py-2.5 rounded-lg text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mine-blue focus-visible:ring-offset-2"
-            style={activeTab === tab.key
-              ? { backgroundColor: 'var(--color-mine-blue)', color: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }
-              : { backgroundColor: 'var(--color-surface)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }
-            }
+            className="shrink-0 px-3 py-1.5 text-[11px] uppercase tracking-widest font-semibold rounded transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            style={{
+              backgroundColor: activeTab === tab.key
+                ? 'var(--color-accent-bg)'
+                : 'transparent',
+              color: activeTab === tab.key
+                ? 'var(--color-accent-bright)'
+                : 'var(--color-text-muted)',
+              fontFamily: 'var(--font-mono)',
+            }}
           >
-            <span className="mr-1.5">{tab.icon}</span>
+            <span className="mr-1.5" aria-hidden="true">{tab.icon}</span>
             {t(tab.translationKey)}
           </button>
         ))}
@@ -90,15 +115,22 @@ export function Step4Content() {
         )}
       </div>
 
+      {/* Sector status — a tiny "site reconciliation" footer that
+       *  matches the reference design's 'SECTOR 07: SITE
+       *  RECONCILIATION' hero. */}
+      <StatusBar
+        title="SECTOR · SITE RECONCILIATION"
+        entries={[
+          { level: 'system', text: 'Secure link established' },
+          { level: 'info', text: t('step4.footer_status', { defaultValue: 'Awaiting operator action' }) },
+        ]}
+      />
+
       {/* Navigation */}
       <div className="flex justify-start pt-1 pb-1 shrink-0">
-        <button
-          onClick={prevStep}
-          className="px-5 py-2.5 rounded-lg text-sm font-medium transition-colors"
-          style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' }}
-        >
+        <Button variant="secondary" onClick={prevStep} size="sm">
           {t('step4.prev')}
-        </button>
+        </Button>
       </div>
     </div>
   );

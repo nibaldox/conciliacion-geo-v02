@@ -217,6 +217,12 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
   );
 }
 
+/* ─── Exported internals — used by Step1Content to compose the
+   Mission Control "PROTOCOL ALPHA / PROTOCOL OMEGA" cards. ── */
+
+export { DropZone };
+export type { DropZoneProps };
+
 /* ─── Main MeshUpload Component ──────────────────────────── */
 
 export function MeshUpload() {
