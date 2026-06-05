@@ -25,27 +25,45 @@ export function SectionHeader({ section, benchCount, lastRunAt }: SectionHeaderP
   return (
     <header
       data-slot="section-header"
-      className="px-3 md:px-6 py-3 border-b flex flex-wrap items-baseline gap-x-4 gap-y-1"
+      className="px-3 md:px-6 py-2.5 border-b flex flex-wrap items-center gap-x-4 gap-y-1.5"
       style={{
         backgroundColor: 'var(--color-surface)',
         borderColor: 'var(--color-border)',
       }}
     >
-      <h2
-        className="text-sm font-semibold mr-1"
-        style={{ color: 'var(--color-text-primary)' }}
-        title={section.id}
-      >
-        {section.name}
-      </h2>
+      {/* Eyebrow + section name as the title group */}
+      <div className="flex items-baseline gap-2 mr-1 min-w-0">
+        <span
+          className="text-[10px] uppercase tracking-widest font-semibold"
+          style={{
+            color: 'var(--color-accent-bright)',
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          {t('profileView.header.eyebrow', { defaultValue: 'SECTION ANALYSIS' })}
+        </span>
+        <span
+          className="text-[10px] uppercase tracking-widest"
+          style={{
+            color: 'var(--color-text-dim)',
+            fontFamily: 'var(--font-mono)',
+          }}
+        >
+          /
+        </span>
+        <h2
+          className="text-sm font-semibold uppercase tracking-wider"
+          style={{
+            color: 'var(--color-text-primary)',
+            fontFamily: 'var(--font-mono)',
+          }}
+          title={section.id}
+        >
+          {section.name}
+        </h2>
+      </div>
 
-      <span
-        className="text-[10px] uppercase tracking-wider font-semibold"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
-        ·
-      </span>
-
+      {/* Inline metadata: az, sector, length, bench count */}
       <MetricValue
         label={t('profileView.header.azimuth', { defaultValue: 'Az' })}
         value={section.azimuth.toFixed(0)}
@@ -73,12 +91,15 @@ export function SectionHeader({ section, benchCount, lastRunAt }: SectionHeaderP
 
       {lastRunAt && (
         <span
-          className="text-[11px] tabular-nums hidden lg:inline"
-          style={{ color: 'var(--color-text-muted)' }}
+          className="text-[10px] uppercase tracking-widest hidden lg:inline tabular-nums"
+          style={{
+            color: 'var(--color-text-muted)',
+            fontFamily: 'var(--font-mono)',
+          }}
           title={lastRunAt}
         >
           {t('profileView.header.last_run', {
-            defaultValue: 'Último análisis: {{ago}}',
+            defaultValue: 'LAST RUN · {{ago}}',
             ago: formatRelativeTime(lastRunAt),
           })}
         </span>

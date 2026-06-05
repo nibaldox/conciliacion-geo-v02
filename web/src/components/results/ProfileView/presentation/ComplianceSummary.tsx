@@ -27,22 +27,44 @@ export function ComplianceSummary({ benches }: ComplianceSummaryProps) {
   return (
     <section
       data-slot="compliance-summary"
-      className="rounded-lg p-4 flex flex-col gap-3"
+      className="rounded-lg p-3 flex flex-col gap-2.5"
       style={{
-        backgroundColor: 'var(--color-surface)',
+        backgroundColor: 'var(--color-surface-raised)',
         border: '1px solid var(--color-border)',
       }}
-      aria-label={t('profileView.summary.aria', { defaultValue: 'Resumen de cumplimiento' })}
+      aria-label={t('profileView.summary.aria', { defaultValue: 'Mission status' })}
     >
       {/* Headline */}
-      <header className="flex items-baseline justify-between gap-4">
-        <h3
-          className="text-[11px] uppercase tracking-wider font-semibold"
-          style={{ color: 'var(--color-text-muted)' }}
+      <header className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-flex items-center justify-center w-6 h-6 rounded"
+            style={{
+              backgroundColor: 'var(--color-accent-bg)',
+              color: 'var(--color-accent-bright)',
+              fontSize: '12px',
+            }}
+            aria-hidden="true"
+          >
+            ⛳
+          </span>
+          <h3
+            className="text-[10px] uppercase tracking-widest font-semibold"
+            style={{
+              color: 'var(--color-text-muted)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          >
+            {t('profileView.summary.title', { defaultValue: 'MISSION STATUS' })}
+          </h3>
+        </div>
+        <span
+          className="text-[10px] uppercase tracking-widest tabular-nums"
+          style={{
+            color: 'var(--color-text-muted)',
+            fontFamily: 'var(--font-mono)',
+          }}
         >
-          {t('profileView.summary.title', { defaultValue: 'Cumplimiento' })}
-        </h3>
-        <span className="text-xs tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
           {stats.total === 0
             ? t('profileView.summary.no_benches', { defaultValue: 'Sin bancos' })
             : t('profileView.summary.headline', {

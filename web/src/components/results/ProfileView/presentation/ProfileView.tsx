@@ -101,7 +101,11 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
        *  Chart keeps a 1:1 aspect via scaleanchor; height auto-
        *  fits the available viewport. */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-2 min-h-0">
-        <div className="relative rounded-lg overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
+        <div
+          className="relative rounded-lg overflow-hidden"
+          style={{ border: '1px solid var(--color-border)' }}
+          data-slot="profile-chart-frame"
+        >
           <SectionNavigator variant="overlay" showLabels />
           <ProfileChart
             viewModel={viewModel}
@@ -109,7 +113,11 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
             crossLink={crossLink}
           />
         </div>
-        <div className="min-h-0 overflow-hidden">
+        <div
+          className="min-h-0 overflow-hidden rounded-lg"
+          style={{ border: '1px solid var(--color-border)' }}
+          data-slot="bench-table-frame"
+        >
           <BenchTable
             benches={viewModel.benches}
             crossLink={crossLink}

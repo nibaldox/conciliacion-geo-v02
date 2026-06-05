@@ -32,7 +32,7 @@ describe('ComplianceSummary', () => {
     // The i18n key is missing from the locales so i18next renders
     // the defaultValue without interpolation. We just verify the
     // headline element exists with the i18n key pattern.
-    expect(container.textContent).toMatch(/Cumplimiento/);
+    expect(container.textContent).toMatch(/MISSION STATUS/);
     expect(container.querySelector('header')).toBeInTheDocument();
   });
 
