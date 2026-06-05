@@ -56,9 +56,21 @@ export {
 export {
   FilterBar,
   ProfileChart,
+  SectionHeader,
+  BenchTable,
+  ComplianceSummary,
+  ProfileView,
   StatusPill,
   FilterToggle,
   MetricValue,
   StatusDot,
+  Spinner,
 } from './presentation';
-export type { FilterBarProps, ProfileChartProps } from './presentation';
+export type {
+  FilterBarProps,
+  ProfileChartProps,
+  SectionHeaderProps,
+  BenchTableProps,
+  ComplianceSummaryProps,
+  ProfileViewProps,
+} from './presentation';

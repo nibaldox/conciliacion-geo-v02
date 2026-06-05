@@ -8,6 +8,18 @@ export type { FilterBarProps } from './FilterBar';
 export { ProfileChart } from './ProfileChart';
 export type { ProfileChartProps } from './ProfileChart';
 
+export { SectionHeader } from './SectionHeader';
+export type { SectionHeaderProps } from './SectionHeader';
+
+export { BenchTable } from './BenchTable';
+export type { BenchTableProps } from './BenchTable';
+
+export { ComplianceSummary } from './ComplianceSummary';
+export type { ComplianceSummaryProps } from './ComplianceSummary';
+
+export { ProfileView } from './ProfileView';
+export type { ProfileViewProps } from './ProfileView';
+
 // Atoms barrel (re-exported here so callers can `import { StatusPill }
 // from '@/.../ProfileView/presentation'` if they want a single import)
 export {
@@ -24,3 +36,8 @@ export type {
   MetricSize,
   StatusDotProps,
 } from './atoms';
+
+// Spinner is shared with the rest of the app via ui/, not in
+// our atoms. Re-export it from the feature index for callers
+// that import from `@/.../ProfileView`.
+export { Spinner } from '../../../ui/Spinner';

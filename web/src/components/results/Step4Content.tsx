@@ -3,13 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { SectionSelector } from './SectionSelector';
 import { ExportPanel } from '../export/ExportPanel';
 import {
-  LazyProfileChart,
   LazyResultsTable,
   LazyDashboard,
   LazyBenchEditor,
   LazyAIReporter,
 } from '../lazy';
 import { LoadingSpinner } from '../LoadingSpinner';
+import { ProfileView } from './ProfileView';
 import { useSession } from '../../stores/session';
 
 type ResultsTab = 'profiles' | 'table' | 'dashboard' | 'bench-editor' | 'export' | 'ai';
@@ -57,12 +57,8 @@ export function Step4Content() {
             <div className="shrink-0">
               <SectionSelector />
             </div>
-            <div className="flex-1 min-h-0 bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-              <Suspense fallback={<LoadingSpinner message={t('step4.loading_profiles')} />}>
-                <div className="max-w-4xl mx-auto" style={{ height: '400px' }}>
-                  <LazyProfileChart />
-                </div>
-              </Suspense>
+            <div className="flex-1 min-h-0">
+              <ProfileView />
             </div>
           </div>
         )}
