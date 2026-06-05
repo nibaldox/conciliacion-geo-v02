@@ -1,0 +1,113 @@
+/**
+ * Pure sorting operations for the bench table.
+ *
+ * Sort field enum + a factory that returns a `Comparator<Bench>` for
+ * the chosen field+direction. Centralised so every sort UI (column
+ * header, default order, URL-saved order) goes through one place.
+ */
+
+import type { Bench, BenchStatus } from './types';
+import { STATUS_PRESENTATION_ORDER } from './status';
+
+// ─── Field enum ─────────────────────────────────────────────
+
+export const SORT_FIELDS = [
+  'benchNumber',
+  'crestElevation',
+  'height',
+  'faceAngle',
+  'bermWidth',
+  'status',
+] as const;
+
+export type SortField = (typeof SORT_FIELDS)[number];
+
+/** Direction: `asc` = smallest first, `desc` = largest first. */
+export type SortDirection = 'asc' | 'desc';
+
+export const DEFAULT_SORT: { field: SortField; direction: SortDirection } = {
+  field: 'benchNumber',
+  direction: 'asc',
+};
+
+// ─── Comparators ────────────────────────────────────────────
+
+const STATUS_INDEX: Record<BenchStatus, number> = (() => {
+  const map = {} as Record<BenchStatus, number>;
+  STATUS_PRESENTATION_ORDER.forEach((s, i) => {
+    map[s] = i;
+  });
+  return map;
+})();
+
+/** Status index in the *presentation* order: NO_CUMPLE=0, FUERA=1,
+ *  CUMPLE=2, UNKNOWN=3. So `asc` sort puts problems at top. */
+function statusRank(s: BenchStatus): number {
+  return STATUS_INDEX[s];
+}
+
+/** Build a comparator for the given field + direction. */
+export function comparator(
+  field: SortField,
+  direction: SortDirection,
+): (a: Bench, b: Bench) => number {
+  const sign = direction === 'asc' ? 1 : -1;
+
+  return (a, b) => {
+    let cmp = 0;
+    switch (field) {
+      case 'benchNumber':
+        cmp = a.benchNumber - b.benchNumber;
+        break;
+      case 'crestElevation':
+        cmp = a.crestElevation - b.crestElevation;
+        break;
+      case 'height':
+        cmp = a.height - b.height;
+        break;
+      case 'faceAngle':
+        cmp = a.faceAngle - b.faceAngle;
+        break;
+      case 'bermWidth':
+        // Push nulls (no-berm benches) to the end regardless of
+        // direction — the user is sorting by width, not by "has it".
+        if (a.bermWidth === null && b.bermWidth === null) cmp = 0;
+        else if (a.bermWidth === null) return 1;
+        else if (b.bermWidth === null) return -1;
+        else cmp = a.bermWidth - b.bermWidth;
+        break;
+      case 'status':
+        cmp = statusRank(a.status) - statusRank(b.status);
+        break;
+      default:
+        // Exhaustiveness — TypeScript will complain here if a new
+        // field is added to SortField but not handled above.
+        throw new Error(`Unhandled sort field: ${String(field)}`);
+    }
+    return cmp * sign;
+  };
+}
+
+/** Apply a comparator to a bench array. Pure, returns a new array. */
+export function applySort(
+  benches: readonly Bench[],
+  field: SortField,
+  direction: SortDirection,
+): readonly Bench[] {
+  // Copy before sorting — Array#sort mutates.
+  return [...benches].sort(comparator(field, direction));
+}
+
+/** Cycle: `asc → desc → none → asc`. Returns the next state. */
+export function cycleSort(
+  current: { field: SortField; direction: SortDirection } | null,
+  clickedField: SortField,
+): { field: SortField; direction: SortDirection } | null {
+  if (current === null || current.field !== clickedField) {
+    return { field: clickedField, direction: 'asc' };
+  }
+  if (current.direction === 'asc') {
+    return { field: clickedField, direction: 'desc' };
+  }
+  return null; // back to default order
+}

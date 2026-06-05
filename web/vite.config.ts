@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -18,6 +19,12 @@ function cesiumStaticAssets() {
   return {
     name: 'cesium-static-assets',
     buildStart() {
+      // Skip in test mode — vitest boots Vite to load this config
+      // and we don't want to touch the filesystem (or pay the ~200ms
+      // copy cost) just to run unit tests. The runtime build pipeline
+      // is the only consumer of public/Cesium.
+      if (process.env.VITEST || process.env.NODE_ENV === 'test') return
+
       // Clean previous assets
       if (existsSync(cesiumDest)) {
         rmSync(cesiumDest, { recursive: true })
@@ -225,4 +232,25 @@ export default defineConfig({
     // threshold so we only see warnings for genuinely large chunks.
     chunkSizeWarningLimit: 2000,
   },
-})
+  test: {
+    // jsdom for component tests (atoms). Pure domain tests don't need
+    // a DOM but we set jsdom as default for consistency.
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
+    css: false,
+    include: ['src/**/*.test.{ts,tsx}'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html'],
+      // Domain layer MUST be 100% covered. Other layers are aspirational.
+      include: ['src/components/results/ProfileView/domain/**'],
+      thresholds: {
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
+      },
+    },
+  },
+} as Parameters<typeof defineConfig>[0])
