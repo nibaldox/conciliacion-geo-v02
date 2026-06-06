@@ -107,6 +107,8 @@ export function toBench(
     angleStatus: comparison ? parseBenchStatus(comparison.angle_status) : 'UNKNOWN',
     bermStatus: comparison ? parseBenchStatus(comparison.berm_status) : 'UNKNOWN',
     matched,
+    deltaCrest: comparison?.delta_crest ?? null,
+    deltaToe: comparison?.delta_toe ?? null,
   };
 }
 
