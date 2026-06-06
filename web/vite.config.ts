@@ -32,7 +32,8 @@ export default defineConfig({
         // precache because they'd balloon the install event;
         // they're served on demand via the runtime caching rules
         // below instead.
-        globPatterns: [],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        globIgnores: ['**/vendor-plotly*.*'],
         additionalManifestEntries: [],
         cleanupOutdatedCaches: true,
         navigateFallbackDenylist: [/assets\/.*-plotly/],
