@@ -44,20 +44,14 @@ router = APIRouter(prefix="/process", tags=["process"])
 
 
 def _load_mesh_from_db(session_id: str, mesh_type: str) -> trimesh.Trimesh:
-    """Load a mesh from the database BLOB via a temporary file."""
+    """Load a mesh from the database, cached in memory."""
     mesh_info = db.get_mesh(session_id, mesh_type)
     if not mesh_info:
         raise HTTPException(400, f"{mesh_type} mesh not uploaded")
-    suffix = Path(mesh_info["filename"]).suffix or ".stl"
-    fd, tmp = tempfile.mkstemp(suffix=suffix)
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(mesh_info["data"])
-        return load_mesh(tmp)
+        return db.get_trimesh_by_id(mesh_info["id"])
     except Exception as exc:
         raise HTTPException(400, f"Error loading {mesh_type} mesh: {exc}")
-    finally:
-        os.unlink(tmp)
 
 
 def _extraction_to_dict(er: ExtractionResult) -> dict:
@@ -188,7 +182,7 @@ def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None
             "overall_angle": DEFAULT_TOLERANCES.overall_angle,
         }
 
-    resolution = process_cfg.get("resolution", 0.5)
+    resolution = process_cfg.get("resolution", 0.1)
     face_threshold = process_cfg.get("face_threshold", DETECTION.face_threshold)
     berm_threshold = process_cfg.get("berm_threshold", DETECTION.berm_threshold)
 

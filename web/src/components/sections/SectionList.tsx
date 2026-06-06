@@ -50,6 +50,8 @@ export function SectionList() {
         origin: [...section.origin],
         azimuth: section.azimuth,
         length: section.length,
+        length_up: section.length_up ?? (section.length / 2),
+        length_down: section.length_down ?? (section.length / 2),
         sector: section.sector,
       },
     });
@@ -61,8 +63,15 @@ export function SectionList() {
 
   const saveEdit = () => {
     if (!editState) return;
+    
+    // Automatically compute length based on length_up and length_down if they are edited
+    const updatedForm = { ...editState.form };
+    if (updatedForm.length_up !== undefined && updatedForm.length_down !== undefined) {
+      updatedForm.length = updatedForm.length_up + updatedForm.length_down;
+    }
+
     updateMutation.mutate(
-      { id: editState.id, ...editState.form },
+      { id: editState.id, ...updatedForm },
       { onSuccess: () => setEditState(null) },
     );
   };
@@ -166,6 +175,12 @@ export function SectionList() {
                 {t('section_list.col_azimuth')}
               </th>
               <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                Long Sup
+              </th>
+              <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                Long Inf
+              </th>
+              <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('section_list.col_length')}
               </th>
               <th className="text-left py-2.5 px-3 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
@@ -231,7 +246,7 @@ export function SectionList() {
                             parseFloat(e.target.value) || 0,
                           )
                         }
-                        className="w-20 rounded px-2 py-1 text-sm outline-none"
+                        className="w-16 rounded px-2 py-1 text-sm outline-none"
                         style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                       />
                     </td>
@@ -240,16 +255,35 @@ export function SectionList() {
                         type="number"
                         min={1}
                         step="any"
-                        value={editState.form.length}
+                        value={editState.form.length_up}
                         onChange={(e) =>
                           updateEditField(
-                            'length',
-                            parseFloat(e.target.value) || 200,
+                            'length_up',
+                            parseFloat(e.target.value) || 100,
                           )
                         }
-                        className="w-20 rounded px-2 py-1 text-sm outline-none"
+                        className="w-16 rounded px-2 py-1 text-sm outline-none"
                         style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
                       />
+                    </td>
+                    <td className="py-2 px-3">
+                      <input
+                        type="number"
+                        min={1}
+                        step="any"
+                        value={editState.form.length_down}
+                        onChange={(e) =>
+                          updateEditField(
+                            'length_down',
+                            parseFloat(e.target.value) || 100,
+                          )
+                        }
+                        className="w-16 rounded px-2 py-1 text-sm outline-none"
+                        style={{ border: '1px solid var(--color-mine-blue)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
+                      />
+                    </td>
+                    <td className="py-2 px-3 font-mono text-xs">
+                      {(editState.form.length_up || 0) + (editState.form.length_down || 0)}m
                     </td>
                     <td className="py-2 px-3">
                       <input
@@ -299,6 +333,12 @@ export function SectionList() {
                   </td>
                   <td className="py-2.5 px-3" style={{ color: 'var(--color-text-secondary)' }}>
                     {section.azimuth.toFixed(1)}°
+                  </td>
+                  <td className="py-2.5 px-3" style={{ color: 'var(--color-text-secondary)' }}>
+                    {section.length_up !== undefined && section.length_up !== null ? section.length_up.toFixed(1) : (section.length / 2).toFixed(1)}m
+                  </td>
+                  <td className="py-2.5 px-3" style={{ color: 'var(--color-text-secondary)' }}>
+                    {section.length_down !== undefined && section.length_down !== null ? section.length_down.toFixed(1) : (section.length / 2).toFixed(1)}m
                   </td>
                   <td className="py-2.5 px-3" style={{ color: 'var(--color-text-secondary)' }}>
                     {section.length.toFixed(1)}m

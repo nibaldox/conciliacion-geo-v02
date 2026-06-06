@@ -1,6 +1,7 @@
 [server]
 maxUploadSize = 500  # MB - limit file uploads to 500 MB
 maxMessageSize = 500
+fileWatcherType = "poll"  # avoid inotify ENOSPC on node_modules-heavy trees
 
 [browser]
 gatherUsageStats = false

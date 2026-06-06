@@ -54,7 +54,7 @@ class SectionFromFileParams(BaseModel):
 
 
 class ProcessSettings(BaseModel):
-    resolution: float = 0.5
+    resolution: float = 0.1
     face_threshold: float = 40.0
     berm_threshold: float = 20.0
 

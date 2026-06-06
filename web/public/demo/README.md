@@ -12,7 +12,7 @@ visitors see in the browser matches what pytest asserts.
 | `design.stl` | ~340 KB | Pit design surface, no noise. Conical pit with 4 benches at 15.0 m height, 9.0 m berms, 70.0° face angle. |
 | `topo.stl`   | ~340 KB | As-built topography, Gaussian noise σ = 0.3 m on the design grid. |
 | `crest.dxf` | tiny | A 5-vertex LWPOLYLINE showing the section origins. |
-| `precomputed.json` | ~396 KB | Output of running the full cut → extract → compare pipeline over the sample data, with safe-for-JSON comparison rows. |
+| `precomputed.json` | ~536 KB | Output of running the full cut → extract → compare pipeline over the sample data, with safe-for-JSON comparison rows. |
 
 ## When to regenerate
 

@@ -23,6 +23,9 @@ export type { ComplianceSummaryProps } from './ComplianceSummary';
 export { ProfileView } from './ProfileView';
 export type { ProfileViewProps } from './ProfileView';
 
+export { ProfilesGrid } from './ProfilesGrid';
+
+
 // Atoms barrel (re-exported here so callers can `import { StatusPill }
 // from '@/.../ProfileView/presentation'` if they want a single import)
 export {

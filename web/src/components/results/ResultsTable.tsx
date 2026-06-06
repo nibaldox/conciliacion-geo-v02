@@ -98,8 +98,10 @@ export function ResultsTable() {
         accessorKey: 'height_real',
         header: t('table.col_height_real'),
         size: 90,
-        cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        cell: ({ row, getValue }) => (
+          <span className={`inline-block px-2 py-0.5 rounded font-mono text-xs font-semibold ${getStatusClass(row.original.height_status)}`}>
+            {formatMeters(getValue<number | null>())}
+          </span>
         ),
       },
       {
@@ -109,12 +111,6 @@ export function ResultsTable() {
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
         ),
-      },
-      {
-        accessorKey: 'height_status',
-        header: t('table.col_height_status'),
-        size: 110,
-        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} t={t} />,
       },
       // Angle group
       {
@@ -129,8 +125,10 @@ export function ResultsTable() {
         accessorKey: 'angle_real',
         header: t('table.col_angle_real'),
         size: 90,
-        cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatDegrees(getValue<number | null>())}</span>
+        cell: ({ row, getValue }) => (
+          <span className={`inline-block px-2 py-0.5 rounded font-mono text-xs font-semibold ${getStatusClass(row.original.angle_status)}`}>
+            {formatDegrees(getValue<number | null>())}
+          </span>
         ),
       },
       {
@@ -140,12 +138,6 @@ export function ResultsTable() {
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
         ),
-      },
-      {
-        accessorKey: 'angle_status',
-        header: t('table.col_angle_status'),
-        size: 110,
-        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} t={t} />,
       },
       // Berm group
       {
@@ -160,8 +152,10 @@ export function ResultsTable() {
         accessorKey: 'berm_real',
         header: t('table.col_berm_real'),
         size: 90,
-        cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        cell: ({ row, getValue }) => (
+          <span className={`inline-block px-2 py-0.5 rounded font-mono text-xs font-semibold ${getStatusClass(row.original.berm_status)}`}>
+            {formatMeters(getValue<number | null>())}
+          </span>
         ),
       },
       {
@@ -171,12 +165,6 @@ export function ResultsTable() {
         cell: ({ getValue }) => (
           <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
         ),
-      },
-      {
-        accessorKey: 'berm_status',
-        header: t('table.col_berm_status'),
-        size: 110,
-        cell: ({ getValue }) => <StatusBadge status={getValue<string>()} t={t} />,
       },
     ],
     [t],

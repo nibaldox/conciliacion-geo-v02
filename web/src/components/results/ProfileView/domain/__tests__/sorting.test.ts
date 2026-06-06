@@ -12,7 +12,7 @@ function makeBench(overrides: Partial<Bench> = {}): Bench {
     height: 15,
     faceAngle: 65,
     bermWidth: 8,
-    isRamp: false,
+    isRamp: false, designHeight: 15, designAngle: 65, designBerm: 8, heightStatus: 'UNKNOWN', angleStatus: 'UNKNOWN', bermStatus: 'UNKNOWN',
     status: 'CUMPLE',
     matched: true,
     ...overrides,
@@ -138,7 +138,7 @@ describe('cycleSort', () => {
 describe('SORT_FIELDS', () => {
   it('lists the expected fields', () => {
     expect([...SORT_FIELDS].sort()).toEqual(
-      ['benchNumber', 'bermWidth', 'crestElevation', 'faceAngle', 'height', 'status'].sort(),
+      ['benchNumber', 'bermWidth', 'crestElevation', 'designAngle', 'designBerm', 'designHeight', 'faceAngle', 'height'].sort(),
     );
   });
 });

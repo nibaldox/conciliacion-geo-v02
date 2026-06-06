@@ -7,6 +7,7 @@ All endpoints operate under the session identified by ``request.state.session_id
 
 import os
 import tempfile
+import functools
 from pathlib import Path
 from typing import Optional
 
@@ -132,28 +133,89 @@ def mesh_info(request: Request, mesh_id: str):
     }
 
 
+@functools.lru_cache(maxsize=16)
+def _get_decimated_vertices_cached(mesh_id: str, step: int) -> dict:
+    tmesh = db.get_trimesh_by_id(mesh_id)
+    
+    from core.mesh_handler import decimate_mesh
+    if len(tmesh.faces) > 0:
+        dec = decimate_mesh(tmesh, step)
+        verts = dec.vertices
+        faces = dec.faces
+    else:
+        verts = tmesh.vertices
+        stride = max(1, len(verts) // step)
+        verts = verts[::stride]
+        faces = []
+
+    return {
+        "x": verts[:, 0].tolist(),
+        "y": verts[:, 1].tolist(),
+        "z": verts[:, 2].tolist(),
+        "faces": faces.tolist() if len(faces) > 0 else [],
+    }
+
+
+@functools.lru_cache(maxsize=16)
+def _get_contours_cached(mesh_id: str, interval: float, grid_size: int) -> dict:
+    tmesh = db.get_trimesh_by_id(mesh_id)
+    z_min, z_max = tmesh.bounds[0][2], tmesh.bounds[1][2]
+
+    # Round to nearest interval
+    levels = np.arange(
+        np.floor(z_min / interval) * interval, z_max + interval, interval
+    )
+
+    contour_lines: list[dict] = []
+    
+    # We use exact trimesh sectioning instead of griddata interpolation!
+    # This prevents staircases and produces geometrically perfect contours.
+    for z in levels:
+        slice_path = tmesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+        if slice_path is not None:
+            segs = []
+            # slice_path.discrete gives ordered polylines (requires networkx)
+            for poly in slice_path.discrete:
+                if len(poly) < 2:
+                    continue
+                poly_2d = [[float(v[0]), float(v[1])] for v in poly]
+                segs.append(poly_2d)
+                
+            if segs:
+                contour_lines.append({
+                    "elevation": float(z),
+                    "segments": segs
+                })
+
+    bounds = {
+        "xmin": float(tmesh.bounds[0][0]),
+        "xmax": float(tmesh.bounds[1][0]),
+        "ymin": float(tmesh.bounds[0][1]),
+        "ymax": float(tmesh.bounds[1][1]),
+        "zmin": float(tmesh.bounds[0][2]),
+        "zmax": float(tmesh.bounds[1][2]),
+    }
+
+    return {
+        "bounds": bounds,
+        "elevation_min": z_min,
+        "elevation_max": z_max,
+        "interval": interval,
+        "lines": contour_lines,
+    }
+
+
 @router.get("/{mesh_id}/vertices")
 def mesh_vertices(request: Request, mesh_id: str, step: int = 8000):
     """
-    Return subsampled vertices for plan-view scatter plot.
+    Return decimated mesh vertices and faces for 3D visualization.
 
-    ``step`` is the *maximum number of points* to return (default 8000).
+    ``step`` is the *maximum number of faces/points* to return (default 8000).
     """
-    mesh = db.get_mesh_by_id(mesh_id)
-    if mesh is None:
-        raise HTTPException(404, "Mesh not found")
-
-    tmesh = _load_mesh_from_blob(mesh["data"], mesh["filename"])
-    verts = tmesh.vertices
-
-    stride = max(1, len(verts) // step)
-    sub = verts[::stride]
-
-    return {
-        "x": sub[:, 0].tolist(),
-        "y": sub[:, 1].tolist(),
-        "z": sub[:, 2].tolist(),
-    }
+    try:
+        return _get_decimated_vertices_cached(mesh_id, step)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
 
 
 @router.delete("/{mesh_id}")
@@ -170,7 +232,7 @@ def mesh_contours(
     request: Request,
     mesh_id: str,
     interval: float = 15.0,
-    grid_size: int = 400,
+    grid_size: int = 1500,
 ):
     """
     Return contour/isoline data for a mesh.
@@ -181,72 +243,60 @@ def mesh_contours(
     Returns contour line segments grouped by elevation level, suitable for
     rendering with Chart.js or any line chart library.
     """
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from scipy.interpolate import griddata
-
-    mesh = db.get_mesh_by_id(mesh_id)
-    if mesh is None:
-        raise HTTPException(404, "Mesh not found")
-
-    tmesh = _load_mesh_from_blob(mesh["data"], mesh["filename"])
-    verts = tmesh.vertices
-
-    # Subsample very dense meshes
-    if len(verts) > 200_000:
-        verts = verts[:: len(verts) // 200_000]
-
-    x, y, z = verts[:, 0], verts[:, 1], verts[:, 2]
-    xi = np.linspace(x.min(), x.max(), grid_size)
-    yi = np.linspace(y.min(), y.max(), grid_size)
-    xi_grid, yi_grid = np.meshgrid(xi, yi)
-    zi_grid = griddata((x, y), z, (xi_grid, yi_grid), method="linear")
-
-    # Mask NaN values so contour doesn't draw them
-    zi_grid = np.ma.masked_invalid(zi_grid)
-
-    z_min, z_max = float(np.nanmin(z)), float(np.nanmax(z))
-    # Round to nearest interval
-    levels = np.arange(
-        np.floor(z_min / interval) * interval, z_max + interval, interval
-    )
-
-    # Suppress matplotlib output; extract paths from QuadContourSet
-    # NOTE: matplotlib 3.8+ removed QuadContourSet.collections. The new
-    # API exposes the line segments directly via `allsegs[lev_idx]`, which
-    # is a list of (N, 2) arrays — one per polyline at that level.
-    fig, ax = plt.subplots()
     try:
-        cs = ax.contour(xi_grid, yi_grid, zi_grid, levels=levels)
-        contour_lines: list[dict] = []
-        for lev_idx, lev in enumerate(cs.levels):
-            segs: list[list[list[float]]] = []
-            level_segs = cs.allsegs[lev_idx] if lev_idx < len(cs.allsegs) else []
-            for vertices in level_segs:
-                if len(vertices) < 2:
-                    continue
-                poly: list[list[float]] = [[float(v[0]), float(v[1])] for v in vertices]
-                segs.append(poly)
-            if segs:
-                contour_lines.append({"elevation": float(lev), "segments": segs})
-    finally:
-        plt.close(fig)
+        return _get_contours_cached(mesh_id, interval, grid_size)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
 
+@functools.lru_cache(maxsize=16)
+def _get_breaklines_cached(mesh_id: str, angle_threshold: float) -> dict:
+    from core.breaklines import extract_breaklines
+    tmesh = db.get_trimesh_by_id(mesh_id)
+    
+    # Extract breaklines
+    result = extract_breaklines(tmesh, angle_threshold_deg=angle_threshold)
+    
+    contour_lines = []
+    if result["crests"]:
+        contour_lines.append({
+            "elevation": 1.0,
+            "type": "crest",
+            "segments": result["crests"]
+        })
+    if result["toes"]:
+        contour_lines.append({
+            "elevation": -1.0,
+            "type": "toe",
+            "segments": result["toes"]
+        })
+        
     bounds = {
-        "xmin": float(x.min()),
-        "xmax": float(x.max()),
-        "ymin": float(y.min()),
-        "ymax": float(y.max()),
-        "zmin": z_min,
-        "zmax": z_max,
+        "xmin": float(tmesh.bounds[0][0]),
+        "xmax": float(tmesh.bounds[1][0]),
+        "ymin": float(tmesh.bounds[0][1]),
+        "ymax": float(tmesh.bounds[1][1]),
+        "zmin": float(tmesh.bounds[0][2]),
+        "zmax": float(tmesh.bounds[1][2]),
     }
 
     return {
         "bounds": bounds,
-        "elevation_min": z_min,
-        "elevation_max": z_max,
-        "interval": interval,
+        "elevation_min": bounds["zmin"],
+        "elevation_max": bounds["zmax"],
+        "interval": 0,
         "lines": contour_lines,
     }
+
+@router.get("/{mesh_id}/breaklines")
+def mesh_breaklines(
+    request: Request,
+    mesh_id: str,
+    angle_threshold: float = 20.0,
+):
+    """
+    Return analytic structural breaklines (crests, toes) extracted from the mesh dihedral angles.
+    """
+    try:
+        return _get_breaklines_cached(mesh_id, angle_threshold)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))

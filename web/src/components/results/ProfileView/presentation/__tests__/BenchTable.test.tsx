@@ -15,7 +15,7 @@ function makeBench(overrides: Partial<Bench> = {}): Bench {
     height: 15,
     faceAngle: 65,
     bermWidth: 8,
-    isRamp: false,
+    isRamp: false, designHeight: 15, designAngle: 65, designBerm: 8, heightStatus: 'UNKNOWN', angleStatus: 'UNKNOWN', bermStatus: 'UNKNOWN',
     status: 'CUMPLE',
     matched: true,
     ...overrides,
@@ -54,9 +54,9 @@ describe('BenchTable', () => {
   it('renders one header per sort field', () => {
     const { container } = render(<BenchTable benches={benches} crossLink={makeCrossLink()} />);
     const headers = container.querySelectorAll('[data-testid^="sort-header-"]');
-    expect(headers).toHaveLength(6);
+    expect(headers).toHaveLength(8);
     expect(headers[0]?.textContent).toMatch(/#/);
-    expect(headers[3]?.textContent).toMatch(/Ángulo/i);
+    expect(headers[5]?.textContent).toMatch(/Áng/i);
   });
 
   it('sorts by benchNumber asc by default', () => {
@@ -72,17 +72,18 @@ describe('BenchTable', () => {
     const heightHeader = container.querySelector('[data-testid="sort-header-height"]') as HTMLElement;
     // First click on a DIFFERENT field → asc: 12, 14, 15, 18
     await user.click(heightHeader);
-    let heights = Array.from(container.querySelectorAll('[data-bench-number]')).map(
-      (r) => (r.querySelector('td:nth-child(3)') as HTMLElement | null)?.textContent,
+    // Verify the "Alt (R)" column (it's the 4th column now: 1:#, 2:Elev, 3:Alt(D), 4:Alt(R))
+    let heights = Array.from(container.querySelectorAll('tbody tr')).map(
+      (r) => (r.querySelector('td:nth-child(4)') as HTMLElement | null)?.textContent?.trim()
     );
     expect(heights).toEqual(['12.0', '14.0', '15.0', '18.0']);
     // Second click on the same field → desc: 18, 15, 14, 12
     await user.click(heightHeader);
-    heights = Array.from(container.querySelectorAll('[data-bench-number]')).map(
-      (r) => (r.querySelector('td:nth-child(3)') as HTMLElement | null)?.textContent,
+    heights = Array.from(container.querySelectorAll('tbody tr')).map(
+      (r) => (r.querySelector('td:nth-child(4)') as HTMLElement | null)?.textContent?.trim()
     );
     expect(heights).toEqual(['18.0', '15.0', '14.0', '12.0']);
-    // Third click → none (reset to default benchNumber asc)
+    // Third click on the same field → none (returns to benchNumber asc)
     await user.click(heightHeader);
     const numbers = Array.from(container.querySelectorAll('[data-bench-number]')).map((r) =>
       r.getAttribute('data-bench-number'),

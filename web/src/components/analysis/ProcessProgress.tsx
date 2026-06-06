@@ -8,11 +8,14 @@ export function ProcessProgress() {
   if (!status || status.status === 'idle') return null;
 
   const isProcessing = status.status === 'processing';
-  const isComplete = status.status === 'complete';
   const total = status.total_sections ?? 0;
   const completed = status.completed_sections ?? 0;
   const current = status.current_section;
-  const progressPct = total > 0 ? (completed / total) * 100 : 0;
+  
+  const isComplete = status.status === 'complete';
+  const progressPct = isComplete ? 100 : (total > 0 ? (completed / total) * 100 : 0);
+  const displayCompleted = isComplete ? (status.n_results || total) : completed;
+  const displayTotal = isComplete ? (status.n_results || total) : total;
 
   return (
     <div className="w-full max-w-xl space-y-3">
@@ -48,7 +51,7 @@ export function ProcessProgress() {
 
       {/* Progress numbers */}
       <div className="flex justify-between text-xs" style={{ color: 'var(--color-text-muted)' }}>
-        <span>{t('step3.n_completed', { completed, total })}</span>
+        <span>{t('step3.n_completed', { completed: displayCompleted, total: displayTotal })}</span>
         <span>{Math.round(progressPct)}%</span>
       </div>
     </div>

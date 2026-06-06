@@ -42,14 +42,26 @@ export function ProcessButton() {
 
       {/* Complete state */}
       {isComplete && (
-        <div className="flex flex-col items-center gap-2 px-8 py-4 rounded-xl" style={{ backgroundColor: 'var(--status-ok-bg)', border: '1px solid var(--status-ok-border)' }}>
-          <div className="flex items-center gap-2 font-semibold text-lg" style={{ color: 'var(--status-ok-text)' }}>
-            <span className="text-2xl">✓</span>
-            {t('step3.complete_title')}
+        <div className="flex flex-col items-center gap-3 w-full">
+          <div className="flex flex-col items-center gap-2 px-8 py-4 rounded-xl w-full" style={{ backgroundColor: 'var(--status-ok-bg)', border: '1px solid var(--status-ok-border)' }}>
+            <div className="flex items-center gap-2 font-semibold text-lg" style={{ color: 'var(--status-ok-text)' }}>
+              <span className="text-2xl">✓</span>
+              {t('step3.complete_title')}
+            </div>
+            <p className="text-sm" style={{ color: 'var(--status-ok-text)', opacity: 0.8 }}>
+              {t('step3.n_results', { count: status?.n_results ?? 0 })}
+            </p>
           </div>
-          <p className="text-sm" style={{ color: 'var(--status-ok-text)', opacity: 0.8 }}>
-            {t('step3.n_results', { count: status?.n_results ?? 0 })}
-          </p>
+          
+          <Button
+            variant="secondary"
+            onClick={handleProcess}
+            loading={isPending}
+            disabled={isPending}
+            className="w-full mt-2"
+          >
+            {t('step3.recalculate', { defaultValue: 'Recalcular Perfiles' })}
+          </Button>
         </div>
       )}
 

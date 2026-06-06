@@ -12,7 +12,7 @@
 
 import type { ComparisonResultDto, ProfileDataDto, SectionResponseDto } from './types';
 import type { Bench, ProfileLine, ProfilePoint, ProfileViewModel, SectionMeta } from './types';
-import { worstOfThree } from './status';
+import { worstOfThree, parseBenchStatus } from './status';
 
 // ─── Section meta ───────────────────────────────────────────
 
@@ -93,13 +93,19 @@ export function toBench(
     toeElevation: raw.toe_elevation,
     toeDistance: raw.toe_distance,
     height: raw.bench_height,
+    designHeight: comparison?.height_design ?? null,
     faceAngle: raw.face_angle,
+    designAngle: comparison?.angle_design ?? null,
     // Backend may report 0 for "no berm" but that's an actual
     // measurement too. We treat 0 as a real value, and missing/
     // null/undefined as no berm.
     bermWidth: Number.isFinite(raw.berm_width) ? raw.berm_width : null,
+    designBerm: comparison?.berm_design ?? null,
     isRamp: raw.is_ramp,
     status,
+    heightStatus: comparison ? parseBenchStatus(comparison.height_status) : 'UNKNOWN',
+    angleStatus: comparison ? parseBenchStatus(comparison.angle_status) : 'UNKNOWN',
+    bermStatus: comparison ? parseBenchStatus(comparison.berm_status) : 'UNKNOWN',
     matched,
   };
 }

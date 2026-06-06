@@ -7,6 +7,7 @@ import {
   useExportImages,
 } from '../../api/hooks';
 import { Button } from '../ui/Button';
+import { IconDashboard, IconReport, IconDesign, IconImage } from '../ui/Icons';
 
 interface ExportForm {
   project: string;
@@ -112,28 +113,28 @@ export function ExportPanel() {
       <div className="grid grid-cols-4 gap-3">
         <ExportButton
           label={t('export.excel')}
-          icon="📊"
+          icon={<IconDashboard className="w-6 h-6" />}
           loading={exportExcel.isPending}
           disabled={isAnyExporting}
           onClick={() => exportExcel.mutate(projectParams)}
         />
         <ExportButton
           label={t('export.word')}
-          icon="📄"
+          icon={<IconReport className="w-6 h-6" />}
           loading={exportWord.isPending}
           disabled={isAnyExporting}
           onClick={() => exportWord.mutate(projectParams)}
         />
         <ExportButton
           label={t('export.dxf')}
-          icon="📐"
+          icon={<IconDesign className="w-6 h-6" />}
           loading={exportDxf.isPending}
           disabled={isAnyExporting}
           onClick={() => exportDxf.mutate()}
         />
         <ExportButton
           label={t('export.images')}
-          icon="🖼️"
+          icon={<IconImage className="w-6 h-6" />}
           loading={exportImages.isPending}
           disabled={isAnyExporting}
           onClick={() => exportImages.mutate()}
@@ -160,7 +161,7 @@ function ExportButton({
   onClick,
 }: {
   label: string;
-  icon: string;
+  icon: React.ReactNode;
   loading: boolean;
   disabled: boolean;
   onClick: () => void;
@@ -174,7 +175,7 @@ function ExportButton({
       fullWidth
       className="!flex-col !gap-2 !px-4 !py-4"
     >
-      {!loading && <span className="text-2xl">{icon}</span>}
+      {!loading && <span className="mb-1 text-accent">{icon}</span>}
       <span className="text-xs font-medium">{label}</span>
     </Button>
   );

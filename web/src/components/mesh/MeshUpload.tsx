@@ -128,8 +128,8 @@ function DropZone({ type, meshId, onSetMeshId }: DropZoneProps) {
           </span>
           {meshInfo.bounds && (
             <span title="Extensión">
-              {(meshInfo.bounds.max_x - meshInfo.bounds.min_x).toFixed(0)}×
-              {(meshInfo.bounds.max_y - meshInfo.bounds.min_y).toFixed(0)}m
+              {(meshInfo.bounds.xmax - meshInfo.bounds.xmin).toFixed(0)}×
+              {(meshInfo.bounds.ymax - meshInfo.bounds.ymin).toFixed(0)}m
             </span>
           )}
         </div>

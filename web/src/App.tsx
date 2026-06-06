@@ -1,39 +1,223 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Suspense, lazy, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useHotkeys } from './hooks/useHotkeys';
 import { useSession } from './stores/session';
 import { useTheme } from './stores/theme';
+import { useSections, useProcessStatus } from './api/hooks';
 
-// All four step components are lazy loaded. The wizard's "current step"
-// state lives in zustand, so navigating between steps just swaps which
-// chunk React fetches. This keeps the initial bundle (Step 1 only) as
-// small as possible — the bulk of the app's JS is in steps 2-4 and
-// only fetches when the user actually navigates there.
-const LazyStep1 = lazy(() => import('./components/mesh/Step1Content').then(m => ({ default: m.Step1Content })));
-const LazyStep2 = lazy(() => import('./components/sections/SectionWizard').then(m => ({ default: m.SectionWizard })));
-const LazyStep3 = lazy(() => import('./components/analysis/Step3Content').then(m => ({ default: m.Step3Content })));
-const LazyStep4 = lazy(() => import('./components/results/Step4Content').then(m => ({ default: m.Step4Content })));
+// Workspace Views
+import {
+  LazyMesh3DViewer,
+  LazyResultsTable,
+  LazyDashboard,
+  LazyAIReporter,
+} from './components/lazy';
+import { ProfileView } from './components/results/ProfileView';
+import { ProfilesGrid } from './components/results/ProfileView';
+import { SectionSelector } from './components/results/SectionSelector';
+import { IconGrid, IconList } from './components/ui/Icons';
 
-const STEPS_MAP = {
-  1: LazyStep1,
-  2: LazyStep2,
-  3: LazyStep3,
-  4: LazyStep4,
-} as const;
+import { ExportPanel } from './components/export/ExportPanel';
 
-function StepsRouter() {
-  const { currentStep } = useSession();
-  const Component = STEPS_MAP[currentStep as keyof typeof STEPS_MAP];
-  return Component ? <Component /> : null;
+function WarningState({ icon, title, description }: { icon: string; title: string; description: string }) {
+  return (
+    <div className="flex items-center justify-center h-full w-full p-6">
+      <div
+        className="flex flex-col items-center justify-center max-w-md text-center p-8 border border-dashed rounded-2xl"
+        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-sunken)' }}
+      >
+        <div className="text-5xl mb-4" aria-hidden="true">{icon}</div>
+        <h3 className="text-base font-semibold mb-2 font-mono uppercase tracking-wider" style={{ color: 'var(--color-text-primary)' }}>
+          {title}
+        </h3>
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Profiles workspace (grid ↔ detail toggle) ─────────────
+
+function ProfilesWorkspace() {
+  const { t } = useTranslation();
+  const { selectedSection, setSelectedSection } = useSession();
+  const [mode, setMode] = useState<'grid' | 'detail'>('grid');
+
+  // When user picks a section from the grid, auto-switch to detail
+  const handleGridSelect = (id: string) => {
+    setSelectedSection(id);
+    setMode('detail');
+  };
+
+
+  return (
+    <div className="flex flex-col h-full gap-3 min-h-0">
+      {/* Mode toggle */}
+      <div className="shrink-0 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setMode('grid')}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-colors"
+          style={
+            mode === 'grid'
+              ? {
+                  backgroundColor: 'var(--color-accent)',
+                  color: 'var(--color-accent-fg)',
+                  border: '1px solid var(--color-accent-bright)',
+                }
+              : {
+                  backgroundColor: 'var(--color-surface-raised)',
+                  color: 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                }
+          }
+        >
+          <IconGrid className="w-3.5 h-3.5" /> {t('profiles.mode_grid', { defaultValue: 'Grilla' })}
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode('detail')}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-colors"
+          style={
+            mode === 'detail'
+              ? {
+                  backgroundColor: 'var(--color-accent)',
+                  color: 'var(--color-accent-fg)',
+                  border: '1px solid var(--color-accent-bright)',
+                }
+              : {
+                  backgroundColor: 'var(--color-surface-raised)',
+                  color: 'var(--color-text-secondary)',
+                  border: '1px solid var(--color-border)',
+                }
+          }
+        >
+          <IconList className="w-3.5 h-3.5" /> {t('profiles.mode_detail', { defaultValue: 'Detalle' })}
+        </button>
+        {mode === 'detail' && selectedSection && (
+          <span className="text-xs font-mono ml-2" style={{ color: 'var(--color-text-muted)' }}>
+            — {selectedSection}
+          </span>
+        )}
+      </div>
+
+      {/* Content */}
+      {mode === 'grid' ? (
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <ProfilesGrid onSectionSelect={handleGridSelect} />
+        </div>
+      ) : (
+        <div className="space-y-3 flex-1 flex flex-col min-h-0">
+          <div className="shrink-0">
+            <SectionSelector />
+          </div>
+          <div className="flex-1 min-h-0">
+            <ProfileView />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+function WorkspaceRouter() {
+  const { activeWorkspaceView, designMeshId, topoMeshId } = useSession();
+  const { data: sections } = useSections();
+  const { data: status } = useProcessStatus();
+  const { t } = useTranslation();
+
+  const bothUploaded = !!designMeshId && !!topoMeshId;
+  const hasSections = sections && sections.length > 0;
+  const isComplete = status?.status === 'complete';
+
+  // 1. Mesh load prerequisite check
+  if (!bothUploaded && activeWorkspaceView !== '3d') {
+    return (
+      <WarningState
+        icon="⛰️"
+        title={t('warning.no_mesh_title', { defaultValue: 'Mallas no cargadas' })}
+        description={t('warning.no_mesh_desc', { defaultValue: 'Cargue superficies de diseño (Protocol Alpha) y topografía (Protocol Omega) en el panel lateral para acceder a esta vista.' })}
+      />
+    );
+  }
+
+  // 2. Sections prerequisite check
+  if (bothUploaded && !hasSections && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'export-ai')) {
+    return (
+      <WarningState
+        icon="📏"
+        title={t('warning.no_sections_title', { defaultValue: 'Sin Secciones' })}
+        description={t('warning.no_sections_desc', { defaultValue: 'Defina al menos una sección en el panel lateral para iniciar el análisis.' })}
+      />
+    );
+  }
+
+  // 3. Process completion check
+  if (bothUploaded && hasSections && !isComplete && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'export-ai')) {
+    return (
+      <WarningState
+        icon="⚡"
+        title={t('warning.no_process_title', { defaultValue: 'Conciliación Pendiente' })}
+        description={t('warning.no_process_desc', { defaultValue: 'Las secciones están definidas, pero el análisis no ha corrido. Haga clic en "Iniciar Análisis" en la sección de Procesamiento del panel lateral.' })}
+      />
+    );
+  }
+
+  // Active View Render
+  switch (activeWorkspaceView) {
+    case '3d':
+      return <LazyMesh3DViewer />;
+    case 'profiles':
+      return <ProfilesWorkspace />;
+
+    case 'dashboard':
+      return (
+        <div className="h-full flex flex-col gap-6 overflow-y-auto pr-1">
+          <div className="shrink-0">
+            <LazyDashboard />
+          </div>
+          <div className="flex-1 border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+            <div className="p-3 border-b border-border text-xs font-mono font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface-raised)' }}>
+              Tabla Detallada de Comparación
+            </div>
+            <div className="p-4 overflow-x-auto">
+              <LazyResultsTable />
+            </div>
+          </div>
+        </div>
+      );
+    case 'export-ai':
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full overflow-y-auto pb-4">
+          <div className="h-fit">
+            <ExportPanel />
+          </div>
+          <div className="h-fit">
+            <LazyAIReporter />
+          </div>
+        </div>
+      );
+    default:
+      return null;
+  }
 }
 
 function LoadingSpinner() {
+  const { t } = useTranslation();
   return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-mine-blue" />
+    <div className="flex flex-col items-center justify-center h-64 gap-3">
+      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-accent" />
+      <span className="text-xs font-mono" style={{ color: 'var(--color-text-muted)' }}>
+        {t('common.loading', { defaultValue: 'Cargando…' })}
+      </span>
     </div>
   );
 }
@@ -51,14 +235,15 @@ function App() {
 
   const { isDark } = useTheme();
   const { i18n } = useTranslation();
-  const { setStep, nextStep, prevStep } = useSession();
+  const { setActiveWorkspaceView } = useSession();
 
-  // Wizard step navigation via keyboard
-  useHotkeys('ArrowLeft', () => prevStep());
-  useHotkeys('ArrowRight', () => nextStep());
-  useHotkeys(['1', '2', '3', '4'], (e) => {
-    const target = parseInt(e.key, 10);
-    if (target >= 1 && target <= 4) setStep(target);
+  // Workspace view hotkeys
+  useHotkeys(['1', '2', '3', '4', '5'], (e) => {
+    const target = e.key;
+    if (target === '1') setActiveWorkspaceView('3d');
+    if (target === '2') setActiveWorkspaceView('profiles');
+    if (target === '3') setActiveWorkspaceView('dashboard');
+    if (target === '4') setActiveWorkspaceView('export-ai');
   });
 
   // Apply dark class to root element
@@ -70,8 +255,7 @@ function App() {
     }
   }, [isDark]);
 
-  // Sync <html lang> with i18n language so screen readers and
-  // browser translation prompts work correctly.
+  // Sync <html lang> with i18n language
   useEffect(() => {
     const handler = (lng: string) => {
       document.documentElement.lang = lng.startsWith('es') ? 'es' : 'en';
@@ -86,7 +270,7 @@ function App() {
       <AppLayout>
         <ErrorBoundary>
           <Suspense fallback={<LoadingSpinner />}>
-            <StepsRouter />
+            <WorkspaceRouter />
           </Suspense>
         </ErrorBoundary>
       </AppLayout>

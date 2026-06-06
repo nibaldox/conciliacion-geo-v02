@@ -1,9 +1,15 @@
 import sqlite3
 import json
 import uuid
+import functools
+import tempfile
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
+
+import trimesh
+from core import load_mesh
 
 DB_PATH = Path(__file__).parent.parent / "data" / "conciliacion.db"
 
@@ -201,6 +207,35 @@ def get_mesh_by_id(mesh_id: str) -> Optional[Dict[str, Any]]:
         "bounds": json.loads(row["bounds"]),
         "uploaded_at": row["uploaded_at"],
     }
+
+
+@functools.lru_cache(maxsize=8)
+def get_trimesh_by_id(mesh_id: str) -> trimesh.Trimesh:
+    """Get trimesh by its ID, cached in memory."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT filename, data FROM meshes WHERE id = ?", (mesh_id,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        raise ValueError(f"Mesh with ID {mesh_id} not found in database")
+    
+    filename = row["filename"]
+    data = row["data"]
+    
+    suffix = Path(filename).suffix or ".stl"
+    fd, tmp = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        mesh = load_mesh(tmp)
+        # Force evaluation to cache in-memory
+        _ = mesh.vertices
+        _ = mesh.faces
+        return mesh
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
 
 
 def delete_mesh(mesh_id: str) -> bool:

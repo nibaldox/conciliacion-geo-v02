@@ -1,6 +1,3 @@
-// Cesium config MUST be first — sets CESIUM_BASE_URL before any cesium import
-import './cesium-config'
-
 // i18n must initialise before any component renders (so useTranslation
 // doesn't return keys on first paint).
 import './i18n'

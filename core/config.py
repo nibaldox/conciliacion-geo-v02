@@ -38,8 +38,8 @@ class DetectionDefaults:
     berm_threshold: float = 20.0      # degrees, maximum angle to classify as berm
     max_berm_width: float = 50.0      # meters, filter unrealistically large berms
     min_bench_height: float = 2.0     # meters, minimum bench height to be detected
-    simplify_epsilon: float = 0.1     # meters, RDP simplification tolerance
-    profile_resolution: float = 0.5   # meters, profile resampling resolution
+    simplify_epsilon: float = 0.05    # meters, RDP simplification tolerance (was 0.1)
+    profile_resolution: float = 0.1   # meters, profile resampling resolution (was 0.5)
     # Spill-pile detection (used by _detect_and_project_solid_toe)
     spill_angle_solid: float = 52.0   # degrees, segments above this are solid face
     spill_angle_pile: float = 48.0    # degrees, segments below this are spill pile

@@ -342,7 +342,11 @@
     "loading_vertices": "Loading vertices…",
     "design_label": "Design",
     "topo_label": "Topography",
-    "tooltip": "East: %{x:.1f}m<br>North: %{y:.1f}m<br>Elev: %{text:.1f}m"
+    "tooltip": "East: %{x:.1f}m<br>North: %{y:.1f}m<br>Elev: %{text:.1f}m",
+    "layers": "Visible Layers",
+    "layer_topo": "Real Topography",
+    "layer_design": "Design Contours",
+    "layer_sections": "Section Lines"
   },
   "wizard": {
     "nav_label": "Wizard progress",

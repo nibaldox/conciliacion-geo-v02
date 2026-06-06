@@ -61,12 +61,14 @@ export {
   BenchTable,
   ComplianceSummary,
   ProfileView,
+  ProfilesGrid,
   StatusPill,
   FilterToggle,
   MetricValue,
   StatusDot,
   Spinner,
 } from './presentation';
+
 export type {
   FilterBarProps,
   ProfileChartProps,

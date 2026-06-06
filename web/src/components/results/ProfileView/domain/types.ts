@@ -57,14 +57,22 @@ export interface Bench {
   readonly toeElevation: number;
   readonly toeDistance: number;
   readonly height: number;
+  readonly designHeight: number | null;
   readonly faceAngle: number;
+  readonly designAngle: number | null;
   /** `null` if the bench has no berm (e.g. last bench in the pit). */
   readonly bermWidth: number | null;
+  readonly designBerm: number | null;
   readonly isRamp: boolean;
   /** Worst-of-three compliance status (height / angle / berm). */
   readonly status: BenchStatus;
+  readonly heightStatus: BenchStatus;
+  readonly angleStatus: BenchStatus;
+  readonly bermStatus: BenchStatus;
   /** `true` if this bench exists in both design and topo. */
   readonly matched: boolean;
+  readonly deltaCrest: number | null;
+  readonly deltaToe: number | null;
 }
 
 // ─── Section metadata ───────────────────────────────────────

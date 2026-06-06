@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import { useAIProviders, useAIModels } from '../../api/hooks';
+import { getSessionId } from '../../api/client';
 import { Button } from '../ui/Button';
 
 // ─── Types ───────────────────────────────────────────────────
@@ -91,7 +92,7 @@ export function AIReporter() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Session-ID': localStorage.getItem('session_id') || '',
+          'X-Session-ID': getSessionId() || '',
         },
         body: JSON.stringify({
           provider: options.provider,

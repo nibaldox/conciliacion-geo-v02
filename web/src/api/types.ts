@@ -21,49 +21,75 @@ export interface UploadResponse {
 
 // Section schemas
 export interface SectionCreate {
-  name: string;
-  origin: number[];  // [x, y]
+  name?: string;
+  origin: [number, number];
   azimuth: number;
   length: number;
-  sector: string;
+  length_up?: number;
+  length_down?: number;
+  sector?: string;
 }
 
 export interface SectionResponse {
   id: string;
   name: string;
-  origin: number[];
+  origin: [number, number];
   azimuth: number;
   length: number;
+  length_up?: number | null;
+  length_down?: number | null;
   sector: string;
 }
 
 export interface SectionAutoParams {
-  start: number[];   // [x, y]
-  end: number[];     // [x, y]
-  n_sections: number;
-  azimuth?: number | null;
-  length: number;
-  sector: string;
-  az_method: 'perpendicular' | 'fixed' | 'local_slope';
-  fixed_az: number;
+  start: [number, number];
+  end: [number, number];
+  n_sections?: number;
+  length?: number;
+  length_up?: number;
+  length_down?: number;
+  sector?: string;
+  az_method?: 'perpendicular' | 'fixed' | 'local_slope';
+  fixed_az?: number;
 }
 
 export interface SectionFromFileParams {
   spacing: number;
   length: number;
+  length_up?: number;
+  length_down?: number;
   sector: string;
   az_mode: 'perpendicular' | 'local_slope';
 }
 
+export interface SectionCurveParams {
+  points: [number, number][];
+  spacing?: number;
+  length?: number;
+  length_up?: number;
+  length_down?: number;
+  sector?: string;
+}
+
 export interface SectionClickParams {
-  origin: number[];
-  length: number;
-  sector: string;
-  az_mode: 'auto' | 'manual';
+  origin: [number, number];
+  length?: number;
+  length_up?: number;
+  length_down?: number;
+  sector?: string;
+  az_mode?: 'auto' | 'manual';
   azimuth?: number;
 }
 
 // Process schemas
+
+export interface SectionCurveParams {
+  points: number[][];
+  spacing: number;
+  length: number;
+  sector: string;
+}
+
 export interface ProcessSettings {
   resolution: number;
   face_threshold: number;
@@ -162,10 +188,12 @@ export interface VerticesResponse {
   x: number[];
   y: number[];
   z: number[];
+  faces?: number[][];
 }
 
 export interface ContourLine {
   elevation: number;
+  type?: 'crest' | 'toe';
   segments: number[][][];  // [polyline][point][x or y]
 }
 

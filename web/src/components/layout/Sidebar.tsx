@@ -128,7 +128,7 @@ export function Sidebar() {
                       step={0.1}
                       min={0.1}
                       value={processSettings.resolution}
-                      onChange={(e) => handleProcessChange('resolution', parseFloat(e.target.value) || 0.5)}
+                      onChange={(e) => handleProcessChange('resolution', parseFloat(e.target.value) || 0.1)}
                       className={inputCls}
                       style={inputStyle}
                     />

@@ -66,6 +66,8 @@ def _section_to_dict(sec: SectionLine) -> dict:
         else list(sec.origin),
         "azimuth": round(float(sec.azimuth), 2),
         "length": float(sec.length),
+        "length_up": float(sec.length_up) if getattr(sec, 'length_up', None) is not None else None,
+        "length_down": float(sec.length_down) if getattr(sec, 'length_down', None) is not None else None,
         "sector": sec.sector,
     }
 
@@ -78,6 +80,8 @@ def _section_to_response(index: int, sec_dict: dict) -> dict:
         "origin": sec_dict["origin"],
         "azimuth": sec_dict["azimuth"],
         "length": sec_dict["length"],
+        "length_up": sec_dict.get("length_up"),
+        "length_down": sec_dict.get("length_down"),
         "sector": sec_dict["sector"],
     }
 
@@ -89,6 +93,8 @@ def _dict_to_section(d: dict) -> SectionLine:
         origin=np.array(d["origin"], dtype=float),
         azimuth=float(d["azimuth"]),
         length=float(d["length"]),
+        length_up=d.get("length_up"),
+        length_down=d.get("length_down"),
         sector=d.get("sector", ""),
     )
 
@@ -98,7 +104,7 @@ def _get_design_mesh(session_id: str):
     mesh = db.get_mesh(session_id, "design")
     if mesh is None:
         raise HTTPException(400, "Upload design mesh first")
-    return _load_mesh_from_blob(mesh["data"], mesh["filename"])
+    return db.get_trimesh_by_id(mesh["id"])
 
 
 def _save_sections(session_id: str, sections: List[SectionLine]):
@@ -123,10 +129,22 @@ class SectionAutoParams(BaseModel):
     end: List[float]  # [x, y]
     n_sections: int = 5
     length: float = 200.0
+    length_up: Optional[float] = None
+    length_down: Optional[float] = None
     sector: str = ""
     az_method: str = "perpendicular"  # "perpendicular" | "fixed" | "local_slope"
     fixed_az: float = 0.0
 
+
+
+class SectionCurveParams(BaseModel):
+    """Parameters for auto-generating sections along a polyline (curve)."""
+    points: List[List[float]]  # List of [x, y]
+    spacing: float = 10.0
+    length: float = 200.0
+    length_up: Optional[float] = None
+    length_down: Optional[float] = None
+    sector: str = ""
 
 class SectionCreate(BaseModel):
     """Single section definition."""
@@ -135,6 +153,8 @@ class SectionCreate(BaseModel):
     origin: List[float]  # [x, y]
     azimuth: float
     length: float = 200.0
+    length_up: Optional[float] = None
+    length_down: Optional[float] = None
     sector: str = ""
 
 
@@ -143,6 +163,8 @@ class SectionClickParams(BaseModel):
 
     origin: List[float]  # [x, y]
     length: float = 200.0
+    length_up: Optional[float] = None
+    length_down: Optional[float] = None
     sector: str = ""
     az_mode: str = "auto"  # "auto" | "manual"
     azimuth: Optional[float] = None
@@ -188,7 +210,8 @@ def sections_auto(request: Request, params: SectionAutoParams):
         az = 0.0  # placeholder, overwritten per section below
 
     sections = generate_sections_along_crest(
-        design_mesh, start, end, n, az, length, sector
+        design_mesh, start, end, n, az, length, sector,
+        length_up=params.length_up, length_down=params.length_down
     )
 
     # Override azimuth with local slope if requested
@@ -215,6 +238,8 @@ def sections_manual(request: Request, sections_data: List[SectionCreate]):
             origin=np.array(s.origin, dtype=float),
             azimuth=float(s.azimuth),
             length=float(s.length),
+            length_up=s.length_up,
+            length_down=s.length_down,
             sector=s.sector,
         )
         sections.append(sec)
@@ -254,6 +279,8 @@ def add_section_click(request: Request, params: SectionClickParams):
         origin=origin,
         azimuth=az,
         length=length,
+        length_up=params.length_up,
+        length_down=params.length_down,
         sector=sector,
     )
 
@@ -274,6 +301,8 @@ async def sections_from_file(
     file: UploadFile = File(...),
     spacing: str = Form("20.0"),
     length: str = Form("200.0"),
+    length_up: str = Form(""),
+    length_down: str = Form(""),
     sector: str = Form("Principal"),
     az_mode: str = Form("perpendicular"),  # "perpendicular" | "local_slope"
 ):
@@ -288,6 +317,8 @@ async def sections_from_file(
 
     spacing_f = float(spacing)
     length_f = float(length)
+    l_up_f = float(length_up) if length_up.strip() else None
+    l_down_f = float(length_down) if length_down.strip() else None
 
     fname = (file.filename or "").lower()
     content = await file.read()
@@ -333,7 +364,8 @@ async def sections_from_file(
 
     mesh_for_az = design_mesh if az_mode == "local_slope" else None
     sections = generate_perpendicular_sections(
-        polyline, spacing_f, length_f, sector, design_mesh=mesh_for_az
+        polyline, spacing_f, length_f, sector, design_mesh=mesh_for_az,
+        length_up=l_up_f, length_down=l_down_f
     )
 
     _save_sections(session_id, sections)
@@ -373,6 +405,8 @@ def update_section(request: Request, section_id: str, body: SectionCreate):
         "origin": list(body.origin),
         "azimuth": round(float(body.azimuth), 2),
         "length": float(body.length),
+        "length_up": float(body.length_up) if body.length_up is not None else None,
+        "length_down": float(body.length_down) if body.length_down is not None else None,
         "sector": body.sector,
     }
     sections[idx] = updated
@@ -412,3 +446,26 @@ def clear_sections(request: Request):
     session_id = db.get_or_create_session(get_session_id(request))
     db.save_sections(session_id, [])
     return {"message": "All sections cleared"}
+
+@router.post("/curve")
+def sections_curve(request: Request, params: SectionCurveParams):
+    """
+    Generate sections perpendicular to an arbitrary polyline (e.g. contour curve segment).
+    """
+    session_id = db.get_or_create_session(get_session_id(request))
+    # We do not strictly need the design mesh unless az_method=local_slope,
+    # but the current generate_perpendicular_sections handles az automatically.
+    
+    # We pass the polyline points to generate_perpendicular_sections
+    points_array = np.array(params.points, dtype=float)
+    if len(points_array) < 2:
+        raise HTTPException(400, "Curve must have at least 2 points")
+        
+    sections = generate_perpendicular_sections(
+        points=points_array,
+        spacing=params.spacing,
+        section_length=params.length,
+        sector_name=params.sector
+    )
+    
+    _save_sections(session_id, sections)

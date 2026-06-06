@@ -185,17 +185,25 @@ def run_pipeline(design: trimesh.Trimesh, topo: trimesh.Trimesh,
             "pct": round(n_ok / total * 100, 1) if total else 0.0,
         }
 
-    # 3D mesh vertices (what the CesiumJS viewer and Plotly plan view
-    # need). Subsample dense meshes so the bundle stays small.
+    # 3D mesh vertices (what the R3F viewer and Plotly plan view
+    # need). Decimate meshes to keep the payload size small.
     def _vertices_payload(m: trimesh.Trimesh, max_points: int = 6000) -> dict:
-        v = m.vertices
-        if len(v) > max_points:
-            stride = max(1, len(v) // max_points)
-            v = v[::stride]
+        from core.mesh_handler import decimate_mesh
+        if len(m.faces) > 0:
+            m_dec = decimate_mesh(m, max_points)
+            v = m_dec.vertices
+            f = m_dec.faces
+        else:
+            v = m.vertices
+            if len(v) > max_points:
+                stride = max(1, len(v) // max_points)
+                v = v[::stride]
+            f = []
         return {
             "x": v[:, 0].tolist(),
             "y": v[:, 1].tolist(),
             "z": v[:, 2].tolist(),
+            "faces": f.tolist() if len(f) > 0 else [],
         }
 
     return {

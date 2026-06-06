@@ -142,10 +142,16 @@ export function topoLineStyle(): Partial<ScatterLine> {
   return { color: t.topoLine, width: 3, shape: 'linear' };
 }
 
-/** Style for reconciled (dashed) polylines. */
+/** Style for reconciled (dashed) polylines — amber so it contrasts
+ *  clearly against design (blue) and topo (green). */
 export function reconciledLineStyle(): Partial<ScatterLine> {
-  const t = resolveTokens();
-  return { color: t.reconciledDash, width: 2, dash: 'dash', shape: 'linear' };
+  return { color: '#f59e0b', width: 2, dash: 'dash', shape: 'linear' };
+}
+
+/** Style for the reconciled topo polyline — solid amber, thinner than
+ *  the primary topo so it reads as a "derived" version of it. */
+export function reconciledTopoLineStyle(): Partial<ScatterLine> {
+  return { color: '#f59e0b', width: 2, shape: 'linear' };
 }
 
 /** Marker style for a bench crest, color-coded by status. */

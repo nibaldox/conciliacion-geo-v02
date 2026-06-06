@@ -20,7 +20,6 @@ export function Header() {
   const { t } = useTranslation();
 
   const handleNewSession = () => {
-    localStorage.removeItem('session_id');
     queryClient.clear();
     reset();
     window.location.href = window.location.pathname;

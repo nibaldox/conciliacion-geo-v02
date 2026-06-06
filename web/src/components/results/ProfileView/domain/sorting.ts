@@ -14,10 +14,12 @@ import { STATUS_PRESENTATION_ORDER } from './status';
 export const SORT_FIELDS = [
   'benchNumber',
   'crestElevation',
+  'designHeight',
   'height',
+  'designAngle',
   'faceAngle',
+  'designBerm',
   'bermWidth',
-  'status',
 ] as const;
 
 export type SortField = (typeof SORT_FIELDS)[number];
@@ -62,22 +64,26 @@ export function comparator(
       case 'crestElevation':
         cmp = a.crestElevation - b.crestElevation;
         break;
+      case 'designHeight':
+        cmp = (a.designHeight ?? 0) - (b.designHeight ?? 0);
+        break;
       case 'height':
         cmp = a.height - b.height;
+        break;
+      case 'designAngle':
+        cmp = (a.designAngle ?? 0) - (b.designAngle ?? 0);
         break;
       case 'faceAngle':
         cmp = a.faceAngle - b.faceAngle;
         break;
+      case 'designBerm':
+        cmp = (a.designBerm ?? 0) - (b.designBerm ?? 0);
+        break;
       case 'bermWidth':
-        // Push nulls (no-berm benches) to the end regardless of
-        // direction — the user is sorting by width, not by "has it".
         if (a.bermWidth === null && b.bermWidth === null) cmp = 0;
         else if (a.bermWidth === null) return 1;
         else if (b.bermWidth === null) return -1;
         else cmp = a.bermWidth - b.bermWidth;
-        break;
-      case 'status':
-        cmp = statusRank(a.status) - statusRank(b.status);
         break;
       default:
         // Exhaustiveness — TypeScript will complain here if a new

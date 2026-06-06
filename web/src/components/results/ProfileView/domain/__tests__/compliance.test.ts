@@ -12,7 +12,7 @@ function makeBench(status: BenchStatus, n: number): Bench {
     height: 15,
     faceAngle: 65,
     bermWidth: 8,
-    isRamp: false,
+    isRamp: false, designHeight: 15, designAngle: 65, designBerm: 8, heightStatus: 'UNKNOWN', angleStatus: 'UNKNOWN', bermStatus: 'UNKNOWN',
     status,
     matched: true,
   };

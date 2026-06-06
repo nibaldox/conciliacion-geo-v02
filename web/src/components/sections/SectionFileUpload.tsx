@@ -11,7 +11,8 @@ export function SectionFileUpload() {
   const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null);
   const [spacing, setSpacing] = useState(20);
-  const [length, setLength] = useState(200);
+  const [lengthUp, setLengthUp] = useState(100);
+  const [lengthDown, setLengthDown] = useState(100);
   const [sector, setSector] = useState('');
   const [azMode, setAzMode] = useState<AzMode>('perpendicular');
   const [isDragging, setIsDragging] = useState(false);
@@ -55,7 +56,7 @@ export function SectionFileUpload() {
     e.preventDefault();
     if (!file) return;
 
-    mutation.mutate({ file, spacing, length, sector, az_mode: azMode });
+    mutation.mutate({ file, spacing, length: lengthUp + lengthDown, length_up: lengthUp, length_down: lengthDown, sector, az_mode: azMode });
   };
 
   const clearFile = () => {
@@ -122,8 +123,8 @@ export function SectionFileUpload() {
       </div>
 
       {/* Settings */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <div>
+      <div className="grid grid-cols-2 gap-4">
+        <div className="col-span-2">
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
             {t('section_form_file.spacing')}
           </label>
@@ -140,14 +141,29 @@ export function SectionFileUpload() {
 
         <div>
           <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            {t('section_form_file.length')}
+            Longitud Superior (m)
           </label>
           <input
             type="number"
             min={1}
             step="any"
-            value={length}
-            onChange={(e) => setLength(parseFloat(e.target.value) || 200)}
+            value={lengthUp}
+            onChange={(e) => setLengthUp(parseFloat(e.target.value) || 100)}
+            className="w-full rounded-md px-3 py-2 text-sm outline-none"
+            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+            Longitud Inferior (m)
+          </label>
+          <input
+            type="number"
+            min={1}
+            step="any"
+            value={lengthDown}
+            onChange={(e) => setLengthDown(parseFloat(e.target.value) || 100)}
             className="w-full rounded-md px-3 py-2 text-sm outline-none"
             style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
           />

@@ -95,7 +95,7 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
         benchCount={viewModel.benches.length}
         lastRunAt={lastRunAt}
       />
-      <FilterBar blastDataAvailable={blastDataAvailable} />
+      <FilterBar filter={filter} blastDataAvailable={blastDataAvailable} />
 
       {/* Main row: chart on the left, table on the right.
        *  Chart keeps a 1:1 aspect via scaleanchor; height auto-

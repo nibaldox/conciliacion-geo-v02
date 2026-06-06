@@ -9,7 +9,7 @@ export const DEFAULT_TOLERANCES = {
 
 /** Default process settings matching core/config.py */
 export const DEFAULT_SETTINGS = {
-  resolution: 0.5,
+  resolution: 0.1,
   face_threshold: 40.0,
   berm_threshold: 20.0,
 };

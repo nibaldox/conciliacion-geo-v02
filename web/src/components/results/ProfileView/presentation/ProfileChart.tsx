@@ -25,7 +25,7 @@
  * traces" — a pure function that can be tested independently.
  */
 
-import { useEffect, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import Plot from 'react-plotly.js';
 import type { Data, Layout, Config } from 'plotly.js';
 import {
@@ -34,7 +34,9 @@ import {
   designLineStyle,
   topoLineStyle,
   reconciledLineStyle,
+  reconciledTopoLineStyle,
 } from '../infrastructure/plotlyTheme';
+
 import type { Bench, ProfileLine, ProfileViewModel } from '../domain/types';
 import { type FilterState } from '../domain/filters';
 import { type UseCrossLinkStateApi } from '../application';
@@ -52,6 +54,21 @@ export interface ProfileChartProps {
 export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }: ProfileChartProps) {
   const { isDark } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      if (entries[0]) {
+        setContainerSize({
+          width: entries[0].contentRect.width,
+          height: entries[0].contentRect.height,
+        });
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // ── 1. Build the data array (pure derivation) ─────────────
   const data = useMemo<Data[]>(
@@ -67,21 +84,55 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
     // 8% padding on each side — enough to leave breathing room
     // without wasting viewport on whitespace.
     const { xRange, yRange } = computeAxisRanges(viewModel, height);
+
+    // Replicate Streamlit annotations: Crest labels (B1, B2) with arrows,
+    // and Berm width labels (B2=17.3m) above the horizontal berms.
+    const annotations: any[] = [];
+    if (filterState.showReconciledTopo) {
+      for (const bench of viewModel.benches) {
+        // Crest annotation (B1 with arrow)
+        const crestColor = resolveCssVar(STATUS_FG_VAR[bench.status], '#ef4444');
+        annotations.push({
+          x: bench.crestDistance,
+          y: bench.crestElevation,
+          text: `B${bench.benchNumber}`,
+          showarrow: true,
+          arrowhead: 2,
+          arrowsize: 1,
+          arrowwidth: 1.5,
+          arrowcolor: 'var(--color-text-muted, #9ca3af)',
+          ax: -10,
+          ay: -25,
+          font: { size: 10, color: crestColor },
+        });
+
+        // Berm width annotation
+        if (bench.bermWidth != null && bench.bermWidth > 0) {
+          const dir = Math.sign(bench.toeDistance - bench.crestDistance) || 1;
+          const bermCenter = bench.toeDistance + (bench.bermWidth / 2) * dir;
+          annotations.push({
+            x: bermCenter,
+            y: bench.toeElevation,
+            text: `B${bench.benchNumber}=${bench.bermWidth.toFixed(1)}m`,
+            showarrow: false,
+            yshift: 10,
+            font: { size: 10, color: '#f59e0b' },
+          });
+        }
+      }
+    }
+
     return {
       ...base,
       // We extend the layout with view-model-specific bits: title
       // is rendered in SectionHeader (above), so plotly title is off.
       title: undefined,
-      height,
-      // CRITICAL: lock the y-axis to the x-axis scale (1:1). Both
-      // are in metres, so 1m horizontal = 1m vertical. Without this,
-      // Plotly auto-fits the y-axis range and the slope angles look
-      // completely wrong (the mine cross-section appears flat when
-      // it should be visibly steep). Streamlit's old code had this.
+      autosize: true,
+      annotations,
       yaxis: {
         ...(base.yaxis as Partial<Layout['yaxis']>),
         scaleanchor: 'x',
-        scaleratio: 1,
+        scaleratio: computeScaleRatio(xRange, yRange, containerSize.width, containerSize.height),
         range: yRange,
       },
       xaxis: {
@@ -92,7 +143,7 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
       // and onClick callbacks we attach to the Plot component,
       // not by Plotly's built-in modes.
     };
-  }, [height, viewModel]);
+  }, [height, viewModel, containerSize, filterState.showReconciledTopo]);
 
   const config = useMemo<Partial<Config>>(() => createPlotlyConfig(), []);
 
@@ -139,8 +190,8 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
     <div
       ref={containerRef}
       data-slot="profile-chart"
-      className="w-full"
-      style={{ minHeight: height }}
+      className="w-full h-full"
+      style={{ minHeight: '400px' }}
     >
       <Plot
         data={data}
@@ -244,6 +295,35 @@ export function computeAxisRanges(
   };
 }
 
+/**
+ * Computes a fixed scaleratio based on the container dimensions so that
+ * the profile fills the screen (vertical exaggeration) but maintains a
+ * locked ratio when the user zooms in/out.
+ */
+function computeScaleRatio(
+  xRange: [number, number],
+  yRange: [number, number],
+  containerWidth: number,
+  containerHeight: number,
+): number {
+  if (containerWidth <= 0 || containerHeight <= 0) return 1;
+
+  // Plotly margins defined in plotlyTheme.ts
+  const horizontalMargins = 60 + 24; // l: 60, r: 24
+  const verticalMargins = 16 + 56;   // t: 16, b: 56
+
+  const plotWidth = Math.max(1, containerWidth - horizontalMargins);
+  const plotHeight = Math.max(1, containerHeight - verticalMargins);
+
+  const xSpan = Math.abs(xRange[1] - xRange[0]);
+  const ySpan = Math.abs(yRange[1] - yRange[0]);
+
+  if (xSpan === 0 || ySpan === 0) return 1;
+
+  // Ratio = (pixels per unit Y) / (pixels per unit X)
+  return (plotHeight / ySpan) / (plotWidth / xSpan);
+}
+
 // ─── Pure: build Plotly traces ───────────────────────────────
 
 /**
@@ -266,8 +346,8 @@ export function buildTraces(
   if (filterState.showAreas) {
     const design = vm.lines.find((l) => l.kind === 'design');
     const topo = vm.lines.find((l) => l.kind === 'topo');
-    if (design && topo && design.points.length === topo.points.length) {
-      traces.push(buildAreaFill(design, topo, isDark));
+    if (design && design.points.length > 1 && topo && topo.points.length > 1) {
+      traces.push(...buildAreaFills(design, topo, isDark));
     }
   }
 
@@ -288,19 +368,11 @@ export function buildTraces(
     traces.push(buildGroundFill(topo, isDark));
   }
 
-  // 4. Reconciled design (when toggled on, if data exists)
-  if (filterState.showReconciledDesign) {
-    const rd = vm.lines.find((l) => l.kind === 'reconciled_design');
-    if (rd && rd.points.length > 0) {
-      traces.push(buildPolyline(rd, 'Diseño (reconciliado)', reconciledLineStyle()));
-    }
-  }
-
-  // 5. Reconciled topo (when toggled on, if data exists)
+  // 4. Reconciled topo — solid amber line (no dashed reconciled design)
   if (filterState.showReconciledTopo) {
     const rt = vm.lines.find((l) => l.kind === 'reconciled_topo');
     if (rt && rt.points.length > 0) {
-      traces.push(buildPolyline(rt, 'Topografía (reconciliada)', reconciledLineStyle()));
+      traces.push(buildPolyline(rt, 'Topografía (reconciliada)', reconciledTopoLineStyle()));
     }
   }
 
@@ -350,35 +422,85 @@ function buildGroundFill(
   };
 }
 
-function buildAreaFill(
+function buildAreaFills(
   design: ProfileLine,
   topo: ProfileLine,
   isDark: boolean,
-): Partial<Plotly.PlotData> {
-  // Construct a closed polygon: design forward, topo reverse.
-  // The fill colour is a very subtle green so it never competes
-  // visually with the actual polylines.
-  const x = [
+): Partial<Plotly.PlotData>[] {
+  const xSet = new Set<number>([
     ...design.points.map((p) => p.distance),
-    ...topo.points.map((p) => p.distance).reverse(),
+    ...topo.points.map((p) => p.distance)
+  ]);
+  const xAll = Array.from(xSet).sort((a, b) => a - b);
+
+  function interp(x: number, pts: readonly ProfilePoint[]): number {
+    if (pts.length === 0) return NaN;
+    if (x <= pts[0]!.distance) return pts[0]!.elevation;
+    if (x >= pts[pts.length - 1]!.distance) return pts[pts.length - 1]!.elevation;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p1 = pts[i]!;
+      const p2 = pts[i + 1]!;
+      if (x >= p1.distance && x <= p2.distance) {
+        if (p2.distance === p1.distance) return p1.elevation;
+        const t = (x - p1.distance) / (p2.distance - p1.distance);
+        return p1.elevation + t * (p2.elevation - p1.elevation);
+      }
+    }
+    return NaN;
+  }
+
+  const z_ref = xAll.map(x => interp(x, design.points));
+  const z_eval = xAll.map(x => interp(x, topo.points));
+
+  const y_deuda = xAll.map((_, i) => Math.max(z_eval[i]!, z_ref[i]!));
+  const y_sobrexcavacion = xAll.map((_, i) => Math.min(z_eval[i]!, z_ref[i]!));
+
+  return [
+    {
+      type: 'scatter',
+      mode: 'lines',
+      x: xAll,
+      y: z_ref,
+      line: { width: 0 },
+      showlegend: false,
+      hoverinfo: 'skip',
+    },
+    {
+      type: 'scatter',
+      mode: 'lines',
+      name: 'Deuda',
+      x: xAll,
+      y: y_deuda,
+      fill: 'tonexty',
+      fillcolor: isDark ? 'rgba(59,130,246,0.25)' : 'rgba(59,130,246,0.3)',
+      line: { width: 0 },
+      showlegend: true,
+      hovertemplate: 'skip',
+      hoverinfo: 'skip',
+    },
+    {
+      type: 'scatter',
+      mode: 'lines',
+      x: xAll,
+      y: z_ref,
+      line: { width: 0 },
+      showlegend: false,
+      hoverinfo: 'skip',
+    },
+    {
+      type: 'scatter',
+      mode: 'lines',
+      name: 'Sobrexcavación',
+      x: xAll,
+      y: y_sobrexcavacion,
+      fill: 'tonexty',
+      fillcolor: isDark ? 'rgba(239,68,68,0.25)' : 'rgba(239,68,68,0.3)',
+      line: { width: 0 },
+      showlegend: true,
+      hovertemplate: 'skip',
+      hoverinfo: 'skip',
+    }
   ];
-  const y = [
-    ...design.points.map((p) => p.elevation),
-    ...topo.points.map((p) => p.elevation).reverse(),
-  ];
-  return {
-    type: 'scatter',
-    mode: 'lines',
-    name: 'Desviación',
-    x,
-    y,
-    fill: 'toself',
-    fillcolor: isDark ? 'rgba(46,125,50,0.10)' : 'rgba(46,125,50,0.08)',
-    line: { color: 'transparent', width: 0 },
-    hovertemplate: 'skip',
-    hoverinfo: 'skip',
-    showlegend: false,
-  };
 }
 
 function buildBenchMarkers(
@@ -401,8 +523,17 @@ function buildBenchMarkers(
   ): Partial<Plotly.PlotData> => {
     const x = matched.map((b) => b.crestDistance);
     const y = matched.map((b) => b.crestElevation);
-    const customdata = matched.map((b) => b.benchNumber);
     const text = matched.map((b) => `${STATUS_ICON[b.status]} ${b.benchNumber}`);
+    const customdata = matched.map((b) => {
+      const crColor = b.deltaCrest && b.deltaCrest < -0.5 ? '#ef4444' : b.deltaCrest && b.deltaCrest > 0.5 ? '#3b82f6' : 'inherit';
+      const toColor = b.deltaToe && b.deltaToe < -0.5 ? '#ef4444' : b.deltaToe && b.deltaToe > 0.5 ? '#3b82f6' : 'inherit';
+      return [
+        b.benchNumber,
+        b.toeElevation,
+        b.deltaCrest !== null ? `<span style="color:${crColor}">${b.deltaCrest > 0 ? '+' : ''}${b.deltaCrest.toFixed(2)}m</span>` : 'N/A',
+        b.deltaToe !== null ? `<span style="color:${toColor}">${b.deltaToe > 0 ? '+' : ''}${b.deltaToe.toFixed(2)}m</span>` : 'N/A',
+      ];
+    });
     // Highlight the currently-hovered or selected bench.
     const sizes = matched.map((b) => {
       if (crossLink.selected === b.benchNumber) return 16;
@@ -470,7 +601,10 @@ function makeHoverTemplate(benches: readonly Bench[]): string {
   // a tooltip rendered by us on hover, not in the Plotly default
   // bubble. Simpler, less to maintain.
   void benches;
-  return '%{text}<br>%{x:.1f} m, %{y:.1f} m<extra></extra>';
+  return '<b>Cota %{customdata[1]:.0f}</b> %{text}<br>' +
+         'ΔCr: %{customdata[2]}<br>' +
+         'ΔPa: %{customdata[3]}<br>' +
+         '<extra></extra>';
 }
 
 function extractBenchNumber(customdata: unknown): number | null {

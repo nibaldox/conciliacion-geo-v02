@@ -194,7 +194,7 @@ def decimate_mesh(mesh: trimesh.Trimesh, target_faces: int) -> trimesh.Trimesh:
     if len(mesh.faces) <= target_faces:
         return mesh
     try:
-        return mesh.simplify_quadric_decimation(target_faces)
+        return mesh.simplify_quadric_decimation(face_count=target_faces)
     except (ImportError, Exception):
         return _vertex_clustering(mesh, target_faces)
 

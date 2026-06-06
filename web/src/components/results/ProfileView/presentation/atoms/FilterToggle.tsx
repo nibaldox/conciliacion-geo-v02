@@ -116,9 +116,8 @@ export function FilterToggle({
         // All toggles share the same outer dimensions so they sit on
         // the same baseline in the FilterBar. `box-border` (the
         // Tailwind default) means the 1px border is INSIDE the
-        // button's width, so the X position doesn't shift between
         // OFF (border: surface) and ON (border: accent).
-        'group inline-flex items-center justify-center gap-2.5 h-7 px-2.5 rounded-md text-[11px] font-semibold',
+        'group inline-flex items-center justify-center gap-2 h-7 px-2.5 rounded-md text-[11px] font-semibold',
         'transition-colors duration-150 select-none whitespace-nowrap',
         'border',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
@@ -175,10 +174,8 @@ export function FilterToggle({
         />
       </span>
 
-      {/* The label — primary cue. Color + weight change.
-       * pl-2 ensures at least 8px of breathing room from the
-       * track even if a future change shrinks the gap. */}
-      <span style={labelStyle} className="pl-2">{label}</span>
+      {/* The label — primary cue. Color + weight change. */}
+      <span style={labelStyle} className="leading-none pt-[1px]">{label}</span>
 
       {badge != null && (
         <span

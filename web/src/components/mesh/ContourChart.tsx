@@ -146,7 +146,7 @@ export function ContourChart() {
     // 1m vertical (a contour line that "looks square" on the
     // ground doesn't get squashed/stretched on screen).
     // Falls back to a square aspect if no bounds yet.
-    const aspectRatio = computeContourAspectRatio(bounds);
+    const aspectRatio = computeContourAspectRatio(bounds as unknown as ContourBounds);
 
     return {
       responsive: true,

@@ -19,23 +19,19 @@
 import { useTranslation } from 'react-i18next';
 import { FilterToggle } from './atoms/FilterToggle';
 import { MetricValue } from './atoms/MetricValue';
+import type { UseFilterStateApi } from '../application';
 import { useFilterState } from '../application';
 import { isFilterActive } from '../domain/filters';
 
 export interface FilterBarProps {
-  /** True when blast-hole data is available for the current session.
-   *  When false, the Blast Holes toggle is hidden. The session
-   *  exposes this via a flag we read from useSession (or the parent
-   *  can pass it in if it has a more direct source). */
+  readonly filter: UseFilterStateApi;
   readonly blastDataAvailable?: boolean;
-  /** Optional: live count of "active" overlays, computed by the
-   *  parent if it has cheaper access than the FilterState. */
   readonly activeCount?: number;
 }
 
-export function FilterBar({ blastDataAvailable = false, activeCount }: FilterBarProps) {
+export function FilterBar({ filter, blastDataAvailable = false, activeCount }: FilterBarProps) {
   const { t } = useTranslation();
-  const { state, setField, reset } = useFilterState();
+  const { state, setField, reset } = filter;
 
   // The "Reconciled" toggle controls BOTH reconciled lines.
   const reconciledOn = state.showReconciledDesign && state.showReconciledTopo;

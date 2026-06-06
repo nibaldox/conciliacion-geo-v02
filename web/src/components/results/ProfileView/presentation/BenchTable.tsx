@@ -25,6 +25,7 @@ import { cycleSort, SORT_FIELDS } from '../domain/sorting';
 import { type UseCrossLinkStateApi, useSortedBenches } from '../application';
 import { StatusPill } from './atoms/StatusPill';
 import { StatusDot } from './atoms/StatusDot';
+import { getStatusClass } from '../../../../utils/format';
 
 export interface BenchTableProps {
   readonly benches: readonly Bench[];
@@ -46,19 +47,23 @@ interface SortState {
 const COLUMN_LABELS: Record<SortField, string> = {
   benchNumber: '#',
   crestElevation: 'Elev (m)',
-  height: 'Altura (m)',
-  faceAngle: 'Ángulo (°)',
-  bermWidth: 'Berma (m)',
-  status: 'Estado',
+  designHeight: 'Alt (D)',
+  height: 'Alt (R)',
+  designAngle: 'Áng (D)',
+  faceAngle: 'Áng (R)',
+  designBerm: 'Berma (D)',
+  bermWidth: 'Berma (R)',
 };
 
 const COLUMN_ALIGN: Record<SortField, 'left' | 'right'> = {
   benchNumber: 'left',
   crestElevation: 'right',
+  designHeight: 'right',
   height: 'right',
+  designAngle: 'right',
   faceAngle: 'right',
+  designBerm: 'right',
   bermWidth: 'right',
-  status: 'left',
 };
 
 export function BenchTable({
@@ -189,13 +194,25 @@ export function BenchTable({
                   </span>
                 </td>
                 <td className="px-3 py-2 text-right tabular-nums">{b.crestElevation.toFixed(1)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{b.height.toFixed(1)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{b.faceAngle.toFixed(0)}°</td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {b.bermWidth === null ? '—' : b.bermWidth.toFixed(1)}
+                <td className="px-3 py-2 text-right tabular-nums">{b.designHeight === null ? '—' : b.designHeight.toFixed(1)}</td>
+                <td className="px-3 py-2 text-right">
+                  <span className={`inline-block px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold ${getStatusClass(b.heightStatus)}`}>
+                    {b.height.toFixed(1)}
+                  </span>
                 </td>
-                <td className="px-3 py-2 text-left">
-                  <StatusPill status={b.status} size="sm" />
+                <td className="px-3 py-2 text-right tabular-nums">{b.designAngle === null ? '—' : b.designAngle.toFixed(0)}°</td>
+                <td className="px-3 py-2 text-right">
+                  <span className={`inline-block px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold ${getStatusClass(b.angleStatus)}`}>
+                    {b.faceAngle.toFixed(0)}°
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {b.designBerm === null ? '—' : b.designBerm.toFixed(1)}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  <span className={`inline-block px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold ${b.bermWidth === null ? '' : getStatusClass(b.bermStatus)}`}>
+                    {b.bermWidth === null ? '—' : b.bermWidth.toFixed(1)}
+                  </span>
                 </td>
               </tr>
             );

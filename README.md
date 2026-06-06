@@ -42,6 +42,8 @@ Render.com (free tier) only when you upload your own data.
 
 - **Multi-format mesh support** — STL, OBJ, PLY, DXF
 - **Auto-section generation** — by start/end line, by polyline file, or click-on-map
+- **3D native interactions** — select and edit cross-section paths directly on the 3D terrain viewer
+- **Asymmetric profiles & rich graphs** — configure independent up/down profile lengths and view live reconciliation data (Delta Crest, Delta Toe) directly on interactive 2D profile graphs
 - **RDP + Hungarian matching** — robust bench / berm / face detection with no double-counting
 - **Compliance dashboard** — CUMPLE / FUERA / NO CUMPLE per sector, parameter, bench
 - **3D and 2D views** — CesiumJS for the terrain, Plotly for interactive profiles, Chart.js for charts

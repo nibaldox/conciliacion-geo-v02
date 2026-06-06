@@ -10,6 +10,7 @@ export const LazyMesh3DViewer = lazy(() =>
   import('./mesh/Mesh3DViewer').then(m => ({ default: m.Mesh3DViewer }))
 );
 
+
 // Note: the old LazyProfileChart is gone. ProfileView (the new
 // orchestrator) is loaded eagerly because Plotly is its biggest
 // dependency and is already in the Plotly vendor chunk. The

@@ -18,3 +18,4 @@ pandas>=2.2
 slowapi>=0.1.9
 # Observability (opt-in via SENTRY_DSN — no-op when unset).
 sentry-sdk[fastapi]>=2.0
+networkx>=3.0

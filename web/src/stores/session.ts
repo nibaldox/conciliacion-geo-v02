@@ -58,10 +58,20 @@ export interface DemoData {
     delta_toe: number | null;
   }>;
 }
-
 interface SessionState {
   // Wizard navigation
   currentStep: number;
+
+  // Workspace views and layout state
+  activeWorkspaceView: '3d' | 'profiles' | 'dashboard' | 'export-ai';
+  sidebarCollapsed: boolean;
+
+  // Click handler for placing sections in 3D View
+  mapClickHandler: ((x: number, y: number, curveId?: string, pointIndex?: number) => void) | null;
+
+  // Curve Selection State
+  selectedCurveId: string | null;
+  selectedCurvePoints: Array<{ curveId: string; pointIndex: number; x: number; y: number }>;
 
   // Selections
   selectedSection: string | null;
@@ -87,6 +97,11 @@ interface SessionState {
   setStep: (step: number) => void;
   nextStep: () => void;
   prevStep: () => void;
+  setActiveWorkspaceView: (view: '3d' | 'profiles' | 'dashboard' | 'export-ai') => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  setMapClickHandler: (handler: ((x: number, y: number, curveId?: string, pointIndex?: number) => void) | null) => void;
+  setSelectedCurveId: (id: string | null) => void;
+  setSelectedCurvePoints: (points: Array<{ curveId: string; pointIndex: number; x: number; y: number }>) => void;
   setSelectedSection: (id: string | null) => void;
   setDesignMeshId: (id: string | null) => void;
   setTopoMeshId: (id: string | null) => void;
@@ -99,6 +114,11 @@ interface SessionState {
 
 const initialState = {
   currentStep: 1,
+  activeWorkspaceView: '3d' as const,
+  sidebarCollapsed: false,
+  mapClickHandler: null,
+  selectedCurveId: null,
+  selectedCurvePoints: [],
   selectedSection: null,
   designMeshId: null,
   topoMeshId: null,
@@ -122,6 +142,11 @@ export const useSession = create<SessionState>((set, get) => ({
   setStep: (step) => set({ currentStep: step }),
   nextStep: () => set((s) => ({ currentStep: Math.min(s.currentStep + 1, 4) })),
   prevStep: () => set((s) => ({ currentStep: Math.max(s.currentStep - 1, 1) })),
+  setActiveWorkspaceView: (view) => set({ activeWorkspaceView: view }),
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+  setMapClickHandler: (handler) => set({ mapClickHandler: handler }),
+  setSelectedCurveId: (id) => set({ selectedCurveId: id }),
+  setSelectedCurvePoints: (points) => set({ selectedCurvePoints: points }),
   setSelectedSection: (id) => set({ selectedSection: id }),
   setDesignMeshId: (id) => set({ designMeshId: id }),
   setTopoMeshId: (id) => set({ topoMeshId: id }),
@@ -137,6 +162,7 @@ export const useSession = create<SessionState>((set, get) => ({
         designMeshId: DEMO_MESH_IDS.design,
         topoMeshId: DEMO_MESH_IDS.topo,
         currentStep: 4,            // skip straight to results
+        activeWorkspaceView: 'profiles',
         selectedSection: existing.sections[0]?.section_name ?? null,
         demoLoading: false,
         demoError: null,
@@ -159,6 +185,7 @@ export const useSession = create<SessionState>((set, get) => ({
         designMeshId: DEMO_MESH_IDS.design,
         topoMeshId: DEMO_MESH_IDS.topo,
         currentStep: 4,
+        activeWorkspaceView: 'profiles',
         selectedSection: data.sections[0]?.section_name ?? null,
       });
     } catch (err) {
@@ -179,6 +206,7 @@ export const useSession = create<SessionState>((set, get) => ({
       topoMeshId: null,
       selectedSection: null,
       currentStep: 1,
+      activeWorkspaceView: '3d',
     }),
 
   reset: () => set(initialState),

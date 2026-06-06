@@ -342,7 +342,11 @@
     "loading_vertices": "Cargando vértices…",
     "design_label": "Diseño",
     "topo_label": "Topografía",
-    "tooltip": "Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m"
+    "tooltip": "Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m",
+    "layers": "Capas Visibles",
+    "layer_topo": "Topografía Real",
+    "layer_design": "Curvas de Diseño",
+    "layer_sections": "Líneas de Sección"
   },
   "wizard": {
     "nav_label": "Progreso del asistente",

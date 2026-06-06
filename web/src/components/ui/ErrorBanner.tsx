@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { IconWarning, IconInfo, IconError } from './Icons';
+
 
 interface ErrorBannerProps {
   message: string | null;
@@ -52,7 +54,9 @@ export function ErrorBanner({
       style={{ backgroundColor: palette.bg, borderColor: palette.border, color: palette.text }}
     >
       <div className="flex items-center gap-2 min-w-0">
-        <span aria-hidden="true">{variant === 'warning' ? '⚠️' : variant === 'info' ? 'ℹ️' : '❌'}</span>
+        <span aria-hidden="true">
+          {variant === 'warning' ? <IconWarning className="w-4 h-4" /> : variant === 'info' ? <IconInfo className="w-4 h-4" /> : <IconError className="w-4 h-4" />}
+        </span>
         <span className="truncate">{message}</span>
       </div>
       <div className="flex items-center gap-2 shrink-0">

@@ -7,7 +7,7 @@ import type {
   SectionResponse,
   SectionAutoParams,
   SectionCreate,
-  SectionClickParams,
+  SectionClickParams, SectionCurveParams,
   ProfileData,
   ComparisonResult,
   ProcessStatus,
@@ -82,10 +82,10 @@ export function useUploadMesh() {
   });
 }
 
-export function useMeshVertices(meshId: string | null, _step = 8000) {
+export function useMeshVertices(meshId: string | null, _step = 150000) {
   const { demoMode, demoData } = useSession();
   return useQuery({
-    queryKey: ['mesh-vertices', meshId, demoMode],
+    queryKey: ['mesh-vertices', meshId, demoMode, _step],
     queryFn: async () => {
       if (demoMode && demoData && isDemoMeshId(meshId)) {
         const kind = meshId === DEMO_MESH_IDS.design ? 'design' : 'topo';
@@ -111,6 +111,14 @@ export function useMeshContours(meshId: string | null, interval = 15.0) {
   return useQuery({
     queryKey: ['mesh-contours', meshId, interval],
     queryFn: () => client.get<ContourData>(`/meshes/${meshId}/contours`, { params: { interval } }).then(r => r.data),
+    enabled: !!meshId,
+  });
+}
+
+export function useMeshBreaklines(meshId: string | null) {
+  return useQuery({
+    queryKey: ['mesh-breaklines', meshId],
+    queryFn: () => client.get<ContourData>(`/meshes/${meshId}/breaklines`).then(r => r.data),
     enabled: !!meshId,
   });
 }
@@ -167,10 +175,12 @@ export function useClickSection() {
 export function useFileSections() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ file, ...params }: { file: File; spacing: number; length: number; sector: string; az_mode: string }) => {
+    mutationFn: ({ file, ...params }: { file: File; spacing: number; length: number; length_up?: number; length_down?: number; sector: string; az_mode: string }) => {
       const fd = new FormData();
       fd.append('file', file);
-      Object.entries(params).forEach(([k, v]) => fd.append(k, String(v)));
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined) fd.append(k, String(v));
+      });
       return client.post('/sections/from-file', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       }).then(r => r.data);
@@ -395,5 +405,19 @@ export function useAIModels(provider: string | null) {
     queryFn: () => client.get<{ provider: string; models: string[] }>(`/ai/models/${provider}`).then(r => r.data),
     enabled: !!provider,
     staleTime: 60_000,
+  });
+}
+
+
+export function useCurveSection() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (params: SectionCurveParams) => {
+      if (useSession.getState().demoMode) return;
+      await client.post('/sections/curve', params);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sections'] });
+    },
   });
 }
