@@ -529,9 +529,9 @@ function buildBenchMarkers(
       const toColor = b.deltaToe && b.deltaToe < -0.5 ? '#ef4444' : b.deltaToe && b.deltaToe > 0.5 ? '#3b82f6' : 'inherit';
       return [
         b.benchNumber,
-        b.toeElevation,
-        b.deltaCrest !== null ? `<span style="color:${crColor}">${b.deltaCrest > 0 ? '+' : ''}${b.deltaCrest.toFixed(2)}m</span>` : 'N/A',
-        b.deltaToe !== null ? `<span style="color:${toColor}">${b.deltaToe > 0 ? '+' : ''}${b.deltaToe.toFixed(2)}m</span>` : 'N/A',
+        b.toeElevation ?? 0,
+        b.deltaCrest != null ? `<span style="color:${crColor}">${b.deltaCrest > 0 ? '+' : ''}${b.deltaCrest.toFixed(2)}m</span>` : 'N/A',
+        b.deltaToe != null ? `<span style="color:${toColor}">${b.deltaToe > 0 ? '+' : ''}${b.deltaToe.toFixed(2)}m</span>` : 'N/A',
       ];
     });
     // Highlight the currently-hovered or selected bench.
