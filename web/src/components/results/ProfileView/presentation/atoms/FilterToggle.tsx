@@ -117,7 +117,7 @@ export function FilterToggle({
         // the same baseline in the FilterBar. `box-border` (the
         // Tailwind default) means the 1px border is INSIDE the
         // OFF (border: surface) and ON (border: accent).
-        'group inline-flex items-center justify-center gap-2 h-7 px-2.5 rounded-md text-[11px] font-semibold',
+        'group inline-flex items-center justify-center gap-2.5 h-7 px-2.5 rounded-md text-[11px] font-semibold',
         'transition-colors duration-150 select-none whitespace-nowrap',
         'border',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',

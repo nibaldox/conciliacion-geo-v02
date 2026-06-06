@@ -138,7 +138,7 @@ describe('cycleSort', () => {
 describe('SORT_FIELDS', () => {
   it('lists the expected fields', () => {
     expect([...SORT_FIELDS].sort()).toEqual(
-      ['benchNumber', 'bermWidth', 'crestElevation', 'designAngle', 'designBerm', 'designHeight', 'faceAngle', 'height'].sort(),
+      ['benchNumber', 'bermWidth', 'crestElevation', 'designAngle', 'designBerm', 'designHeight', 'faceAngle', 'height', 'status'].sort(),
     );
   });
 });

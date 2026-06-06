@@ -20,6 +20,7 @@ export const SORT_FIELDS = [
   'faceAngle',
   'designBerm',
   'bermWidth',
+  'status',
 ] as const;
 
 export type SortField = (typeof SORT_FIELDS)[number];
@@ -84,6 +85,9 @@ export function comparator(
         else if (a.bermWidth === null) return 1;
         else if (b.bermWidth === null) return -1;
         else cmp = a.bermWidth - b.bermWidth;
+        break;
+      case 'status':
+        cmp = statusRank(a.status) - statusRank(b.status);
         break;
       default:
         // Exhaustiveness — TypeScript will complain here if a new

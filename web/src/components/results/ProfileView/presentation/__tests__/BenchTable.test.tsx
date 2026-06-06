@@ -54,7 +54,7 @@ describe('BenchTable', () => {
   it('renders one header per sort field', () => {
     const { container } = render(<BenchTable benches={benches} crossLink={makeCrossLink()} />);
     const headers = container.querySelectorAll('[data-testid^="sort-header-"]');
-    expect(headers).toHaveLength(8);
+    expect(headers).toHaveLength(9);
     expect(headers[0]?.textContent).toMatch(/#/);
     expect(headers[5]?.textContent).toMatch(/Áng/i);
   });

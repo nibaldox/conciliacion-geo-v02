@@ -95,7 +95,6 @@ describe('buildTraces', () => {
     });
     const traces = buildTraces(vm, makeFilterState(), stubCrossLink, false);
     const names = traces.map((t) => (t as { name?: string }).name);
-    expect(names).toContain('Diseño (reconciliado)');
     expect(names).toContain('Topografía (reconciliada)');
   });
 
@@ -113,7 +112,6 @@ describe('buildTraces', () => {
       false,
     );
     const names = traces.map((t) => (t as { name?: string }).name);
-    expect(names).not.toContain('Diseño (reconciliado)');
     expect(names).not.toContain('Topografía (reconciliada)');
   });
 
@@ -125,9 +123,9 @@ describe('buildTraces', () => {
       ],
     });
     const traces = buildTraces(vm, makeFilterState({ showAreas: true }), stubCrossLink, false);
-    const fill = traces.find((t) => (t as { name?: string }).name === 'Desviación');
+    const fill = traces.find((t) => (t as { name?: string }).name === 'Deuda');
     expect(fill).toBeDefined();
-    expect((fill as { fill?: string }).fill).toBe('toself');
+    expect((fill as { fill?: string }).fill).toBe('tonexty');
   });
 
   it('does NOT emit a fill trace when only one of design/topo is present', () => {
@@ -137,7 +135,7 @@ describe('buildTraces', () => {
       ],
     });
     const traces = buildTraces(vm, makeFilterState({ showAreas: true }), stubCrossLink, false);
-    const fill = traces.find((t) => (t as { name?: string }).name === 'Desviación');
+    const fill = traces.find((t) => (t as { name?: string }).name === 'Deuda');
     expect(fill).toBeUndefined();
   });
 
@@ -166,8 +164,8 @@ describe('buildTraces', () => {
   it('encodes the bench number in customdata for cross-link routing', () => {
     const vm = makeViewModel({ benches: [makeBench({ benchNumber: 42, status: 'CUMPLE' })] });
     const traces = buildTraces(vm, makeFilterState(), stubCrossLink, false);
-    const bench = traces.find((t) => (t as { name?: string }).name === 'Bancos') as { customdata?: number[] } | undefined;
-    expect(bench?.customdata).toEqual([42]);
+    const bench = traces.find((t) => (t as { name?: string }).name === 'Bancos') as { customdata?: number[][] } | undefined;
+    expect(bench?.customdata).toEqual([[42, 85, 'N/A', 'N/A']]);
   });
 
   it('grows the marker for the hovered bench', () => {

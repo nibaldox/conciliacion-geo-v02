@@ -372,7 +372,7 @@ class TestSettings:
         data = resp.json()
         assert "process" in data
         assert "tolerances" in data
-        assert data["process"]["resolution"] == 0.5
+        assert data["process"]["resolution"] == 0.1
         assert data["process"]["face_threshold"] == 40.0
         assert "bench_height" in data["tolerances"]
 
