@@ -53,6 +53,7 @@ const COLUMN_LABELS: Record<SortField, string> = {
   faceAngle: 'Áng (R)',
   designBerm: 'Berma (D)',
   bermWidth: 'Berma (R)',
+  status: 'Est',
 };
 
 const COLUMN_ALIGN: Record<SortField, 'left' | 'right'> = {
@@ -64,6 +65,7 @@ const COLUMN_ALIGN: Record<SortField, 'left' | 'right'> = {
   faceAngle: 'right',
   designBerm: 'right',
   bermWidth: 'right',
+  status: 'left',
 };
 
 export function BenchTable({
@@ -213,6 +215,9 @@ export function BenchTable({
                   <span className={`inline-block px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold ${b.bermWidth === null ? '' : getStatusClass(b.bermStatus)}`}>
                     {b.bermWidth === null ? '—' : b.bermWidth.toFixed(1)}
                   </span>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <StatusPill status={b.status} />
                 </td>
               </tr>
             );

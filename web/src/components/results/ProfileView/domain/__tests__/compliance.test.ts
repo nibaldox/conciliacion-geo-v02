@@ -15,6 +15,8 @@ function makeBench(status: BenchStatus, n: number): Bench {
     isRamp: false, designHeight: 15, designAngle: 65, designBerm: 8, heightStatus: 'UNKNOWN', angleStatus: 'UNKNOWN', bermStatus: 'UNKNOWN',
     status,
     matched: true,
+    deltaCrest: null,
+    deltaToe: null,
   };
 }
 

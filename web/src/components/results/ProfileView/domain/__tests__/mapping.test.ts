@@ -78,7 +78,7 @@ describe('toSectionMeta', () => {
   });
 
   it('coerces a malformed origin to [0, 0]', () => {
-    const meta = toSectionMeta(makeSection({ origin: [42] as unknown as number[] }));
+    const meta = toSectionMeta(makeSection({ origin: [42] as unknown as [number, number] }));
     expect(meta.origin).toEqual([0, 0]);
   });
 

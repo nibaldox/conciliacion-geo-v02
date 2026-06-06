@@ -5,7 +5,7 @@ import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 import { useMeshVertices, useMeshBreaklines, useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
-import type { SectionResponse, VerticesResponse, BreaklineResponse, ContourData } from '../../api/types';
+import type { SectionResponse, VerticesResponse, ContourData } from '../../api/types';
 
 const DESIGN_HEX = '#7693b7'; // steel blue
 const TOPO_HEX = '#cccccc';   // grey
@@ -336,8 +336,8 @@ function Scene({
         return (
           <line 
             key={item.id} 
-            geometry={item.geo}
-            onClick={(e) => {
+            {...{ geometry: item.geo } as any}
+            onClick={(e: any) => {
               e.stopPropagation();
               if (mapClickHandler) {
                 const vertexIndex = e.index;

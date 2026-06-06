@@ -15,6 +15,8 @@ function makeBench(overrides: Partial<Bench> = {}): Bench {
     isRamp: false, designHeight: 15, designAngle: 65, designBerm: 8, heightStatus: 'UNKNOWN', angleStatus: 'UNKNOWN', bermStatus: 'UNKNOWN',
     status: 'CUMPLE',
     matched: true,
+    deltaCrest: null,
+    deltaToe: null,
     ...overrides,
   };
 }

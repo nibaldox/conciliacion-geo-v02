@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { Tooltip } from '../ui/Tooltip';
-import { Icon3D, Icon2D, IconProfiles, IconDashboard, IconExport } from '../ui/Icons';
+import { Icon3D, IconProfiles, IconDashboard, IconExport } from '../ui/Icons';
 
 
 export function ViewsToolbar() {
