@@ -3,6 +3,11 @@ name: Deploy Frontend to GitHub Pages
 on:
   push:
     branches: [main]
+    # Don't waste a build if only docs/markdown changed.
+    paths:
+      - 'web/**'
+      - 'package.json'
+      - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:
 
 # Allow only one concurrent deploy, queueing newer runs and skipping stale ones
@@ -16,12 +21,6 @@ permissions:
   contents: read
   pages: write
   id-token: write
-
-# Don't waste a build if only docs/markdown changed.
-paths:
-  - 'web/**'
-  - 'package.json'
-  - '.github/workflows/deploy-frontend.yml'
 
 jobs:
   build:
