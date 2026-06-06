@@ -25,33 +25,35 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
   const { isDark } = useTheme();
   const { data: profile } = useProfile(section.id);
 
-  const bg = isDark ? '#0b0f19' : '#f8fafc';
   const gridColor = isDark ? '#1e293b' : '#e2e8f0';
   const designColor = '#7693b7';
   const topoColor = '#4ade80';
 
-  const plotData: Data[] = profile
-    ? [
-        {
-          x: profile.design.distances,
-          y: profile.design.elevations,
-          type: 'scatter',
-          mode: 'lines',
-          name: 'Diseño',
-          line: { color: designColor, width: 1.5 },
-          showlegend: false,
-        },
-        {
-          x: profile.topo.distances,
-          y: profile.topo.elevations,
-          type: 'scatter',
-          mode: 'lines',
-          name: 'Topo',
-          line: { color: topoColor, width: 1.5 },
-          showlegend: false,
-        },
-      ]
-    : [];
+  const plotData: Data[] = [];
+  if (profile) {
+    if (profile.design) {
+      plotData.push({
+        x: profile.design.distances,
+        y: profile.design.elevations,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Diseño',
+        line: { color: designColor, width: 1.5 },
+        showlegend: false,
+      });
+    }
+    if (profile.topo) {
+      plotData.push({
+        x: profile.topo.distances,
+        y: profile.topo.elevations,
+        type: 'scatter',
+        mode: 'lines',
+        name: 'Topo',
+        line: { color: topoColor, width: 1.5 },
+        showlegend: false,
+      });
+    }
+  }
 
   const layout: Partial<Layout> = {
     paper_bgcolor: 'transparent',

@@ -131,14 +131,14 @@ export function useSections() {
     queryKey: ['sections', demoMode],
     queryFn: async () => {
       if (demoMode && demoData) {
-        return demoData.sections.map((s, i) => ({
+        return demoData.sections.map((s, i): SectionResponse => ({
           id: String(i),
           name: s.section_name,
-          origin: s.origin,
+          origin: s.origin as [number, number],
           azimuth: s.azimuth,
           length: 400,            // matches the synthetic generator
           sector: s.sector,
-        })) satisfies SectionResponse[];
+        }));
       }
       return client.get<SectionResponse[]>('/sections').then(r => r.data);
     },

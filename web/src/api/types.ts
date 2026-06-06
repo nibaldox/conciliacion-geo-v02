@@ -63,7 +63,7 @@ export interface SectionFromFileParams {
 }
 
 export interface SectionCurveParams {
-  points: [number, number][];
+  points: [number, number][] | number[][];
   spacing?: number;
   length?: number;
   length_up?: number;
@@ -83,12 +83,6 @@ export interface SectionClickParams {
 
 // Process schemas
 
-export interface SectionCurveParams {
-  points: number[][];
-  spacing: number;
-  length: number;
-  sector: string;
-}
 
 export interface ProcessSettings {
   resolution: number;

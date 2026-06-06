@@ -33,11 +33,10 @@ import {
   createPlotlyLayout,
   designLineStyle,
   topoLineStyle,
-  reconciledLineStyle,
   reconciledTopoLineStyle,
 } from '../infrastructure/plotlyTheme';
 
-import type { Bench, ProfileLine, ProfileViewModel } from '../domain/types';
+import type { Bench, ProfileLine, ProfileViewModel, ProfilePoint } from '../domain/types';
 import { type FilterState } from '../domain/filters';
 import { type UseCrossLinkStateApi } from '../application';
 import { STATUS_BG_VAR, STATUS_FG_VAR, STATUS_BORDER_VAR, STATUS_ICON } from '../domain/status';

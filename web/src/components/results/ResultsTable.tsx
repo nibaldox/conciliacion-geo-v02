@@ -21,16 +21,6 @@ import {
 } from '../../utils/format';
 import type { ComparisonResult, MatchType } from '../../api/types';
 
-function StatusBadge({ status, t }: { status: string; t: (k: string) => string }) {
-  const cls = getStatusClass(status);
-  if (!cls) return <span className="text-gray-400 text-xs">—</span>;
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
-      {t(`compliance.${status}`)}
-    </span>
-  );
-}
-
 function MatchBadge({ type, t }: { type: MatchType; t: (k: string) => string }) {
   const cls = getMatchClass(type);
   const key = `table.status_${type.toLowerCase()}`;
