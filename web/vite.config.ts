@@ -33,7 +33,7 @@ export default defineConfig({
         // they're served on demand via the runtime caching rules
         // below instead.
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        globIgnores: ['**/vendor-plotly*.*'],
+        globIgnores: ['**/vendor-plotly*.*', '**/Cesium/**'],
         additionalManifestEntries: [],
         cleanupOutdatedCaches: true,
         navigateFallbackDenylist: [/assets\/.*-plotly/],
