@@ -16,8 +16,6 @@ datas = [
 ]
 
 hiddenimports = [
-    'scipy._lib.misc',
-    'scipy.special._cdflib',
     'scipy.integrate._quadpack',
     'scipy.integrate._odepack',
     'scipy.optimize._minpack',
@@ -34,7 +32,6 @@ excludes = [
     'matplotlib.tests',
     'IPython',
     'notebook',
-    'PIL',
     'PyQt5',
     'PySide2',
 ]
