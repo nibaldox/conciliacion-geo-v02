@@ -204,26 +204,20 @@ def run_test():
         # Test Word Report
         print("\n6. Generando reporte Word...")
         report_data = []
-        # We need to reconstruct report_data because the loop above was not saving profiles
-        # In a real test we would modify the loop, but here we can just rebuild it for the matches
+        for s, p_d, p_t in zip(sections, params_design, params_topo):
+            pd_prof = cut_mesh_with_section(mesh_design, s)
+            pt_prof = cut_mesh_with_section(mesh_topo, s)
+            report_data.append({
+                "section_name": s.name,
+                "params_design": p_d,
+                "params_topo": p_t,
+                "profile_d": (pd_prof.distances, pd_prof.elevations) if pd_prof else (np.array([]), np.array([])),
+                "profile_t": (pt_prof.distances, pt_prof.elevations) if pt_prof else (np.array([]), np.array([])),
+            })
         
-        # Actually, let's just make the loop above save the profiles, it's cleaner.
-        # But since I cannot easily edit the loop efficiently with replace_file_content in one go without replacing huge block,
-        # I will cheat for the test and re-cut the *first* section just to prove it works.
-        
-        if len(sections) > 0 and comparisons:
-             # Just grab one section that has matches
-            s_match = comparisons[0]['section']
-            # Find index
-            idx = next(i for i, s in enumerate(sections) if s.name == s_match)
-            
-            # Recut to get profiles
-            pd = cut_mesh_with_section(mesh_design, sections[idx])
-            pt = cut_mesh_with_section(mesh_topo, sections[idx])
-            
-            report_out = "/tmp/test_report.docx"
-            generate_word_report(comparisons, report_data, report_out, {'project': 'Test Report'})
-            print(f"✅ Reporte Word exportado: {report_out}")
+        report_out = "/tmp/test_report.docx"
+        generate_word_report(comparisons, report_data, report_out, {'project': 'Test Report'})
+        print(f"✅ Reporte Word exportado: {report_out}")
 
     else:
         print("   ⚠️ No se obtuvieron comparaciones.")

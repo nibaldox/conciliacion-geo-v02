@@ -465,6 +465,73 @@ class TestExportWord:
         resp = client.get("/api/v1/export/word")
         assert resp.status_code == 400
 
+    def test_export_word_success(self, client, headers, stl_path, monkeypatch):
+        import numpy as np
+        _upload_mesh(client, headers, stl_path, "design")
+        _upload_mesh(client, headers, stl_path, "topo")
+        sections = [
+            {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 20.0, "sector": "A"}
+        ]
+        resp = client.post("/api/v1/sections/manual", json=sections, headers=headers)
+        assert resp.status_code == 200
+        
+        session_id = headers["x-session-id"]
+        mock_results = [
+            {
+                "section": "S-01",
+                "bench_num": 1,
+                "level": 3900.0,
+                "height_design": 15.0,
+                "height_real": 15.0,
+                "height_dev": 0.0,
+                "height_status": "CUMPLE",
+                "angle_design": 70.0,
+                "angle_real": 70.0,
+                "angle_dev": 0.0,
+                "angle_status": "CUMPLE",
+                "berm_design": 9.0,
+                "berm_real": 9.0,
+                "berm_dev": 0.0,
+                "berm_status": "CUMPLE",
+                "berm_min": 6.0,
+            }
+        ]
+        db.save_results(session_id, mock_results)
+        
+        mock_ext_design = {
+            "section_name": "S-01",
+            "sector": "A",
+            "benches": [
+                {
+                    "bench_number": 1,
+                    "crest_elevation": 3900.0,
+                    "crest_distance": 10.0,
+                    "toe_elevation": 3885.0,
+                    "toe_distance": 15.0,
+                    "bench_height": 15.0,
+                    "face_angle": 70.0,
+                    "berm_width": 9.0,
+                    "is_ramp": False,
+                }
+            ],
+            "inter_ramp_angle": 45.0,
+            "overall_angle": 45.0,
+        }
+        db.save_extraction(session_id, "S-01", "design", mock_ext_design)
+        db.save_extraction(session_id, "S-01", "topo", mock_ext_design)
+
+        class MockProfile:
+            def __init__(self):
+                self.distances = np.array([0.0, 5.0, 10.0, 15.0])
+                self.elevations = np.array([3900.0, 3900.0, 3885.0, 3885.0])
+        
+        import core
+        monkeypatch.setattr(core, "cut_both_surfaces", lambda m_d, m_t, sec: (None, None))
+
+        resp = client.get("/api/v1/export/word", headers=headers)
+        assert resp.status_code == 200, f"Export Word failed: {resp.text}"
+        assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
 
 class TestExportDXF:
     def test_no_meshes_error(self, client):
