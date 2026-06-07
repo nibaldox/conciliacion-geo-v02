@@ -80,6 +80,15 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
       points = points.reverse();
     }
     
+    console.log("handleGenerate: calling mutation.mutate with params:", {
+      pointsCount: points.length,
+      spacing,
+      length: lengthUp + lengthDown,
+      length_up: lengthUp,
+      length_down: lengthDown,
+      sector
+    });
+
     mutation.mutate({
       points,
       spacing,
@@ -87,11 +96,17 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
       length_up: lengthUp,
       length_down: lengthDown,
       sector
+    }, {
+      onSuccess: () => {
+        console.log("Profile generation mutation succeeded.");
+        // Reset selection after successful generation
+        setSelectedCurveId(null);
+        setSelectedCurvePoints([]);
+      },
+      onError: (err) => {
+        console.error("Profile generation mutation failed:", err);
+      }
     });
-    
-    // Reset selection after generation
-    setSelectedCurveId(null);
-    setSelectedCurvePoints([]);
   };
 
   const isReady = selectedCurvePoints.length === 2 && Math.abs(selectedCurvePoints[0].pointIndex - selectedCurvePoints[1].pointIndex) > 0;
@@ -200,6 +215,18 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
         <Button className="w-full" variant="primary" disabled={!isReady || mutation.isPending} onClick={handleGenerate}>
           {mutation.isPending ? 'Generando...' : 'Generar Perfiles'}
         </Button>
+
+        {mutation.isError && (
+          <p className="text-xs font-medium mt-2 text-center" style={{ color: 'var(--color-mine-red)' }}>
+            Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudo generar los perfiles'}
+          </p>
+        )}
+
+        {mutation.isSuccess && (
+          <p className="text-xs font-medium mt-2 text-center" style={{ color: 'var(--color-mine-green)' }}>
+            ¡Perfiles generados con éxito!
+          </p>
+        )}
       </div>
     </div>
   );
