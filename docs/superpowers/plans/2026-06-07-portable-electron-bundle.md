@@ -1055,7 +1055,7 @@ git commit -m "feat(electron): main process with sidecar spawn, health wait, and
 **Files:**
 - Create: `electron/builder.config.js`
 
-- [ ] **Step 11.1: Crear la config de electron-builder**
+- [x] **Step 11.1: Crear la config de electron-builder**
 
 Crear `electron/builder.config.js`:
 
@@ -1126,12 +1126,12 @@ mismo checkout. El que exista físicamente al momento de buildear se
 copia; el otro falla silenciosamente. En el futuro podemos refinar esto
 con un `extraResources` por target.
 
-- [ ] **Step 11.2: Verificar que la config es válida**
+- [x] **Step 11.2: Verificar que la config es válida**
 
 Run: `cd electron && node -e "const c = require('./builder.config.js'); console.log(JSON.stringify(c.win), JSON.stringify(c.linux.target))" && cd ..`
 Expected: output con la config de Windows y el target `AppImage`.
 
-- [ ] **Step 11.3: Commit**
+- [x] **Step 11.3: Commit**
 
 ```bash
 git add electron/builder.config.js
