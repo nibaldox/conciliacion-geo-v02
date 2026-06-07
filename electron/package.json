@@ -9,7 +9,7 @@
     "build": "electron-builder --config builder.config.js",
     "build:linux": "electron-builder --linux --config builder.config.js",
     "build:windows": "electron-builder --win --config builder.config.js",
-    "test": "node --test lib/"
+    "test": "node --test"
   },
   "devDependencies": {
     "electron": "^32.0.0",
