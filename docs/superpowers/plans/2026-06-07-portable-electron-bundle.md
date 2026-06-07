@@ -897,7 +897,7 @@ git commit -m "feat(electron): health check waiter with tests"
 - Create: `electron/preload.js`
 - Create: `electron/main.js`
 
-- [ ] **Step 10.1: Crear `electron/preload.js`**
+- [x] **Step 10.1: Crear `electron/preload.js`**
 
 Crear `electron/preload.js`:
 
@@ -914,7 +914,7 @@ contextBridge.exposeInMainWorld('conciliacion', {
 });
 ```
 
-- [ ] **Step 10.2: Crear `electron/main.js`**
+- [x] **Step 10.2: Crear `electron/main.js`**
 
 Crear `electron/main.js`:
 
@@ -1036,12 +1036,12 @@ app.on('before-quit', () => {
 });
 ```
 
-- [ ] **Step 10.3: Verificar que el main.js no tiene errores de sintaxis**
+- [x] **Step 10.3: Verificar que el main.js no tiene errores de sintaxis**
 
 Run: `cd electron && node --check main.js && node --check preload.js && node --check lib/port.js && node --check lib/health.js && cd ..`
 Expected: sin output (todos los archivos pasan el syntax check).
 
-- [ ] **Step 10.4: Commit**
+- [x] **Step 10.4: Commit**
 
 ```bash
 git add electron/preload.js electron/main.js
