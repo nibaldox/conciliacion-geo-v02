@@ -210,6 +210,6 @@ app.include_router(ai.router, prefix="/api/v1")
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
-_web_dist = Path.cwd() / "web" / "dist"
+_web_dist = Path(__file__).parent.parent / "web" / "dist"
 if _web_dist.exists():
     app.mount("/", StaticFiles(directory=str(_web_dist), html=True), name="web")
