@@ -397,7 +397,7 @@ git commit -m "feat(sidecar): entry_api.py with per-OS data dir resolution"
 Esta task no tiene test unitario — el "test" es el build en sí, que
 sucede en Task 5.
 
-- [ ] **Step 4.1: Crear el spec de PyInstaller**
+- [x] **Step 4.1: Crear el spec de PyInstaller**
 
 Crear `conciliacion-api.spec` en la raíz del repo:
 
@@ -479,7 +479,7 @@ exe = EXE(
 )
 ```
 
-- [ ] **Step 4.2: Commit**
+- [x] **Step 4.2: Commit** (SHA: 71a81cc)
 
 ```bash
 git add conciliacion-api.spec
