@@ -48,7 +48,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Runtime system deps only (no gcc)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libspatialindex6 \
+        libspatialindex-dev \
         curl && \
     rm -rf /var/lib/apt/lists/*
 
