@@ -10,6 +10,9 @@ on:
       - '.github/workflows/deploy-frontend.yml'
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # Allow only one concurrent deploy, queueing newer runs and skipping stale ones
 concurrency:
   group: pages
