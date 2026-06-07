@@ -662,7 +662,7 @@ git commit -m "feat(electron): placeholder icons (PNG/ICO/Linux)"
 Esta lógica se extrae del main process para poder testearla sin
 levantar Electron.
 
-- [ ] **Step 8.1: Escribir el test que falla**
+- [x] **Step 8.1: Escribir el test que falla**
 
 Crear `electron/lib/port.test.js`:
 
@@ -696,12 +696,12 @@ test('findFreePort returns a port in the valid range', async () => {
 });
 ```
 
-- [ ] **Step 8.2: Correr el test, ver que falla**
+- [x] **Step 8.2: Correr el test, ver que falla**
 
 Run: `cd electron && npm test && cd ..`
 Expected: FAIL — `electron/lib/port.js` no existe todavía.
 
-- [ ] **Step 8.3: Crear `electron/lib/port.js`**
+- [x] **Step 8.3: Crear `electron/lib/port.js`**
 
 Crear `electron/lib/port.js`:
 
@@ -742,12 +742,12 @@ function findFreePort() {
 module.exports = { isPortInUse, findFreePort };
 ```
 
-- [ ] **Step 8.4: Correr el test, ver que pasa**
+- [x] **Step 8.4: Correr el test, ver que pasa**
 
 Run: `cd electron && npm test && cd ..`
 Expected: PASS (3 tests).
 
-- [ ] **Step 8.5: Commit**
+- [x] **Step 8.5: Commit**
 
 ```bash
 git add electron/lib/port.js electron/lib/port.test.js
