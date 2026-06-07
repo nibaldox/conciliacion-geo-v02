@@ -329,6 +329,33 @@ class TestSectionsAuto:
         assert resp.status_code == 400
 
 
+class TestSectionsCurve:
+    def test_curve_sections_generation(self, client, headers):
+        """Test generating sections perpendicular to a curve/polyline with 3D points."""
+        resp = client.post(
+            "/api/v1/sections/curve",
+            json={
+                "points": [[100.0, 100.0, 50.0], [150.0, 100.0, 52.0], [200.0, 100.0, 54.0]],
+                "spacing": 50.0,
+                "length": 200.0,
+                "length_up": 120.0,
+                "length_down": 80.0,
+                "sector": "SectorTest",
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        
+        # Verify sections are stored in the DB
+        list_resp = client.get("/api/v1/sections", headers=headers)
+        assert list_resp.status_code == 200
+        sections = list_resp.json()
+        assert len(sections) > 0
+        assert sections[0]["sector"] == "SectorTest"
+
+
+
+
 class TestSectionsFromFile:
     def test_from_csv(self, client, headers, stl_path):
         """Upload a CSV file with X,Y columns to generate sections."""

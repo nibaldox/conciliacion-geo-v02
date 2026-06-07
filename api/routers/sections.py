@@ -465,7 +465,14 @@ def sections_curve(request: Request, params: SectionCurveParams):
         points=points_array,
         spacing=params.spacing,
         section_length=params.length,
-        sector_name=params.sector
+        sector_name=params.sector,
+        length_up=params.length_up,
+        length_down=params.length_down
     )
     
     _save_sections(session_id, sections)
+    stored = _load_sections(session_id)
+    return {
+        "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
+    }
+
