@@ -496,19 +496,19 @@ valida vía CI en Task 11.
 
 **Files:** ninguno (validación manual)
 
-- [ ] **Step 5.1: Asegurarse de que el build de React existe**
+- [x] **Step 5.1: Asegurarse de que el build de React existe**
 
 Run: `cd web && npm run build && cd ..`
 Expected: el directorio `web/dist/` se crea con `index.html` adentro.
 
 Si `web/dist/` ya existe de una build anterior, podés saltar este paso.
 
-- [ ] **Step 5.2: Instalar PyInstaller**
+- [x] **Step 5.2: Instalar PyInstaller**
 
 Run: `pip install pyinstaller`
 Expected: instalación exitosa.
 
-- [ ] **Step 5.3: Correr PyInstaller**
+- [x] **Step 5.3: Correr PyInstaller**
 
 Run: `pyinstaller --clean --noconfirm conciliacion-api.spec`
 Expected: el comando termina con `Building EXE from EXE-00.toc completed
@@ -517,7 +517,7 @@ successfully.` y se crea `dist/conciliacion-api`.
 Si falla con errores tipo `ModuleNotFoundError: No module named 'X'`,
 agregar `'X'` a `hiddenimports` en el spec y reintentar.
 
-- [ ] **Step 5.4: Arrancar el sidecar y validar**
+- [x] **Step 5.4: Arrancar el sidecar y validar**
 
 Run (en una terminal): `./dist/conciliacion-api`
 
@@ -534,19 +534,19 @@ curl -s http://localhost:57890/ | head -5
 Si ambos retornan lo esperado, el sidecar funciona. Matar el proceso con
 Ctrl+C en la primera terminal.
 
-- [ ] **Step 5.5: Verificar dónde quedó la DB**
+- [x] **Step 5.5: Verificar dónde quedó la DB**
 
 Run: `ls ~/.local/share/conciliacion/`
 Expected: `conciliacion.db`, `conciliacion.db-wal`, `conciliacion.db-shm`,
 `logs/`, `uploads/`.
 
-- [ ] **Step 5.6: Limpiar el artefacto de build local**
+- [x] **Step 5.6: Limpiar el artefacto de build local**
 
 Run: `rm -rf dist/ build/`
 Expected: los directorios `dist/` y `build/` (de PyInstaller) se eliminan.
 No commitear estos directorios (se agregan al `.gitignore` en Task 10).
 
-- [ ] **Step 5.7: No commit — esta task no genera código nuevo**
+- [x] **Step 5.7: No commit — esta task no genera código nuevo**
 
 Si hubo ajustes al spec en 5.3, volver a Task 4, ajustar, re-correr, y
 commitear con `--amend` o un commit nuevo.
