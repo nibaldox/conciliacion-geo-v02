@@ -1145,7 +1145,7 @@ git commit -m "feat(electron): electron-builder config with sidecar resources"
 **Files:**
 - Create: `.github/workflows/build-portable.yml`
 
-- [ ] **Step 12.1: Crear el workflow**
+- [x] **Step 12.1: Crear el workflow**
 
 Crear `.github/workflows/build-portable.yml`:
 
@@ -1246,7 +1246,7 @@ AppImage con caracteres especiales. En ese caso ajustar la glob en el
 upload. El patrón `Conciliación Geotécnica-*.AppImage` es el default de
 electron-builder con `productName: 'Conciliación Geotécnica'`.
 
-- [ ] **Step 12.2: Commit**
+- [x] **Step 12.2: Commit**
 
 ```bash
 git add .github/workflows/build-portable.yml
