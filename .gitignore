@@ -25,6 +25,13 @@ data/
 # Electron build artifacts
 electron/node_modules/
 electron/dist/
+dist-portable*/
+squashfs-root/
+*.AppImage
+
+# PyInstaller
+build/
+dist/
 
 # IDE / OS
 .vscode/
@@ -33,3 +40,5 @@ electron/dist/
 .opencode/
 .atl/
 .superpowers/
+nul
+web/nul

@@ -5,6 +5,16 @@ import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
+// Disable PWA / service worker when building for the Electron portable
+// bundle. The SW is designed for the GitHub Pages web deploy (where it
+// caches static assets across deploys and enables offline), but in the
+// Electron bundle the assets are baked into a fixed AppImage and the
+// SW's NavigationRoute actively breaks the app: any full-page reload
+// (e.g. "Nueva sesión") gets served a cached `index.html` that
+// references asset hashes which no longer exist in the current build,
+// leaving the `<div id="root">` empty. Disable for `VITE_PWA=false`.
+const pwaEnabled = process.env.VITE_PWA !== 'false'
+
 export default defineConfig({
   // base path: default works for GitHub Pages at /conciliacion-geo-v02/.
   // For a custom domain (e.g. conciliacion-geo.app), set VITE_BASE=/ in
@@ -14,7 +24,8 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
+    ...(pwaEnabled
+      ? [VitePWA({
       // Register the service worker that Workbox generates. We do NOT
       // include the Cesium static assets (~22 MB) or the heavy lazy
       // chunks (Cesium 5.5 MB, Plotly 4.7 MB) in the precache —
@@ -80,7 +91,8 @@ export default defineConfig({
         // Don't enable the SW in dev — it gets in the way of HMR.
         enabled: false,
       },
-    }),
+    })]
+      : []),
   ],
   resolve: {
     alias: {

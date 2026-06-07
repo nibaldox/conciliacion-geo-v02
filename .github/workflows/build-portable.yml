@@ -42,6 +42,12 @@ jobs:
           npm run build
         env:
           VITE_API_URL: /api/v1
+          VITE_BASE: /
+          # Disable the PWA service worker for the Electron bundle: the
+          # SW's NavigationRoute serves a cached index.html with stale
+          # asset hashes, which breaks full-page reloads (e.g. the
+          # "Nueva sesión" button) and leaves the UI empty.
+          VITE_PWA: "false"
 
       - name: Build Python sidecar
         run: |

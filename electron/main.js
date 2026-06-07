@@ -10,6 +10,20 @@ const API_PORT = 57890;
 let pythonProcess = null;
 let mainWindow = null;
 
+// Use a per-user-data-dir under the data directory so the Chromium
+// cache (and any stale Service Worker registrations) don't survive
+// across installs of the AppImage. This also avoids the well-known
+// "black screen after upgrade" caused by a cached index.html
+// referencing asset hashes from a previous build.
+app.setPath('userData', path.join(
+  process.env.APPDATA
+    || (process.platform === 'darwin'
+      ? path.join(os.homedir(), 'Library', 'Application Support')
+      : path.join(os.homedir(), '.local', 'share')),
+  'conciliacion',
+  'chromium'
+));
+
 function getSidecarPath() {
   const name = process.platform === 'win32' ? 'conciliacion-api.exe' : 'conciliacion-api';
   return path.join(process.resourcesPath, name);
