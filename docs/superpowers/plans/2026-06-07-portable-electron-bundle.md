@@ -1260,7 +1260,7 @@ git commit -m "ci(electron): GitHub Actions matrix for portable Windows + Linux 
 **Files:**
 - Create: `docs/PORTABLE.md`
 
-- [ ] **Step 13.1: Crear la guía para el usuario final**
+- [x] **Step 13.1: Crear la guía para el usuario final**
 
 Crear `docs/PORTABLE.md`:
 
@@ -1347,7 +1347,7 @@ lugar para mirar.
   advertencias de seguridad.
 ````
 
-- [ ] **Step 13.2: Commit**
+- [x] **Step 13.2: Commit**
 
 ```bash
 git add docs/PORTABLE.md
