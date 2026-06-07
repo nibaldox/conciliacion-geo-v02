@@ -22,6 +22,10 @@ conciliacion_geotecnica.egg-info/
 # Data (SQLite, temp files)
 data/
 
+# Electron build artifacts
+electron/node_modules/
+electron/dist/
+
 # IDE / OS
 .vscode/
 .idea/
