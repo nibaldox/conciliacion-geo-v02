@@ -1,0 +1,89 @@
+name: Build portable bundle
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            web/package-lock.json
+            electron/package-lock.json
+
+      - name: Install Python deps
+        run: |
+          pip install -r requirements-api.txt
+          pip install pyinstaller
+
+      - name: Build React
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+        env:
+          VITE_API_URL: /api/v1
+
+      - name: Build Python sidecar
+        run: |
+          pyinstaller --clean --noconfirm conciliacion-api.spec
+
+      - name: Install Electron deps
+        working-directory: electron
+        run: npm ci
+
+      - name: Build Electron app (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: electron
+        run: npm run build:linux
+
+      - name: Build Electron app (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: electron
+        run: npm run build:windows
+
+      - name: Package Windows artifact
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path dist-portable/win-unpacked/* `
+            -DestinationPath conciliacion-portable-windows.zip
+
+      - name: Rename Linux artifact for clarity
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mv dist-portable/*.AppImage conciliacion-portable-linux.AppImage
+
+      - name: Upload Windows artifact
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: conciliacion-portable-windows
+          path: conciliacion-portable-windows.zip
+
+      - name: Upload Linux artifact
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: conciliacion-portable-linux
+          path: conciliacion-portable-linux.AppImage
