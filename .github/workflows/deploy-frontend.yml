@@ -52,7 +52,7 @@ jobs:
           # Custom domain (e.g. conciliacion-geo.app) → set this in repo
           # Settings → Secrets → VITE_BASE=/.  Default keeps the path.
           VITE_BASE: ${{ vars.VITE_BASE || secrets.VITE_BASE || '/conciliacion-geo-v02/' }}
-          VITE_API_URL: ${{ vars.VITE_API_URL || secrets.VITE_API_URL || 'https://conciliacion-api-ewbb.onrender.com' }}
+          VITE_API_URL: 'https://conciliacion-api-ewbb.onrender.com'
           # Observability (Phase 8) — leave unset to disable.
           # Both Sentry and the Plausible-style analytics beacon are
           # no-ops when their env vars are absent, so the bundle ships
