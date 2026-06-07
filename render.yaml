@@ -24,12 +24,9 @@ services:
     healthCheckPath: /api/v1/health
     autoDeploy: true
 
-    # Persistent disk for SQLite + mesh BLOB cache.
-    # Render free tier disks are 1 GB; sufficient for a small SQLite.
-    disk:
-      name: conciliacion-data
-      mountPath: /app/data
-      sizeGB: 1
+    # NOTE: Render free tier does not support persistent disks.
+    # The SQLite database will be ephemeral (lost on restarts).
+    # If persistent data is needed, upgrade to a paid tier or use an external DB.
 
     envVars:
       # ── Required ────────────────────────────────────────────────
