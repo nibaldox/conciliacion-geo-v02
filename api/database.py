@@ -11,7 +11,13 @@ from typing import Optional, List, Dict, Any, Tuple
 import trimesh
 from core import load_mesh
 
-DB_PATH = Path(__file__).parent.parent / "data" / "conciliacion.db"
+_DATA_DIR = Path(
+    os.environ.get(
+        "CONCILIACION_DATA_DIR",
+        Path(__file__).parent.parent / "data",
+    )
+)
+DB_PATH = _DATA_DIR / "conciliacion.db"
 
 
 def get_connection() -> sqlite3.Connection:
