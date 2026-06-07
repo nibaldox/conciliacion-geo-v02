@@ -198,3 +198,18 @@ app.include_router(process.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
+
+
+# ---------------------------------------------------------------------------
+# Static mount: serve the React build at / when web/dist/ exists.
+# This is the "portable" mode (Electron + sidecar) where the same process
+# serves both the API and the SPA. Dev workflow (Vite on :5173) is
+# unaffected because the React dev server runs separately.
+# ---------------------------------------------------------------------------
+
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
+
+_web_dist = Path(__file__).parent.parent / "web" / "dist"
+if _web_dist.exists():
+    app.mount("/", StaticFiles(directory=str(_web_dist), html=True), name="web")

@@ -1,0 +1,18 @@
+{
+  "name": "conciliacion-electron",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron shell for Conciliación Geotécnica portable bundle",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "electron-builder --config builder.config.js",
+    "build:linux": "electron-builder --linux --config builder.config.js",
+    "build:windows": "electron-builder --win --config builder.config.js",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

@@ -126,11 +126,15 @@ export function useMeshBreaklines(meshId: string | null) {
 // ─── Sections ──────────────────────────────────────────────
 
 export function useSections() {
-  const { demoMode, demoData } = useSession();
+  const { demoMode, demoData, designMeshId } = useSession();
   return useQuery({
-    queryKey: ['sections', demoMode],
+    queryKey: ['sections', demoMode, designMeshId],
     queryFn: async () => {
-      if (demoMode && demoData) {
+      // Only serve demo data if the active design mesh is actually a demo
+      // mesh. If the user uploaded their own mesh while still in demo
+      // mode (the flag stays sticky after loadDemo), we must hit the
+      // backend so freshly generated profiles show up.
+      if (demoMode && demoData && isDemoMeshId(designMeshId)) {
         return demoData.sections.map((s, i): SectionResponse => ({
           id: String(i),
           name: s.section_name,
@@ -240,11 +244,14 @@ export function useProcessStatus() {
 }
 
 export function useProfile(sectionId: string | null) {
-  const { demoMode, demoData } = useSession();
+  const { demoMode, demoData, designMeshId } = useSession();
   return useQuery({
-    queryKey: ['profile', sectionId, demoMode],
+    queryKey: ['profile', sectionId, demoMode, designMeshId],
     queryFn: async () => {
-      if (demoMode && demoData && sectionId !== null) {
+      // Same demo guard as useSections: only use demo data if the active
+      // design mesh is a demo mesh, otherwise always hit the backend so
+      // profiles the user just generated become visible.
+      if (demoMode && demoData && isDemoMeshId(designMeshId) && sectionId !== null) {
         const idx = parseInt(sectionId, 10);
         const sec = demoData.sections[idx];
         if (!sec) throw new Error(`Demo section ${sectionId} not found`);
@@ -283,11 +290,14 @@ export function useUpdateReconciled() {
 // ─── Results ───────────────────────────────────────────────
 
 export function useResults(section?: string) {
-  const { demoMode, demoData } = useSession();
+  const { demoMode, demoData, designMeshId } = useSession();
   return useQuery({
-    queryKey: ['results', section, demoMode],
+    queryKey: ['results', section, demoMode, designMeshId],
     queryFn: async () => {
-      if (demoMode && demoData) {
+      // Same demo guard: only serve demo comparison rows if the active
+      // design mesh is a demo mesh. Otherwise hit the backend so the
+      // user sees comparison results they actually generated.
+      if (demoMode && demoData && isDemoMeshId(designMeshId)) {
         const rows = demoData.comparisons;
         return section ? rows.filter(r => r.section === section) : rows;
       }
@@ -413,7 +423,13 @@ export function useCurveSection() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (params: SectionCurveParams) => {
-      if (useSession.getState().demoMode) return;
+      const { demoMode, demoData, designMeshId } = useSession.getState();
+      // Only skip the API call if the user is actually using demo meshes
+      // (the demo data is loaded client-side from demoData, so a real
+      // POST would 404 on the backend). If the user uploaded their own
+      // meshes while still in demo mode (the flag stays sticky), the
+      // POST must proceed so we hit the real backend pipeline.
+      if (demoMode && demoData && isDemoMeshId(designMeshId)) return;
       await client.post('/sections/curve', params);
     },
     onSuccess: () => {
