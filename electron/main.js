@@ -68,6 +68,24 @@ function fatalError(message) {
   app.quit();
 }
 
+function killPythonProcess() {
+  if (pythonProcess) {
+    if (process.platform === 'win32') {
+      // On Windows, PyInstaller onefile bundles run in a wrapper/bootloader process.
+      // A standard pythonProcess.kill() only terminates the parent bootloader process,
+      // leaving the actual child Python process alive and holding the port.
+      // We use taskkill with /T (tree kill) and /F (force) to clean up the entire tree.
+      spawn('taskkill', ['/pid', pythonProcess.pid.toString(), '/f', '/t'], {
+        stdio: 'ignore',
+        detached: true
+      });
+    } else {
+      pythonProcess.kill();
+    }
+    pythonProcess = null;
+  }
+}
+
 app.whenReady().then(async () => {
   if (await isPortInUse(API_PORT)) {
     fatalError(`El puerto ${API_PORT} ya está en uso. ¿Hay otra instancia de Conciliación corriendo? Ciérrala e intenta de nuevo.`);
@@ -113,16 +131,10 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (pythonProcess) {
-    pythonProcess.kill();
-    pythonProcess = null;
-  }
+  killPythonProcess();
   app.quit();
 });
 
 app.on('before-quit', () => {
-  if (pythonProcess) {
-    pythonProcess.kill();
-    pythonProcess = null;
-  }
+  killPythonProcess();
 });
