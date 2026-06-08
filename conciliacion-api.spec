@@ -21,6 +21,7 @@ hiddenimports = [
     'scipy.optimize._minpack',
     'shapely.geometry',
     'trimesh',
+    'fast_simplification',
     'pandas',
     'openpyxl',
     'ezdxf',
