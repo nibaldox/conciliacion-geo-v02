@@ -256,7 +256,7 @@ def _render_tab_interactive() -> None:
                     for s in st.session_state.sections)
                 if not already:
                     origin = np.array([px_val, py_val])
-                    az = (compute_local_azimuth(mesh_d, origin)
+                    az = (_cached_local_azimuth(float(px_val), float(py_val), id(mesh_d))
                           if az_mode == "Auto (pendiente local)" else manual_az_int)
                     pending_secs_n = [s for s in st.session_state.sections
                                       if s.name in st.session_state.pending_section_names]
@@ -267,7 +267,6 @@ def _render_tab_interactive() -> None:
                         length_up=len_up_int, length_down=len_down_int)
                     st.session_state.sections.append(sec)
                     st.session_state.pending_section_names.add(sec.name)
-                    st.rerun()
     except TypeError:
         st.plotly_chart(fig_plan, key="plan_fallback")
         st.info("Actualiza Streamlit a >= 1.35 para selección interactiva. "
