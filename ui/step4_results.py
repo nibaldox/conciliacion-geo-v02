@@ -11,6 +11,36 @@ from ui.tabs.export import render_tab_export
 from ui.tabs.blast_correlation import render_tab_blast_correlation
 
 
+@st.fragment
+def _profiles_tab(config: dict) -> None:
+    render_tab_profiles(config)
+
+
+@st.fragment
+def _table_tab() -> None:
+    render_tab_table()
+
+
+@st.fragment
+def _dashboard_tab(config: dict) -> None:
+    render_tab_dashboard(config)
+
+
+@st.fragment
+def _blast_tab(config: dict) -> None:
+    render_tab_blast_correlation(config)
+
+
+@st.fragment
+def _ai_tab(config: dict) -> None:
+    render_tab_ai(config)
+
+
+@st.fragment
+def _export_tab(config: dict) -> None:
+    render_tab_export(config)
+
+
 def render_step4(config: dict) -> None:
     st.header("📊 Paso 4: Resultados")
 
@@ -19,14 +49,14 @@ def render_step4(config: dict) -> None:
         "💥 Correlación Voladura", "🤖 Analista IA", "💾 Exportar"])
 
     with tab_profiles:
-        render_tab_profiles(config)
+        _profiles_tab(config)
     with tab_table:
-        render_tab_table()
+        _table_tab()
     with tab_dash:
-        render_tab_dashboard(config)
+        _dashboard_tab(config)
     with tab_corr:
-        render_tab_blast_correlation(config)
+        _blast_tab(config)
     with tab_ai:
-        render_tab_ai(config)
+        _ai_tab(config)
     with tab_export:
-        render_tab_export(config)
+        _export_tab(config)
