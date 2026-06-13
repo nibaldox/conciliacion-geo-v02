@@ -27,10 +27,13 @@ from core import (
     cut_both_surfaces,
     extract_parameters,
     compare_design_vs_asbuilt,
-    build_reconciled_profile,
 )
-from core.section_cutter import azimuth_to_direction
-from core.param_extractor import BenchParams, ExtractionResult
+from core.param_extractor import (
+    BenchParams,
+    ExtractionResult,
+    ReconciledPoint,
+    build_reconciled_profile_v2,
+)
 from core.config import DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
 logger = logging.getLogger(__name__)
@@ -130,6 +133,26 @@ def _dict_to_bench(d: dict) -> BenchParams:
 def _get_session_id(request_state) -> str:
     """Extract or create a session ID from the request state."""
     return db.get_or_create_session(getattr(request_state, "session_id", None))
+
+
+def _reconciled_point_to_dict(p: ReconciledPoint) -> dict:
+    """Serialise a ReconciledPoint for JSON transport."""
+    return {
+        "distance": round(float(p.distance), 3),
+        "elevation": round(float(p.elevation), 3),
+        "bench_number": int(p.bench_number),
+        "segment_type": str(p.segment_type),
+        "source": str(p.source),
+    }
+
+
+def _reconciled_profile_to_dict(prof) -> dict:
+    """Serialise a ReconciledProfile (distances, elevations, segments)."""
+    return {
+        "distances": prof.distances.tolist() if len(prof.distances) > 0 else [],
+        "elevations": prof.elevations.tolist() if len(prof.elevations) > 0 else [],
+        "segments": [_reconciled_point_to_dict(p) for p in prof.points],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -381,26 +404,23 @@ def get_profile(request: Request, section_id: int):
                 "elevations": pt_prof.elevations.tolist(),
             }
 
-        # Reconciled profiles from extraction cache
+        # Reconciled profiles from extraction cache. The v2 builder
+        # returns a ReconciledProfile whose ``segments`` field carries
+        # per-point metadata (bench_number, segment_type, source) that
+        # the frontend uses to differentiate face / berm / ramp.
         design_extraction = db.get_extraction(session_id, sec.name, "design")
         if design_extraction:
             benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
             if benches_d:
-                rd, re = build_reconciled_profile(benches_d)
-                result["reconciled_design"] = {
-                    "distances": rd.tolist() if len(rd) > 0 else [],
-                    "elevations": re.tolist() if len(re) > 0 else [],
-                }
+                prof_d = build_reconciled_profile_v2(benches_d, source="design")
+                result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
 
         topo_extraction = db.get_extraction(session_id, sec.name, "topo")
         if topo_extraction:
             benches_t = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
             if benches_t:
-                rt, ret = build_reconciled_profile(benches_t)
-                result["reconciled_topo"] = {
-                    "distances": rt.tolist() if len(rt) > 0 else [],
-                    "elevations": ret.tolist() if len(ret) > 0 else [],
-                }
+                prof_t = build_reconciled_profile_v2(benches_t, source="topo")
+                result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
                 result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
 
         return result
@@ -517,13 +537,10 @@ def update_reconciled(
             filtered.extend(safe_new)
             db.save_results(session_id, filtered)
 
-        # Return updated reconciled profile + benches
-        rd, re = build_reconciled_profile(benches)
+        # Return updated reconciled profile + benches (v2: rich segments)
+        prof = build_reconciled_profile_v2(benches, source="topo")
         return {
-            "reconciled_topo": {
-                "distances": rd.tolist() if len(rd) > 0 else [],
-                "elevations": re.tolist() if len(re) > 0 else [],
-            },
+            "reconciled_topo": _reconciled_profile_to_dict(prof),
             "benches": [_bench_to_dict(b) for b in benches],
         }
     except HTTPException:
