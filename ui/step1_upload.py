@@ -2,6 +2,7 @@
 Step 1: Load design and topographic surfaces (STL/OBJ/PLY/DXF).
 Renders the file upload widgets, 3D view, and plan/contour view.
 """
+import logging
 import os
 import tempfile
 
@@ -12,6 +13,8 @@ import streamlit as st
 from core import load_mesh, get_mesh_bounds, mesh_to_plotly, decimate_mesh
 from core.config import DEFAULTS, VISUALIZATION
 from ui.plots import draw_sections_on_figure, mesh_to_contour_data
+
+logger = logging.getLogger(__name__)
 
 
 @st.cache_data(show_spinner=False)
@@ -129,7 +132,8 @@ def _load_meshes(file_design, file_topo) -> None:
         st.session_state.step = max(st.session_state.step, 2)
 
     except Exception as e:
-        st.error(f"Error al cargar: {e}")
+        logger.exception("Failed to load mesh")
+        st.error("No se pudo cargar la malla STL/DXF. Revisa la consola para detalles.")
     finally:
         for tmp in (f_design, f_topo):
             if tmp and os.path.exists(tmp):

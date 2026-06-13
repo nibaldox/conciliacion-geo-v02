@@ -6,6 +6,7 @@ core.calculo_tronadura, and rendering 3D visualizations with Plotly.
 Also overlays reference lines (mallas) loaded from the sidebar uploader.
 """
 import io
+import logging
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -14,6 +15,8 @@ from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
 from core.geom_utils import find_df_column
 from core.config import DEFAULTS
 from ui.ref_lines import add_ref_lines_3d
+
+logger = logging.getLogger(__name__)
 
 
 def render_modulo_tronadura() -> None:
@@ -43,7 +46,8 @@ def render_modulo_tronadura() -> None:
     try:
         df = _read_uploaded(uploaded)
     except Exception as e:
-        st.error(f"Error al leer archivo: {e}")
+        logger.exception("Failed to read blast file")
+        st.error("No se pudo leer el archivo de pozos. Revisa la consola para detalles.")
         return
 
     st.subheader("Vista previa del archivo")

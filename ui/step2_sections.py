@@ -6,6 +6,7 @@ Step 2: Define cut sections via four input methods:
   - Auto (equispaced along a crest line)
 """
 import io
+import logging
 import os
 import tempfile
 
@@ -21,6 +22,8 @@ from core.section_cutter import (
     generate_sections_along_crest,
 )
 from ui.plots import draw_sections_on_figure
+
+logger = logging.getLogger(__name__)
 
 
 @st.cache_data(show_spinner=False)
@@ -84,7 +87,8 @@ def _render_tab_file() -> None:
     try:
         polyline = _parse_coord_file(coord_file)
     except Exception as e:
-        st.error(f"Error al leer el archivo: {e}")
+        logger.exception("Failed to read coord file")
+        st.error("No se pudo leer el archivo de coordenadas. Revisa la consola para detalles.")
         return
 
     if polyline is None or len(polyline) < 2:
@@ -123,6 +127,7 @@ def _render_tab_file() -> None:
                 sec.name = f"{target_name}_{col_idx}"
             st.session_state.sections.append(sec)
             existing_names.add(sec.name)
+            st.session_state.pending_section_names.add(sec.name)
             added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
         st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
@@ -229,8 +234,10 @@ def _render_tab_interactive() -> None:
         name='Diseño',
         hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<extra></extra>'))
 
-    if st.session_state.clicked_sections:
-        draw_sections_on_figure(fig_plan, st.session_state.clicked_sections, is_3d=False)
+    if st.session_state.pending_section_names:
+        pending_secs_fig = [s for s in st.session_state.sections
+                            if s.name in st.session_state.pending_section_names]
+        draw_sections_on_figure(fig_plan, pending_secs_fig, is_3d=False)
 
     fig_plan.update_layout(
         xaxis_title='Este (m)', yaxis_title='Norte (m)',
@@ -246,34 +253,44 @@ def _render_tab_interactive() -> None:
                 px_val, py_val = pt['x'], pt['y']
                 already = any(
                     abs(s.origin[0] - px_val) < 1 and abs(s.origin[1] - py_val) < 1
-                    for s in st.session_state.clicked_sections)
+                    for s in st.session_state.sections)
                 if not already:
                     origin = np.array([px_val, py_val])
                     az = (compute_local_azimuth(mesh_d, origin)
                           if az_mode == "Auto (pendiente local)" else manual_az_int)
-                    n = len(st.session_state.clicked_sections) + 1
-                    st.session_state.clicked_sections.append(SectionLine(
+                    pending_secs_n = [s for s in st.session_state.sections
+                                      if s.name in st.session_state.pending_section_names]
+                    n = len(pending_secs_n) + 1
+                    sec = SectionLine(
                         name=f"S-{n:02d}", origin=origin,
                         azimuth=az, length=len_up_int + len_down_int, sector=sector_int,
-                        length_up=len_up_int, length_down=len_down_int))
+                        length_up=len_up_int, length_down=len_down_int)
+                    st.session_state.sections.append(sec)
+                    st.session_state.pending_section_names.add(sec.name)
                     st.rerun()
     except TypeError:
         st.plotly_chart(fig_plan, key="plan_fallback")
         st.info("Actualiza Streamlit a >= 1.35 para selección interactiva. "
                 "Mientras tanto usa la pestaña Manual.")
 
-    if st.session_state.clicked_sections:
-        st.subheader(f"📍 {len(st.session_state.clicked_sections)} secciones colocadas")
-        st.dataframe(_sections_to_rows(st.session_state.clicked_sections), use_container_width=True)
+    pending_secs = [s for s in st.session_state.sections
+                    if s.name in st.session_state.pending_section_names]
+    if pending_secs:
+        st.subheader(f"📍 {len(pending_secs)} secciones colocadas")
+        st.dataframe(_sections_to_rows(pending_secs), use_container_width=True)
 
     cols_btn = st.columns(2)
     if cols_btn[0].button("✅ Aplicar Secciones", type="primary", key="apply_int"):
-        if st.session_state.clicked_sections:
-            st.session_state.sections = list(st.session_state.clicked_sections)
+        if pending_secs:
+            st.session_state.pending_section_names.clear()
             st.session_state.step = max(st.session_state.step, 3)
-            st.success(f"✅ {len(st.session_state.clicked_sections)} secciones aplicadas")
+            st.success(f"✅ {len(pending_secs)} secciones aplicadas")
     if cols_btn[1].button("🗑️ Limpiar", key="clear_int"):
-        st.session_state.clicked_sections = []
+        st.session_state.sections = [
+            s for s in st.session_state.sections
+            if s.name not in st.session_state.pending_section_names
+        ]
+        st.session_state.pending_section_names.clear()
         st.rerun()
 
 
@@ -320,6 +337,8 @@ def _render_tab_manual() -> None:
 
     if st.button("✅ Aplicar Secciones Manuales", type="primary"):
         st.session_state.sections = sections_manual
+        for sec in sections_manual:
+            st.session_state.pending_section_names.add(sec.name)
         st.session_state.step = max(st.session_state.step, 3)
         st.success(f"✅ {len(sections_manual)} secciones definidas")
 
@@ -371,6 +390,8 @@ def _render_tab_auto() -> None:
                 sec.azimuth = compute_local_azimuth(st.session_state.mesh_design, sec.origin)
 
         st.session_state.sections = sections_auto
+        for sec in sections_auto:
+            st.session_state.pending_section_names.add(sec.name)
         st.session_state.step = max(st.session_state.step, 3)
         st.success(f"✅ {len(sections_auto)} secciones generadas")
 
@@ -380,8 +401,10 @@ def _render_tab_auto() -> None:
 # ---------------------------------------------------------------------------
 
 def _sections_to_rows(sections) -> list:
+    pending = st.session_state.get('pending_section_names', set())
     return [
-        {"Nombre": s.name, "Archivo": getattr(s, 'file_name', ''), "Sector": s.sector,
+        {"Estado": "⚠ Pendiente" if s.name in pending else "Aplicada",
+         "Nombre": s.name, "Archivo": getattr(s, 'file_name', ''), "Sector": s.sector,
          "Origen X": f"{s.origin[0]:.1f}", "Origen Y": f"{s.origin[1]:.1f}",
          "Azimut (°)": f"{s.azimuth:.1f}",
          "Long. Arriba (m)": f"{s.length_up:.1f}" if getattr(s, 'length_up', None) is not None else f"{s.length/2:.1f}",
@@ -394,11 +417,19 @@ def _sections_to_rows(sections) -> list:
 def _render_sections_table() -> None:
     if st.session_state.sections:
         st.subheader("📋 Secciones Definidas")
-        cols_tbl = st.columns([5, 1])
+        cols_tbl = st.columns([5, 1, 1])
         with cols_tbl[0]:
             st.dataframe(_sections_to_rows(st.session_state.sections), use_container_width=True)
         with cols_tbl[1]:
-            if st.button("🗑️ Limpiar Secciones", key="clear_all_sections_btn", type="secondary"):
+            if st.button("🗑️ Limpiar Pendientes", key="clear_pending_btn", type="secondary"):
+                st.session_state.sections = [
+                    s for s in st.session_state.sections
+                    if s.name not in st.session_state.pending_section_names
+                ]
+                st.session_state.pending_section_names.clear()
+                st.rerun()
+        with cols_tbl[2]:
+            if st.button("🗑️ Limpiar Todas", key="clear_all_sections_btn", type="secondary"):
                 st.session_state.sections = []
-                st.session_state.clicked_sections = []
+                st.session_state.pending_section_names.clear()
                 st.rerun()

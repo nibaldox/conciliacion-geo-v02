@@ -6,11 +6,14 @@ crests, toes, etc. Stores traces in st.session_state.ref_line_traces
 so any module can access them.
 """
 import io
+import logging
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 _PALETTE = [
     'crimson', 'dodgerblue', 'forestgreen', 'darkorange', 'purple',
@@ -59,7 +62,8 @@ def _parse_files(ref_files) -> None:
             f.seek(0)
             df = _parse_csv(id(f), content, f.name)
         except Exception as e:
-            st.warning(f"Error leyendo {f.name}: {e}")
+            logger.exception("Failed to read ref line file: %s", f.name)
+            st.warning(f"No se pudo leer {f.name}.")
             continue
 
         if df.shape[1] < 2:
