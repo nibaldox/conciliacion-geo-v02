@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 @st.cache_data(show_spinner=False)
-def _cached_decimate(_mesh, target_faces, method='quadric'):
-    return decimate_mesh(_mesh, target_faces=target_faces, method=method)
+def _cached_decimate(_mesh, target_faces):
+    return decimate_mesh(_mesh, target_faces=target_faces)
 
 
 def render_step1(config: dict) -> None:
