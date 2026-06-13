@@ -1,15 +1,62 @@
 """Parameter extraction from profiles and design vs as-built comparison."""
 
 import logging
+import warnings
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Literal
 from scipy.interpolate import interp1d
 from scipy.ndimage import uniform_filter1d
 
 from core.blast_correlation import classify_berm_as_ramp
 from core.config import DETECTION, RAMP
+
+SegmentType = Literal["crest", "berm_top", "berm_bottom", "toe", "face", "ramp"]
+
+
+@dataclass
+class ReconciledPoint:
+    """A single point in the idealised reconciled profile.
+
+    Attributes
+    ----------
+    distance : float
+        Horizontal coordinate along the section (meters).
+    elevation : float
+        Vertical coordinate (meters above datum).
+    bench_number : int
+        Index of the bench this point belongs to (1-based).
+    segment_type : str
+        Role of this point in the geometry: ``"crest"`` (upper edge of a
+        face), ``"toe"`` (lower edge of a face), ``"berm_top"`` (top of
+        a horizontal berm platform), ``"berm_bottom"`` (bottom corner
+        of a berm — coincides with the next bench's crest elevation),
+        ``"face"`` (intermediate point on a face), or ``"ramp"``
+        (point on an oblique ramp transition that replaces a berm).
+    source : str
+        ``"design"`` or ``"topo"`` — used by the renderer to colour
+        design vs as-built traces.
+    """
+    distance: float
+    elevation: float
+    bench_number: int
+    segment_type: str
+    source: str = "topo"
+
+
+@dataclass
+class ReconciledProfile:
+    """Rich output of the idealised-profile builder.
+
+    Provides the two flat arrays expected by legacy consumers
+    (``distances`` / ``elevations``) plus a structured list of
+    :class:`ReconciledPoint` entries that downstream code can use to
+    colour, label, or group points by bench / segment type.
+    """
+    distances: np.ndarray
+    elevations: np.ndarray
+    points: List[ReconciledPoint] = field(default_factory=list)
 
 logger = logging.getLogger(__name__)
 
@@ -47,43 +94,49 @@ def ramer_douglas_peucker(points, epsilon):
     Simplifies a 2D polyline using Ramer-Douglas-Peucker algorithm.
     points: Nx2 array
     epsilon: approximate max distance error
+
+    Iterative implementation (explicit stack + keep-mask): same output as
+    the classic recursive version, without per-level array allocations or
+    recursion-depth limits on dense profiles.
     """
-    if len(points) < 3:
+    points = np.asarray(points)
+    n = len(points)
+    if n < 3:
         return points
 
-    # Find the point with the maximum distance
-    dmax = 0.0
-    index = 0
-    end = len(points) - 1
-    
-    # Line from start to end
-    start_pt = points[0]
-    end_pt = points[end]
-    
-    # Vector from start to end
-    line_vec = end_pt - start_pt
-    line_len_sq = np.dot(line_vec, line_vec)
-    
-    if line_len_sq == 0:
-        dists = np.linalg.norm(points[1:end] - start_pt, axis=1)
-    else:
-        # Distance = |cross_product| / line_length
-        # But for 2D, cross product of (dx, dy) and (px-sx, py-sy) is (dx*py - dy*px)
-        # We need vector formulation
-        numer = np.abs(np.cross(line_vec, points[1:end] - start_pt))
-        dists = numer / np.sqrt(line_len_sq)
+    keep = np.zeros(n, dtype=bool)
+    keep[0] = True
+    keep[n - 1] = True
 
-    if len(dists) > 0:
-        dmax = np.max(dists)
-        index = np.argmax(dists) + 1
+    # Each entry is an index range (start, end) whose endpoints are kept
+    stack = [(0, n - 1)]
+    while stack:
+        start, end = stack.pop()
+        if end - start < 2:
+            continue
 
-    if dmax > epsilon:
-        # Recursive call
-        rec_results1 = ramer_douglas_peucker(points[:index+1], epsilon)
-        rec_results2 = ramer_douglas_peucker(points[index:], epsilon)
-        return np.vstack((rec_results1[:-1], rec_results2))
-    else:
-        return np.vstack((points[0], points[end]))
+        start_pt = points[start]
+        end_pt = points[end]
+        line_vec = end_pt - start_pt
+        line_len_sq = np.dot(line_vec, line_vec)
+
+        seg = points[start + 1:end]
+        if line_len_sq == 0:
+            dists = np.linalg.norm(seg - start_pt, axis=1)
+        else:
+            # 2D cross product magnitude: |dx*py - dy*px| / line_length
+            numer = np.abs(line_vec[0] * (seg[:, 1] - start_pt[1]) -
+                           line_vec[1] * (seg[:, 0] - start_pt[0]))
+            dists = numer / np.sqrt(line_len_sq)
+
+        local_idx = int(np.argmax(dists))
+        if dists[local_idx] > epsilon:
+            index = start + 1 + local_idx
+            keep[index] = True
+            stack.append((start, index))
+            stack.append((index, end))
+
+    return points[keep]
 
 
 def _detect_and_project_solid_toe(sorted_face_pts: np.ndarray, face_threshold: float) -> tuple[float, float, np.ndarray]:
@@ -450,20 +503,154 @@ def _evaluate_status(deviation, tol_neg, tol_pos):
         return "NO CUMPLE"
 
 
-def build_reconciled_profile(benches):
-    """
-    Build an idealized profile from detected crest/toe points.
+def _build_reconciled_points(benches, source: str = "topo") -> List[ReconciledPoint]:
+    """Return ordered :class:`ReconciledPoint` entries for ``benches``.
+
+    The output polyline honours the geotechnical convention:
+
+    * A normal bench emits **two points** — its crest and its toe.
+      The horizontal berm platform that connects this bench's toe
+      to the next bench's crest is modelled by an extra ``berm_top``
+      point inserted *after* this bench's toe, at the same elevation
+      as the next bench's crest. This way the renderer can draw the
+      berm as an explicit horizontal segment between
+      ``toe_i → berm_top → crest_{i+1}``.
+    * A bench flagged as a ramp (``is_ramp=True``) does not emit a
+      ``berm_top`` corner — the previous toe connects directly to
+      this ramp's crest with an oblique segment. The previous
+      bench's toe and this bench's crest are still emitted so the
+      polyline is continuous.
+    * The last bench never emits a ``berm_top`` (no following bench).
+    * Benches are emitted in the order they appear in the list, which
+      is the topological order produced by :func:`extract_parameters`.
+      For inverted sections (distances decreasing) the caller is
+      expected to have already reversed the bench list — this
+      function does not silently flip it.
     """
     if not benches:
-        return np.array([]), np.array([])
-    pts = []
-    for bench in benches:
-        pts.append((bench.crest_distance, bench.crest_elevation))
-        pts.append((bench.toe_distance, bench.toe_elevation))
-    pts_sorted = sorted(pts, key=lambda p: p[0])
-    distances = [p[0] for p in pts_sorted]
-    elevations = [p[1] for p in pts_sorted]
-    return np.array(distances), np.array(elevations)
+        return []
+    pts: List[ReconciledPoint] = []
+    for idx, b in enumerate(benches):
+        # 1) Crest / ramp start
+        if b.is_ramp:
+            pts.append(ReconciledPoint(
+                distance=float(b.crest_distance),
+                elevation=float(b.crest_elevation),
+                bench_number=int(b.bench_number),
+                segment_type="ramp",
+                source=source,
+            ))
+        else:
+            pts.append(ReconciledPoint(
+                distance=float(b.crest_distance),
+                elevation=float(b.crest_elevation),
+                bench_number=int(b.bench_number),
+                segment_type="crest",
+                source=source,
+            ))
+        # 2) Toe (end of the face / ramp)
+        pts.append(ReconciledPoint(
+            distance=float(b.toe_distance),
+            elevation=float(b.toe_elevation),
+            bench_number=int(b.bench_number),
+            segment_type="toe",
+            source=source,
+        ))
+        # 3) Berm top — only when there is a following bench AND
+        #    this bench is not itself flagged as a ramp. The berm
+        #    corner is placed at the next bench's crest elevation,
+        #    at this bench's toe distance, so the segment from
+        #    toe_i to berm_top is a step up and berm_top to
+        #    crest_{i+1} is horizontal.
+        if not b.is_ramp and idx + 1 < len(benches):
+            next_b = benches[idx + 1]
+            pts.append(ReconciledPoint(
+                distance=float(b.toe_distance),
+                elevation=float(next_b.crest_elevation),
+                bench_number=int(b.bench_number),
+                segment_type="berm_top",
+                source=source,
+            ))
+    return pts
+
+
+def build_reconciled_profile(benches, *, source: str = "topo",
+                             return_v2: bool = False):
+    """Build an idealised profile from detected crest/toe points.
+
+    Parameters
+    ----------
+    benches : list[BenchParams]
+        Detected benches, typically in the order returned by
+        :func:`extract_parameters`.
+    source : str
+        ``"design"`` or ``"topo"`` — recorded in each
+        :class:`ReconciledPoint` so the renderer can colour the
+        trace accordingly. Only honoured when ``return_v2=True``.
+    return_v2 : bool
+        If ``True`` (default in new code), returns a
+        :class:`ReconciledProfile` with structured points. If
+        ``False``, returns the legacy ``(distances, elevations)`` tuple
+        of ``np.array`` for backward compatibility — but emits a
+        :class:`DeprecationWarning` and still draws berms as
+        straight lines (legacy behaviour).
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray] | ReconciledProfile
+        ``(distances, elevations)`` when ``return_v2=False``; a
+        :class:`ReconciledProfile` instance when ``return_v2=True``.
+
+    Notes
+    -----
+    The legacy path (``return_v2=False``) is preserved for one release
+    cycle. New code should use :func:`build_reconciled_profile_v2`
+    which always returns the rich structure.
+    """
+    if not return_v2:
+        warnings.warn(
+            "build_reconciled_profile(return_v2=False) is deprecated: "
+            "use build_reconciled_profile_v2() to receive the rich "
+            "ReconciledProfile with explicit berm segments.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if not benches:
+            return np.array([]), np.array([])
+        pts_legacy = []
+        for bench in benches:
+            pts_legacy.append((bench.crest_distance, bench.crest_elevation))
+            pts_legacy.append((bench.toe_distance, bench.toe_elevation))
+        pts_sorted = sorted(pts_legacy, key=lambda p: p[0])
+        return (
+            np.array([p[0] for p in pts_sorted], dtype=float),
+            np.array([p[1] for p in pts_sorted], dtype=float),
+        )
+
+    pts = _build_reconciled_points(benches, source=source)
+    if not pts:
+        return ReconciledProfile(
+            distances=np.array([], dtype=float),
+            elevations=np.array([], dtype=float),
+            points=[],
+        )
+    distances = np.array([p.distance for p in pts], dtype=float)
+    elevations = np.array([p.elevation for p in pts], dtype=float)
+    return ReconciledProfile(
+        distances=distances,
+        elevations=elevations,
+        points=pts,
+    )
+
+
+def build_reconciled_profile_v2(benches, *, source: str = "topo") -> ReconciledProfile:
+    """Convenience wrapper that always returns a :class:`ReconciledProfile`.
+
+    Equivalent to ``build_reconciled_profile(benches, source=source,
+    return_v2=True)``. Provided so call sites do not need to remember
+    the keyword argument.
+    """
+    return build_reconciled_profile(benches, source=source, return_v2=True)
 
 
 def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
@@ -566,11 +753,20 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
 
             berm_real = round(bt.berm_width, 2)
 
-            if berm_real >= min_berm:
-                berm_status = "CUMPLE"
-            else:
-                berm_status = "NO CUMPLE"
-            
+            berm_complies = berm_real >= min_berm
+            berm_status = "CUMPLE" if berm_complies else "NO CUMPLE"
+            berm_score = 60 if berm_complies else 0
+
+            angle_complies = abs(angle_dev) <= (tol_a['neg'] if angle_dev < 0 else tol_a['pos'])
+            angle_status = _evaluate_status(angle_dev, tol_a['neg'], tol_a['pos'])
+            angle_score = 10 if angle_complies else 0
+
+            height_complies = abs(height_dev) <= (tol_h['neg'] if height_dev < 0 else tol_h['pos'])
+            height_status = _evaluate_status(height_dev, tol_h['neg'], tol_h['pos'])
+            height_score = 30 if height_complies else 0
+
+            bench_score = berm_score + angle_score + height_score
+
             comparisons.append({
                 'sector': params_design.sector,
                 'section': params_design.section_name,
@@ -580,11 +776,11 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'height_design': round(bd.bench_height, 2),
                 'height_real': round(bt.bench_height, 2),
                 'height_dev': round(height_dev, 2),
-                'height_status': _evaluate_status(height_dev, tol_h['neg'], tol_h['pos']),
+                'height_status': height_status,
                 'angle_design': round(bd.face_angle, 1),
                 'angle_real': round(bt.face_angle, 1),
                 'angle_dev': round(angle_dev, 1),
-                'angle_status': _evaluate_status(angle_dev, tol_a['neg'], tol_a['pos']),
+                'angle_status': angle_status,
                 'berm_design': round(bd.berm_width, 2),
                 'berm_real': berm_real,
                 'berm_min': min_berm,
@@ -595,6 +791,10 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'delta_toe': round((bt.toe_distance - bd.toe_distance) * (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
                 'bench_design': bd,
                 'bench_real': bt,
+                'berm_score': berm_score,
+                'angle_score': angle_score,
+                'height_score': height_score,
+                'bench_score': bench_score,
             })
     
     # Process Unmatched Design (Missing Benches)
@@ -625,6 +825,10 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'delta_toe': None,
                 'bench_design': bd,
                 'bench_real': None,
+                'berm_score': 0,
+                'angle_score': 0,
+                'height_score': 0,
+                'bench_score': 0,
             })
             
     # Process Unmatched Topo (Extra Benches)
@@ -655,7 +859,20 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'delta_toe': None,
                 'bench_design': None,
                 'bench_real': bt,
+                'berm_score': 0,
+                'angle_score': 0,
+                'height_score': 0,
+                'bench_score': 0,
             })
+            
+    # Calculate section-level compliance score (average of MATCH bench scores)
+    match_scores = [c['bench_score'] for c in comparisons if c['type'] == 'MATCH']
+    section_score = round(sum(match_scores) / len(match_scores), 1) if match_scores else 0.0
+    section_status = "CUMPLE" if section_score >= 70 else "NO CUMPLE"
+
+    for c in comparisons:
+        c['section_score'] = section_score
+        c['section_status'] = section_status
             
     # Sort by Level (Descending) for display
     comparisons.sort(key=lambda x: float(x['level']) if x['level'].replace('.','',1).isdigit() else 0, reverse=True)
