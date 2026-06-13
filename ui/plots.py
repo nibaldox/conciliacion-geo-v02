@@ -64,10 +64,10 @@ def mesh_to_contour_data(_mesh, grid_size: int = 500):
 
     Returns (xi, yi, xi_grid, yi_grid, zi_grid) or (None,)*5 if mesh is None.
     """
-    if mesh is None:
+    if _mesh is None:
         return None, None, None, None, None
 
-    verts = mesh.vertices
+    verts = _mesh.vertices
     if len(verts) > 200_000:
         step = len(verts) // 200_000
         verts = verts[::step]
