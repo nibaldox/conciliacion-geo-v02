@@ -68,7 +68,9 @@ def render_step1(config: dict) -> None:
 
     if st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None:
         _render_mesh_info()
+        _build_or_get_3d_figure()
         _render_3d_view()
+        _build_or_get_contour_figure(config)
         _render_contour_view(config)
 
 
@@ -140,100 +142,134 @@ def _load_meshes(file_design, file_topo) -> None:
                 os.unlink(tmp)
 
 
+def _build_or_get_3d_figure() -> None:
+    sections = st.session_state.get('sections') or []
+    sections_key = tuple((s.name, tuple(s.origin), s.azimuth, s.length) for s in sections)
+    cache_key = (
+        id(st.session_state.mesh_design),
+        id(st.session_state.mesh_topo),
+        sections_key,
+    )
+
+    cached = st.session_state.get('_3d_fig')
+    if cached and cached[0] == cache_key:
+        return
+
+    md = st.session_state.get('decimated_mesh_design') or _cached_decimate(
+        st.session_state.mesh_design, DEFAULTS.target_faces_visual)
+    mt = st.session_state.get('decimated_mesh_topo') or _cached_decimate(
+        st.session_state.mesh_topo, DEFAULTS.target_faces_visual)
+    st.session_state.decimated_mesh_design = md
+    st.session_state.decimated_mesh_topo = mt
+
+    fig = go.Figure()
+    fig.add_trace(mesh_to_plotly(md, "Diseño", "royalblue", 1.0))
+    fig.add_trace(mesh_to_plotly(mt, "Topografía Real", "forestgreen", 1.0))
+
+    if sections:
+        bd = st.session_state.bounds_design
+        zref = (bd['zmin'] + bd['zmax']) / 2
+        draw_sections_on_figure(fig, sections, is_3d=True, zref=zref)
+
+    fig.update_layout(
+        scene=dict(
+            aspectmode='data',
+            xaxis_title='Este (m)', yaxis_title='Norte (m)', zaxis_title='Elevación (m)'),
+        height=600, margin=dict(l=0, r=0, t=30, b=0),
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+    )
+    st.session_state['_3d_fig'] = (cache_key, fig)
+
+
 def _render_3d_view() -> None:
     with st.expander("🌐 Vista 3D de Superficies", expanded=False):
-        with st.spinner("Generando vista 3D..."):
-            fig = go.Figure()
-            
-            # Use pre-decimated meshes
-            md = st.session_state.get('decimated_mesh_design')
-            if md is None:
-                md = _cached_decimate(st.session_state.mesh_design, DEFAULTS.target_faces_visual)
-                st.session_state.decimated_mesh_design = md
+        cached = st.session_state.get('_3d_fig')
+        if not cached:
+            return
+        st.plotly_chart(cached[1], use_container_width=True)
 
-            mt = st.session_state.get('decimated_mesh_topo')
-            if mt is None:
-                mt = _cached_decimate(st.session_state.mesh_topo, DEFAULTS.target_faces_visual)
-                st.session_state.decimated_mesh_topo = mt
 
-            fig.add_trace(mesh_to_plotly(md, "Diseño", "royalblue", 1.0))
-            fig.add_trace(mesh_to_plotly(mt, "Topografía Real", "forestgreen", 1.0))
+def _build_or_get_contour_figure(config: dict) -> None:
+    grid_ref = config.get('grid_ref', VISUALIZATION.grid_ref)
+    contour_surface = st.session_state.get('contour_surf', 'Diseño')
+    contour_interval = st.session_state.get('contour_int', 15.0)
+    contour_grid = st.session_state.get('contour_grid', VISUALIZATION.contour_resolution)
 
-            if st.session_state.sections:
-                bd = st.session_state.bounds_design
-                zref = (bd['zmin'] + bd['zmax']) / 2
-                draw_sections_on_figure(fig, st.session_state.sections, is_3d=True, zref=zref)
+    cache_key = (
+        id(st.session_state.mesh_design),
+        id(st.session_state.mesh_topo),
+        grid_ref,
+        contour_interval,
+        int(contour_grid),
+        contour_surface,
+    )
 
-            fig.update_layout(
-                scene=dict(
-                    aspectmode='data',
-                    xaxis_title='Este (m)', yaxis_title='Norte (m)', zaxis_title='Elevación (m)'),
-                height=600, margin=dict(l=0, r=0, t=30, b=0),
-                legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    cached = st.session_state.get('_contour_fig')
+    if cached and cached[0] == cache_key:
+        return
+
+    fig_contour = go.Figure()
+
+    if contour_surface in ("Diseño", "Ambas"):
+        xi, yi, _, _, zig = mesh_to_contour_data(
+            st.session_state.mesh_design, int(contour_grid))
+        fig_contour.add_trace(go.Contour(
+            x=xi, y=yi, z=zig,
+            contours=dict(
+                start=grid_ref,
+                end=float(np.nanmax(zig)) if zig is not None else 100,
+                size=contour_interval,
+                showlabels=True,
+                labelfont=dict(size=9, color='blue'),
+                coloring='lines',
+            ),
+            line=dict(color='royalblue', width=1.0),
+            showscale=False, name='Diseño',
+            hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Diseño</extra>',
+        ))
+
+    if contour_surface in ("Topografía", "Ambas"):
+        xi, yi, _, _, zig = mesh_to_contour_data(
+            st.session_state.mesh_topo, int(contour_grid))
+        fig_contour.add_trace(go.Contour(
+            x=xi, y=yi, z=zig,
+            contours=dict(
+                start=grid_ref,
+                end=float(np.nanmax(zig)) if zig is not None else 100,
+                size=contour_interval,
+                showlabels=True,
+                labelfont=dict(size=9, color='green'),
+                coloring='lines',
+            ),
+            line=dict(color='forestgreen', width=1.0),
+            showscale=False, name='Topografía',
+            hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Topo</extra>',
+        ))
+
+    if st.session_state.sections:
+        draw_sections_on_figure(fig_contour, st.session_state.sections, is_3d=False)
+
+    fig_contour.update_layout(
+        xaxis_title='Este (m)', yaxis_title='Norte (m)',
+        yaxis=dict(scaleanchor='x', scaleratio=1),
+        height=650, margin=dict(l=60, r=20, t=30, b=40),
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+    )
+    st.session_state['_contour_fig'] = (cache_key, fig_contour)
 
 
 def _render_contour_view(config: dict) -> None:
     with st.expander("🗺️ Vista en Planta — Curvas de Nivel", expanded=False):
-        with st.spinner("Generando curvas de nivel..."):
-            import numpy as np
-            contour_cols = st.columns(3)
-            contour_surface = contour_cols[0].selectbox(
-                "Superficie", ["Diseño", "Topografía", "Ambas"], key="contour_surf")
-            contour_interval = contour_cols[1].number_input(
-                "Intervalo curvas (m)", value=15.0, min_value=1.0, step=1.0, key="contour_int")
-            contour_grid = contour_cols[2].number_input(
-                "Resolución grilla", value=VISUALIZATION.contour_resolution, min_value=100, max_value=2000,
-                step=100, key="contour_grid")
+        contour_cols = st.columns(3)
+        contour_cols[0].selectbox(
+            "Superficie", ["Diseño", "Topografía", "Ambas"], key="contour_surf")
+        contour_cols[1].number_input(
+            "Intervalo curvas (m)", value=15.0, min_value=1.0, step=1.0, key="contour_int")
+        contour_cols[2].number_input(
+            "Resolución grilla", value=VISUALIZATION.contour_resolution, min_value=100, max_value=2000,
+            step=100, key="contour_grid")
 
-            grid_ref = config.get('grid_ref', VISUALIZATION.grid_ref)
-
-            fig_contour = go.Figure()
-
-            if contour_surface in ("Diseño", "Ambas"):
-                xi, yi, _, _, zig = mesh_to_contour_data(
-                    st.session_state.mesh_design, int(contour_grid))
-                fig_contour.add_trace(go.Contour(
-                    x=xi, y=yi, z=zig,
-                    contours=dict(
-                        start=grid_ref,
-                        end=float(np.nanmax(zig)) if zig is not None else 100,
-                        size=contour_interval,
-                        showlabels=True,
-                        labelfont=dict(size=9, color='blue'),
-                        coloring='lines',
-                    ),
-                    line=dict(color='royalblue', width=1.0),
-                    showscale=False, name='Diseño',
-                    hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Diseño</extra>',
-                ))
-
-            if contour_surface in ("Topografía", "Ambas"):
-                xi, yi, _, _, zig = mesh_to_contour_data(
-                    st.session_state.mesh_topo, int(contour_grid))
-                fig_contour.add_trace(go.Contour(
-                    x=xi, y=yi, z=zig,
-                    contours=dict(
-                        start=grid_ref,
-                        end=float(np.nanmax(zig)) if zig is not None else 100,
-                        size=contour_interval,
-                        showlabels=True,
-                        labelfont=dict(size=9, color='green'),
-                        coloring='lines',
-                    ),
-                    line=dict(color='forestgreen', width=1.0),
-                    showscale=False, name='Topografía',
-                    hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Topo</extra>',
-                ))
-
-            if st.session_state.sections:
-                draw_sections_on_figure(fig_contour, st.session_state.sections, is_3d=False)
-
-            fig_contour.update_layout(
-                xaxis_title='Este (m)', yaxis_title='Norte (m)',
-                yaxis=dict(scaleanchor='x', scaleratio=1),
-                height=650, margin=dict(l=60, r=20, t=30, b=40),
-                legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
-            )
-            st.plotly_chart(fig_contour, use_container_width=True)
+        cached = st.session_state.get('_contour_fig')
+        if not cached:
+            return
+        st.plotly_chart(cached[1], use_container_width=True)
