@@ -411,3 +411,117 @@ class TestExtractParameters:
         assert hasattr(result, "benches")
         assert hasattr(result, "inter_ramp_angle")
         assert hasattr(result, "overall_angle")
+
+
+class TestReconciledProfileFaceSegments:
+    """Tests for face segment emission when a source profile is provided.
+
+    When the caller passes the original (distances, elevations) profile
+    to build_reconciled_profile_v2, the algorithm samples intermediate
+    face points between each crest and toe so the reconciled polyline
+    follows the actual as-built curvature of the bench face.
+    """
+
+    def _single_bench(self):
+        from core.param_extractor import BenchParams
+        return BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=85.0,
+            toe_distance=10.0,
+            bench_height=15.0,
+            face_angle=70.0,
+            berm_width=9.0,
+        )
+
+    def test_face_segments_emitted_with_profile(self):
+        """When a profile is provided, face points fill the crest-toe gap."""
+        from core.param_extractor import build_reconciled_profile_v2
+        bench = self._single_bench()
+        # Perfil con 4 puntos: 2 en (crest..toe), más los endpoints
+        profile = (
+            np.array([20.0, 18.0, 14.0, 10.0]),
+            np.array([100.0, 98.0, 92.0, 85.0]),
+        )
+        prof = build_reconciled_profile_v2([bench], profile=profile)
+        face_pts = [p for p in prof.points if p.segment_type == "face"]
+        # Solo los 2 puntos estrictamente entre crest y toe
+        assert len(face_pts) == 2
+        assert all(np.isclose(p.distance, d) for p, d in
+                   zip(face_pts, [18.0, 14.0]))
+        # El primer face point debe seguir al crest, el último al toe
+        assert prof.points[0].segment_type == "crest"
+        assert prof.points[1].segment_type == "face"
+        assert prof.points[2].segment_type == "face"
+        assert prof.points[3].segment_type == "toe"
+
+    def test_face_segments_fallback_to_midpoint_when_profile_empty_in_range(self):
+        """If the profile has no points in (crest, toe), emit one midpoint."""
+        from core.param_extractor import build_reconciled_profile_v2
+        bench = self._single_bench()
+        # Perfil con puntos fuera del rango (no hay puntos en (10, 20))
+        profile = (
+            np.array([0.0, 5.0, 25.0, 30.0]),
+            np.array([50.0, 60.0, 110.0, 120.0]),
+        )
+        prof = build_reconciled_profile_v2([bench], profile=profile)
+        face_pts = [p for p in prof.points if p.segment_type == "face"]
+        assert len(face_pts) == 1
+        # Midpoint entre crest (20, 100) y toe (10, 85)
+        assert np.isclose(face_pts[0].distance, 15.0)
+        assert np.isclose(face_pts[0].elevation, 92.5)
+
+    def test_face_segments_omitted_when_profile_is_none(self):
+        """Without profile (legacy callers), no face points are emitted."""
+        from core.param_extractor import build_reconciled_profile_v2
+        bench = self._single_bench()
+        prof = build_reconciled_profile_v2([bench])
+        face_pts = [p for p in prof.points if p.segment_type == "face"]
+        assert face_pts == []
+
+    def test_face_segments_preserve_profile_order(self):
+        """Face points follow the order of the source profile (no reordering)."""
+        from core.param_extractor import build_reconciled_profile_v2
+        bench = self._single_bench()
+        # 5 puntos en el rango, en orden descendente de distance
+        profile = (
+            np.array([20.0, 19.0, 17.0, 14.0, 12.0, 10.0]),
+            np.array([100.0, 99.0, 96.0, 92.0, 88.0, 85.0]),
+        )
+        prof = build_reconciled_profile_v2([bench], profile=profile)
+        face_pts = [p for p in prof.points if p.segment_type == "face"]
+        assert len(face_pts) == 4
+        distances = [p.distance for p in face_pts]
+        # Mismo orden que el profile: 19, 17, 14, 12
+        assert distances == [19.0, 17.0, 14.0, 12.0]
+
+    def test_face_segments_per_bench_for_multiple_benches(self):
+        """With multiple benches, face points are scoped to each (crest, toe) range."""
+        from core.param_extractor import build_reconciled_profile_v2, BenchParams
+        benches = [
+            BenchParams(
+                bench_number=1,
+                crest_elevation=100.0, crest_distance=20.0,
+                toe_elevation=85.0, toe_distance=10.0,
+                bench_height=15.0, face_angle=70.0, berm_width=9.0,
+            ),
+            BenchParams(
+                bench_number=2,
+                crest_elevation=85.0, crest_distance=35.0,
+                toe_elevation=70.0, toe_distance=25.0,
+                bench_height=15.0, face_angle=70.0, berm_width=9.0,
+            ),
+        ]
+        # Banco 1 face: x=15. Banco 2 face: x=30. Berma: 10..35 (sin face).
+        profile = (
+            np.array([20.0, 15.0, 10.0, 35.0, 30.0, 25.0]),
+            np.array([100.0, 92.0, 85.0, 85.0, 78.0, 70.0]),
+        )
+        prof = build_reconciled_profile_v2(benches, profile=profile)
+        face_pts = [p for p in prof.points if p.segment_type == "face"]
+        assert len(face_pts) == 2
+        assert face_pts[0].bench_number == 1
+        assert np.isclose(face_pts[0].distance, 15.0)
+        assert face_pts[1].bench_number == 2
+        assert np.isclose(face_pts[1].distance, 30.0)

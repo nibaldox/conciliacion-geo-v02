@@ -503,7 +503,11 @@ def _evaluate_status(deviation, tol_neg, tol_pos):
         return "NO CUMPLE"
 
 
-def _build_reconciled_points(benches, source: str = "topo") -> List[ReconciledPoint]:
+def _build_reconciled_points(
+    benches,
+    source: str = "topo",
+    profile: tuple[np.ndarray, np.ndarray] | None = None,
+) -> List[ReconciledPoint]:
     """Return ordered :class:`ReconciledPoint` entries for ``benches``.
 
     The output polyline honours the geotechnical convention:
@@ -526,9 +530,23 @@ def _build_reconciled_points(benches, source: str = "topo") -> List[ReconciledPo
       For inverted sections (distances decreasing) the caller is
       expected to have already reversed the bench list — this
       function does not silently flip it.
+
+    If ``profile`` is provided as a ``(distances, elevations)`` pair of
+    arrays, the function additionally emits ``face`` segments between
+    each crest and toe by sampling the profile points that fall in
+    the open interval ``(min(crest, toe), max(crest, toe))``. This
+    makes the reconciled polyline follow the actual as-built (or
+    design) curvature of the bench face, rather than a straight
+    crest-toe line. When no profile points fall in the face interval,
+    a single midpoint is emitted so the face is never collapsed.
     """
     if not benches:
         return []
+    profile_d = None
+    profile_e = None
+    if profile is not None:
+        profile_d = np.asarray(profile[0])
+        profile_e = np.asarray(profile[1])
     pts: List[ReconciledPoint] = []
     for idx, b in enumerate(benches):
         # 1) Crest / ramp start
@@ -548,7 +566,36 @@ def _build_reconciled_points(benches, source: str = "topo") -> List[ReconciledPo
                 segment_type="crest",
                 source=source,
             ))
-        # 2) Toe (end of the face / ramp)
+        # 2) Face points (only when a profile was supplied). Sample
+        #    the profile points that fall strictly between crest and
+        #    toe; if none, fall back to a single midpoint so the
+        #    face is always represented by at least one point.
+        if profile_d is not None:
+            d_min = min(b.crest_distance, b.toe_distance)
+            d_max = max(b.crest_distance, b.toe_distance)
+            mask = (profile_d > d_min) & (profile_d < d_max)
+            face_d = profile_d[mask]
+            face_e = profile_e[mask]
+            if face_d.size == 0:
+                mid_d = 0.5 * (b.crest_distance + b.toe_distance)
+                mid_e = 0.5 * (b.crest_elevation + b.toe_elevation)
+                pts.append(ReconciledPoint(
+                    distance=float(mid_d),
+                    elevation=float(mid_e),
+                    bench_number=int(b.bench_number),
+                    segment_type="face",
+                    source=source,
+                ))
+            else:
+                for fd, fe in zip(face_d, face_e):
+                    pts.append(ReconciledPoint(
+                        distance=float(fd),
+                        elevation=float(fe),
+                        bench_number=int(b.bench_number),
+                        segment_type="face",
+                        source=source,
+                    ))
+        # 3) Toe (end of the face / ramp)
         pts.append(ReconciledPoint(
             distance=float(b.toe_distance),
             elevation=float(b.toe_elevation),
@@ -556,7 +603,7 @@ def _build_reconciled_points(benches, source: str = "topo") -> List[ReconciledPo
             segment_type="toe",
             source=source,
         ))
-        # 3) Berm top — only when there is a following bench AND
+        # 4) Berm top — only when there is a following bench AND
         #    this bench is not itself flagged as a ramp. The berm
         #    corner is placed at the next bench's crest elevation,
         #    at this bench's toe distance, so the segment from
@@ -575,7 +622,8 @@ def _build_reconciled_points(benches, source: str = "topo") -> List[ReconciledPo
 
 
 def build_reconciled_profile(benches, *, source: str = "topo",
-                             return_v2: bool = False):
+                             return_v2: bool = False,
+                             profile: tuple[np.ndarray, np.ndarray] | None = None):
     """Build an idealised profile from detected crest/toe points.
 
     Parameters
@@ -594,6 +642,13 @@ def build_reconciled_profile(benches, *, source: str = "topo",
         of ``np.array`` for backward compatibility — but emits a
         :class:`DeprecationWarning` and still draws berms as
         straight lines (legacy behaviour).
+    profile : tuple of (distances, elevations) | None
+        Original as-built (or design) profile. When supplied AND
+        ``return_v2=True``, the function samples this profile to emit
+        ``face`` segments between each crest and toe, so the reconciled
+        polyline follows the actual curvature of the bench face
+        rather than a straight crest-toe line. Ignored by the legacy
+        ``return_v2=False`` path.
 
     Returns
     -------
@@ -627,7 +682,7 @@ def build_reconciled_profile(benches, *, source: str = "topo",
             np.array([p[1] for p in pts_sorted], dtype=float),
         )
 
-    pts = _build_reconciled_points(benches, source=source)
+    pts = _build_reconciled_points(benches, source=source, profile=profile)
     if not pts:
         return ReconciledProfile(
             distances=np.array([], dtype=float),
@@ -643,14 +698,23 @@ def build_reconciled_profile(benches, *, source: str = "topo",
     )
 
 
-def build_reconciled_profile_v2(benches, *, source: str = "topo") -> ReconciledProfile:
+def build_reconciled_profile_v2(
+    benches, *, source: str = "topo",
+    profile: tuple[np.ndarray, np.ndarray] | None = None,
+) -> ReconciledProfile:
     """Convenience wrapper that always returns a :class:`ReconciledProfile`.
 
     Equivalent to ``build_reconciled_profile(benches, source=source,
-    return_v2=True)``. Provided so call sites do not need to remember
-    the keyword argument.
+    return_v2=True, profile=profile)``. Provided so call sites do not
+    need to remember the keyword argument.
+
+    If ``profile`` is provided, the returned
+    :class:`ReconciledProfile` includes ``face`` segments sampled
+    from the profile between each crest and toe.
     """
-    return build_reconciled_profile(benches, source=source, return_v2=True)
+    return build_reconciled_profile(
+        benches, source=source, return_v2=True, profile=profile,
+    )
 
 
 def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
