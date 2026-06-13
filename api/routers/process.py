@@ -408,18 +408,34 @@ def get_profile(request: Request, section_id: int):
         # returns a ReconciledProfile whose ``segments`` field carries
         # per-point metadata (bench_number, segment_type, source) that
         # the frontend uses to differentiate face / berm / ramp.
+        # When the original cut profile is available (pd_prof / pt_prof)
+        # we pass it to the builder so the reconciled polyline samples
+        # intermediate face points from the actual as-built curvature
+        # rather than drawing straight crest-toe lines.
+        profile_d_arg = (
+            (pd_prof.distances, pd_prof.elevations)
+            if pd_prof is not None else None
+        )
+        profile_t_arg = (
+            (pt_prof.distances, pt_prof.elevations)
+            if pt_prof is not None else None
+        )
         design_extraction = db.get_extraction(session_id, sec.name, "design")
         if design_extraction:
             benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
             if benches_d:
-                prof_d = build_reconciled_profile_v2(benches_d, source="design")
+                prof_d = build_reconciled_profile_v2(
+                    benches_d, source="design", profile=profile_d_arg,
+                )
                 result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
 
         topo_extraction = db.get_extraction(session_id, sec.name, "topo")
         if topo_extraction:
             benches_t = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
             if benches_t:
-                prof_t = build_reconciled_profile_v2(benches_t, source="topo")
+                prof_t = build_reconciled_profile_v2(
+                    benches_t, source="topo", profile=profile_t_arg,
+                )
                 result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
                 result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
 
