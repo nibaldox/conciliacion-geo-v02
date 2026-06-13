@@ -7,6 +7,7 @@ Also overlays reference lines (mallas) loaded from the sidebar uploader.
 """
 import io
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -64,17 +65,35 @@ def render_modulo_tronadura() -> None:
         st.session_state['blast_processed'] = False
 
     if st.button("🚀 Procesar Pozos", type="primary", key="process_blast"):
-        with st.spinner("Calculando coordenadas de fondo (toe)..."):
-            try:
-                df_clean, x_lines, y_lines, z_lines = procesar_pozos(df)
-                st.session_state['blast_df_clean'] = df_clean
-                st.session_state['blast_x_lines'] = x_lines
-                st.session_state['blast_y_lines'] = y_lines
-                st.session_state['blast_z_lines'] = z_lines
-                st.session_state['blast_processed'] = True
-            except KeyError as e:
-                st.error(str(e))
-                st.session_state['blast_processed'] = False
+        progress = st.progress(0.0, text="Encolando trabajo de procesamiento…")
+        status = st.empty()
+        status.info("⏳ Procesando pozos en segundo plano…")
+
+        local_df = df.copy()
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_run_procesar_pozos, local_df, progress)
+                try:
+                    df_clean, x_lines, y_lines, z_lines = future.result()
+                except KeyError as e:
+                    st.error(str(e))
+                    st.session_state['blast_processed'] = False
+                    status.empty()
+                    progress.empty()
+                    return
+            st.session_state['blast_df_clean'] = df_clean
+            st.session_state['blast_x_lines'] = x_lines
+            st.session_state['blast_y_lines'] = y_lines
+            st.session_state['blast_z_lines'] = z_lines
+            st.session_state['blast_processed'] = True
+            status.success("✅ Pozos procesados correctamente")
+            progress.progress(1.0, text="Listo")
+        except Exception as e:
+            logger.exception("Failed to process blast holes")
+            st.error("No se pudieron procesar los pozos. Revisa la consola para detalles.")
+            st.session_state['blast_processed'] = False
+            status.empty()
+            progress.empty()
 
     if st.session_state.get('blast_processed', False):
         df_clean = st.session_state['blast_df_clean']
@@ -427,6 +446,22 @@ def _read_uploaded(uploaded) -> "pd.DataFrame":
         return pd.read_excel(io.BytesIO(uploaded.read()))
     content = uploaded.read().decode("utf-8")
     return pd.read_csv(io.StringIO(content))
+
+
+def _run_procesar_pozos(df, progress=None):
+    """Worker that processes blast holes off the main thread."""
+    if progress is not None:
+        try:
+            progress.progress(0.1, text="Calculando trayectorias (toe)…")
+        except Exception:
+            pass
+    result = procesar_pozos(df)
+    if progress is not None:
+        try:
+            progress.progress(0.9, text="Empacando resultados…")
+        except Exception:
+            pass
+    return result
 
 
 def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
