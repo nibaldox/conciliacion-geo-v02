@@ -12,6 +12,7 @@ from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.config import DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
+from ui.tabs.export import _get_profile_pair
 
 def render_tab_blast_correlation(config: dict) -> None:
     blast_df = st.session_state.get('blast_df_clean')
@@ -242,20 +243,38 @@ def render_tab_blast_correlation(config: dict) -> None:
 
 
 def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, comparison_results, tolerance) -> pd.DataFrame:
-    cache_key = f"{len(sections)}_{tolerance}_{len(blast_df)}"
-    
+    cut_cache_key = (
+        tuple(s.name for s in sections),
+        tuple(sorted(blast_df.columns)),
+    )
+    full_cache_key = (cut_cache_key, tolerance)
+
     if 'blast_corr_sections_cache' in st.session_state:
         cached_key, cached_df = st.session_state.blast_corr_sections_cache
-        if cached_key == cache_key:
+        if cached_key == full_cache_key:
             return cached_df
+
+    cuts_cache = st.session_state.get('blast_corr_cuts_cache')
+    if cuts_cache and cuts_cache[0] == cut_cache_key:
+        cuts = cuts_cache[1]
+    else:
+        cuts = {}
+        for sec in sections:
+            pd_prof, pt_prof = _get_profile_pair(sec.name)
+            if pd_prof is None or pt_prof is None:
+                pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+            if pd_prof and pt_prof:
+                cuts[sec.name] = (pd_prof, pt_prof)
+        st.session_state.blast_corr_cuts_cache = (cut_cache_key, cuts)
 
     data_rows = []
     kg_col = find_df_column(blast_df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
 
     for sec in sections:
-        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-        if not pd_prof or not pt_prof:
+        cut = cuts.get(sec.name)
+        if not cut:
             continue
+        pd_prof, pt_prof = cut
 
         a_over, a_under, _, _, _ = calculate_area_between_profiles(pd_prof, pt_prof)
 
@@ -291,7 +310,7 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
     if df.empty:
         df = pd.DataFrame(columns=['section', 'sector', 'num_pozos', 'total_kg', 'area_over', 'area_under', 'avg_abs_dev'])
 
-    st.session_state.blast_corr_sections_cache = (cache_key, df)
+    st.session_state.blast_corr_sections_cache = (full_cache_key, df)
     return df
 
 

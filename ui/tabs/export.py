@@ -4,12 +4,13 @@ Results tab: export to Excel, PNG images (ZIP), and DXF 3D profiles.
 import os
 import tempfile
 from datetime import datetime
+from typing import Optional
 
 import streamlit as st
 
 from core import cut_both_surfaces, generate_section_images_zip
 from core.param_extractor import build_reconciled_profile
-from core.section_cutter import azimuth_to_direction
+from core.section_cutter import azimuth_to_direction, ProfileResult
 
 
 def render_tab_export(config: dict) -> None:
@@ -20,6 +21,31 @@ def render_tab_export(config: dict) -> None:
     _render_word_report(config)
     st.divider()
     _render_dxf_export()
+
+
+def _get_profile_pair(section_name: str) -> tuple[Optional[ProfileResult], Optional[ProfileResult]]:
+    """Look up the cached (design, topo) ProfileResult pair for a section by name.
+
+    Falls back to a fresh cut only when the section was not part of the
+    processed batch in step 3 (e.g. legacy sessions or manual additions).
+    """
+    profiles_design = st.session_state.get('profiles_design') or []
+    profiles_topo = st.session_state.get('profiles_topo') or []
+    processed_sections = st.session_state.get('processed_sections') or []
+
+    for idx, sec in enumerate(processed_sections):
+        if sec.name == section_name:
+            pd_prof = profiles_design[idx] if idx < len(profiles_design) else None
+            pt_prof = profiles_topo[idx] if idx < len(profiles_topo) else None
+            return pd_prof, pt_prof
+
+    mesh_design = st.session_state.get('mesh_design')
+    mesh_topo = st.session_state.get('mesh_topo')
+    sections = st.session_state.get('sections') or []
+    target = next((s for s in sections if s.name == section_name), None)
+    if target is not None and mesh_design is not None and mesh_topo is not None:
+        return cut_both_surfaces(mesh_design, mesh_topo, target)
+    return None, None
 
 
 def _get_filtered_comparisons() -> list:
@@ -139,10 +165,7 @@ def _render_images_export(config: dict) -> None:
             if sec.name not in matching_section_names:
                 continue
 
-            pd_prof, pt_prof = cut_both_surfaces(
-                st.session_state.mesh_design,
-                st.session_state.mesh_topo,
-                sec)
+            pd_prof, pt_prof = _get_profile_pair(sec.name)
 
             if pd_prof and pt_prof:
                 p_d = design_params_map.get(sec.name)
@@ -227,10 +250,7 @@ def _render_word_report(config: dict) -> None:
             if sec.name not in matching_section_names:
                 continue
 
-            pd_prof, pt_prof = cut_both_surfaces(
-                st.session_state.mesh_design,
-                st.session_state.mesh_topo,
-                sec)
+            pd_prof, pt_prof = _get_profile_pair(sec.name)
 
             if pd_prof and pt_prof:
                 p_d = design_params_map.get(sec.name)
@@ -313,10 +333,7 @@ def _render_dxf_export() -> None:
         n_exported = 0
 
         for i, sec in enumerate(processed_secs):
-            pd_prof, pt_prof = cut_both_surfaces(
-                st.session_state.mesh_design,
-                st.session_state.mesh_topo,
-                sec)
+            pd_prof, pt_prof = _get_profile_pair(sec.name)
 
             if pd_prof and pt_prof:
                 p_d = design_params_map.get(sec.name)
