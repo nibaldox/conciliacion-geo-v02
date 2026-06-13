@@ -68,15 +68,25 @@ def render_step1(config: dict) -> None:
 
     if st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None:
         _render_mesh_info()
-        _build_or_get_3d_figure()
-        _render_3d_view()
-        _build_or_get_contour_figure(config)
-        _render_contour_view(config)
+        _render_3d_fragment()
+        _render_contour_fragment(config)
 
 
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+@st.fragment
+def _render_3d_fragment() -> None:
+    _build_or_get_3d_figure()
+    _render_3d_view()
+
+
+@st.fragment
+def _render_contour_fragment(config: dict) -> None:
+    _build_or_get_contour_figure(config)
+    _render_contour_view(config)
+
 
 def _render_mesh_info() -> None:
     col1, col2 = st.columns(2)
