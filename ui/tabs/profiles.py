@@ -7,7 +7,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core import build_reconciled_profile
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles, find_df_column
 
@@ -101,7 +100,11 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
         mode='lines', name='Diseño',
         line=dict(color='royalblue', width=2)))
 
-    a_over, a_under, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(pd_prof, pt_prof)
+    area_fill_design = st.session_state.get('area_fill_design') or []
+    if i < len(area_fill_design):
+        a_over, a_under, d_i, z_ref_i, z_eval_i = area_fill_design[i]
+    else:
+        a_over, a_under, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(pd_prof, pt_prof)
 
     if show_areas:
         _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under)
@@ -127,15 +130,21 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
             mode='lines', name='Topografía Real',
             line=dict(color='forestgreen', width=2)))
 
-    if show_reconciled and i < len(st.session_state.params_design):
-        _add_reconciled_trace(fig, st.session_state.params_design[i].benches,
+    reconciled_design = st.session_state.get('reconciled_design') or []
+    if show_reconciled and i < len(reconciled_design):
+        rd_d, re_d = reconciled_design[i]
+        _add_reconciled_trace(fig, rd_d, re_d,
                                color='royalblue', label='Conciliado Diseño', dash='dash',
                                showlegend=False)
 
-    if show_reconciled and i < len(st.session_state.params_topo):
-        _add_reconciled_trace(fig, st.session_state.params_topo[i].benches,
+    reconciled_topo = st.session_state.get('reconciled_topo') or []
+    if show_reconciled and i < len(reconciled_topo):
+        rd_t, re_t = reconciled_topo[i]
+        _add_reconciled_trace(fig, rd_t, re_t,
                                color='#FF7F0E', label='Conciliado As-Built', dash='solid', width=2.5,
                                show_berm_width=True, comparison_results=sec_comps,
+                               topo_benches=st.session_state.params_topo[i].benches
+                               if i < len(st.session_state.params_topo) else None,
                                showlegend=True)
 
     if i < len(st.session_state.params_topo):
@@ -323,16 +332,15 @@ def _add_semaphore_traces(fig, pd_prof, pt_prof, config):
             showlegend=False))
 
 
-def _add_reconciled_trace(fig, benches, color, label, dash, width=1.5, show_berm_width=False, comparison_results=None, showlegend=True):
-    rd, re = build_reconciled_profile(benches)
+def _add_reconciled_trace(fig, rd, re, color, label, dash, width=1.5, show_berm_width=False, comparison_results=None, topo_benches=None, showlegend=True):
     if len(rd) > 0:
         fig.add_trace(go.Scatter(
             x=rd, y=re, mode='lines+markers', name=label,
             line=dict(color=color, width=width, dash=dash),
             marker=dict(size=5 if width == 1.5 else 6, symbol='diamond', color=color),
             showlegend=showlegend))
-        if show_berm_width and comparison_results is not None:
-            _add_berm_width_indicators(fig, benches, comparison_results)
+        if show_berm_width and comparison_results is not None and topo_benches is not None:
+            _add_berm_width_indicators(fig, topo_benches, comparison_results)
 
 
 def _add_berm_width_indicators(fig, benches, comparison_results):

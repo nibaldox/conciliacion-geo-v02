@@ -4,13 +4,16 @@ Separates processing logic from UI rendering.
 """
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import streamlit as st
 
 from core import (
+    build_reconciled_profile,
     cut_mesh_with_section,
     extract_parameters,
     compare_design_vs_asbuilt,
 )
+from core.geom_utils import calculate_area_between_profiles
 
 
 def render_step3(config: dict) -> None:
@@ -41,7 +44,47 @@ def render_step3(config: dict) -> None:
         st.session_state.processed_sections = sections_to_process
         st.session_state.step = 4
 
+        _precompute_profile_artefacts(results)
         _render_summary_metrics(results)
+
+
+def _precompute_profile_artefacts(results: dict) -> None:
+    """Stash reconciled profile + area-fill arrays in session_state for step-4."""
+    total = results['total']
+    profiles_d = results['profiles_design']
+    profiles_t = results['profiles_topo']
+    params_d = results['params_design']
+    params_t = results['params_topo']
+
+    empty_area = (0.0, 0.0, np.array([]), np.array([]), np.array([]))
+    empty_recon = (np.array([]), np.array([]))
+
+    reconciled_design = [empty_recon] * total
+    reconciled_topo = [empty_recon] * total
+    area_fill_design = [empty_area] * total
+    area_fill_topo = [empty_area] * total
+
+    for i in range(total):
+        pd_prof = profiles_d[i]
+        pt_prof = profiles_t[i]
+        ep_d = params_d[i]
+        ep_t = params_t[i]
+
+        if pd_prof is not None and pt_prof is not None:
+            a_over, a_under, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(
+                pd_prof, pt_prof)
+            area_fill_design[i] = (a_over, a_under, d_i, z_ref_i, z_eval_i)
+            area_fill_topo[i] = (a_under, a_over, d_i, z_eval_i, z_ref_i)
+
+        if ep_d is not None and ep_d.benches:
+            reconciled_design[i] = build_reconciled_profile(ep_d.benches)
+        if ep_t is not None and ep_t.benches:
+            reconciled_topo[i] = build_reconciled_profile(ep_t.benches)
+
+    st.session_state['reconciled_design'] = reconciled_design
+    st.session_state['reconciled_topo'] = reconciled_topo
+    st.session_state['area_fill_design'] = area_fill_design
+    st.session_state['area_fill_topo'] = area_fill_topo
 
 
 # ---------------------------------------------------------------------------
