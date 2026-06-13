@@ -45,7 +45,7 @@ _DEFAULTS = {
     'sections': [], 'profiles_design': [], 'profiles_topo': [],
     'params_design': [], 'params_topo': [],
     'comparison_results': [], 'step': 1,
-    'clicked_sections': [],
+    'pending_section_names': set(),
     'ref_line_traces': {},
     'blast_df_clean': None,
 }
