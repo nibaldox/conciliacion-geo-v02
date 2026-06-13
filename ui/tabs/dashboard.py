@@ -5,37 +5,28 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from ui.filter_cache import _ensure_filter_values
+
 
 def render_tab_dashboard(config: dict) -> None:
     results = st.session_state.comparison_results
     if not results:
         return
 
-    import pandas as pd
     df = pd.DataFrame(results)
 
     with st.expander("🔎 Filtros (Excel-style)", expanded=False):
         cols_filter = st.columns(4)
+        fv = _ensure_filter_values()
 
-        all_sectors = sorted(df['sector'].unique().tolist())
         sel_sectors = cols_filter[0].multiselect(
-            "Filtrar por Sector:", all_sectors, default=[], key="dash_filter_sector")
-
-        unique_levels = df['level'].unique()
-        sorted_levels = sorted(
-            unique_levels,
-            key=lambda x: float(x) if str(x).replace('.', '', 1).isdigit() else -9999,
-            reverse=True)
+            "Filtrar por Sector:", fv['sectors'], default=[], key="dash_filter_sector")
         sel_levels = cols_filter[1].multiselect(
-            "Filtrar por Nivel (Cota):", sorted_levels, default=[], key="dash_filter_level")
-
-        all_sections = sorted(df['section'].unique().tolist())
+            "Filtrar por Nivel (Cota):", fv['levels'], default=[], key="dash_filter_level")
         sel_sections = cols_filter[2].multiselect(
-            "Filtrar por Sección:", all_sections, default=[], key="dash_filter_section")
-
-        all_benches = sorted(df['bench_num'].unique().tolist())
+            "Filtrar por Sección:", fv['sections'], default=[], key="dash_filter_section")
         sel_benches = cols_filter[3].multiselect(
-            "Filtrar por Banco:", all_benches, default=[], key="dash_filter_bench")
+            "Filtrar por Banco:", fv['benches'], default=[], key="dash_filter_bench")
 
     if sel_sectors:
         df = df[df['sector'].isin(sel_sectors)]

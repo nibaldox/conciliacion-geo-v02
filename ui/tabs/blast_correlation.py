@@ -12,6 +12,7 @@ from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.config import DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
+from ui.filter_cache import _ensure_filter_values
 from ui.tabs.export import _get_profile_pair
 
 def render_tab_blast_correlation(config: dict) -> None:
@@ -60,18 +61,8 @@ def render_tab_blast_correlation(config: dict) -> None:
         
         sel_mallas = cols_filter[1].multiselect("Filtrar por Malla/Polígono:", all_mallas, default=[], key="corr_filter_malla")
 
-        unique_levels = []
-        for c in comparison_results:
-            lvl = c.get('level')
-            if lvl is not None:
-                unique_levels.append(lvl)
-        unique_levels = list(set(unique_levels))
-        sorted_levels = sorted(
-            unique_levels,
-            key=lambda x: float(x) if str(x).replace('.', '', 1).isdigit() else -9999,
-            reverse=True
-        )
-        sel_levels = cols_filter[2].multiselect("Filtrar por Nivel/Cota:", sorted_levels, default=[], key="corr_filter_level")
+        unique_levels = _ensure_filter_values()['levels']
+        sel_levels = cols_filter[2].multiselect("Filtrar por Nivel/Cota:", unique_levels, default=[], key="corr_filter_level")
 
     df_filtered_sections = df_sections_calc.copy()
     if sel_sectors:
