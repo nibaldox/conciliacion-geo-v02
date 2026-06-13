@@ -11,8 +11,9 @@ Endpoints:
 import os
 import logging
 import tempfile
+import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import trimesh
@@ -27,10 +28,36 @@ from core import (
     cut_both_surfaces,
     extract_parameters,
     compare_design_vs_asbuilt,
-    build_reconciled_profile,
 )
-from core.section_cutter import azimuth_to_direction
-from core.param_extractor import BenchParams, ExtractionResult
+from core.param_extractor import (
+    BenchParams,
+    ExtractionResult,
+    ReconciledPoint,
+    build_reconciled_profile_v2,
+)
+from core.section_cutter import azimuth_to_direction, ProfileResult
+
+
+def _reconciled_point_to_dict(p: ReconciledPoint) -> dict:
+    """Serialise a ReconciledPoint for JSON transport."""
+    return {
+        "distance": round(float(p.distance), 3),
+        "elevation": round(float(p.elevation), 3),
+        "bench_number": int(p.bench_number),
+        "segment_type": str(p.segment_type),
+        "source": str(p.source),
+    }
+
+
+def _reconciled_profile_to_dict(prof) -> dict:
+    """Serialise a ReconciledProfile (distances, elevations, points)."""
+    return {
+        "distances": prof.distances.tolist() if len(prof.distances) > 0 else [],
+        "elevations": prof.elevations.tolist() if len(prof.elevations) > 0 else [],
+        "segments": [_reconciled_point_to_dict(p) for p in prof.points],
+    }
+
+
 from core.config import DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
 logger = logging.getLogger(__name__)
@@ -87,6 +114,44 @@ def _section_from_dict(d: dict) -> SectionLine:
         length=float(d.get("length", 200)),
         sector=d.get("sector", ""),
     )
+
+
+def _profile_to_dict(prof: Optional[ProfileResult]) -> Optional[dict]:
+    """Serialise a ProfileResult for the profile cache (None stays None)."""
+    if prof is None:
+        return None
+    return {
+        "distances": prof.distances.tolist(),
+        "elevations": prof.elevations.tolist(),
+    }
+
+
+def _profile_from_dict(d: Optional[dict]) -> Optional[ProfileResult]:
+    """Deserialise a cached profile dict back into a ProfileResult."""
+    if d is None:
+        return None
+    return ProfileResult(
+        distances=np.asarray(d["distances"], dtype=float),
+        elevations=np.asarray(d["elevations"], dtype=float),
+    )
+
+
+def _profiles_for_section(
+    session_id: str,
+    sec: SectionLine,
+    mesh_design: trimesh.Trimesh,
+    mesh_topo: trimesh.Trimesh,
+) -> Tuple[Optional[ProfileResult], Optional[ProfileResult]]:
+    """Return (design, topo) profiles for a section.
+
+    Uses the profile cache persisted by POST /process; falls back to cutting
+    the meshes when the cache is missing (e.g. sessions processed before the
+    cache existed).
+    """
+    cached = db.get_profile_cache(session_id, sec.name)
+    if "design" in cached and "topo" in cached:
+        return _profile_from_dict(cached["design"]), _profile_from_dict(cached["topo"])
+    return cut_both_surfaces(mesh_design, mesh_topo, sec)
 
 
 def _bench_to_dict(b: BenchParams) -> dict:
@@ -193,9 +258,17 @@ def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None
         # Mark processing started
         db.update_process_status(session_id, "processing", 0, len(sections))
 
+        # Pre-warm trimesh lazy caches in the main thread so worker threads
+        # don't race to compute them (results are unaffected).
+        for _mesh in (mesh_design, mesh_topo):
+            _ = _mesh.vertices
+            _ = _mesh.faces
+
         # Allocate result containers
         params_design_list: List[Optional[ExtractionResult]] = [None] * len(sections)
         params_topo_list: List[Optional[ExtractionResult]] = [None] * len(sections)
+        profile_design_list: List[Optional[ProfileResult]] = [None] * len(sections)
+        profile_topo_list: List[Optional[ProfileResult]] = [None] * len(sections)
         comparison_results: List[Dict[str, Any]] = []
 
         def _process_section(args: tuple):
@@ -223,46 +296,60 @@ def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None
                         berm_threshold,
                     )
                     comps = compare_design_vs_asbuilt(p_d, p_t, tolerances)
-                    return idx, sec, p_d, p_t, comps
+                    return idx, sec, p_d, p_t, comps, pd_prof, pt_prof
                 else:
                     p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
                     p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                    return idx, sec, p_d_empty, p_t_empty, []
+                    return idx, sec, p_d_empty, p_t_empty, [], pd_prof, pt_prof
             except Exception as exc:
                 logger.exception("Section %s processing failed: %s", sec.name, exc)
                 p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
                 p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                return idx, sec, p_d_empty, p_t_empty, []
+                return idx, sec, p_d_empty, p_t_empty, [], None, None
 
-        # Execute in parallel
+        # Execute in parallel. Status updates are throttled to avoid one
+        # SQLite commit per section (a major cost with many sections).
         completed = 0
+        last_status = 0.0
         with ThreadPoolExecutor() as executor:
-            for idx, sec, p_d, p_t, comps in executor.map(
+            for idx, sec, p_d, p_t, comps, pd_prof, pt_prof in executor.map(
                 _process_section, enumerate(sections)
             ):
                 params_design_list[idx] = p_d
                 params_topo_list[idx] = p_t
+                profile_design_list[idx] = pd_prof
+                profile_topo_list[idx] = pt_prof
                 comparison_results.extend(comps)
                 completed += 1
-                db.update_process_status(session_id, "processing", completed, len(sections))
+                now = time.monotonic()
+                if now - last_status >= 0.5 or completed == len(sections):
+                    db.update_process_status(
+                        session_id, "processing", completed, len(sections)
+                    )
+                    last_status = now
 
         # Persist results
-        # Save extraction cache for each section
+        # Save extraction + raw profile caches in bulk (single transaction
+        # each) instead of one commit per section.
+        extraction_rows: List[Tuple[str, str, dict]] = []
+        profile_rows: List[Tuple[str, str, Optional[dict]]] = []
         for idx, sec in enumerate(sections):
             if params_design_list[idx] is not None:
-                db.save_extraction(
-                    session_id,
-                    sec.name,
-                    "design",
-                    _extraction_to_dict(params_design_list[idx]),
+                extraction_rows.append(
+                    (sec.name, "design", _extraction_to_dict(params_design_list[idx]))
                 )
             if params_topo_list[idx] is not None:
-                db.save_extraction(
-                    session_id,
-                    sec.name,
-                    "topo",
-                    _extraction_to_dict(params_topo_list[idx]),
+                extraction_rows.append(
+                    (sec.name, "topo", _extraction_to_dict(params_topo_list[idx]))
                 )
+            profile_rows.append(
+                (sec.name, "design", _profile_to_dict(profile_design_list[idx]))
+            )
+            profile_rows.append(
+                (sec.name, "topo", _profile_to_dict(profile_topo_list[idx]))
+            )
+        db.save_extractions_bulk(session_id, extraction_rows)
+        db.save_profiles_bulk(session_id, profile_rows)
 
         # Make comparison results JSON-safe before saving
         safe_results = []
@@ -352,7 +439,7 @@ def get_profile(request: Request, section_id: int):
 
         sec = _section_from_dict(sections_raw[section_id])
 
-        # Load meshes and cut profiles
+        # Load meshes and resolve profiles (cache first, cut as fallback)
         try:
             mesh_design = _load_mesh_from_db(session_id, "design")
             mesh_topo = _load_mesh_from_db(session_id, "topo")
@@ -361,7 +448,7 @@ def get_profile(request: Request, section_id: int):
         except Exception as exc:
             raise HTTPException(400, f"Error loading meshes: {exc}")
 
-        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+        pd_prof, pt_prof = _profiles_for_section(session_id, sec, mesh_design, mesh_topo)
 
         result: Dict[str, Any] = {
             "section_name": sec.name,
@@ -381,26 +468,23 @@ def get_profile(request: Request, section_id: int):
                 "elevations": pt_prof.elevations.tolist(),
             }
 
-        # Reconciled profiles from extraction cache
+        # Reconciled profiles from extraction cache. We use the v2
+        # builder so the response carries the structured ``segments``
+        # list (with explicit berm/ramp classifications) in addition
+        # to the legacy ``distances``/``elevations`` arrays.
         design_extraction = db.get_extraction(session_id, sec.name, "design")
         if design_extraction:
             benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
             if benches_d:
-                rd, re = build_reconciled_profile(benches_d)
-                result["reconciled_design"] = {
-                    "distances": rd.tolist() if len(rd) > 0 else [],
-                    "elevations": re.tolist() if len(re) > 0 else [],
-                }
+                prof_d = build_reconciled_profile_v2(benches_d, source="design")
+                result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
 
         topo_extraction = db.get_extraction(session_id, sec.name, "topo")
         if topo_extraction:
             benches_t = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
             if benches_t:
-                rt, ret = build_reconciled_profile(benches_t)
-                result["reconciled_topo"] = {
-                    "distances": rt.tolist() if len(rt) > 0 else [],
-                    "elevations": ret.tolist() if len(ret) > 0 else [],
-                }
+                prof_t = build_reconciled_profile_v2(benches_t, source="topo")
+                result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
                 result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
 
         return result
@@ -517,13 +601,10 @@ def update_reconciled(
             filtered.extend(safe_new)
             db.save_results(session_id, filtered)
 
-        # Return updated reconciled profile + benches
-        rd, re = build_reconciled_profile(benches)
+        # Return updated reconciled profile + benches (v2: rich segments)
+        prof = build_reconciled_profile_v2(benches, source="topo")
         return {
-            "reconciled_topo": {
-                "distances": rd.tolist() if len(rd) > 0 else [],
-                "elevations": re.tolist() if len(re) > 0 else [],
-            },
+            "reconciled_topo": _reconciled_profile_to_dict(prof),
             "benches": [_bench_to_dict(b) for b in benches],
         }
     except HTTPException:
