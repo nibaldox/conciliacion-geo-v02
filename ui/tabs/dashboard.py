@@ -19,7 +19,7 @@ def render_tab_dashboard(config: dict) -> None:
 
         all_sectors = sorted(df['sector'].unique().tolist())
         sel_sectors = cols_filter[0].multiselect(
-            "Filtrar por Sector:", all_sectors, default=[], key="filter_sector_dash")
+            "Filtrar por Sector:", all_sectors, default=[], key="dash_filter_sector")
 
         unique_levels = df['level'].unique()
         sorted_levels = sorted(
@@ -27,15 +27,15 @@ def render_tab_dashboard(config: dict) -> None:
             key=lambda x: float(x) if str(x).replace('.', '', 1).isdigit() else -9999,
             reverse=True)
         sel_levels = cols_filter[1].multiselect(
-            "Filtrar por Nivel (Cota):", sorted_levels, default=[], key="filter_level_dash")
+            "Filtrar por Nivel (Cota):", sorted_levels, default=[], key="dash_filter_level")
 
         all_sections = sorted(df['section'].unique().tolist())
         sel_sections = cols_filter[2].multiselect(
-            "Filtrar por Sección:", all_sections, default=[], key="filter_section_dash")
+            "Filtrar por Sección:", all_sections, default=[], key="dash_filter_section")
 
         all_benches = sorted(df['bench_num'].unique().tolist())
         sel_benches = cols_filter[3].multiselect(
-            "Filtrar por Banco:", all_benches, default=[], key="filter_bench_dash")
+            "Filtrar por Banco:", all_benches, default=[], key="dash_filter_bench")
 
     if sel_sectors:
         df = df[df['sector'].isin(sel_sectors)]
@@ -98,7 +98,7 @@ def _render_stacked_bar(results) -> None:
     ])
     fig_bar.update_layout(barmode='stack', title="Cumplimiento por Parámetro",
                           height=350, margin=dict(l=40, r=20, t=40, b=40))
-    st.plotly_chart(fig_bar, width="stretch")
+    st.plotly_chart(fig_bar, use_container_width=True)
 
 
 def _render_deviation_histograms(results, config: dict) -> None:
@@ -112,7 +112,7 @@ def _render_deviation_histograms(results, config: dict) -> None:
                             xaxis_title="Desviación (m)", yaxis_title="Frecuencia")
         fig_h.add_vline(x=-tol['bench_height']['neg'], line_dash="dash", line_color="orange")
         fig_h.add_vline(x=tol['bench_height']['pos'], line_dash="dash", line_color="orange")
-        st.plotly_chart(fig_h, width="stretch")
+        st.plotly_chart(fig_h, use_container_width=True)
 
     with col2:
         devs_a = [r['angle_dev'] for r in results if r['angle_dev'] is not None]
@@ -121,7 +121,7 @@ def _render_deviation_histograms(results, config: dict) -> None:
                             xaxis_title="Desviación (°)", yaxis_title="Frecuencia")
         fig_a.add_vline(x=-tol['face_angle']['neg'], line_dash="dash", line_color="orange")
         fig_a.add_vline(x=tol['face_angle']['pos'], line_dash="dash", line_color="orange")
-        st.plotly_chart(fig_a, width="stretch")
+        st.plotly_chart(fig_a, use_container_width=True)
 
     with col3:
         berm_vals = [r['berm_real'] for r in results
@@ -132,4 +132,4 @@ def _render_deviation_histograms(results, config: dict) -> None:
                                 xaxis_title="Ancho (m)", yaxis_title="Frecuencia")
             fig_b.add_vline(x=config['min_berm_width'], line_dash="dash", line_color="red",
                             annotation_text="Mínimo", annotation_position="top right")
-            st.plotly_chart(fig_b, width="stretch")
+            st.plotly_chart(fig_b, use_container_width=True)

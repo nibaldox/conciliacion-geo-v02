@@ -3,6 +3,7 @@ Reusable Plotly figure builders shared across UI steps.
 """
 import numpy as np
 import plotly.graph_objects as go
+import streamlit as st
 from scipy.interpolate import griddata
 
 from core.section_cutter import azimuth_to_direction
@@ -57,15 +58,16 @@ def draw_sections_on_figure(fig: go.Figure, sections, is_3d: bool = False, zref:
 # Contour / topographic grid helper
 # ---------------------------------------------------------------------------
 
-def mesh_to_contour_data(mesh, grid_size: int = 500):
+@st.cache_data(show_spinner=False)
+def mesh_to_contour_data(_mesh, grid_size: int = 500):
     """Interpolate mesh vertices onto a regular grid for contour plotting.
 
     Returns (xi, yi, xi_grid, yi_grid, zi_grid) or (None,)*5 if mesh is None.
     """
-    if mesh is None:
+    if _mesh is None:
         return None, None, None, None, None
 
-    verts = mesh.vertices
+    verts = _mesh.vertices
     if len(verts) > 200_000:
         step = len(verts) // 200_000
         verts = verts[::step]

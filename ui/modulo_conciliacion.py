@@ -16,11 +16,10 @@ from ui.step4_results import render_step4
 
 def render_modulo_conciliacion() -> None:
     config = render_sidebar()
-    st.session_state['_grid_ref'] = config['grid_ref']
 
     _render_ref_lines_preview()
 
-    render_step1()
+    render_step1(config)
 
     if st.session_state.step >= 2:
         render_step2()
@@ -56,4 +55,4 @@ def _render_ref_lines_preview() -> None:
             height=500, margin=dict(l=60, r=20, t=30, b=40),
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)

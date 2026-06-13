@@ -12,6 +12,9 @@ from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles, find_df_column
 
 
+BLAST_HOLE_DISPLAY_RADIUS_M = 10.0
+
+
 def render_tab_profiles(config: dict) -> None:
     ctrl_cols = st.columns(5)
     
@@ -46,7 +49,7 @@ def render_tab_profiles(config: dict) -> None:
         if show_pozos and st.session_state.get('blast_df_clean') is not None:
             blast_tolerance = st.number_input(
                 "Tolerancia pozos (m)",
-                value=10.0, min_value=1.0, max_value=50.0, step=1.0,
+                value=BLAST_HOLE_DISPLAY_RADIUS_M, min_value=1.0, max_value=50.0, step=1.0,
                 key="blast_tol_profile",
                 help="Distancia máxima a la línea de sección")
                 
@@ -85,7 +88,7 @@ def render_tab_profiles(config: dict) -> None:
                         show_pozos=show_pozos,
                         blast_tolerance=blast_tolerance,
                         config=config)
-                    st.plotly_chart(fig, width="stretch")
+                    st.plotly_chart(fig, use_container_width=True)
 
 
 def _build_profile_figure(i, section, pd_prof, pt_prof,

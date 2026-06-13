@@ -8,9 +8,10 @@ try:
     _HAS_STATSMODELS = True
 except ImportError:
     _HAS_STATSMODELS = False
+from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.config import DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
-from core.calculo_tronadura import proyectar_pozos_en_seccion
 
 def render_tab_blast_correlation(config: dict) -> None:
     blast_df = st.session_state.get('blast_df_clean')
@@ -36,7 +37,7 @@ def render_tab_blast_correlation(config: dict) -> None:
 
     tolerance = st.slider(
         "Tolerancia de Proyección de Pozos a la Sección (m):",
-        min_value=5.0, max_value=30.0, value=15.0, step=1.0,
+        min_value=5.0, max_value=30.0, value=DEFAULTS.blast_correlation_radius_m, step=1.0,
         key="corr_projection_tolerance"
     )
 
@@ -131,7 +132,7 @@ def render_tab_blast_correlation(config: dict) -> None:
         }
         
         df_sec_disp = df_filtered_sections[col_list].rename(columns=display_map)
-        st.dataframe(df_sec_disp, width="stretch", height=300)
+        st.dataframe(df_sec_disp, use_container_width=True, height=300)
 
         if len(df_filtered_sections) > 1:
             fig_scatter = px.scatter(
@@ -149,7 +150,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 trendline="ols" if _HAS_STATSMODELS and len(df_filtered_sections) > 2 and np.var(df_filtered_sections['total_kg']) > 0 else None
             )
             fig_scatter.update_layout(height=450)
-            st.plotly_chart(fig_scatter, width="stretch")
+            st.plotly_chart(fig_scatter, use_container_width=True)
 
     with tab_bnc:
         st.markdown("#### Comportamiento Horizontal por Banco / Nivel de Cota")
@@ -167,7 +168,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'avg_dev_toe': 'Sobre-quiebre Pata Medio (m)'
             }
             df_b_disp = df_bench_corr[col_list_b].rename(columns=display_map_b)
-            st.dataframe(df_b_disp, width="stretch", height=300)
+            st.dataframe(df_b_disp, use_container_width=True, height=300)
 
             fig_bench = go.Figure()
             fig_bench.add_trace(go.Bar(
@@ -199,7 +200,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 height=450,
                 legend=dict(x=0.01, y=0.99)
             )
-            st.plotly_chart(fig_bench, width="stretch")
+            st.plotly_chart(fig_bench, use_container_width=True)
 
     with tab_mal:
         st.markdown("#### Evaluación de Daño Geotécnico por Malla / Polígono de Tronadura")
@@ -221,7 +222,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'avg_overbreak': 'Sobre-excavación Media (m²)'
             }
             df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
-            st.dataframe(df_m_disp, width="stretch", height=300)
+            st.dataframe(df_m_disp, use_container_width=True, height=300)
 
             fig_malla = px.bar(
                 df_malla_corr,
@@ -237,7 +238,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 title='Área de Sobre-excavación Promedio por Malla de Tronadura'
             )
             fig_malla.update_layout(height=450)
-            st.plotly_chart(fig_malla, width="stretch")
+            st.plotly_chart(fig_malla, use_container_width=True)
 
 
 def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, comparison_results, tolerance) -> pd.DataFrame:
@@ -320,7 +321,7 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col) 
             pass
 
         if lvl_float is not None:
-            mask_pozos = (blast_df['Z_collar'] - lvl_float).abs() <= 10.0
+            mask_pozos = (blast_df['Z_collar'] - lvl_float).abs() <= DEFAULTS.blast_correlation_radius_m
             pozos_lvl = blast_df[mask_pozos]
             
             projected_count = 0

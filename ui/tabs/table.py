@@ -34,7 +34,7 @@ def render_tab_table() -> None:
     df_display = _format_numeric(df_display)
     styled = df_display.style.map(
         _highlight_status, subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
-    st.dataframe(styled, width="stretch", height=400)
+    st.dataframe(styled, use_container_width=True, height=400)
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
 
         all_sectors = sorted(df['sector'].unique().tolist())
         sel_sectors = cols_filter[0].multiselect(
-            "Filtrar por Sector:", all_sectors, default=[], key="filter_sector")
+            "Filtrar por Sector:", all_sectors, default=[], key="table_filter_sector")
 
         unique_levels = df['level'].unique()
         sorted_levels = sorted(
@@ -55,15 +55,15 @@ def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
             key=lambda x: float(x) if str(x).replace('.', '', 1).isdigit() else -9999,
             reverse=True)
         sel_levels = cols_filter[1].multiselect(
-            "Filtrar por Nivel (Cota):", sorted_levels, default=[], key="filter_level")
+            "Filtrar por Nivel (Cota):", sorted_levels, default=[], key="table_filter_level")
 
         all_sections = sorted(df['section'].unique().tolist())
         sel_sections = cols_filter[2].multiselect(
-            "Filtrar por Sección:", all_sections, default=[], key="filter_section")
+            "Filtrar por Sección:", all_sections, default=[], key="table_filter_section")
 
         all_benches = sorted(df['bench_num'].unique().tolist())
         sel_benches = cols_filter[3].multiselect(
-            "Filtrar por Banco:", all_benches, default=[], key="filter_bench")
+            "Filtrar por Banco:", all_benches, default=[], key="table_filter_bench")
 
     if sel_sectors:
         df = df[df['sector'].isin(sel_sectors)]

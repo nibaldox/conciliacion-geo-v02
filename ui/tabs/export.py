@@ -27,10 +27,10 @@ def _get_filtered_comparisons() -> list:
     if not comps:
         return []
     
-    sel_sectors = st.session_state.get("filter_sector", [])
-    sel_levels = st.session_state.get("filter_level", [])
-    sel_sections = st.session_state.get("filter_section", [])
-    sel_benches = st.session_state.get("filter_bench", [])
+    sel_sectors = st.session_state.get("export_filter_sector", [])
+    sel_levels = st.session_state.get("export_filter_level", [])
+    sel_sections = st.session_state.get("export_filter_section", [])
+    sel_benches = st.session_state.get("export_filter_bench", [])
     
     filtered = []
     for c in comps:

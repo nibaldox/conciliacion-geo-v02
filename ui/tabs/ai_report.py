@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.config import DEFAULTS
 from core.geom_utils import find_df_column
 
 
@@ -38,9 +39,10 @@ def render_tab_ai(config: dict) -> None:
     blast_df = st.session_state.get('blast_df_clean')
     blast_stats = {}
     if blast_df is not None and not blast_df.empty:
-        pasadura = (blast_df['Z_collar'] - 15.0) - blast_df['Z_toe']
+        pasadura = (blast_df['Z_collar'] - DEFAULTS.blast_default_bench_height) - blast_df['Z_toe']
         p_mean = pasadura.mean()
-        p_optimal = ((pasadura >= 0.5) & (pasadura <= 1.5)).sum()
+        p_min, p_max = DEFAULTS.blast_correlation_pasadura_optimal
+        p_optimal = ((pasadura >= p_min) & (pasadura <= p_max)).sum()
         p_pct = p_optimal / len(blast_df) * 100 if len(blast_df) > 0 else 0
 
         # Calculate correlation coefficient r if geotech results exist
@@ -75,7 +77,7 @@ def render_tab_ai(config: dict) -> None:
                         origin=sec.origin,
                         azimuth=sec.azimuth,
                         length=sec.length,
-                        tolerance=15.0
+                        tolerance=DEFAULTS.blast_correlation_radius_m
                     )
                     total_kg = proj_wells[kg_col].fillna(0).sum() if not proj_wells.empty else 0
                     corr_data.append({'Kg_Explosivo': total_kg, 'Desviacion': avg_dev})
@@ -135,7 +137,7 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
     st.subheader("🔬 Diagnóstico de Perforación y Voladura")
 
     # Calculate average pasadura
-    pasadura = (blast_df['Z_collar'] - 15.0) - blast_df['Z_toe']
+    pasadura = (blast_df['Z_collar'] - DEFAULTS.blast_default_bench_height) - blast_df['Z_toe']
     p_mean = pasadura.mean()
 
     has_alert = False
@@ -174,7 +176,7 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
                     origin=sec.origin,
                     azimuth=sec.azimuth,
                     length=sec.length,
-                    tolerance=15.0
+                    tolerance=DEFAULTS.blast_correlation_radius_m
                 )
                 if not proj.empty:
                     total_kg = proj[kg_col].fillna(0).sum()

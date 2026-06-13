@@ -23,6 +23,11 @@ from core.section_cutter import (
 from ui.plots import draw_sections_on_figure
 
 
+@st.cache_data(show_spinner=False)
+def _cached_local_azimuth(ox: float, oy: float, mesh_id: int) -> float:
+    return float(compute_local_azimuth(st.session_state.mesh_design, np.array([ox, oy])))
+
+
 def render_step2() -> None:
     """Render Paso 2: section definition."""
     st.header("✂️ Paso 2: Definir Secciones de Corte")
@@ -188,7 +193,7 @@ def _render_file_preview(polyline, preview_sections) -> None:
         xaxis_title='Este (m)', yaxis_title='Norte (m)',
         yaxis=dict(scaleanchor='x', scaleratio=1),
         height=500, margin=dict(l=60, r=20, t=30, b=40))
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +264,7 @@ def _render_tab_interactive() -> None:
 
     if st.session_state.clicked_sections:
         st.subheader(f"📍 {len(st.session_state.clicked_sections)} secciones colocadas")
-        st.dataframe(_sections_to_rows(st.session_state.clicked_sections), width="stretch")
+        st.dataframe(_sections_to_rows(st.session_state.clicked_sections), use_container_width=True)
 
     cols_btn = st.columns(2)
     if cols_btn[0].button("✅ Aplicar Secciones", type="primary", key="apply_int"):
@@ -300,7 +305,7 @@ def _render_tab_manual() -> None:
             oy = cols2[1].number_input("Origen Y", value=float(cy), format="%.1f", key=f"soy_{i}")
 
             if auto_az_manual:
-                az = compute_local_azimuth(st.session_state.mesh_design, np.array([ox, oy]))
+                az = _cached_local_azimuth(float(ox), float(oy), id(st.session_state.mesh_design))
                 cols2[2].text_input("Azimut (°)", value=f"{az:.1f}", disabled=True, key=f"saz_{i}")
             else:
                 az = cols2[2].number_input("Azimut (°)", value=0.0, min_value=0.0,
@@ -391,7 +396,7 @@ def _render_sections_table() -> None:
         st.subheader("📋 Secciones Definidas")
         cols_tbl = st.columns([5, 1])
         with cols_tbl[0]:
-            st.dataframe(_sections_to_rows(st.session_state.sections), width="stretch")
+            st.dataframe(_sections_to_rows(st.session_state.sections), use_container_width=True)
         with cols_tbl[1]:
             if st.button("🗑️ Limpiar Secciones", key="clear_all_sections_btn", type="secondary"):
                 st.session_state.sections = []

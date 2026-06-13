@@ -4,6 +4,8 @@ Returns a config dict consumed by all UI steps.
 """
 import streamlit as st
 
+from core.config import DETECTION, TOLERANCES, VISUALIZATION
+
 
 def render_sidebar() -> dict:
     """Render the sidebar and return a configuration dictionary."""
@@ -32,27 +34,27 @@ def render_sidebar() -> dict:
 
         # --- Tolerancias ---
         st.subheader("📐 Tolerancias")
-        tol_h_neg = st.number_input("Altura banco: Tol. (-) m", value=1.0, step=0.5, key="tol_h_neg")
-        tol_h_pos = st.number_input("Altura banco: Tol. (+) m", value=1.5, step=0.5, key="tol_h_pos")
-        tol_a_neg = st.number_input("Ángulo cara: Tol. (-) °", value=5.0, step=1.0, key="tol_a_neg")
-        tol_a_pos = st.number_input("Ángulo cara: Tol. (+) °", value=5.0, step=1.0, key="tol_a_pos")
-        min_berm_width = st.number_input("Berma mínima (m)", value=6.0, step=0.5, key="min_berm")
-        tol_ir_neg = st.number_input("Áng. Inter-Rampa: Tol. (-) °", value=3.0, step=1.0, key="tol_ir_neg")
-        tol_ir_pos = st.number_input("Áng. Inter-Rampa: Tol. (+) °", value=2.0, step=1.0, key="tol_ir_pos")
+        tol_h_neg = st.number_input("Altura banco: Tol. (-) m", value=TOLERANCES.bench_height['neg'], step=0.5, key="tol_h_neg")
+        tol_h_pos = st.number_input("Altura banco: Tol. (+) m", value=TOLERANCES.bench_height['pos'], step=0.5, key="tol_h_pos")
+        tol_a_neg = st.number_input("Ángulo cara: Tol. (-) °", value=TOLERANCES.face_angle['neg'], step=1.0, key="tol_a_neg")
+        tol_a_pos = st.number_input("Ángulo cara: Tol. (+) °", value=TOLERANCES.face_angle['pos'], step=1.0, key="tol_a_pos")
+        min_berm_width = st.number_input("Berma mínima (m)", value=TOLERANCES.berm_width['min'], step=0.5, key="min_berm")
+        tol_ir_neg = st.number_input("Áng. Inter-Rampa: Tol. (-) °", value=TOLERANCES.inter_ramp_angle['neg'], step=1.0, key="tol_ir_neg")
+        tol_ir_pos = st.number_input("Áng. Inter-Rampa: Tol. (+) °", value=TOLERANCES.inter_ramp_angle['pos'], step=1.0, key="tol_ir_pos")
 
         # --- Detección ---
         st.subheader("🔧 Detección de Bancos")
-        face_threshold = st.slider("Ángulo mínimo cara (°)", 0, 90, 40)
+        face_threshold = st.slider("Ángulo mínimo cara (°)", 0, 90, int(DETECTION.face_threshold))
         berm_threshold = st.slider("Ángulo máximo berma (°)", 0, 10, 5)
         resolution = st.slider("Resolución de perfil (m)", 0.1, 2.0, 0.5)
 
         # --- Visualización ---
         st.subheader("📊 Visualización")
         grid_height = st.number_input(
-            "Grilla Vertical (m)", value=15.0, min_value=1.0, step=1.0,
+            "Grilla Vertical (m)", value=VISUALIZATION.grid_height, min_value=1.0, step=1.0,
             help="Define la separación de líneas horizontales en los perfiles")
         grid_ref = st.number_input(
-            "Cota Referencia (m)", value=0.0, step=1.0,
+            "Cota Referencia (m)", value=VISUALIZATION.grid_ref, step=1.0,
             help="Altura base para alinear la grilla (ej: pata del banco)")
 
         # --- Proyecto ---
@@ -67,7 +69,7 @@ def render_sidebar() -> dict:
         'face_angle': {'neg': tol_a_neg, 'pos': tol_a_pos},
         'berm_width': {'min': min_berm_width},
         'inter_ramp_angle': {'neg': tol_ir_neg, 'pos': tol_ir_pos},
-        'overall_angle': {'neg': 2.0, 'pos': 2.0},
+        'overall_angle': {'neg': TOLERANCES.overall_angle['neg'], 'pos': TOLERANCES.overall_angle['pos']},
     }
 
     return {

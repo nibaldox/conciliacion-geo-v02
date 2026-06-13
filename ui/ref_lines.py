@@ -57,7 +57,7 @@ def _parse_files(ref_files) -> None:
         try:
             content = f.read().decode('utf-8')
             f.seek(0)
-            df = pd.read_csv(io.StringIO(content), header=None, nrows=50000)
+            df = _parse_csv(id(f), content, f.name)
         except Exception as e:
             st.warning(f"Error leyendo {f.name}: {e}")
             continue
@@ -80,6 +80,11 @@ def _parse_files(ref_files) -> None:
             'color': color,
             'n_points': len(coords),
         }
+
+
+@st.cache_data(show_spinner=False)
+def _parse_csv(_file_id, content: str, filename: str) -> pd.DataFrame:
+    return pd.read_csv(io.StringIO(content), header=None, nrows=50000)
 
 
 def add_ref_lines_2d(fig: go.Figure) -> None:

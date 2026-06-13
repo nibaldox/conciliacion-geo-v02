@@ -10,10 +10,16 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core import load_mesh, get_mesh_bounds, mesh_to_plotly, decimate_mesh
+from core.config import DEFAULTS, VISUALIZATION
 from ui.plots import draw_sections_on_figure, mesh_to_contour_data
 
 
-def render_step1() -> None:
+@st.cache_data(show_spinner=False)
+def _cached_decimate(_mesh, target_faces, method='quadric'):
+    return decimate_mesh(_mesh, target_faces=target_faces, method=method)
+
+
+def render_step1(config: dict) -> None:
     """Render Paso 1: file upload + 3D and plan visualizations."""
     st.header("📁 Paso 1: Cargar Superficies STL / DXF")
 
@@ -60,7 +66,7 @@ def render_step1() -> None:
     if st.session_state.mesh_design is not None and st.session_state.mesh_topo is not None:
         _render_mesh_info()
         _render_3d_view()
-        _render_contour_view()
+        _render_contour_view(config)
 
 
 # ---------------------------------------------------------------------------
@@ -111,8 +117,8 @@ def _load_meshes(file_design, file_topo) -> None:
             st.session_state.bounds_topo = get_mesh_bounds(mesh_t)
 
             # Pre-decimate meshes for Plotly 3D visualization
-            st.session_state.decimated_mesh_design = decimate_mesh(mesh_d, 30000)
-            st.session_state.decimated_mesh_topo = decimate_mesh(mesh_t, 30000)
+            st.session_state.decimated_mesh_design = _cached_decimate(mesh_d, DEFAULTS.target_faces_visual)
+            st.session_state.decimated_mesh_topo = _cached_decimate(mesh_t, DEFAULTS.target_faces_visual)
 
             # Store cache keys
             st.session_state.mesh_design_file_name = file_design.name
@@ -138,12 +144,12 @@ def _render_3d_view() -> None:
             # Use pre-decimated meshes
             md = st.session_state.get('decimated_mesh_design')
             if md is None:
-                md = decimate_mesh(st.session_state.mesh_design, 30000)
+                md = _cached_decimate(st.session_state.mesh_design, DEFAULTS.target_faces_visual)
                 st.session_state.decimated_mesh_design = md
-                
+
             mt = st.session_state.get('decimated_mesh_topo')
             if mt is None:
-                mt = decimate_mesh(st.session_state.mesh_topo, 30000)
+                mt = _cached_decimate(st.session_state.mesh_topo, DEFAULTS.target_faces_visual)
                 st.session_state.decimated_mesh_topo = mt
 
             fig.add_trace(mesh_to_plotly(md, "Diseño", "royalblue", 1.0))
@@ -161,10 +167,10 @@ def _render_3d_view() -> None:
                 height=600, margin=dict(l=0, r=0, t=30, b=0),
                 legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
             )
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
 
 
-def _render_contour_view() -> None:
+def _render_contour_view(config: dict) -> None:
     with st.expander("🗺️ Vista en Planta — Curvas de Nivel", expanded=False):
         with st.spinner("Generando curvas de nivel..."):
             import numpy as np
@@ -174,11 +180,10 @@ def _render_contour_view() -> None:
             contour_interval = contour_cols[1].number_input(
                 "Intervalo curvas (m)", value=15.0, min_value=1.0, step=1.0, key="contour_int")
             contour_grid = contour_cols[2].number_input(
-                "Resolución grilla", value=500, min_value=100, max_value=2000,
+                "Resolución grilla", value=VISUALIZATION.contour_resolution, min_value=100, max_value=2000,
                 step=100, key="contour_grid")
 
-            # grid_ref comes from sidebar via session state fallback
-            grid_ref = st.session_state.get('_grid_ref', 0.0)
+            grid_ref = config.get('grid_ref', VISUALIZATION.grid_ref)
 
             fig_contour = go.Figure()
 
@@ -227,4 +232,4 @@ def _render_contour_view() -> None:
                 height=650, margin=dict(l=60, r=20, t=30, b=40),
                 legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
             )
-            st.plotly_chart(fig_contour, width="stretch")
+            st.plotly_chart(fig_contour, use_container_width=True)

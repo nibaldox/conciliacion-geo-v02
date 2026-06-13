@@ -12,6 +12,7 @@ import streamlit as st
 
 from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
 from core.geom_utils import find_df_column
+from core.config import DEFAULTS
 from ui.ref_lines import add_ref_lines_3d
 
 
@@ -46,7 +47,7 @@ def render_modulo_tronadura() -> None:
         return
 
     st.subheader("Vista previa del archivo")
-    st.dataframe(df.head(20), width="stretch")
+    st.dataframe(df.head(20), use_container_width=True)
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
     # Clear processed state if file changes
@@ -258,7 +259,7 @@ def render_modulo_tronadura() -> None:
                 )
 
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
-                    st.dataframe(df_filtered, width="stretch")
+                    st.dataframe(df_filtered, use_container_width=True)
 
         with tab_corr:
             df_filtered = df_clean.copy() # Base for correlation
@@ -269,16 +270,17 @@ def render_modulo_tronadura() -> None:
             """)
 
             # Calculate Pasadura
-            # target floor elevation is collar_elevation - BENCH_HEIGHT (15.0m)
-            df_filtered['Pasadura'] = (df_filtered['Z_collar'] - 15.0) - df_filtered['Z_toe']
+            # target floor elevation is collar_elevation - bench height
+            df_filtered['Pasadura'] = (df_filtered['Z_collar'] - DEFAULTS.blast_default_bench_height) - df_filtered['Z_toe']
 
             p_mean = df_filtered['Pasadura'].mean()
-            p_optimal = ((df_filtered['Pasadura'] >= 0.5) & (df_filtered['Pasadura'] <= 1.5)).sum()
+            p_min, p_max = DEFAULTS.blast_correlation_pasadura_optimal
+            p_optimal = ((df_filtered['Pasadura'] >= p_min) & (df_filtered['Pasadura'] <= p_max)).sum()
             p_pct = p_optimal / len(df_filtered) * 100 if len(df_filtered) > 0 else 0
 
             col_p1, col_p2 = st.columns(2)
             col_p1.metric("Pasadura Promedio", f"{p_mean:.2f} m")
-            col_p2.metric("Pozos en Rango Óptimo (0.5m - 1.5m)", f"{p_pct:.1f}%", f"{p_optimal}/{len(df_filtered)} pozos")
+            col_p2.metric(f"Pozos en Rango Óptimo ({p_min}m - {p_max}m)", f"{p_pct:.1f}%", f"{p_optimal}/{len(df_filtered)} pozos")
 
             import numpy as np
             fig_pas = go.Figure(go.Histogram(
@@ -288,8 +290,8 @@ def render_modulo_tronadura() -> None:
                 opacity=0.75,
                 name='Pasadura real'
             ))
-            fig_pas.add_vline(x=0.5, line_dash="dash", line_color="green", annotation_text="Óptimo Mín (0.5m)")
-            fig_pas.add_vline(x=1.5, line_dash="dash", line_color="green", annotation_text="Óptimo Máx (1.5m)")
+            fig_pas.add_vline(x=p_min, line_dash="dash", line_color="green", annotation_text=f"Óptimo Mín ({p_min}m)")
+            fig_pas.add_vline(x=p_max, line_dash="dash", line_color="green", annotation_text=f"Óptimo Máx ({p_max}m)")
             fig_pas.add_vline(x=0.0, line_dash="solid", line_color="red", annotation_text="Nivel Piso (0.0m)")
             fig_pas.update_layout(
                 title="Distribución de Pasaduras (m)",
@@ -298,7 +300,7 @@ def render_modulo_tronadura() -> None:
                 height=350,
                 margin=dict(l=40, r=20, t=40, b=40)
             )
-            st.plotly_chart(fig_pas, width="stretch")
+            st.plotly_chart(fig_pas, use_container_width=True)
 
             st.markdown("---")
             st.subheader("💥 Correlación Geotécnica: Daño vs Explosivos")
@@ -340,13 +342,13 @@ def render_modulo_tronadura() -> None:
                                 continue
                             avg_dev = match['abs_dev'].values[0]
 
-                            # Project wells with tolerance=15m
+                            # Project wells with the default correlation radius
                             proj_wells = proyectar_pozos_en_seccion(
                                 df_filtered,
                                 sec.origin,
                                 sec.azimuth,
                                 sec.length,
-                                tolerance=15.0
+                                tolerance=DEFAULTS.blast_correlation_radius_m
                             )
 
                             if not proj_wells.empty:
@@ -368,7 +370,7 @@ def render_modulo_tronadura() -> None:
                         if df_corr.empty or df_corr['Kg_Explosivo'].sum() == 0:
                             st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
                         else:
-                            st.dataframe(df_corr, width="stretch")
+                            st.dataframe(df_corr, use_container_width=True)
 
                             # Plot Scatter with Trendline
                             fig_scat = go.Figure()
@@ -396,13 +398,13 @@ def render_modulo_tronadura() -> None:
                                 ))
 
                             fig_scat.update_layout(
-                                title=f"Correlación: Kg Explosivos (r=15m) vs Desviación Absoluta Media ({dev_col})",
+                                title=f"Correlación: Kg Explosivos (r={DEFAULTS.blast_correlation_radius_m:.0f}m) vs Desviación Absoluta Media ({dev_col})",
                                 xaxis_title="Carga Explosiva Acumulada (Kg)",
                                 yaxis_title="Desviación Absoluta Media (m)",
                                 height=450,
                                 margin=dict(l=40, r=20, t=40, b=40)
                             )
-                            st.plotly_chart(fig_scat, width="stretch")
+                            st.plotly_chart(fig_scat, use_container_width=True)
 
                             r_coef = np.corrcoef(xs, ys)[0, 1] if len(xs) > 1 and np.var(xs) > 0 and np.var(ys) > 0 else 0
                             if r_coef > 0.5:
@@ -438,7 +440,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         md = st.session_state.get('decimated_mesh_design')
         if md is None and st.session_state.get('mesh_design') is not None:
             from core import decimate_mesh
-            md = decimate_mesh(st.session_state.mesh_design, 30000)
+            md = decimate_mesh(st.session_state.mesh_design, DEFAULTS.target_faces_visual)
             st.session_state.decimated_mesh_design = md
         if md is not None:
             from core import mesh_to_plotly
@@ -448,7 +450,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         mt = st.session_state.get('decimated_mesh_topo')
         if mt is None and st.session_state.get('mesh_topo') is not None:
             from core import decimate_mesh
-            mt = decimate_mesh(st.session_state.mesh_topo, 30000)
+            mt = decimate_mesh(st.session_state.mesh_topo, DEFAULTS.target_faces_visual)
             st.session_state.decimated_mesh_topo = mt
         if mt is not None:
             from core import mesh_to_plotly
@@ -578,7 +580,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: list[str], label_prefix: str) -> None:
