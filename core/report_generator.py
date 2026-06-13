@@ -78,20 +78,50 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
         else:
             ax.plot(distances_t, elevations_t, color='forestgreen', label='Topografía Real', linewidth=2)
 
-    from core.param_extractor import build_reconciled_profile
+    from core.param_extractor import build_reconciled_profile_v2
+    # Estilos por tipo de segmento para el perfil idealizado.
+    # La cara del banco se dibuja continua; la berma (horizontal) con
+    # guiones; la rampa (transición oblicua) con punteado fino.
+    seg_style = {
+        "face":      {"linestyle": "-",  "linewidth": 2.5},
+        "berm_top":  {"linestyle": "--", "linewidth": 2.5},
+        "ramp":      {"linestyle": ":",  "linewidth": 2.5},
+    }
     if show_reconciled:
         if params_topo and params_topo.benches:
-            rec_dist, rec_elev = build_reconciled_profile(params_topo.benches)
-            if len(rec_dist) > 0:
-                ax.plot(rec_dist, rec_elev, color='#FF7F0E', label='Conciliado As-Built', linewidth=2.5, zorder=4)
+            rec_prof = build_reconciled_profile_v2(params_topo.benches, source="topo")
+            if len(rec_prof.distances) > 0:
+                # Trazo continuo base (para la leyenda y como fallback)
+                ax.plot(rec_prof.distances, rec_prof.elevations,
+                        color='#FF7F0E', label='Conciliado As-Built',
+                        linewidth=2.5, zorder=4)
+                # Sobre-grafico por segmento para diferenciar cara / berma / rampa
+                for i in range(len(rec_prof.points) - 1):
+                    p0 = rec_prof.points[i]
+                    p1 = rec_prof.points[i + 1]
+                    t = p0.segment_type
+                    style = seg_style.get(t, seg_style["face"])
+                    ax.plot([p0.distance, p1.distance],
+                            [p0.elevation, p1.elevation],
+                            color='#FF7F0E', **style, zorder=4)
                 for b in params_topo.benches:
                     ax.plot(b.crest_distance, b.crest_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
                     ax.plot(b.toe_distance, b.toe_elevation, marker='d', color='#FF7F0E', markersize=5, zorder=5)
 
         if params_design and params_design.benches:
-            rec_d_dist, rec_d_elev = build_reconciled_profile(params_design.benches)
-            if len(rec_d_dist) > 0:
-                ax.plot(rec_d_dist, rec_d_elev, color='royalblue', linestyle='--', linewidth=1.5, alpha=0.7)
+            rec_d_prof = build_reconciled_profile_v2(params_design.benches, source="design")
+            if len(rec_d_prof.distances) > 0:
+                ax.plot(rec_d_prof.distances, rec_d_prof.elevations,
+                        color='royalblue', linestyle='--', linewidth=1.5, alpha=0.7)
+                # Refuerzo de berma/rampa en diseño con línea punteada
+                for i in range(len(rec_d_prof.points) - 1):
+                    p0 = rec_d_prof.points[i]
+                    p1 = rec_d_prof.points[i + 1]
+                    t = p0.segment_type
+                    if t == "ramp":
+                        ax.plot([p0.distance, p1.distance],
+                                [p0.elevation, p1.elevation],
+                                color='royalblue', linestyle=':', linewidth=1.5, alpha=0.7)
 
     if params_topo and params_topo.benches:
         for bench in params_topo.benches:
@@ -190,41 +220,67 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
 
 
 def create_compliance_pie_charts(comparisons):
+    """Create a row of donut charts (one per parameter) of compliance breakdown.
+
+    Categories follow the tripartite status emitted by
+    `param_extractor._evaluate_status` and `compare_design_vs_asbuilt`:
+    CUMPLE / FUERA DE TOLERANCIA / NO CUMPLE. The `berm_status` is binary in
+    the pipeline, so its FUERA DE TOLERANCIA slice is always zero.
+    """
     keys = ['height_status', 'angle_status', 'berm_status']
     labels = ['Altura de Banco', 'Ángulo de Cara', 'Ancho de Berma']
-    
+
+    # Soft, high-contrast palette (readable on screen and printed).
+    category_colors = {
+        'CUMPLE':             '#7FBF7F',  # soft green
+        'FUERA DE TOLERANCIA':'#FFD27F',  # soft amber
+        'NO CUMPLE':          '#F08C8C',  # soft red
+    }
+    category_order = ['CUMPLE', 'FUERA DE TOLERANCIA', 'NO CUMPLE']
+
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-    
-    any_data = False
+
+    match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
     for idx, (key, title) in enumerate(zip(keys, labels)):
         ax = axes[idx]
-        counts = {
-            'CUMPLE': sum(1 for c in comparisons if c[key] == "CUMPLE"),
-            'FUERA TOL.': sum(1 for c in comparisons if c[key] == "FUERA DE TOLERANCIA"),
-            'NO CUMPLE': sum(1 for c in comparisons if c[key] == "NO CUMPLE")
-        }
-        
-        labels_to_show = []
-        sizes = []
-        colors_to_show = []
-        for cat, color in zip(['CUMPLE', 'FUERA TOL.', 'NO CUMPLE'], ['#006100', '#9C5700', '#9C0006']):
+        counts = {cat: sum(1 for c in match_comps if c[key] == cat) for cat in category_order}
+
+        labels_to_show, sizes, colors_to_show = [], [], []
+        for cat in category_order:
             val = counts[cat]
             if val > 0:
                 labels_to_show.append(f"{cat}\n({val})")
                 sizes.append(val)
-                colors_to_show.append(color)
-        
+                colors_to_show.append(category_colors[cat])
+
         if sum(sizes) > 0:
-            any_data = True
-            ax.pie(sizes, labels=labels_to_show, autopct='%1.1f%%', startangle=90, colors=colors_to_show,
-                   textprops={'fontsize': 9, 'weight': 'bold'})
+            # Donut: pie with a hole in the middle shows the total and the
+            # global % de logro, complementing the per-slice percentages.
+            wedges, _texts, autotexts = ax.pie(
+                sizes,
+                labels=labels_to_show,
+                autopct='%1.1f%%',
+                startangle=90,
+                colors=colors_to_show,
+                wedgeprops={'width': 0.38, 'edgecolor': 'white', 'linewidth': 1.5},
+                textprops={'fontsize': 9, 'weight': 'bold'},
+            )
+            for at in autotexts:
+                at.set_color('black')
+                at.set_fontsize(8)
+
+            total = sum(sizes)
+            n_ok = counts['CUMPLE']
+            pct = (n_ok / total * 100) if total > 0 else 0
+            ax.text(0, 0, f"{pct:.0f}%\nLogro",
+                    ha='center', va='center', fontsize=10, weight='bold')
             ax.set_title(title, fontsize=11, weight='bold', pad=10)
         else:
             ax.text(0.5, 0.5, 'Sin Datos', ha='center', va='center')
             ax.axis('off')
-            
+
     fig.tight_layout()
-    
+
     buf = io.BytesIO()
     fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
     plt.close(fig)
@@ -263,12 +319,16 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
     doc.add_heading("1. Resumen Ejecutivo", level=1)
     
     if comparisons:
-        n_total = len(comparisons) * 3
-        n_ok = sum(1 for c in comparisons for k in ['height_status','angle_status','berm_status'] if c[k] == "CUMPLE")
-        pct = n_ok / n_total * 100 if n_total > 0 else 0
+        match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
+        if match_comps:
+            section_score = match_comps[0].get('section_score', 0.0)
+            section_status = match_comps[0].get('section_status', 'NO CUMPLE')
+        else:
+            section_score = 0.0
+            section_status = 'NO CUMPLE'
         
-        doc.add_paragraph(f"Se evaluaron {len(comparisons)} bancos en total.")
-        doc.add_paragraph(f"Cumplimiento Global: {pct:.1f}%")
+        doc.add_paragraph(f"Se evaluaron {len(match_comps)} bancos emparejados.")
+        doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.0f}/100 — {section_status}")
         
         try:
             pie_stream = create_compliance_pie_charts(comparisons)
@@ -280,26 +340,58 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             doc.add_paragraph(f"(Error al generar gráficos de torta: {e})")
 
         doc.add_paragraph("Resumen por parámetro:")
-        table = doc.add_table(rows=1, cols=4)
+        # Ternary table: CUMPLE + FUERA DE TOLERANCIA + NO CUMPLE = Total.
+        # % Logro is CUMPLE / Total * 100. The last column shows the
+        # average real value for the evaluated section (real height in m,
+        # real face angle in degrees, real berm width in m).
+        table = doc.add_table(rows=1, cols=6)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Parámetro'
         hdr_cells[1].text = 'CUMPLE'
-        hdr_cells[2].text = 'FUERA TOL.'
+        hdr_cells[2].text = 'Fuera de Tolerancia'
         hdr_cells[3].text = 'NO CUMPLE'
-        
-        for col_idx, h in enumerate(['Parámetro', 'CUMPLE', 'FUERA TOL.', 'NO CUMPLE']):
+        hdr_cells[4].text = '% Logro'
+        hdr_cells[5].text = 'Valor Promedio (Real)'
+
+        for col_idx, h in enumerate(['Parámetro', 'CUMPLE',
+                                     'Fuera de Tolerancia', 'NO CUMPLE',
+                                     '% Logro', 'Valor Promedio (Real)']):
             for paragraph in hdr_cells[col_idx].paragraphs:
                 for run in paragraph.runs:
                     run.font.bold = True
                     run.font.size = Pt(9.5)
 
-        for key, label in [('height_status', 'Altura'), ('angle_status', 'Ángulo Cara'), ('berm_status', 'Berma')]:
+        # Each row aggregates over MATCH comparisons and shows the real
+        # value average. Berm/angle/height use the *_real field of the
+        # comparison dict; averages ignore None.
+        param_avg_specs = [
+            ('height_status', 'Altura',          'height_real', 'm'),
+            ('angle_status',  'Ángulo Cara',     'angle_real',  '°'),
+            ('berm_status',   'Berma',           'berm_real',   'm'),
+        ]
+        for key, label, real_field, unit in param_avg_specs:
             row_cells = table.add_row().cells
+            n_ok = sum(1 for c in match_comps if c[key] == "CUMPLE")
+            n_ft = sum(1 for c in match_comps if c[key] == "FUERA DE TOLERANCIA")
+            n_nok = sum(1 for c in match_comps if c[key] == "NO CUMPLE")
+            total = n_ok + n_ft + n_nok
+            pct = (n_ok / total * 100) if total > 0 else 0
+
+            real_values = [c[real_field] for c in match_comps
+                           if c.get(real_field) is not None]
+            if real_values:
+                avg_val = sum(real_values) / len(real_values)
+                avg_str = f"{avg_val:.2f} {unit}"
+            else:
+                avg_str = "N/A"
+
             row_cells[0].text = label
-            row_cells[1].text = str(sum(1 for c in comparisons if c[key] == "CUMPLE"))
-            row_cells[2].text = str(sum(1 for c in comparisons if c[key] == "FUERA DE TOLERANCIA"))
-            row_cells[3].text = str(sum(1 for c in comparisons if c[key] == "NO CUMPLE"))
+            row_cells[1].text = str(n_ok)
+            row_cells[2].text = str(n_ft)
+            row_cells[3].text = str(n_nok)
+            row_cells[4].text = f"{pct:.1f}%"
+            row_cells[5].text = avg_str
             for cell in row_cells:
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
@@ -309,38 +401,53 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 
     doc.add_heading("2. Tabla Resumen de Cumplimiento por Perfil", level=1)
     if comparisons:
-        table_summary = doc.add_table(rows=1, cols=5)
+        # Per-profile compliance table. Previously the design/real values
+        # were packed into a single "Dise / Real" cell. We now split them
+        # into separate columns to make the report easier to scan. The
+        # column order matches the previous layout (Diseño first, Real
+        # second) for each parameter, so the table reads top-to-bottom as:
+        # Sección · Banco · H. Dise · H. Real · Ang. Dise · Ang. Real ·
+        # Berma Dise · Berma Real.
+        table_summary = doc.add_table(rows=1, cols=8)
         table_summary.style = 'Table Grid'
-        
-        headers = ['Sección', 'Banco (cota)', 'H. Dise / Real', 'Ang. Dise / Real', 'Berma Dise / Real']
+
+        headers = [
+            'Sección', 'Banco (cota)',
+            'H. Diseño (m)', 'H. Real (m)',
+            'Ang. Diseño (°)', 'Ang. Real (°)',
+            'Berma Diseño (m)', 'Berma Real (m)',
+        ]
         for col_idx, h in enumerate(headers):
             hdr_cell = table_summary.rows[0].cells[col_idx]
             hdr_cell.text = h
             for paragraph in hdr_cell.paragraphs:
                 for run in paragraph.runs:
                     run.font.bold = True
-                    run.font.size = Pt(9.5)
-                    
+                    run.font.size = Pt(9.0)
+
         for c in comparisons:
             row_cells = table_summary.add_row().cells
             row_cells[0].text = c.get('section', 'N/A')
-            
+
             b_num = c.get('bench_num', 'N/A')
             b_level = c.get('level', 'N/A')
             row_cells[1].text = f"B{b_num} ({b_level})"
-            
-            h_d = f"{c['height_design']:.1f}" if c.get('height_design') is not None else "N/A"
-            h_r = f"{c['height_real']:.1f}" if c.get('height_real') is not None else "N/A"
-            row_cells[2].text = f"{h_d} / {h_r}"
-            
-            a_d = f"{c['angle_design']:.1f}" if c.get('angle_design') is not None else "N/A"
-            a_r = f"{c['angle_real']:.1f}" if c.get('angle_real') is not None else "N/A"
-            row_cells[3].text = f"{a_d} / {a_r}"
-            
-            b_d = f"{c['berm_design']:.1f}" if c.get('berm_design') is not None else "N/A"
-            b_r = f"{c['berm_real']:.1f}" if c.get('berm_real') is not None else "N/A"
-            row_cells[4].text = f"{b_d} / {b_r}"
-            
+
+            row_cells[2].text = (f"{c['height_design']:.1f}"
+                                 if c.get('height_design') is not None else "N/A")
+            row_cells[3].text = (f"{c['height_real']:.1f}"
+                                 if c.get('height_real') is not None else "N/A")
+
+            row_cells[4].text = (f"{c['angle_design']:.1f}"
+                                 if c.get('angle_design') is not None else "N/A")
+            row_cells[5].text = (f"{c['angle_real']:.1f}"
+                                 if c.get('angle_real') is not None else "N/A")
+
+            row_cells[6].text = (f"{c['berm_design']:.1f}"
+                                 if c.get('berm_design') is not None else "N/A")
+            row_cells[7].text = (f"{c['berm_real']:.1f}"
+                                 if c.get('berm_real') is not None else "N/A")
+
             for cell in row_cells:
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
