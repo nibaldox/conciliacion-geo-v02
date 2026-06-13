@@ -72,12 +72,26 @@ def render_tab_profiles(config: dict) -> None:
             continue
         valid_plots.append((i, section, pd_prof, pt_prof))
 
+    fig_cache = st.session_state.setdefault('_profile_figs', {})
+
     for j in range(0, len(valid_plots), num_cols):
         cols = st.columns(num_cols)
         for col_idx in range(num_cols):
             if j + col_idx < len(valid_plots):
                 i, section, pd_prof, pt_prof = valid_plots[j + col_idx]
-                with cols[col_idx]:
+                cache_key = (
+                    i,
+                    id(pd_prof), id(pt_prof),
+                    id(st.session_state.get('reconciled_design')),
+                    id(st.session_state.get('area_fill_design')),
+                    show_areas, show_spill_areas, show_semaphore,
+                    show_reconciled, show_pozos, blast_tolerance,
+                    num_cols,
+                )
+                cached = fig_cache.get(i)
+                if cached and cached[0] == cache_key:
+                    fig = cached[1]
+                else:
                     fig = _build_profile_figure(
                         i, section, pd_prof, pt_prof,
                         show_areas=show_areas,
@@ -87,6 +101,8 @@ def render_tab_profiles(config: dict) -> None:
                         show_pozos=show_pozos,
                         blast_tolerance=blast_tolerance,
                         config=config)
+                    fig_cache[i] = (cache_key, fig)
+                with cols[col_idx]:
                     st.plotly_chart(fig, use_container_width=True)
 
 
