@@ -392,18 +392,26 @@ def _add_berm_width_indicators(fig, benches, comparison_results):
         )
 
 
+def _get_or_project_pozos(blast_df, section, tolerance: float):
+    cache = st.session_state.setdefault('proyectar_pozos_cache', {})
+    key = (id(blast_df), tuple(section.origin), section.azimuth, section.length, tolerance)
+    if key not in cache:
+        cache[key] = proyectar_pozos_en_seccion(
+            blast_df,
+            origin=section.origin,
+            azimuth=section.azimuth,
+            length=section.length,
+            tolerance=tolerance,
+        )
+    return cache[key]
+
+
 def _add_blast_holes(fig, section, tolerance: float) -> None:
     df_blast = st.session_state.get('blast_df_clean')
     if df_blast is None or df_blast.empty:
         return
 
-    projected = proyectar_pozos_en_seccion(
-        df_blast,
-        origin=section.origin,
-        azimuth=section.azimuth,
-        length=section.length,
-        tolerance=tolerance,
-    )
+    projected = _get_or_project_pozos(df_blast, section, tolerance)
 
     if projected.empty:
         return
@@ -413,7 +421,7 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
     label_col = find_df_column(projected, ['label_pozo'], raise_error=False)
 
     x_holes, y_holes = [], []
-    texts, colors = [], []
+    colors = []
 
     for _, row in projected.iterrows():
         d_c = row['dist_along']
@@ -423,11 +431,6 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
 
         x_holes.extend([d_c, d_t, None])
         y_holes.extend([z_c, z_t, None])
-
-        label = str(row[label_col]) if label_col else ''
-        malla = str(row[malla_col]) if malla_col else ''
-        kg = f"{row[kg_col]:.0f} kg" if kg_col and pd.notna(row[kg_col]) else ''
-        texts.append(f"{label}<br>{malla}<br>{kg}")
 
         if kg_col and pd.notna(row[kg_col]):
             colors.append(row[kg_col])
@@ -457,14 +460,21 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
     else:
         marker = dict(size=5, color='darkorange')
 
-    hover_labels = projected.apply(
-        lambda r: (
-            f"{r[label_col] if label_col else ''}<br>"
-            f"{r[malla_col] if malla_col else ''}<br>"
-            f"Collar: {r['Z_collar']:.0f}m | Toe: {r['Z_toe']:.0f}m<br>"
-            f"Largo: {r['Len']:.1f}m"
-            + (f" | {r[kg_col]:.0f}kg" if kg_col and pd.notna(r[kg_col]) else '')
-        ), axis=1)
+    n = len(projected)
+    empty = pd.Series([''] * n, index=projected.index)
+    label_s = projected[label_col].fillna('').astype(str) if label_col else empty
+    malla_s = projected[malla_col].fillna('').astype(str) if malla_col else empty
+    collar_line = (
+        "Collar: " + projected['Z_collar'].round().astype(int).astype(str)
+        + "m | Toe: " + projected['Z_toe'].round().astype(int).astype(str) + "m"
+    )
+    length_line = "Largo: " + projected['Len'].round(1).astype(str) + "m"
+    if kg_col:
+        kg_vals = pd.to_numeric(projected[kg_col], errors='coerce')
+        kg_suffix = " | " + kg_vals.round().astype('Int64').astype(str) + "kg"
+        kg_suffix = kg_suffix.where(pd.notna(kg_vals), "")
+        length_line = length_line + kg_suffix
+    hover_labels = label_s.str.cat([malla_s, collar_line, length_line], sep="<br>")
 
     fig.add_trace(go.Scatter(
         x=collar_x, y=collar_z,
