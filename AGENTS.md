@@ -127,6 +127,7 @@ Key detection defaults: `face_threshold=40°`, `berm_threshold=20°`, `max_berm_
 - `.gitignore` excludes `.stl` and `.xlsx` — test meshes and outputs won't commit.
 - API session store uses SQLite (`api/database.py`) — single-machine only.
 - Berm detection can produce unrealistic widths (>50m) on flat areas. Partially filtered by `max_berm_width=50`.
+- Reconciled profile (`core/param_extractor.py`): `build_reconciled_profile_v2(benches, source="topo")` returns a `ReconciledProfile` with rich `ReconciledPoint` entries. Berms are drawn as explicit horizontal segments via a `berm_top` point; ramps (`is_ramp=True`) skip the berm corner and emit a `ramp` point. The legacy `build_reconciled_profile(...)` is deprecated and emits `DeprecationWarning`.
 - Ramp detection is partial (width range 15-42m). The "Rampas" Excel sheet may need manual input.
 - Sections near mesh edges can produce incomplete profiles with no user warning.
 - `app.py` (root) still exists but **must not be modified** — README/CONTRIBUTING explicitly forbid it.
