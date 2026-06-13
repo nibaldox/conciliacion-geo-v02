@@ -17,9 +17,9 @@ from ui.plots import draw_sections_on_figure, mesh_to_contour_data
 logger = logging.getLogger(__name__)
 
 
-@st.cache_data(show_spinner=False)
-def _cached_decimate(_mesh, target_faces):
-    return decimate_mesh(_mesh, target_faces=target_faces)
+@st.cache_resource(show_spinner=False)
+def _cached_decimate(mesh, target_faces):
+    return decimate_mesh(mesh, target_faces=target_faces)
 
 
 def render_step1(config: dict) -> None:
