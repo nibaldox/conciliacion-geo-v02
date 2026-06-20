@@ -20,11 +20,20 @@ from core.blast_model import (
     fit_powder_factor_damage_model,
     predict_damage_for_pf,
 )
-from core.config import DEFAULTS
+from core.config import ADVISOR, DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
 from ui.filter_cache import _ensure_filter_values
 from ui.tabs.export import _get_profile_pair
+try:
+    from core.blast_advisor import (
+        format_recommendation_text,
+        recommend_by_sector,
+        recommend_pf_adjustment,
+    )
+    _HAS_BLAST_ADVISOR = True
+except ImportError:
+    _HAS_BLAST_ADVISOR = False
 
 def render_tab_blast_correlation(config: dict) -> None:
     blast_df = st.session_state.get('blast_df_clean')
@@ -153,7 +162,8 @@ def render_tab_blast_correlation(config: dict) -> None:
     if not df_filtered_sections.empty and bool(df_filtered_sections['_pf_unavailable'].iloc[0]):
         st.info("ℹ️ Powder factor no disponible: faltan columnas de burden/espaciamiento en el archivo de pozos.")
 
-    _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
+    model, valid = _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
+    _render_pf_recommendations(model, valid, df_filtered_sections)
 
     tab_sec, tab_bnc, tab_mal = st.tabs([
         "📐 Análisis por Sección / Perfil",
@@ -661,12 +671,21 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
     return pd.DataFrame(malla_stats).reset_index(drop=True)
 
 
-def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_pf_axis: bool) -> None:
+def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_pf_axis: bool) -> tuple:
     """OLS regression: powder factor vs mean overbreak per section.
 
     Renders β₁, p-value, R², n, 95% CI and a confidence label. Also exposes
     a scenario slider that calls ``predict_damage_for_pf`` so the user can
     answer "¿qué pasa si subo/bajo el PF objetivo?" interactively.
+
+    Returns
+    -------
+    tuple
+        ``(model, valid)`` where ``model`` is the fitted regression dict
+        (or ``None`` when fitting was skipped) and ``valid`` is the cleaned
+        DataFrame used for fitting (or ``None`` when no data was
+        available). Callers can use the returned ``model`` to render
+        downstream recommendations without re-fitting.
     """
     st.markdown("---")
     with st.expander("📈 Modelo Cuantitativo: PF → Sobre-excavación", expanded=True):
@@ -679,7 +698,7 @@ def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_p
 
         if not use_pf_axis:
             st.info("ℹ️ Powder factor no disponible: faltan columnas de burden/espaciamiento. No es posible ajustar el modelo.")
-            return
+            return None, None
 
         valid = df_filtered_sections.dropna(subset=['pf_vol_avg_kgm3', 'avg_over_break']).copy()
         valid = valid[valid['pf_vol_avg_kgm3'] > 0]
@@ -688,12 +707,12 @@ def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_p
 
         if len(pf) < 5:
             st.info(f"Datos insuficientes (n={len(pf)} < 5). Necesitas más secciones con PF válido para ajustar el modelo.")
-            return
+            return None, valid
 
         model = fit_powder_factor_damage_model(pf, dmg)
         if not model['is_significant'] and model['confidence'] == 'INSUFFICIENT':
             st.warning(f"Modelo no confiable (confianza={model['confidence']}). Revisa que los datos tengan variabilidad real en PF.")
-            return
+            return model, valid
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("β₁ (m por kg/m³)", f"{model['beta1']:.4f}")
@@ -773,6 +792,77 @@ def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_p
         pa.metric("PF objetivo", f"{target_pf:.2f} kg/m³")
         pb.metric("Sobre-excavación predicha", f"{pred['predicted_damage']:+.3f} m")
         pc.metric("Incertidumbre (±)", f"{pred['uncertainty_m']:.3f} m")
+
+    return model, valid
+
+
+def _render_pf_recommendations(
+    model: dict | None,
+    valid: pd.DataFrame | None,
+    df_filtered_sections: pd.DataFrame,
+) -> None:
+    """Render PF-adjustment recommendations block (Phase 5).
+
+    Consumes the fitted model from :func:`_render_powder_factor_damage_model`
+    and emits global and per-sector actionable recommendations through
+    :mod:`core.blast_advisor`. Degrades silently when the engine is not
+    importable.
+    """
+    if not _HAS_BLAST_ADVISOR:
+        return
+
+    st.markdown("---")
+    with st.expander("🎯 Recomendaciones de Ajuste de Carga", expanded=True):
+        if model is None or model.get('confidence') == 'INSUFFICIENT':
+            n = int(model.get('n', 0)) if model else 0
+            p_val = float(model.get('p_value', float('nan'))) if model else float('nan')
+            st.warning("Modelo sin confianza estadística suficiente para emitir recomendaciones cuantitativas.")
+            st.caption(
+                f"n={n} | p={p_val:.3f} | Se requiere n≥{ADVISOR.min_samples_for_advice} con variabilidad en PF."
+            )
+            return
+
+        target_ob = st.slider(
+            "Sobre-excavación objetivo (m):",
+            min_value=0.1, max_value=1.5, value=ADVISOR.target_overbreak_m, step=0.05,
+            help="Sobre-excavación objetivo. El motor calculará el PF necesario para alcanzarla.",
+            key="advisor_target_overbreak",
+        )
+
+        if valid is None or valid.empty:
+            st.info("No hay datos válidos de PF y sobre-excavación para recomendar.")
+            return
+
+        valid_pf_mean = float(valid['pf_vol_avg_kgm3'].mean())
+        rec_global = recommend_pf_adjustment(
+            model,
+            current_pf=valid_pf_mean,
+            target_overbreak_m=target_ob,
+        )
+        st.markdown(f"### 📊 Recomendación Global (PF promedio = {valid_pf_mean:.3f} kg/m³)")
+        col_r1, col_r2, col_r3 = st.columns(3)
+        col_r1.metric("ΔPF objetivo", f"{rec_global['delta_pf']:+.3f} kg/m³")
+        col_r2.metric("ΔPF %", f"{rec_global['delta_pf_pct']:+.1f}%")
+        col_r3.metric("Factibilidad", rec_global['feasibility'])
+        st.info(format_recommendation_text(rec_global, section_name='(global)'))
+
+        st.markdown("### 🏗️ Recomendaciones por Sector")
+        if 'sector' in df_filtered_sections.columns:
+            df_recs = recommend_by_sector(
+                df_filtered_sections, model, group_col='sector',
+                target_overbreak_m=target_ob,
+            )
+            if not df_recs.empty:
+                st.dataframe(df_recs, use_container_width=True, height=300)
+                for _, row in df_recs.iterrows():
+                    if row['feasibility'] == 'APPLICABLE':
+                        st.success(f"**{row['group_value']}**: {row['message']}")
+                    elif row['feasibility'] == 'CAUTION':
+                        st.warning(f"**{row['group_value']}**: {row['message']}")
+            else:
+                st.info("No hay datos suficientes para recomendaciones por sector.")
+        else:
+            st.info("Columna 'sector' no disponible en los datos.")
 
 
 def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list) -> None:

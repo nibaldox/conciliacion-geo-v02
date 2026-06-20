@@ -6,12 +6,21 @@ import pandas as pd
 import streamlit as st
 
 from core.calculo_tronadura import proyectar_pozos_en_seccion
-from core.config import DEFAULTS, POWDER_FACTOR
+from core.config import ADVISOR, DEFAULTS, POWDER_FACTOR
 from core.geom_utils import find_df_column
 from core.blast_correlation import (
     aggregate_powder_factor_by_group,
     compute_powder_factor,
 )
+try:
+    from core.blast_advisor import (
+        format_recommendation_text,
+        recommend_pf_adjustment,
+    )
+    from core.blast_model import fit_powder_factor_damage_model
+    _HAS_BLAST_ADVISOR = True
+except ImportError:
+    _HAS_BLAST_ADVISOR = False
 
 
 def render_tab_ai(config: dict) -> None:
@@ -264,3 +273,130 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
 
     if not has_alert:
         st.success("✅ **Estabilidad Operativa**: No se detectan anomalías críticas de correlación energía-daño o desviaciones extremas de pasadura en los bancos analizados.")
+
+    _render_quantitative_recommendations(comparison, sections, blast_df, kg_col)
+
+
+def _render_quantitative_recommendations(
+    comparison: list,
+    sections: list,
+    blast_df: pd.DataFrame,
+    kg_col: str | None,
+) -> None:
+    """Render per-section PF-adjustment recommendations block (Phase 5).
+
+    Aggregates per-section PF and signed damage into a DataFrame, fits the
+    PF→damage OLS regression via :mod:`core.blast_model` and asks
+    :mod:`core.blast_advisor` for an actionable adjustment. Degrades
+    silently when the engine is not importable.
+    """
+    if not _HAS_BLAST_ADVISOR:
+        return
+    if not sections or not comparison or blast_df is None or blast_df.empty:
+        return
+
+    rows = []
+    blast_df_pf = compute_powder_factor(blast_df)
+
+    for sec in sections:
+        proj = proyectar_pozos_en_seccion(
+            blast_df,
+            origin=sec.origin,
+            azimuth=sec.azimuth,
+            length=sec.length,
+            tolerance=DEFAULTS.blast_correlation_radius_m,
+        )
+        if proj.empty:
+            continue
+
+        proj_labeled = proj.copy()
+        proj_labeled['section_name'] = sec.name
+        pf_row = aggregate_powder_factor_by_group(
+            blast_df_pf, 'section_name', sec.name, proj_labeled,
+        )
+        pf_vol = pf_row.get('pf_vol_avg')
+        if pf_vol is None or (isinstance(pf_vol, float) and np.isnan(pf_vol)):
+            continue
+        if not isinstance(pf_vol, (int, float)) or float(pf_vol) <= 0:
+            continue
+
+        df_comp_sec = pd.DataFrame(comparison)
+        if df_comp_sec.empty:
+            continue
+        sec_match = df_comp_sec[df_comp_sec['section'] == sec.name]
+        if sec_match.empty:
+            continue
+
+        damage_col = None
+        for col_name in ('delta_crest', 'height_dev'):
+            if col_name in sec_match.columns:
+                damage_col = col_name
+                break
+        if damage_col is None:
+            continue
+
+        avg_damage = float(pd.to_numeric(sec_match[damage_col], errors='coerce').mean())
+        if not np.isfinite(avg_damage):
+            continue
+
+        rows.append({
+            'section': sec.name,
+            'sector': getattr(sec, 'sector', ''),
+            'pf_vol_avg_kgm3': float(pf_vol),
+            'avg_over_break': avg_damage,
+        })
+
+    if len(rows) < ADVISOR.min_samples_for_advice:
+        st.info(
+            f"Se requieren al menos {ADVISOR.min_samples_for_advice} secciones con PF y desviación válidos."
+        )
+        return
+
+    df_sec = pd.DataFrame(rows)
+    pf_clean = df_sec['pf_vol_avg_kgm3'].values.astype(float)
+    dmg_clean = df_sec['avg_over_break'].values.astype(float)
+
+    model = fit_powder_factor_damage_model(pf_clean, dmg_clean)
+    if model.get('confidence') == 'INSUFFICIENT':
+        st.info(
+            f"Modelo sin confianza suficiente (n={model.get('n', 0)}, "
+            f"p={model.get('p_value', float('nan')):.3f}). No se emiten recomendaciones cuantitativas."
+        )
+        return
+
+    st.markdown("---")
+    st.subheader("🎯 Recomendaciones Cuantitativas del Modelo")
+    st.markdown(
+        f"**Modelo**: β₁ = {model['beta1']:.3f} m/(kg/m³), "
+        f"R² = {model['r_squared']:.3f}, "
+        f"p = {model['p_value']:.4f}, n = {model['n']}"
+    )
+
+    idx_worst = int(np.argmax(dmg_clean))
+    worst = df_sec.iloc[idx_worst]
+    rec_worst = recommend_pf_adjustment(
+        model, current_pf=float(worst['pf_vol_avg_kgm3']),
+    )
+    st.markdown(
+        f"**Sección más crítica: {worst['section']}** "
+        f"(PF actual = {float(worst['pf_vol_avg_kgm3']):.3f} kg/m³, "
+        f"sobre-excavación = {float(worst['avg_over_break']):.2f} m)"
+    )
+    st.info(format_recommendation_text(rec_worst, section_name=str(worst['section'])))
+
+    st.markdown("**Recomendación por sección:**")
+    rec_table = []
+    for _, row in df_sec.iterrows():
+        rec = recommend_pf_adjustment(
+            model, current_pf=float(row['pf_vol_avg_kgm3']),
+        )
+        rec_table.append({
+            'Sección': row['section'],
+            'Sector': row['sector'],
+            'PF actual': f"{float(row['pf_vol_avg_kgm3']):.3f}",
+            'Sobre-excav. (m)': f"{float(row['avg_over_break']):.2f}",
+            'PF objetivo': f"{rec['target_pf']:.3f}",
+            'ΔPF %': f"{rec['delta_pf_pct']:+.1f}",
+            'Factibilidad': rec['feasibility'],
+        })
+    st.dataframe(pd.DataFrame(rec_table), use_container_width=True, height=300)
