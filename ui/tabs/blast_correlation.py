@@ -26,6 +26,15 @@ from core.section_cutter import cut_both_surfaces
 from ui.filter_cache import _ensure_filter_values
 from ui.tabs.export import _get_profile_pair
 try:
+    from tests.test_ai_service_enrich import (
+        compute_monthly_trend,
+        detect_pf_outliers_iqr,
+        split_campaign,
+    )
+    _HAS_TREND_HELPERS = True
+except ImportError:
+    _HAS_TREND_HELPERS = False
+try:
     from core.blast_advisor import (
         format_recommendation_text,
         recommend_by_sector,
@@ -164,6 +173,9 @@ def render_tab_blast_correlation(config: dict) -> None:
 
     model, valid = _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
     _render_pf_recommendations(model, valid, df_filtered_sections)
+
+    if _HAS_TREND_HELPERS:
+        _render_temporal_analysis(blast_df, df_filtered_sections)
 
     tab_sec, tab_bnc, tab_mal = st.tabs([
         "📐 Análisis por Sección / Perfil",
@@ -989,3 +1001,88 @@ def _render_energy_density_along_profile(
         f"Energía acumulada por punto, radio de búsqueda = {DEFAULTS.blast_correlation_radius_m:.0f} m, "
         f"z de muestreo = {z_sample:.1f} m."
     )
+
+
+def _render_temporal_analysis(blast_df, df_filtered_sections):
+    """Render the 'Tendencia Temporal' and 'Comparativa Pre/Post' expanders."""
+    st.markdown("---")
+    with st.expander("📊 Tendencia Temporal de PF y Daño", expanded=False):
+        try:
+            trend_df = compute_monthly_trend(blast_df)
+        except Exception:
+            st.info("Datos insuficientes para análisis temporal.")
+            trend_df = pd.DataFrame()
+        if trend_df.empty:
+            st.info("Sin datos temporales disponibles (sin columna 'fecha_tronadura' con fechas válidas).")
+        else:
+            col_t1, col_t2 = st.columns(2)
+            col_t1.metric("Meses con datos", len(trend_df))
+            trend_slope = trend_df['trend_slope'].iloc[0] if 'trend_slope' in trend_df.columns else np.nan
+            if pd.notna(trend_slope):
+                col_t2.metric("Tendencia PF (kg/m³ por mes)", f"{trend_slope:+.4f}")
+            st.dataframe(trend_df, use_container_width=True, height=300)
+            if len(trend_df) >= 2:
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=trend_df['mes'], y=trend_df['pf_promedio'],
+                    name='PF (kg/m³)', yaxis='y1', mode='lines+markers',
+                ))
+                fig.add_trace(go.Scatter(
+                    x=trend_df['mes'], y=trend_df['damage_promedio'],
+                    name='Sobre-excavación (m)', yaxis='y2', mode='lines+markers',
+                    line=dict(color='crimson'),
+                ))
+                fig.update_layout(
+                    yaxis=dict(title='PF (kg/m³)', side='left'),
+                    yaxis2=dict(title='Sobre-excavación (m)', overlaying='y', side='right'),
+                    height=400, margin=dict(l=40, r=40, t=30, b=30),
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            try:
+                outliers = detect_pf_outliers_iqr(blast_df)
+            except Exception:
+                outliers = pd.DataFrame()
+            if not outliers.empty:
+                st.warning(
+                    f"⚠️ {len(outliers)} pozos con PF fuera del rango IQR (1.5×): revisar carga explosiva."
+                )
+                preview_cols = [c for c in ['label_pozo', 'pf_vol_kgm3'] if c in outliers.columns]
+                if preview_cols:
+                    st.dataframe(outliers[preview_cols].head(10), use_container_width=True)
+
+    with st.expander("🔄 Comparativa Pre/Post Campaña", expanded=False):
+        campaign_date = st.date_input(
+            "Fecha de inicio de campaña:", value=None, key="campaign_start_date",
+        )
+        if campaign_date:
+            try:
+                cohort = split_campaign(blast_df, campaign_date.strftime('%Y-%m-%d'))
+            except Exception:
+                cohort = {'has_campaign': False, 'before': pd.DataFrame(), 'after': pd.DataFrame()}
+            if cohort['has_campaign']:
+                before, after = cohort['before'], cohort['after']
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
+                    st.markdown("**Antes**")
+                    if not before.empty:
+                        pf_col_b = 'pf_vol_avg_kgm3' if 'pf_vol_avg_kgm3' in before.columns else (
+                            'pf_vol_kgm3' if 'pf_vol_kgm3' in before.columns else None
+                        )
+                        pf_mean_b = float(before[pf_col_b].mean()) if pf_col_b else None
+                        if pf_mean_b is not None and pd.notna(pf_mean_b):
+                            st.metric("PF medio", f"{pf_mean_b:.3f}")
+                        st.metric("N pozos", len(before))
+                    else:
+                        st.info("Sin datos antes de la fecha.")
+                with col_c2:
+                    st.markdown("**Después**")
+                    if not after.empty:
+                        pf_col_a = 'pf_vol_avg_kgm3' if 'pf_vol_avg_kgm3' in after.columns else (
+                            'pf_vol_kgm3' if 'pf_vol_kgm3' in after.columns else None
+                        )
+                        pf_mean_a = float(after[pf_col_a].mean()) if pf_col_a else None
+                        if pf_mean_a is not None and pd.notna(pf_mean_a):
+                            st.metric("PF medio", f"{pf_mean_a:.3f}")
+                        st.metric("N pozos", len(after))
+                    else:
+                        st.info("Sin datos después de la fecha.")
