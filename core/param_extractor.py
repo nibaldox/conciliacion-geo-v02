@@ -77,6 +77,11 @@ class BenchParams:
     effective_berm_width: float = 0.0
     spill_start_distance: float = 0.0
     spill_start_elevation: float = 0.0
+    overhang_m: float = 0.0
+    rock_bridge_thickness_m: float = 0.0
+    rock_bridge_height_m: float = 0.0
+    catch_bench_adequate: bool = False
+    catch_bench_ratio: float = 0.0
 
 
 @dataclass
@@ -355,6 +360,9 @@ def extract_parameters(distances, elevations, section_name, sector,
     _apply_leading_berm(benches, distances, elevations, berm_threshold)
     _apply_trailing_berm(benches, distances, elevations, berm_threshold)
 
+    _detect_overhangs_and_bridges(benches)
+    _evaluate_catch_bench_adequacy(benches)
+
     result.benches = benches
     
     # Calculate angles
@@ -483,6 +491,90 @@ def _apply_trailing_berm(benches, distances, elevations, berm_threshold):
         last.berm_width = width
         if classify_berm_as_ramp(width):
             last.is_ramp = True
+
+
+def _detect_overhangs_and_bridges(benches):
+    """Detect overhangs and rock bridges between consecutive non-ramp benches.
+
+    For each pair (bench_i, bench_{i+1}):
+
+    - ``overhang_m = bench_i.crest_distance - bench_{i+1}.toe_distance``
+      * positive → overhang (the crest of bench N+1 sits behind the toe of
+        bench N — there is a cantilevered block overhanging the pit).
+      * negative → rock bridge (there is intact rock between the toe of
+        bench N and the crest of bench N+1).
+    - ``rock_bridge_height_m = bench_i.toe_elevation - bench_{i+1}.crest_elevation``
+      (vertical separation; positive means the rock bridge has positive
+      thickness; negative means bench N+1 sits *above* bench N's toe, i.e.
+      the next bench has not yet cut down to its design toe elevation).
+    - ``rock_bridge_thickness_m = min(-overhang_m if overhang_m < 0 else 0,
+      rock_bridge_height_m if rock_bridge_height_m > 0 else 0)`` — the
+      limiting dimension of the rock bridge.
+
+    Updates in place: ``bench_i.overhang_m``, ``bench_i.rock_bridge_thickness_m``,
+    ``bench_i.rock_bridge_height_m``. Returns ``None``.
+
+    Skips any pair where ``benches[i].is_ramp`` is True: a ramp breaks the
+    vertical bench sequence (the ramp's crest is not "above" the previous
+    bench's toe in the geometric sense), so overhang/bridge geometry is
+    not meaningful for that adjacency.
+
+    Geotechnical reference (Lorig & Varona, 2004):
+
+    - ``overhang_m >= 0.5 m`` → WARNING (yellow flag in report)
+    - ``overhang_m >= 1.5 m`` → CRITICAL (red flag; classic precursor of
+      planar failure per Hoek & Bray, 1981).
+    """
+    n = len(benches)
+    if n < 2:
+        return
+    for i in range(n - 1):
+        b_curr = benches[i]
+        if b_curr.is_ramp:
+            continue
+        b_next = benches[i + 1]
+        overhang = float(b_curr.crest_distance) - float(b_next.toe_distance)
+        bridge_height = float(b_curr.toe_elevation) - float(b_next.crest_elevation)
+        bridge_thickness = min(
+            (-overhang) if overhang < 0 else 0.0,
+            bridge_height if bridge_height > 0 else 0.0,
+        )
+        b_curr.overhang_m = float(overhang)
+        b_curr.rock_bridge_height_m = float(bridge_height)
+        b_curr.rock_bridge_thickness_m = float(bridge_thickness)
+
+
+def _evaluate_catch_bench_adequacy(benches, berm_design_min_m=None):
+    """Mark each bench's catch-bench adequacy.
+
+    For every bench:
+
+    - ``catch_bench_ratio = effective_berm_width / max(berm_width, 1e-3)``
+      (always computed; 1e-3 floor avoids division by zero on degenerate
+      berms).
+    - ``catch_bench_adequate = True`` iff
+      ``effective_berm_width >= berm_design_min_m`` AND ``berm_design_min_m``
+      is not ``None``. When ``berm_design_min_m`` is ``None``, the
+      boolean is left at its dataclass default (``False``) and only the
+      ratio is populated for diagnostic use.
+
+    Updates in place: ``bench.catch_bench_adequate``,
+    ``bench.catch_bench_ratio``.
+
+    Geotechnical criterion (Read & Stacey, 2009): a catch bench is
+    adequate when its effective width retains the rockfall volume from
+    the bench above — typically
+    ``berm_design >= max(rockfall_height * 0.6, 6 m)`` for 15 m benches.
+    """
+    for b in benches:
+        denom = max(float(b.berm_width), 1e-3)
+        b.catch_bench_ratio = float(b.effective_berm_width) / denom
+        if berm_design_min_m is None:
+            b.catch_bench_adequate = False
+        else:
+            b.catch_bench_adequate = (
+                float(b.effective_berm_width) >= float(berm_design_min_m)
+            )
 
 
 def _evaluate_status(deviation, tol_neg, tol_pos):

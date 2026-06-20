@@ -170,6 +170,15 @@ class BlastAdvisorDefaults:
     medium_confidence_n: int = 8
 
 
+@dataclass(frozen=True)
+class StabilityDefaults:
+    """Stability analysis thresholds for overhang and catch bench detection."""
+    overhang_warning_m: float = 0.5
+    overhang_critical_m: float = 1.5
+    berm_design_min_m: float = 6.0
+    rockfall_catch_factor: float = 0.6
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -180,3 +189,4 @@ DEPLOY = DeployDefaults()
 EXPLOSIVE = ExplosiveEnergy()
 POWDER_FACTOR = PowderFactor()
 ADVISOR = BlastAdvisorDefaults()
+STABILITY = StabilityDefaults()

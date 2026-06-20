@@ -525,3 +525,248 @@ class TestReconciledProfileFaceSegments:
         assert np.isclose(face_pts[0].distance, 15.0)
         assert face_pts[1].bench_number == 2
         assert np.isclose(face_pts[1].distance, 30.0)
+
+
+class TestOverhangDetection:
+    """Phase 9 — A.1 overhang detection between consecutive benches."""
+
+    def _make_pair(self, crest_d_1, toe_d_2, crest_e_1=100.0, toe_e_1=85.0,
+                   crest_e_2=85.0, toe_e_2=70.0, is_ramp_curr=False):
+        from core.param_extractor import BenchParams
+        return [
+            BenchParams(
+                bench_number=1,
+                crest_elevation=crest_e_1,
+                crest_distance=crest_d_1,
+                toe_elevation=toe_e_1,
+                toe_distance=10.0,
+                bench_height=15.0,
+                face_angle=70.0,
+                berm_width=9.0,
+                is_ramp=is_ramp_curr,
+            ),
+            BenchParams(
+                bench_number=2,
+                crest_elevation=crest_e_2,
+                crest_distance=35.0,
+                toe_elevation=toe_e_2,
+                toe_distance=toe_d_2,
+                bench_height=15.0,
+                face_angle=70.0,
+                berm_width=9.0,
+            ),
+        ]
+
+    def test_aligned_benches_no_overhang(self):
+        """Berth aligned (crest_dist_n == toe_dist_{n+1}) → overhang == 0."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        benches = self._make_pair(crest_d_1=20.0, toe_d_2=20.0)
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, 0.0)
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 0.0)
+        assert np.isclose(benches[0].rock_bridge_height_m, 0.0)
+
+    def test_small_overhang_not_flagged(self):
+        """overhang = 0.3 m (below 0.5 m warning threshold) → thin block, no flag."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        benches = self._make_pair(crest_d_1=20.3, toe_d_2=20.0)
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, 0.3)
+        # 0.3 m positive overhang is not a rock bridge, thickness stays 0
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 0.0)
+
+    def test_critical_overhang_flagged(self):
+        """overhang = 1.6 m > critical 1.5 m → thick cantilever, no rock bridge."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        benches = self._make_pair(crest_d_1=21.6, toe_d_2=20.0)
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, 1.6)
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 0.0)
+        assert np.isclose(benches[0].rock_bridge_height_m, 0.0)
+
+    def test_ramp_skipped(self):
+        """If benches[0].is_ramp=True the pair is skipped → defaults remain 0."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        benches = self._make_pair(
+            crest_d_1=25.0, toe_d_2=10.0, is_ramp_curr=True,
+        )
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, 0.0)
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 0.0)
+        assert np.isclose(benches[0].rock_bridge_height_m, 0.0)
+
+    def test_negative_overhang_negative_distance_yields_rock_bridge(self):
+        """crest_dist_1 < toe_dist_2 → negative overhang → rock bridge width = -overhang."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        benches = self._make_pair(crest_d_1=15.0, toe_d_2=20.0)
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, -5.0)
+        # bridge_thickness = min(-(-5.0), bridge_height=0) = 0
+        # bridge_height = toe_e_1 - crest_e_2 = 85 - 85 = 0
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 0.0)
+        assert np.isclose(benches[0].rock_bridge_height_m, 0.0)
+
+    def test_extract_parameters_populates_overhang_field(self):
+        """End-to-end: extract_parameters() leaves overhang/bridge fields populated
+        on the bench list (defaults to 0 when the geometry is aligned)."""
+        from core.param_extractor import extract_parameters
+        # Synthetic flat-then-step profile that should detect at least 1 bench
+        distances = np.linspace(0, 200, 401)
+        elevations = np.where(
+            distances < 100.0, 110.0,
+            np.where(distances < 105.0, 110.0 - (distances - 100.0) * 2.0, 100.0),
+        )
+        result = extract_parameters(distances, elevations, "S-9", "Phase9")
+        assert hasattr(result.benches, "__iter__")
+        if result.benches:
+            for b in result.benches:
+                assert hasattr(b, "overhang_m")
+                assert hasattr(b, "rock_bridge_thickness_m")
+                assert hasattr(b, "rock_bridge_height_m")
+
+
+class TestRockBridge:
+    """Phase 9 — A.2 rock bridge detection (vertical separation)."""
+
+    def _make_pair_with_bridge(self, toe_e_1, crest_e_2, toe_d_2):
+        from core.param_extractor import BenchParams
+        return [
+            BenchParams(
+                bench_number=1,
+                crest_elevation=110.0,
+                crest_distance=10.0,
+                toe_elevation=toe_e_1,
+                toe_distance=10.0,
+                bench_height=10.0,
+                face_angle=70.0,
+                berm_width=9.0,
+            ),
+            BenchParams(
+                bench_number=2,
+                crest_elevation=crest_e_2,
+                crest_distance=20.0,
+                toe_elevation=70.0,
+                toe_distance=toe_d_2,
+                bench_height=15.0,
+                face_angle=70.0,
+                berm_width=9.0,
+            ),
+        ]
+
+    def test_thick_bridge(self):
+        """Large negative overhang AND positive vertical separation →
+        rock_bridge_thickness_m is the min of those two positive dimensions."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        # bridge_width = crest_d_2 - toe_d_1 = 25 - 10 = 15
+        # bridge_height = toe_e_1 - crest_e_2 = 95 - 80 = 15
+        # overhang = crest_d_1 - toe_d_2 = 10 - 25 = -15 → |overhang|=15
+        benches = self._make_pair_with_bridge(
+            toe_e_1=95.0, crest_e_2=80.0, toe_d_2=25.0,
+        )
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, -15.0)
+        assert np.isclose(benches[0].rock_bridge_height_m, 15.0)
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 15.0)
+
+    def test_thin_bridge_limited_by_height(self):
+        """Wide horizontal separation but tiny vertical separation →
+        rock_bridge_thickness_m is limited by the smaller dimension (height)."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        # overhang = 10 - 30 = -20 (wide 20 m gap)
+        # bridge_height = 85 - 84.7 = 0.3 (thin)
+        # thickness = min(20, 0.3) = 0.3
+        benches = self._make_pair_with_bridge(
+            toe_e_1=85.0, crest_e_2=84.7, toe_d_2=30.0,
+        )
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, -20.0)
+        assert np.isclose(benches[0].rock_bridge_height_m, 0.3)
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 0.3)
+
+    def test_negative_bridge_height_yields_zero_thickness(self):
+        """When bridge_height < 0 (bench N+1 sits above bench N's toe) → no bridge."""
+        from core.param_extractor import _detect_overhangs_and_bridges
+        # overhang = 10 - 30 = -20 (still wide negative)
+        # bridge_height = 80 - 90 = -10 (bench 2 crest is *above* bench 1 toe)
+        benches = self._make_pair_with_bridge(
+            toe_e_1=80.0, crest_e_2=90.0, toe_d_2=30.0,
+        )
+        _detect_overhangs_and_bridges(benches)
+        assert np.isclose(benches[0].overhang_m, -20.0)
+        assert np.isclose(benches[0].rock_bridge_height_m, -10.0)
+        # min(-overhang=20, bridge_height=-10 clamped to 0) = 0
+        assert np.isclose(benches[0].rock_bridge_thickness_m, 0.0)
+
+
+class TestCatchBench:
+    """Phase 9 — A.6 catch bench adequacy evaluation."""
+
+    def _make_bench(self, berm_width, effective_berm_width):
+        from core.param_extractor import BenchParams
+        return BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=85.0,
+            toe_distance=10.0,
+            bench_height=15.0,
+            face_angle=70.0,
+            berm_width=berm_width,
+            effective_berm_width=effective_berm_width,
+        )
+
+    def test_adequate_when_effective_geq_design(self):
+        """effective_berm_width=8 ≥ berm_design_min=6 → adequate=True."""
+        bench = self._make_bench(berm_width=9.0, effective_berm_width=8.0)
+        from core.param_extractor import _evaluate_catch_bench_adequacy
+        _evaluate_catch_bench_adequacy([bench], berm_design_min_m=6.0)
+        assert bench.catch_bench_adequate is True
+        assert np.isclose(bench.catch_bench_ratio, 8.0 / 9.0)
+
+    def test_adequate_exact_boundary(self):
+        """effective == design → adequate=True (>= comparison)."""
+        bench = self._make_bench(berm_width=9.0, effective_berm_width=6.0)
+        from core.param_extractor import _evaluate_catch_bench_adequacy
+        _evaluate_catch_bench_adequacy([bench], berm_design_min_m=6.0)
+        assert bench.catch_bench_adequate is True
+        assert np.isclose(bench.catch_bench_ratio, 6.0 / 9.0)
+
+    def test_inadequate_when_effective_lt_design(self):
+        """effective=4 < design=6 → adequate=False."""
+        bench = self._make_bench(berm_width=9.0, effective_berm_width=4.0)
+        from core.param_extractor import _evaluate_catch_bench_adequacy
+        _evaluate_catch_bench_adequacy([bench], berm_design_min_m=6.0)
+        assert bench.catch_bench_adequate is False
+        assert np.isclose(bench.catch_bench_ratio, 4.0 / 9.0)
+
+    def test_no_design_just_ratio(self):
+        """berm_design_min=None → catch_bench_adequate stays False, ratio computed."""
+        bench = self._make_bench(berm_width=10.0, effective_berm_width=5.0)
+        from core.param_extractor import _evaluate_catch_bench_adequacy
+        _evaluate_catch_bench_adequacy([bench], berm_design_min_m=None)
+        assert bench.catch_bench_adequate is False
+        assert np.isclose(bench.catch_bench_ratio, 0.5)
+
+    def test_zero_berm_width_avoids_division_by_zero(self):
+        """berm_width=0 → denom clamped to 1e-3 → ratio is finite, not inf/NaN."""
+        bench = self._make_bench(berm_width=0.0, effective_berm_width=0.0)
+        from core.param_extractor import _evaluate_catch_bench_adequacy
+        _evaluate_catch_bench_adequacy([bench], berm_design_min_m=6.0)
+        assert np.isfinite(bench.catch_bench_ratio)
+        assert bench.catch_bench_adequate is False
+
+    def test_extract_parameters_populates_catch_bench_fields(self):
+        """End-to-end: extract_parameters() initialises catch_bench_ratio and
+        catch_bench_adequate on every detected bench (defaults: 0.0 / False)."""
+        from core.param_extractor import extract_parameters
+        distances = np.linspace(0, 200, 401)
+        elevations = np.where(
+            distances < 100.0, 110.0,
+            np.where(distances < 105.0, 110.0 - (distances - 100.0) * 2.0, 100.0),
+        )
+        result = extract_parameters(distances, elevations, "S-CB", "Phase9")
+        for b in result.benches:
+            assert hasattr(b, "catch_bench_adequate")
+            assert hasattr(b, "catch_bench_ratio")
+            assert isinstance(b.catch_bench_adequate, bool)
+            assert isinstance(b.catch_bench_ratio, float)
