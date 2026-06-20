@@ -110,6 +110,54 @@ class RampDetection:
     max_width: float = 42.0           # meters
 
 
+@dataclass(frozen=True)
+class ExplosiveEnergy:
+    """Reference specific energy per explosive type (MJ/kg) and density (g/cm³).
+
+    Used to convert total_kg to total energy (MJ) when comparing blasts with
+    different explosive products. Typical values from ENAEX product catalog.
+    """
+    anfo_energy: float = 3.72
+    emulsion_energy: float = 2.78
+    heavy_anfo_energy: float = 3.40
+    bulk_emulsion_energy: float = 3.05
+
+    anfo_density: float = 0.80
+    emulsion_density: float = 1.20
+    heavy_anfo_density: float = 1.05
+    bulk_emulsion_density: float = 1.15
+
+    def energy_mj_per_kg(self, explosive_type: str) -> float:
+        """Return MJ/kg for a given explosive type string (case-insensitive)."""
+        et = (explosive_type or '').strip().upper()
+        if 'HEAVY' in et or 'H-ANFO' in et:
+            return self.heavy_anfo_energy
+        if 'EMULSION' in et or 'BULK' in et or 'EMUL' in et:
+            return self.bulk_emulsion_energy
+        if 'ANFO' in et:
+            return self.anfo_energy
+        return self.anfo_energy
+
+    def density_g_per_cm3(self, explosive_type: str) -> float:
+        """Return density (g/cm³) for a given explosive type string (case-insensitive)."""
+        et = (explosive_type or '').strip().upper()
+        if 'HEAVY' in et or 'H-ANFO' in et:
+            return self.heavy_anfo_density
+        if 'EMULSION' in et or 'BULK' in et or 'EMUL' in et:
+            return self.bulk_emulsion_density
+        if 'ANFO' in et:
+            return self.anfo_density
+        return self.anfo_density
+
+
+@dataclass(frozen=True)
+class PowderFactor:
+    """Powder-factor thresholds for advisories."""
+    pf_high_alert_kgm3: float = 0.45
+    pf_optimal_kgm3: float = 0.35
+    pf_low_warn_kgm3: float = 0.20
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -117,3 +165,5 @@ TOLERANCES = Tolerances()
 VISUALIZATION = VisualizationDefaults()
 RAMP = RampDetection()
 DEPLOY = DeployDefaults()
+EXPLOSIVE = ExplosiveEnergy()
+POWDER_FACTOR = PowderFactor()

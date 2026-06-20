@@ -5,12 +5,14 @@ import pytest
 
 from core.blast_correlation import (
     BlastCorrelationRow,
+    aggregate_powder_factor_by_group,
     classify_berm_as_ramp,
     compute_blast_geotech_correlation,
     compute_pasadura_stats,
+    compute_powder_factor,
     compute_signed_deviations,
 )
-from core.config import RAMP
+from core.config import EXPLOSIVE, RAMP
 from core.calculo_tronadura import procesar_pozos
 
 
@@ -143,11 +145,16 @@ class TestBlastCorrelationRowBackwardsCompat:
         row = BlastCorrelationRow(
             "S1", 3, 1000.0, 0.5,
             avg_over_break=0.7, avg_under_break=-0.4, n_over=2, n_under=1,
+            pf_vol_avg_kgm3=0.45, pf_area_avg_kgm2=2.1, energy_total_mj=400.0, n_pf_valid=3,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 8
+        assert len(signed) == 12
         assert signed[4] == 0.7 and signed[5] == -0.4
         assert signed[6] == 2 and signed[7] == 1
+        assert signed[8] == 0.45
+        assert signed[9] == 2.1
+        assert signed[10] == 400.0
+        assert signed[11] == 3
 
     def test_new_fields_default_to_zero(self):
         row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
@@ -179,3 +186,168 @@ class TestClassifyBermAsRamp:
         assert classify_berm_as_ramp(0.0) is False
         assert classify_berm_as_ramp(RAMP.min_width - 1) is False
         assert classify_berm_as_ramp(RAMP.max_width + 1) is False
+
+
+class TestExplosiveEnergy:
+    def test_known_types(self):
+        assert EXPLOSIVE.energy_mj_per_kg("ANFO") == pytest.approx(3.72)
+        assert EXPLOSIVE.energy_mj_per_kg("anfo") == pytest.approx(3.72)
+        assert EXPLOSIVE.energy_mj_per_kg("Heavy ANFO") == pytest.approx(3.40)
+        assert EXPLOSIVE.energy_mj_per_kg("H-ANFO") == pytest.approx(3.40)
+        assert EXPLOSIVE.energy_mj_per_kg("Emulsion") == pytest.approx(3.05)
+        assert EXPLOSIVE.energy_mj_per_kg("Bulk Emulsion") == pytest.approx(3.05)
+        assert EXPLOSIVE.energy_mj_per_kg("Emuline 8000") == pytest.approx(3.05)
+
+    def test_unknown_type_falls_back_to_anfo(self):
+        assert EXPLOSIVE.energy_mj_per_kg("mystery") == pytest.approx(3.72)
+        assert EXPLOSIVE.energy_mj_per_kg("") == pytest.approx(3.72)
+        assert EXPLOSIVE.energy_mj_per_kg(None) == pytest.approx(3.72)
+
+    def test_density_lookup(self):
+        assert EXPLOSIVE.density_g_per_cm3("ANFO") == pytest.approx(0.80)
+        assert EXPLOSIVE.density_g_per_cm3("Heavy ANFO") == pytest.approx(1.05)
+        assert EXPLOSIVE.density_g_per_cm3("Bulk Emulsion") == pytest.approx(1.15)
+
+
+def _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0,
+                             n=9, explosive="ANFO", malla="M1"):
+    """Build a 3×3 grid of blast holes at (0,0), (0,B), (0,2B), (S,0)... with B=burden, S=esp."""
+    rows = []
+    for ix in range(3):
+        for iy in range(3):
+            rows.append({
+                "label_pozo": f"P-{ix}-{iy}",
+                "Latitud_Geo": float(ix * burden),
+                "Longitud_Geo": float(iy * esp),
+                "Nombre_Banco": 4200.0,
+                "Inclinacion_real": 0.0,
+                "Azimuth_real": 0.0,
+                "longitud_real": 12.0,
+                "Kilos_Cargados_real": kg,
+                "Burden": burden,
+                "Esp": esp,
+                "Tipo_Explosivo": explosive,
+                "Nombre_Malla_Original": malla,
+                "fecha_tronadura": "2026-05-01",
+            })
+    return pd.DataFrame(rows[:n])
+
+
+class TestComputePowderFactor:
+    def test_basic_burden_esp_columns(self):
+        """Burden=5, Esp=6, Kilos=300, bench=15 → pf_vol = 300 / (5×6×15) = 0.6667."""
+        df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0)
+        out = compute_powder_factor(df)
+        assert "pf_vol_kgm3" in out.columns
+        assert "pf_area_kgm2" in out.columns
+        assert "energy_mj" in out.columns
+        assert out["pf_vol_kgm3"].iloc[0] == pytest.approx(0.6667, abs=1e-3)
+        assert out["pf_area_kgm2"].iloc[0] == pytest.approx(10.0, abs=1e-6)
+        assert out["energy_mj"].iloc[0] == pytest.approx(300.0 * 3.72, abs=1e-3)
+        assert out["burden_est_m"].iloc[0] == pytest.approx(5.0)
+        assert out["esp_est_m"].iloc[0] == pytest.approx(6.0)
+
+    def test_knn_estimation_when_missing(self):
+        """Without Burden/Esp, k-NN estimates median nearest-neighbour spacing."""
+        df = _holes_grid_with_pattern(burden=4.0, esp=4.0, kg=200.0)
+        df = df.drop(columns=["Burden", "Esp"])
+        processed = procesar_pozos(df)[0]
+        out = compute_powder_factor(processed)
+        assert out["pf_vol_kgm3"].iloc[0] > 0
+        assert out["burden_est_m"].iloc[0] == pytest.approx(4.0, abs=1.5)
+        assert out["esp_est_m"].iloc[0] == pytest.approx(4.0, abs=1.5)
+
+    def test_energy_mj_with_explosive_type(self):
+        """energy_mj per kilo: ANFO 3.72 MJ/kg, Heavy ANFO 3.40, Emulsion 3.05."""
+        df_anfo = _holes_grid_with_pattern(kg=100.0, explosive="ANFO")
+        df_heavy = _holes_grid_with_pattern(kg=100.0, explosive="Heavy ANFO")
+        df_emul = _holes_grid_with_pattern(kg=100.0, explosive="Bulk Emulsion")
+        assert compute_powder_factor(df_anfo)["energy_mj"].iloc[0] == pytest.approx(372.0, abs=1e-3)
+        assert compute_powder_factor(df_heavy)["energy_mj"].iloc[0] == pytest.approx(340.0, abs=1e-3)
+        assert compute_powder_factor(df_emul)["energy_mj"].iloc[0] == pytest.approx(305.0, abs=1e-3)
+
+    def test_returns_nan_gracefully(self):
+        """With only 1 row and no group column, B/S estimation is impossible → NaN."""
+        df = pd.DataFrame(
+            [{
+                "label_pozo": "solo",
+                "Latitud_Geo": 0.0,
+                "Longitud_Geo": 0.0,
+                "Nombre_Banco": 4200.0,
+                "Inclinacion_real": 0.0,
+                "Azimuth_real": 0.0,
+                "longitud_real": 12.0,
+                "Kilos_Cargados_real": 100.0,
+                "fecha_tronadura": "2026-05-01",
+            }]
+        )
+        out = compute_powder_factor(df)
+        assert pd.isna(out["pf_vol_kgm3"].iloc[0])
+        assert pd.isna(out["burden_est_m"].iloc[0])
+
+    def test_none_input_returns_empty(self):
+        assert compute_powder_factor(None) is None
+
+    def test_empty_input(self):
+        df = pd.DataFrame(columns=["X", "Y", "Kilos_Cargados_real"])
+        out = compute_powder_factor(df)
+        assert out.empty
+
+
+class TestAggregatePowderFactorByGroup:
+    def test_group_by_section(self):
+        """PF and energy aggregate by section via projected_pozos."""
+        df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
+        processed = procesar_pozos(df)[0]
+        out = compute_powder_factor(processed)
+        sec_origin = np.array([0.0, 0.0])
+        from core.calculo_tronadura import proyectar_pozos_en_seccion
+        proj = proyectar_pozos_en_seccion(
+            processed, origin=sec_origin, azimuth=90.0, length=200.0, tolerance=50.0,
+        )
+        proj_labeled = proj.copy()
+        proj_labeled["section_name"] = "S1"
+        agg = aggregate_powder_factor_by_group(out, "section_name", "S1", proj_labeled)
+        assert agg["n_wells"] == len(proj_labeled)
+        assert agg["n_pf_valid"] > 0
+        assert agg["pf_vol_avg"] == pytest.approx(0.6667, abs=1e-3)
+        assert agg["energy_total_mj"] > 0
+        assert agg["kg_total"] > 0
+
+    def test_empty_inputs(self):
+        agg = aggregate_powder_factor_by_group(
+            pd.DataFrame(), "section_name", "S1", pd.DataFrame(),
+        )
+        assert agg["n_wells"] == 0
+        assert pd.isna(agg["pf_vol_avg"])
+
+
+class TestBlastCorrelationRowPF:
+    def test_pf_fields_default_to_zero(self):
+        row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
+        assert row.pf_vol_avg_kgm3 == 0.0
+        assert row.pf_area_avg_kgm2 == 0.0
+        assert row.energy_total_mj == 0.0
+        assert row.n_pf_valid == 0
+
+    def test_as_signed_tuple_includes_pf(self):
+        row = BlastCorrelationRow(
+            "S1", 5, 1500.0, 0.8,
+            pf_vol_avg_kgm3=0.42, pf_area_avg_kgm2=2.5, energy_total_mj=900.0, n_pf_valid=5,
+        )
+        signed = row.as_signed_tuple()
+        assert len(signed) == 12
+        assert signed[8] == 0.42
+        assert signed[9] == 2.5
+        assert signed[10] == 900.0
+        assert signed[11] == 5
+
+    def test_correlation_function_populates_pf(self):
+        """compute_blast_geotech_correlation should fill PF fields when data allows."""
+        df = procesar_pozos(_holes_grid_with_pattern())[0]
+        sections = [_section("S1", 0.0, 0.0, 90.0)]
+        rows = compute_blast_geotech_correlation(df, sections, [])
+        assert len(rows) == 1
+        assert rows[0].pf_vol_avg_kgm3 > 0
+        assert rows[0].energy_total_mj > 0
+        assert rows[0].n_pf_valid > 0

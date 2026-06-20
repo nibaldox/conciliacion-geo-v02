@@ -1,12 +1,17 @@
 """
 Results tab: AI-generated executive report via streaming.
 """
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 from core.calculo_tronadura import proyectar_pozos_en_seccion
-from core.config import DEFAULTS
+from core.config import DEFAULTS, POWDER_FACTOR
 from core.geom_utils import find_df_column
+from core.blast_correlation import (
+    aggregate_powder_factor_by_group,
+    compute_powder_factor,
+)
 
 
 def render_tab_ai(config: dict) -> None:
@@ -71,7 +76,10 @@ def render_tab_ai(config: dict) -> None:
                     sec_grouped = df_comp.groupby('section')['abs_dev'].mean().reset_index()
                     value_col = 'abs_dev'
 
+                blast_df_pf = compute_powder_factor(blast_df)
+
                 corr_data = []
+                pf_used = False
                 for sec in sections:
                     sec_name = sec.name
                     match = sec_grouped[sec_grouped['section'] == sec_name]
@@ -86,20 +94,45 @@ def render_tab_ai(config: dict) -> None:
                         tolerance=DEFAULTS.blast_correlation_radius_m
                     )
                     total_kg = proj_wells[kg_col].fillna(0).sum() if not proj_wells.empty else 0
-                    corr_data.append({'Kg_Explosivo': total_kg, 'Desviacion': avg_dev})
+                    pf_vol = float('nan')
+                    if not proj_wells.empty:
+                        proj_labeled = proj_wells.copy()
+                        proj_labeled['section_name'] = sec_name
+                        pf_row = aggregate_powder_factor_by_group(
+                            blast_df_pf, 'section_name', sec_name, proj_labeled,
+                        )
+                        pf_vol = pf_row.get('pf_vol_avg')
+                        if pf_vol is not None and not (isinstance(pf_vol, float) and np.isnan(pf_vol)):
+                            pf_used = True
+                        else:
+                            pf_vol = float('nan')
+                    corr_data.append({
+                        'Kg_Explosivo': total_kg,
+                        'PF_Vol_kgm3': pf_vol,
+                        'Desviacion': avg_dev,
+                    })
 
                 df_corr = pd.DataFrame(corr_data)
-                if not df_corr.empty and df_corr['Kg_Explosivo'].sum() > 0:
-                    xs = df_corr['Kg_Explosivo'].values.astype(float)
+                if not df_corr.empty:
+                    x_field = 'PF_Vol_kgm3' if pf_used else 'Kg_Explosivo'
+                    x_label_corr = 'powder factor (kg/m³)' if pf_used else 'carga explosiva (kg)'
+                    xs_raw = df_corr[x_field].values
+                    if pf_used:
+                        xs = pd.to_numeric(pd.Series(xs_raw), errors='coerce').fillna(0).values.astype(float)
+                    else:
+                        xs = xs_raw.astype(float)
                     ys = df_corr['Desviacion'].values.astype(float)
+                    mask = ~np.isnan(xs) & ~np.isnan(ys)
+                    xs = xs[mask]
+                    ys = ys[mask]
                     if len(xs) > 1 and np.var(xs) > 0 and np.var(ys) > 0:
                         r_coef = np.corrcoef(xs, ys)[0, 1]
                         if r_coef > 0.5:
-                            corr_interp = f"Fuerte Positiva (r={r_coef:.2f}): El sobre-quiebre está ligado directamente a la alta carga explosiva."
+                            corr_interp = f"Fuerte Positiva (r={r_coef:.2f}): El sobre-quiebre está ligado directamente al alto {x_label_corr}."
                         elif r_coef < -0.5:
                             corr_interp = f"Negativa (r={r_coef:.2f})"
                         else:
-                            corr_interp = f"Moderada/Débil (r={r_coef:.2f}): El daño no correlaciona de forma directa con la carga explosiva de voladura."
+                            corr_interp = f"Moderada/Débil (r={r_coef:.2f}): El daño no correlaciona de forma directa con el {x_label_corr} de voladura."
 
         blast_stats = {
             'n_pozos': len(blast_df),
@@ -174,6 +207,8 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
                 df_valid = df_comp.dropna(subset=[dev_col])
                 sec_grouped = df_valid.groupby('section')[dev_col].mean().reset_index()
 
+            blast_df_pf = compute_powder_factor(blast_df)
+
             for sec in sections:
                 sec_name = sec.name
                 match = sec_grouped[sec_grouped['section'] == sec_name]
@@ -191,11 +226,40 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
                 if not proj.empty:
                     total_kg = proj[kg_col].fillna(0).sum()
                     severity = avg_dev if dev_col == 'delta_crest' else abs(avg_dev)
-                    if severity > 1.0 and total_kg > 2000:
-                        if dev_col == 'delta_crest':
-                            st.info(f"💡 **Recomendación Voladura en {sec_name}**: Se registra sobre-excavación en el talud ({avg_dev:.2f} m de sobre-quiebre de cresta) junto con una alta concentración de carga cercana ({total_kg:.0f} Kg). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción.")
+                    proj_labeled = proj.copy()
+                    proj_labeled['section_name'] = sec_name
+                    pf_row = aggregate_powder_factor_by_group(
+                        blast_df_pf, 'section_name', sec_name, proj_labeled,
+                    )
+                    pf_vol = pf_row.get('pf_vol_avg')
+                    pf_available = pf_vol is not None and not (
+                        isinstance(pf_vol, float) and np.isnan(pf_vol)
+                    )
+
+                    trigger_pf = pf_available and severity > 1.0 and pf_vol > POWDER_FACTOR.pf_high_alert_kgm3
+                    trigger_legacy = (
+                        not pf_available
+                        and severity > 1.0
+                        and total_kg > 2000
+                    )
+
+                    if trigger_pf or trigger_legacy:
+                        if pf_available:
+                            pct_above = ((pf_vol - POWDER_FACTOR.pf_optimal_kgm3)
+                                          / max(POWDER_FACTOR.pf_optimal_kgm3, 1e-6)) * 100.0
+                            if dev_col == 'delta_crest':
+                                st.info(
+                                    f"💡 **Recomendación Voladura en {sec_name}**: Se registra sobre-excavación en el talud ({avg_dev:.2f} m de sobre-quiebre de cresta) junto con powder factor elevado ({pf_vol:.2f} kg/m³, aprox. {pct_above:.0f}% sobre el óptimo recomendado). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción."
+                                )
+                            else:
+                                st.info(
+                                    f"💡 **Recomendación Voladura en {sec_name}**: Se registra daño severo en el talud ({avg_dev:.2f} m) junto con powder factor elevado ({pf_vol:.2f} kg/m³, aprox. {pct_above:.0f}% sobre el óptimo recomendado). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción."
+                                )
                         else:
-                            st.info(f"💡 **Recomendación Voladura en {sec_name}**: Se registra daño severo en el talud ({avg_dev:.2f}m) junto con una alta concentración de carga cercana ({total_kg:.0f} Kg). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción.")
+                            if dev_col == 'delta_crest':
+                                st.info(f"💡 **Recomendación Voladura en {sec_name}**: Se registra sobre-excavación en el talud ({avg_dev:.2f} m de sobre-quiebre de cresta) junto con una alta concentración de carga cercana ({total_kg:.0f} Kg). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción.")
+                            else:
+                                st.info(f"💡 **Recomendación Voladura en {sec_name}**: Se registra daño severo en el talud ({avg_dev:.2f}m) junto con una alta concentración de carga cercana ({total_kg:.0f} Kg). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción.")
                         has_alert = True
 
     if not has_alert:

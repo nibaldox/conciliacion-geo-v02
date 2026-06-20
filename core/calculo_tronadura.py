@@ -43,6 +43,9 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
     df_clean : pd.DataFrame
         Cleaned DataFrame with added columns:
         'X', 'Y', 'Z_collar', 'X_toe', 'Y_toe', 'Z_toe'.
+        When present in the input, also captures:
+        'Burden', 'Esp', 'Diam_mm', 'Tipo_Explosivo', 'Taco_m'
+        (numeric fields coerced; missing columns skipped silently).
         Columns marked "no usar" are dropped.
         fecha_tronadura is normalized to date-only.
     x_lines, y_lines, z_lines : np.ndarray
@@ -65,17 +68,51 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
     incl_col = find_df_column(df_work, ['Inclinacion_real', 'Inclinacion', 'Inclination'])
     az_col = find_df_column(df_work, ['Azimuth_real', 'Azimuth', 'Azimut'])
     len_col = find_df_column(df_work, ['longitud_real', 'Longitud', 'Length', 'Profundidad'])
+    burden_col = find_df_column(
+        df_work, ['Burden', 'Burden_Real', 'Burden_diseno', 'B'],
+        raise_error=False,
+    )
+    esp_col = find_df_column(
+        df_work, ['Espaciamiento', 'Espaciamiento_Real', 'Espaciamiento_diseno', 'S', 'Esp'],
+        raise_error=False,
+    )
+    diam_col = find_df_column(
+        df_work, ['Diametro', 'Diametro_pozo', 'Diametro_perforacion', 'D_mm', 'Diam_mm'],
+        raise_error=False,
+    )
+    explosivo_col = find_df_column(
+        df_work, ['Tipo_Explosivo', 'Explosivo', 'Tipo_explosivo'],
+        raise_error=False,
+    )
+    taco_col = find_df_column(
+        df_work, ['Taco', 'Taco_m', 'Stemming'],
+        raise_error=False,
+    )
 
     if z_col:
         df_work['Banco_Original'] = df_work[z_col]
 
-    df_work = df_work.rename(columns={
+    rename_map: dict = {
         x_col: 'X', y_col: 'Y', z_col: 'Z_collar',
         incl_col: 'Incl', az_col: 'Az', len_col: 'Len',
-    })
+    }
+    if burden_col:
+        rename_map[burden_col] = 'Burden'
+    if esp_col:
+        rename_map[esp_col] = 'Esp'
+    if diam_col:
+        rename_map[diam_col] = 'Diam_mm'
+    if explosivo_col:
+        rename_map[explosivo_col] = 'Tipo_Explosivo'
+    if taco_col:
+        rename_map[taco_col] = 'Taco_m'
 
-    for col in ('X', 'Y', 'Z_collar', 'Incl', 'Az', 'Len'):
-        df_work[col] = pd.to_numeric(df_work[col], errors='coerce')
+    df_work = df_work.rename(columns=rename_map)
+
+    for col in ('X', 'Y', 'Z_collar', 'Incl', 'Az', 'Len',
+                'Burden', 'Esp', 'Diam_mm', 'Taco_m'):
+        if col in df_work.columns:
+            df_work[col] = pd.to_numeric(df_work[col], errors='coerce')
 
     df_work['Z_collar'] = df_work['Z_collar'] + BENCH_HEIGHT
 

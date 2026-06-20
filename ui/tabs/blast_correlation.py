@@ -9,7 +9,11 @@ try:
 except ImportError:
     _HAS_STATSMODELS = False
 from core.calculo_tronadura import proyectar_pozos_en_seccion
-from core.blast_correlation import compute_signed_deviations
+from core.blast_correlation import (
+    aggregate_powder_factor_by_group,
+    compute_powder_factor,
+    compute_signed_deviations,
+)
 from core.config import DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
@@ -102,15 +106,27 @@ def render_tab_blast_correlation(config: dict) -> None:
     st.markdown("---")
 
     col_metrics = st.columns(4)
-    
+
     tot_pozos = int(df_filtered_sections['num_pozos'].sum())
     tot_charge = df_filtered_sections['total_kg'].sum()
     avg_overbreak = df_filtered_sections['area_over'].mean()
-    
+
+    use_pf_axis = (
+        'pf_vol_avg_kgm3' in df_filtered_sections.columns
+        and not df_filtered_sections['_pf_unavailable'].iloc[0] if not df_filtered_sections.empty else False
+    )
+
     r_coef = 0.0
     r_text = "Insuficientes datos"
+    r_label = "Correlación Carga vs Daño"
     if len(df_filtered_sections) > 1:
-        x_vals = df_filtered_sections['total_kg'].values.astype(float)
+        if use_pf_axis:
+            x_vals = pd.to_numeric(df_filtered_sections['pf_vol_avg_kgm3'], errors='coerce').fillna(0).values.astype(float)
+            x_label = "Powder Factor (kg/m³)"
+        else:
+            x_vals = df_filtered_sections['total_kg'].values.astype(float)
+            x_label = "Carga Explosiva (Kg crudo)"
+            r_label = "Correlación Carga (kg) vs Daño"
         y_vals = df_filtered_sections['area_over'].values.astype(float)
         if np.var(x_vals) > 0 and np.var(y_vals) > 0:
             r_coef = np.corrcoef(x_vals, y_vals)[0, 1]
@@ -126,7 +142,10 @@ def render_tab_blast_correlation(config: dict) -> None:
     col_metrics[0].metric("Pozos Proyectados", f"{tot_pozos}")
     col_metrics[1].metric("Carga Proyectada Total", f"{tot_charge:,.0f} Kg")
     col_metrics[2].metric("Sobre-excavación Media", f"{avg_overbreak:.1f} m²")
-    col_metrics[3].metric("Correlación Carga vs Daño", r_text)
+    col_metrics[3].metric(r_label, r_text)
+
+    if not df_filtered_sections.empty and bool(df_filtered_sections['_pf_unavailable'].iloc[0]):
+        st.info("ℹ️ Powder factor no disponible: faltan columnas de burden/espaciamiento en el archivo de pozos.")
 
     tab_sec, tab_bnc, tab_mal = st.tabs([
         "📐 Análisis por Sección / Perfil",
@@ -136,8 +155,9 @@ def render_tab_blast_correlation(config: dict) -> None:
 
     with tab_sec:
         st.markdown("#### Distribución de Energía y Desviación por Sección Transversal")
-        
-        col_list = ['section', 'sector', 'num_pozos', 'total_kg', 'area_over', 'area_under', 'avg_over_break', 'avg_under_break']
+
+        col_list = ['section', 'sector', 'num_pozos', 'total_kg', 'area_over', 'area_under', 'avg_over_break', 'avg_under_break', 'pf_vol_avg_kgm3', 'pf_area_avg_kgm2', 'energy_total_mj']
+        col_list = [c for c in col_list if c in df_filtered_sections.columns]
         display_map = {
             'section': 'Sección',
             'sector': 'Sector',
@@ -146,29 +166,45 @@ def render_tab_blast_correlation(config: dict) -> None:
             'area_over': 'Sobre-excavación (m²)',
             'area_under': 'Deuda / Relleno (m²)',
             'avg_over_break': 'Sobre-excavación Media (m)',
-            'avg_under_break': 'Deuda / Relleno Media (m)'
+            'avg_under_break': 'Deuda / Relleno Media (m)',
+            'pf_vol_avg_kgm3': 'PF Vol. (kg/m³)',
+            'pf_area_avg_kgm2': 'PF Área (kg/m²)',
+            'energy_total_mj': 'Energía (MJ)',
         }
-        
+
         df_sec_disp = df_filtered_sections[col_list].rename(columns=display_map)
         st.dataframe(df_sec_disp, use_container_width=True, height=300)
 
         if len(df_filtered_sections) > 1:
+            if use_pf_axis:
+                x_axis = "pf_vol_avg_kgm3"
+                x_label = "Powder Factor Volumétrico (kg/m³)"
+                title = "Correlación: Powder Factor (kg/m³) vs Sobre-excavación Media"
+            else:
+                x_axis = "total_kg"
+                x_label = "Carga Explosiva Proyectada (Kg) — fallback sin PF"
+                title = "Correlación: Carga Explosiva (Kg) vs Sobre-excavación Media"
+
+            x_for_var = pd.to_numeric(df_filtered_sections[x_axis], errors='coerce').fillna(0).values.astype(float)
+            trendline = "ols" if _HAS_STATSMODELS and len(df_filtered_sections) > 2 and np.var(x_for_var) > 0 else None
             fig_scatter = px.scatter(
                 df_filtered_sections,
-                x="total_kg",
+                x=x_axis,
                 y="avg_over_break",
                 color="sector",
                 hover_name="section",
                 labels={
-                    "total_kg": "Carga Explosiva Proyectada (Kg)",
+                    x_axis: x_label,
                     "avg_over_break": "Sobre-excavación Media (m)",
                     "sector": "Sector"
                 },
-                title="Correlación: Carga Explosiva vs Sobre-excavación Media por Sección",
-                trendline="ols" if _HAS_STATSMODELS and len(df_filtered_sections) > 2 and np.var(df_filtered_sections['total_kg']) > 0 else None
+                title=title,
+                trendline=trendline,
             )
             fig_scatter.update_layout(height=450)
             st.plotly_chart(fig_scatter, use_container_width=True)
+            if not use_pf_axis:
+                st.caption("⚠️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
     with tab_bnc:
         st.markdown("#### Comportamiento Horizontal por Banco / Nivel de Cota")
@@ -177,7 +213,8 @@ def render_tab_blast_correlation(config: dict) -> None:
         if df_bench_corr.empty:
             st.info("No hay datos de bancos para los filtros seleccionados.")
         else:
-            col_list_b = ['level', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under']
+            col_list_b = ['level', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'pf_vol_avg_kgm3', 'energy_total_mj']
+            col_list_b = [c for c in col_list_b if c in df_bench_corr.columns]
             display_map_b = {
                 'level': 'Nivel / Cota',
                 'num_pozos': 'Cantidad de Pozos',
@@ -185,7 +222,9 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'avg_dev_crest_over': 'Sobre-quiebre Cresta (m)',
                 'avg_dev_crest_under': 'Deuda Cresta (m)',
                 'avg_dev_toe_over': 'Sobre-quiebre Pata (m)',
-                'avg_dev_toe_under': 'Deuda Pata (m)'
+                'avg_dev_toe_under': 'Deuda Pata (m)',
+                'pf_vol_avg_kgm3': 'PF Vol. (kg/m³)',
+                'energy_total_mj': 'Energía (MJ)',
             }
             df_b_disp = df_bench_corr[col_list_b].rename(columns=display_map_b)
             st.dataframe(df_b_disp, use_container_width=True, height=300)
@@ -214,7 +253,29 @@ def render_tab_blast_correlation(config: dict) -> None:
                 line=dict(color='steelblue', width=3, dash='dash'),
                 yaxis='y2'
             ))
-            
+            if 'pf_vol_avg_kgm3' in df_bench_corr.columns:
+                pf_vals = pd.to_numeric(df_bench_corr['pf_vol_avg_kgm3'], errors='coerce')
+                if pf_vals.notna().any():
+                    fig_bench.add_trace(go.Scatter(
+                        x=df_bench_corr['level'],
+                        y=pf_vals,
+                        name='Powder Factor Vol. (kg/m³)',
+                        mode='lines+markers',
+                        line=dict(color='mediumvioletred', width=2, dash='dot'),
+                        yaxis='y3',
+                    ))
+
+            yaxis3_cfg = {}
+            if 'pf_vol_avg_kgm3' in df_bench_corr.columns:
+                yaxis3_cfg = dict(
+                    title=dict(text='Powder Factor (kg/m³)', font=dict(color='mediumvioletred')),
+                    tickcolor='mediumvioletred',
+                    overlaying='y',
+                    side='right',
+                    anchor='x',
+                    position=0.97,
+                )
+
             fig_bench.update_layout(
                 title='Relación Carga Explosiva vs Desviación de Cresta por Banco (con signo)',
                 xaxis=dict(title='Nivel de Banco (Cota)', type='category'),
@@ -231,6 +292,8 @@ def render_tab_blast_correlation(config: dict) -> None:
                 height=450,
                 legend=dict(x=0.01, y=0.99)
             )
+            if yaxis3_cfg:
+                fig_bench.update_layout(yaxis3=yaxis3_cfg)
             st.plotly_chart(fig_bench, use_container_width=True)
 
     with tab_mal:
@@ -242,8 +305,9 @@ def render_tab_blast_correlation(config: dict) -> None:
         else:
             if sel_mallas:
                 df_malla_corr = df_malla_corr[df_malla_corr['malla'].isin(sel_mallas)]
-            
-            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'avg_overbreak']
+
+            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'avg_overbreak', 'pf_vol_avg_kgm3', 'energy_total_mj']
+            col_list_m = [c for c in col_list_m if c in df_malla_corr.columns]
             display_map_m = {
                 'malla': 'Malla / Polígono',
                 'num_pozos': 'Cantidad de Pozos',
@@ -252,21 +316,25 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'avg_dev_crest_under': 'Deuda Cresta (m)',
                 'avg_dev_toe_over': 'Sobre-quiebre Pata (m)',
                 'avg_dev_toe_under': 'Deuda Pata (m)',
-                'avg_overbreak': 'Sobre-excavación Media (m)'
+                'avg_overbreak': 'Sobre-excavación Media (m)',
+                'pf_vol_avg_kgm3': 'PF Vol. (kg/m³)',
+                'energy_total_mj': 'Energía (MJ)',
             }
             df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
             st.dataframe(df_m_disp, use_container_width=True, height=300)
 
+            color_axis = 'pf_vol_avg_kgm3' if 'pf_vol_avg_kgm3' in df_malla_corr.columns and df_malla_corr['pf_vol_avg_kgm3'].notna().any() else 'total_kg'
+            color_label = 'Powder Factor (kg/m³)' if color_axis == 'pf_vol_avg_kgm3' else 'Carga Explosiva Total (Kg)'
             fig_malla = px.bar(
                 df_malla_corr,
                 x='malla',
                 y='avg_overbreak',
-                color='total_kg',
+                color=color_axis,
                 color_continuous_scale='YlOrRd',
                 labels={
                     'malla': 'Malla de Tronadura',
                     'avg_overbreak': 'Área de Sobre-excavación Promedio (m²)',
-                    'total_kg': 'Carga Explosiva Total (Kg)'
+                    color_axis: color_label,
                 },
                 title='Área de Sobre-excavación Promedio por Malla de Tronadura'
             )
@@ -302,6 +370,11 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
     data_rows = []
     kg_col = find_df_column(blast_df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
 
+    pf_enriched = compute_powder_factor(blast_df) if not blast_df.empty else blast_df
+    has_pf_input = (
+        ('Burden' in blast_df.columns or 'Nombre_Malla_Original' in blast_df.columns or 'holes_polygon' in blast_df.columns)
+    )
+
     for sec in sections:
         cut = cuts.get(sec.name)
         if not cut:
@@ -324,6 +397,13 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
 
         signed = compute_signed_deviations(comparison_results or [], sec.name)
 
+        proj_labeled = proj.copy()
+        if not proj_labeled.empty:
+            proj_labeled['section_name'] = sec.name
+        pf_row = aggregate_powder_factor_by_group(
+            pf_enriched, 'section_name', sec.name, proj_labeled,
+        )
+
         data_rows.append({
             'section': sec.name,
             'sector': sec.sector,
@@ -333,6 +413,10 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
             'area_under': a_under,
             'avg_over_break': signed['avg_over'],
             'avg_under_break': signed['avg_under'],
+            'pf_vol_avg_kgm3': pf_row.get('pf_vol_avg'),
+            'pf_area_avg_kgm2': pf_row.get('pf_area_avg'),
+            'energy_total_mj': pf_row.get('energy_total_mj', 0.0),
+            'n_pf_valid': pf_row.get('n_pf_valid', 0),
         })
 
     df = pd.DataFrame(data_rows)
@@ -340,7 +424,18 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
         df = pd.DataFrame(columns=[
             'section', 'sector', 'num_pozos', 'total_kg',
             'area_over', 'area_under', 'avg_over_break', 'avg_under_break',
+            'pf_vol_avg_kgm3', 'pf_area_avg_kgm2', 'energy_total_mj', 'n_pf_valid',
         ])
+    if 'pf_vol_avg_kgm3' in df.columns:
+        if df['pf_vol_avg_kgm3'].isna().all() or (df['n_pf_valid'].fillna(0) == 0).all():
+            df['_pf_unavailable'] = True
+        else:
+            df['_pf_unavailable'] = False
+    else:
+        df['_pf_unavailable'] = True
+
+    if not has_pf_input:
+        df['_pf_unavailable'] = True
 
     st.session_state.blast_corr_sections_cache = (full_cache_key, df)
     return df
@@ -350,12 +445,14 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
     if df_comps.empty:
         return pd.DataFrame()
 
+    pf_enriched = compute_powder_factor(blast_df) if not blast_df.empty else blast_df
+
     bench_stats = []
-    
+
     unique_levels = df_comps['level'].unique().tolist()
     for lvl in unique_levels:
         df_lvl_comps = df_comps[df_comps['level'] == lvl]
-        
+
         if 'delta_crest' in df_lvl_comps.columns:
             dev_crest_over_list = df_lvl_comps['delta_crest'].dropna()
             dev_crest_over_list = dev_crest_over_list[dev_crest_over_list > 0].tolist()
@@ -373,7 +470,7 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
         else:
             dev_toe_over_list = []
             dev_toe_under_list = []
-        
+
         avg_dev_crest_over = float(np.mean(dev_crest_over_list)) if dev_crest_over_list else 0.0
         avg_dev_crest_under = float(np.mean(dev_crest_under_list)) if dev_crest_under_list else 0.0
         avg_dev_toe_over = float(np.mean(dev_toe_over_list)) if dev_toe_over_list else 0.0
@@ -381,6 +478,9 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
 
         num_pozos = 0
         total_kg = 0.0
+        pf_vol_avg = float('nan')
+        energy_total = 0.0
+        pf_area_avg = float('nan')
 
         lvl_float = None
         try:
@@ -391,10 +491,13 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
         if lvl_float is not None:
             mask_pozos = (blast_df['Z_collar'] - lvl_float).abs() <= DEFAULTS.blast_correlation_radius_m
             pozos_lvl = blast_df[mask_pozos]
-            
+
             projected_count = 0
             charge_sum = 0.0
-            
+            pf_pool = []
+            pf_area_pool = []
+            energy_sum = 0.0
+
             for sec in sections:
                 proj = proyectar_pozos_en_seccion(
                     pozos_lvl,
@@ -408,9 +511,26 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
                     projected_count += len(proj)
                     if kg_col:
                         charge_sum += proj[kg_col].fillna(0).sum()
-            
+                    proj_labeled = proj.copy()
+                    proj_labeled['level'] = str(lvl)
+                    pf_row = aggregate_powder_factor_by_group(
+                        pf_enriched, 'level', str(lvl), proj_labeled,
+                    )
+                    pf_val = pf_row.get('pf_vol_avg')
+                    if pf_val is not None and not (isinstance(pf_val, float) and np.isnan(pf_val)):
+                        pf_pool.append(pf_val)
+                    pa_val = pf_row.get('pf_area_avg')
+                    if pa_val is not None and not (isinstance(pa_val, float) and np.isnan(pa_val)):
+                        pf_area_pool.append(pa_val)
+                    energy_sum += pf_row.get('energy_total_mj', 0.0)
+
             num_pozos = projected_count
             total_kg = charge_sum
+            if pf_pool:
+                pf_vol_avg = float(np.mean(pf_pool))
+            if pf_area_pool:
+                pf_area_avg = float(np.mean(pf_area_pool))
+            energy_total = energy_sum
 
         bench_stats.append({
             'level': lvl,
@@ -420,12 +540,15 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
             'avg_dev_crest_under': avg_dev_crest_under,
             'avg_dev_toe_over': avg_dev_toe_over,
             'avg_dev_toe_under': avg_dev_toe_under,
+            'pf_vol_avg_kgm3': pf_vol_avg,
+            'pf_area_avg_kgm2': pf_area_avg,
+            'energy_total_mj': energy_total,
         })
 
     df_b = pd.DataFrame(bench_stats)
     if df_b.empty:
         return df_b
-        
+
     df_b['sort_level'] = pd.to_numeric(df_b['level'], errors='coerce').fillna(-9999)
     df_b = df_b.sort_values(by='sort_level', ascending=False).reset_index(drop=True)
     return df_b.drop(columns=['sort_level'])
@@ -436,6 +559,7 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
         return pd.DataFrame()
 
     mallas = blast_df[malla_col].dropna().unique().tolist()
+    pf_enriched = compute_powder_factor(blast_df) if not blast_df.empty else blast_df
     malla_stats = []
 
     for mal in mallas:
@@ -444,6 +568,8 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
         num_pozos = len(df_mal_pozos)
 
         intersected_sections = []
+        pf_pool = []
+        energy_sum = 0.0
         for sec in sections:
             proj = proyectar_pozos_en_seccion(
                 df_mal_pozos,
@@ -455,6 +581,15 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
             )
             if not proj.empty:
                 intersected_sections.append(sec.name)
+                proj_labeled = proj.copy()
+                proj_labeled['malla'] = str(mal)
+                pf_row = aggregate_powder_factor_by_group(
+                    pf_enriched, 'malla', str(mal), proj_labeled,
+                )
+                pf_val = pf_row.get('pf_vol_avg')
+                if pf_val is not None and not (isinstance(pf_val, float) and np.isnan(pf_val)):
+                    pf_pool.append(pf_val)
+                energy_sum += pf_row.get('energy_total_mj', 0.0)
 
         avg_dev_crest_over = 0.0
         avg_dev_crest_under = 0.0
@@ -492,6 +627,7 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
                         if under_t:
                             avg_dev_toe_under = float(np.mean(under_t))
 
+        pf_vol_avg = float(np.mean(pf_pool)) if pf_pool else float('nan')
         malla_stats.append({
             'malla': str(mal),
             'num_pozos': num_pozos,
@@ -500,7 +636,9 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
             'avg_dev_crest_under': avg_dev_crest_under,
             'avg_dev_toe_over': avg_dev_toe_over,
             'avg_dev_toe_under': avg_dev_toe_under,
-            'avg_overbreak': avg_overbreak
+            'avg_overbreak': avg_overbreak,
+            'pf_vol_avg_kgm3': pf_vol_avg,
+            'energy_total_mj': energy_sum,
         })
 
     return pd.DataFrame(malla_stats).reset_index(drop=True)
