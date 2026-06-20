@@ -17,6 +17,7 @@ from core.blast_metrics import (
     SPACING_BURDEN_RATIO_OPTIMAL,
     STEMMING_RATIO_OPTIMAL,
     SUBDRILLING_RATIO_OPTIMAL,
+    compute_altura_carga_m,
     compute_collar_deviation,
     compute_decoupling_ratio,
     compute_ispu,
@@ -263,7 +264,7 @@ class TestEnrichBlastDataframe:
             "stemming_ratio", "subdrilling_ratio", "spacing_burden_ratio",
             "kg_per_meter", "volume_load_kgm3", "coupling_ratio",
             "collar_deviation_deg", "kuznetsov_x50_cm", "ispu",
-            "bottom_column_ratio",
+            "bottom_column_ratio", "altura_carga_m",
         }
         assert expected_cols.issubset(set(out.columns))
 
@@ -369,3 +370,46 @@ class TestCalculoTronaduraNewColumns:
         out, *_ = procesar_pozos(df)
         assert pd.api.types.is_integer_dtype(out["Secuencia"])
         assert int(out["Secuencia"].iloc[0]) == 3
+
+
+class TestComputeAlturaCarga:
+    def test_basic(self):
+        longitud = pd.Series([15.0, 12.0, 20.0])
+        stemming = pd.Series([3.0, 2.5, 4.0])
+        out = compute_altura_carga_m(longitud, stemming)
+        assert out.iloc[0] == pytest.approx(12.0)
+        assert out.iloc[1] == pytest.approx(9.5)
+        assert out.iloc[2] == pytest.approx(16.0)
+
+    def test_zero_stemming(self):
+        longitud = pd.Series([10.0, 8.0])
+        stemming = pd.Series([0.0, 0.0])
+        out = compute_altura_carga_m(longitud, stemming)
+        assert out.iloc[0] == pytest.approx(10.0)
+        assert out.iloc[1] == pytest.approx(8.0)
+
+    def test_negative_clamped(self):
+        longitud = pd.Series([5.0, 3.0])
+        stemming = pd.Series([6.0, 10.0])
+        out = compute_altura_carga_m(longitud, stemming)
+        assert out.iloc[0] == pytest.approx(0.0)
+        assert out.iloc[1] == pytest.approx(0.0)
+
+    def test_nan_inputs(self):
+        longitud = pd.Series([10.0, float("nan"), 8.0])
+        stemming = pd.Series([2.0, 1.0, float("nan")])
+        out = compute_altura_carga_m(longitud, stemming)
+        assert out.iloc[0] == pytest.approx(8.0)
+        assert pd.isna(out.iloc[1])
+        assert pd.isna(out.iloc[2])
+
+    def test_with_enrich_blast_dataframe(self):
+        df = _proc_row(Len=15.0, Taco_m=3.0)
+        out = enrich_blast_dataframe(df)
+        assert "altura_carga_m" in out.columns
+        assert out["altura_carga_m"].iloc[0] == pytest.approx(12.0)
+
+    def test_enrich_skipped_without_columns(self):
+        df = _proc_row().drop(columns=["Taco_m"])
+        out = enrich_blast_dataframe(df)
+        assert "altura_carga_m" not in out.columns

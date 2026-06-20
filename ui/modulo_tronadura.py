@@ -9,6 +9,7 @@ import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -19,6 +20,7 @@ from core.blast_correlation import (
     aggregate_powder_factor_by_group,
     compute_powder_factor,
 )
+from core.blast_metrics import enrich_blast_dataframe
 from ui.ref_lines import add_ref_lines_3d
 
 logger = logging.getLogger(__name__)
@@ -85,6 +87,7 @@ def render_modulo_tronadura() -> None:
                     status.empty()
                     progress.empty()
                     return
+            df_clean = enrich_blast_dataframe(df_clean)
             st.session_state['blast_df_clean'] = df_clean
             st.session_state['blast_x_lines'] = x_lines
             st.session_state['blast_y_lines'] = y_lines
@@ -578,7 +581,101 @@ def _run_procesar_pozos(df, progress=None):
     return result
 
 
+_COLLAR_HOVERTEMPLATE = (
+    "<b>%{customdata[0]}</b><br>"
+    "X: %{x:.1f}<br>"
+    "Y: %{y:.1f}<br>"
+    "Z (collar): %{z:.1f}<br>"
+    "<b>📊 Datos del Pozo</b><br>"
+    "Explosivo: %{customdata[1]}<br>"
+    "Kilos cargados: %{customdata[2]:.0f} kg<br>"
+    "Diámetro: %{customdata[3]:.0f} mm<br>"
+    "Longitud real: %{customdata[4]:.2f} m<br>"
+    "Stemming: %{customdata[5]:.2f} m<br>"
+    "Altura de carga: %{customdata[6]:.2f} m<br>"
+    "Densidad lineal: %{customdata[7]:.1f} kg/m<br>"
+    "Inclinación: %{customdata[8]:.1f}°<br>"
+    "Azimut: %{customdata[9]:.0f}°<br>"
+    "<extra></extra>"
+)
+
+
+def _safe_numeric(series, default=0.0):
+    if series is None:
+        return pd.Series([default])
+    return pd.to_numeric(series, errors="coerce").fillna(default)
+
+
+def _safe_str(series, default="?"):
+    if series is None:
+        return pd.Series([default])
+    return series.fillna(default).astype(str)
+
+
+def _build_collar_customdata(df, kg_col):
+    """Return customdata array for collar hovertemplate enrichment."""
+    import numpy as np
+
+    n = len(df)
+    if n == 0:
+        return np.empty((0, 10), dtype=object)
+
+    label = (
+        _safe_str(df["label_pozo"]).values
+        if "label_pozo" in df.columns
+        else np.array(["?"] * n, dtype=object)
+    )
+    expl = (
+        _safe_str(df["Tipo_Explosivo"]).values
+        if "Tipo_Explosivo" in df.columns
+        else np.array(["?"] * n, dtype=object)
+    )
+    kilos = (
+        _safe_numeric(df[kg_col]).values
+        if kg_col and kg_col in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    diam = (
+        _safe_numeric(df["Diam_mm"]).values
+        if "Diam_mm" in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    length = (
+        _safe_numeric(df["Len"]).values
+        if "Len" in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    taco = (
+        _safe_numeric(df["Taco_m"]).values
+        if "Taco_m" in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    altura = (
+        _safe_numeric(df["altura_carga_m"]).values
+        if "altura_carga_m" in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    kgpm = (
+        _safe_numeric(df["kg_per_meter"]).values
+        if "kg_per_meter" in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    incl = (
+        _safe_numeric(df["Incl"]).values
+        if "Incl" in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    az = (
+        _safe_numeric(df["Az"]).values
+        if "Az" in df.columns
+        else np.zeros(n, dtype=float)
+    )
+    return np.column_stack([label, expl, kilos, diam, length, taco, altura, kgpm, incl, az])
+
+
 def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
+    import numpy as np
+
     fig = go.Figure()
 
     add_ref_lines_3d(fig, z_value=float(df['Z_collar'].max()) + 5)
@@ -628,12 +725,21 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         _plot_discrete_traces(fig, df, banco_col, unique_vals, "Banco")
     else:
         # --- Continuous Parametric Coloring ---
+        kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+        trajectory_custom = _build_collar_customdata(df, kg_col)
+        if trajectory_custom.shape[0] == len(df) and len(df) > 0:
+            trajectory_custom_repeat = np.repeat(trajectory_custom, 3, axis=0)
+        else:
+            trajectory_custom_repeat = trajectory_custom
+
         fig.add_trace(go.Scatter3d(
             x=x_lines, y=y_lines, z=z_lines,
             mode='lines',
             line=dict(color='rgba(150,150,150,0.5)', width=2),
             name='Trayectorias',
-            hoverinfo='skip',
+            customdata=trajectory_custom_repeat,
+            hovertemplate=_COLLAR_HOVERTEMPLATE,
+            showlegend=True,
         ))
 
         # Determine colors and scales based on choice
@@ -667,26 +773,33 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
             mode='markers',
             marker=marker,
             name='Collars',
-            hovertemplate='X: %{x:.1f}<br>Y: %{y:.1f}<br>Z: %{z:.1f}<extra>Collar</extra>',
+            customdata=_build_collar_customdata(df, kg_col),
+            hovertemplate=_COLLAR_HOVERTEMPLATE,
         ))
 
     # --- Volumetric Energy Density Grid (IDW 3D) ---
     if show_energy_grid:
-        import numpy as np
         kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
-        # 1. Bounding box
         x_min, x_max = float(df['X'].min()), float(df['X'].max())
         y_min, y_max = float(df['Y'].min()), float(df['Y'].max())
         z_min, z_max = float(df['Z_toe'].min()), float(df['Z_collar'].max())
 
-        # 2. Build 3D mesh grid (10x10x4 = 400 points for real-time calculation)
-        xs = np.linspace(x_min, x_max, 10)
-        ys = np.linspace(y_min, y_max, 10)
-        zs = np.linspace(z_min, z_max, 4)
+        grid_nx = st.session_state.get("idw_nx", 10)
+        grid_ny = st.session_state.get("idw_ny", 10)
+        grid_nz = st.session_state.get("idw_nz", 4)
+        search_radius = float(st.session_state.get("idw_radius", 30))
+        grid_nx = max(2, int(grid_nx))
+        grid_ny = max(2, int(grid_ny))
+        grid_nz = max(2, int(grid_nz))
+        if search_radius <= 0:
+            search_radius = 30.0
+
+        xs = np.linspace(x_min, x_max, grid_nx)
+        ys = np.linspace(y_min, y_max, grid_ny)
+        zs = np.linspace(z_min, z_max, grid_nz)
         grid_x, grid_y, grid_z = np.meshgrid(xs, ys, zs)
         points = np.vstack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()]).T
 
-        # 3. Vectorized IDW calculations
         C = df[['X', 'Y', 'Z_collar']].values.astype(float)
         T = df[['X_toe', 'Y_toe', 'Z_toe']].values.astype(float)
         V = T - C
@@ -702,7 +815,8 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
             closest = C + t_c[:, np.newaxis] * V
             d_sq = np.sum((gp - closest)**2, axis=1)
             d_sq[d_sq < 1e-4] = 1e-4
-            energy = np.sum(Q / d_sq)
+            weights = np.exp(-d_sq / (2.0 * search_radius ** 2))
+            energy = float(np.sum(Q * weights))
             energies.append(energy)
 
         st.session_state['last_idw_grid'] = {
@@ -712,19 +826,35 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
             'Energy_kg_m2': np.asarray(energies, dtype=float).copy(),
         }
 
-        # 4. Draw transparent volumetric scatter trace
+        energies_arr = np.asarray(energies, dtype=float)
+        idw_custom = np.column_stack([
+            points[:, 0],
+            points[:, 1],
+            points[:, 2],
+            energies_arr,
+        ])
+
         fig.add_trace(go.Scatter3d(
             x=points[:, 0], y=points[:, 1], z=points[:, 2],
             mode='markers',
             marker=dict(
-                size=7,
-                color=energies,
+                size=10,
+                color=energies_arr,
                 colorscale='YlOrRd',
-                opacity=0.3,
-                showscale=False,
+                opacity=0.5,
+                showscale=True,
+                colorbar=dict(title='Energía IDW (kg/m²)', x=1.05, len=0.6),
             ),
-            name='Densidad Energía',
-            hoverinfo='skip',
+            name=f'Densidad Energía (radio {search_radius:.0f} m)',
+            customdata=idw_custom,
+            hovertemplate=(
+                "X: %{customdata[0]:.1f} m<br>"
+                "Y: %{customdata[1]:.1f} m<br>"
+                "Z: %{customdata[2]:.1f} m<br>"
+                "Densidad: %{customdata[3]:.4g}<br>"
+                "<extra>Energía acumulada ΣQ·exp(-d²/2σ²) en "
+                f"{search_radius:.0f}m</extra>"
+            ),
             showlegend=True,
         ))
 
@@ -742,16 +872,47 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
 
     st.plotly_chart(fig, use_container_width=True)
 
+    if show_energy_grid:
+        st.caption(
+            "💡 La densidad de energía IDW (ΣQ·exp(−d²/2σ²)) representa la intensidad "
+            "ponderada de la carga explosiva en cada punto del espacio 3D, con peso "
+            "gaussiano respecto a la distancia al segmento collar-toe de cada pozo. "
+            "Útil para visualizar zonas de concentración de energía antes de "
+            "evaluar sobre-excavación. Ajusta resolución y radio en los controles "
+            "de arriba para refinar la grilla."
+        )
+
+        col_idw1, col_idw2, col_idw3 = st.columns(3)
+        grid_nx = col_idw1.slider(
+            "Resolución X", 5, 30, 10, key="idw_nx_widget",
+            help="Cantidad de nodos en X para la grilla IDW.",
+        )
+        grid_ny = col_idw2.slider(
+            "Resolución Y", 5, 30, 10, key="idw_ny_widget",
+            help="Cantidad de nodos en Y para la grilla IDW.",
+        )
+        grid_nz = col_idw3.slider(
+            "Resolución Z", 2, 10, 4, key="idw_nz_widget",
+            help="Cantidad de nodos en Z para la grilla IDW.",
+        )
+        st.slider(
+            "Radio de búsqueda IDW (m)", 5, 50, 30, key="idw_radius",
+            help="Desviación estándar σ del kernel gaussiano (m).",
+        )
+
 
 def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: list[str], label_prefix: str) -> None:
     color_cycle = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
     import numpy as np
 
+    kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+    sub_custom = _build_collar_customdata(df, kg_col)
+
     for idx, val_name in enumerate(unique_vals):
-        df_sub = df[df[category_col].astype(str) == val_name]
+        mask = (df[category_col].astype(str) == val_name).values
+        df_sub = df[mask]
         color = color_cycle[idx % len(color_cycle)]
 
-        # Reconstruct lines for just this subset
         n_s = len(df_sub)
         m_x = np.empty(n_s * 3, dtype=object)
         m_y = np.empty(n_s * 3, dtype=object)
@@ -776,17 +937,23 @@ def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: li
             m_z[j + 1] = zt[i]
             m_z[j + 2] = None
 
-        # Add trajectories
+        if sub_custom.shape[0] == len(df) and len(df) > 0:
+            line_custom = np.repeat(sub_custom[mask], 3, axis=0)
+            collar_custom = sub_custom[mask]
+        else:
+            line_custom = np.empty((0, 10))
+            collar_custom = np.empty((0, 10))
+
         fig.add_trace(go.Scatter3d(
             x=m_x, y=m_y, z=m_z,
             mode='lines',
             line=dict(color=color, width=2),
             name=f"Trayectorias {val_name}",
-            hoverinfo='skip',
+            customdata=line_custom,
+            hovertemplate=_COLLAR_HOVERTEMPLATE,
             showlegend=False,
         ))
 
-        # Add collars
         fig.add_trace(go.Scatter3d(
             x=df_sub['X'].values,
             y=df_sub['Y'].values,
@@ -794,7 +961,8 @@ def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: li
             mode='markers',
             marker=dict(size=4, color=color),
             name=f"{label_prefix}: {val_name}",
-            hovertemplate=f"{label_prefix}: {val_name}<br>X: %{{x:.1f}}<br>Y: %{{y:.1f}}<br>Z: %{{z:.1f}}<extra></extra>",
+            customdata=collar_custom,
+            hovertemplate=_COLLAR_HOVERTEMPLATE,
         ))
 
 

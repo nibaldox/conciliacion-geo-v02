@@ -100,6 +100,36 @@ def compute_kg_per_meter(df: pd.DataFrame) -> pd.Series:
     return out
 
 
+def compute_altura_carga_m(
+    longitud_real_m: pd.Series,
+    stemming_real_m: pd.Series,
+) -> pd.Series:
+    """Compute charge height (m) per well = longitud_real - stemming_real.
+
+    In ENAEX reports:
+      - longitud_real: total hole length (drilled)
+      - stemming_real: stemming (taco) at the top of the hole
+      - altura_carga = longitud_real - stemming_real (the explosive column)
+
+    Negative values (stemming > drilled) indicate data error; clamp to 0.
+    NaN inputs propagate as NaN.
+
+    Parameters
+    ----------
+    longitud_real_m : pd.Series
+        Total hole length in metres (renamed to 'Len' by procesar_pozos).
+    stemming_real_m : pd.Series
+        Stemming (taco) length in metres (renamed to 'Taco_m' by procesar_pozos).
+
+    Returns
+    -------
+    pd.Series
+        Charge height per well in metres (>= 0, or NaN if inputs NaN).
+    """
+    out = longitud_real_m.astype(float) - stemming_real_m.astype(float)
+    return out.clip(lower=0.0)
+
+
 def compute_decoupling_ratio(
     df: pd.DataFrame,
     well_kg_col: Optional[str] = None,
@@ -349,6 +379,7 @@ def enrich_blast_dataframe(
         * ``ispu``
         * ``bottom_column_ratio`` (only when both Carga_Fondo_kg and
           Carga_Columna_kg are present)
+        * ``altura_carga_m`` (charge column length = Len - Taco_m)
     """
     if df is None or df.empty:
         return df.copy() if df is not None else df
@@ -400,5 +431,13 @@ def enrich_blast_dataframe(
     bottom_ratio = _bottom_column_ratio(out)
     if bottom_ratio is not None:
         out["bottom_column_ratio"] = bottom_ratio
+
+    has_len = _first_present(out, _LENGTH_CANDIDATES) is not None
+    has_taco = _first_present(out, _TACO_CANDIDATES) is not None
+    if has_len and has_taco:
+        out["altura_carga_m"] = compute_altura_carga_m(
+            pd.to_numeric(out[_first_present(out, _LENGTH_CANDIDATES)], errors="coerce"),
+            pd.to_numeric(out[_first_present(out, _TACO_CANDIDATES)], errors="coerce"),
+        )
 
     return out
