@@ -62,6 +62,7 @@ class PipelineDefaults:
     blast_correlation_radius_m: float = 15.0   # meters — projection radius
     blast_correlation_pasadura_optimal: tuple = (0.5, 1.5)  # meters
     blast_default_bench_height: float = 15.0   # meters — used for pasadura
+    blast_temporal_filter_days: int = 7       # days — blast must precede topo by >= N days
 
 
 @dataclass(frozen=True)

@@ -248,3 +248,74 @@ class TestProyectarPozosEnSeccion:
 
         sig = inspect.signature(proyectar_pozos_en_seccion)
         assert sig.parameters["tolerance"].default == 10.0
+
+    def test_fecha_corte_param_is_optional(self):
+        """fecha_corte is an optional param defaulting to None (no filter)."""
+        import inspect
+
+        sig = inspect.signature(proyectar_pozos_en_seccion)
+        assert "fecha_corte" in sig.parameters
+        assert sig.parameters["fecha_corte"].default is None
+
+    def test_inclined_hole_included_via_toe(self):
+        """A hole whose collar is off-axis but whose toe is within tolerance
+        must be included (damage is delivered at the toe)."""
+        # Collar 40 m off the X-axis; toe swings down to ~2 m off axis.
+        df = _make_valid_hole(lat=0.0, lon=40.0, incl=71.8, az=180.0, length=40.0, label="INCLINED")
+        out = procesar_pozos(df)[0]
+        proj = proyectar_pozos_en_seccion(
+            out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0, tolerance=10.0
+        )
+        assert not proj.empty
+        assert "dist_perp_toe" in proj.columns
+        assert "closest_point" in proj.columns
+        assert proj["closest_point"].iloc[0] == "toe"
+        assert proj["dist_perp_toe"].iloc[0] <= 10.0
+
+    def test_closest_point_is_collar_when_collar_nearer(self):
+        """For a vertical hole on the axis, the collar is the closest point."""
+        df = _make_valid_hole(lat=0.0, lon=0.0, label="VERT")
+        out = procesar_pozos(df)[0]
+        proj = proyectar_pozos_en_seccion(
+            out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=100.0, tolerance=5.0
+        )
+        assert proj["closest_point"].iloc[0] == "collar"
+
+    def test_fecha_corte_drops_late_and_empty_holes(self):
+        """Holes blasted after the survey date (or with no date) are excluded."""
+        df = pd.concat(
+            [
+                _make_valid_hole(lat=0.0, lon=0.0, label="EARLY", fecha="2026-01-10"),
+                _make_valid_hole(lat=0.0, lon=10.0, label="LATE", fecha="2026-06-01"),
+                _make_valid_hole(lat=0.0, lon=20.0, label="NODATE", fecha=None),
+            ],
+            ignore_index=True,
+        )
+        out = procesar_pozos(df)[0]
+        proj_all = proyectar_pozos_en_seccion(
+            out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0, tolerance=100.0
+        )
+        assert {"EARLY", "LATE"} <= set(proj_all["label_pozo"])
+        proj_cut = proyectar_pozos_en_seccion(
+            out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0,
+            tolerance=100.0, fecha_corte="2026-05-01",
+        )
+        labels = set(proj_cut["label_pozo"])
+        assert "EARLY" in labels
+        assert "LATE" not in labels
+        assert "NODATE" not in labels
+
+    def test_fecha_corte_none_keeps_all(self):
+        """Without fecha_corte the temporal filter is inactive."""
+        df = pd.concat(
+            [
+                _make_valid_hole(lat=0.0, lon=0.0, label="A", fecha="2026-06-01"),
+                _make_valid_hole(lat=0.0, lon=10.0, label="B", fecha="2026-01-01"),
+            ],
+            ignore_index=True,
+        )
+        out = procesar_pozos(df)[0]
+        proj = proyectar_pozos_en_seccion(
+            out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0, tolerance=100.0
+        )
+        assert {"A", "B"} == set(proj["label_pozo"])

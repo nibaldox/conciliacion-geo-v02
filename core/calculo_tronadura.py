@@ -10,6 +10,8 @@ Columnas descartadas al procesar (según descripción ENAEX):
 """
 import numpy as np
 import pandas as pd
+from datetime import timedelta
+from core.config import DEFAULTS
 from core.geom_utils import find_df_column
 
 COLS_DROP = [
@@ -125,29 +127,56 @@ def proyectar_pozos_en_seccion(
     azimuth: float,
     length: float,
     tolerance: float = 10.0,
+    fecha_corte: "str | None" = None,
 ) -> pd.DataFrame:
     """Project blast holes onto a section's coordinate system.
 
     For each hole, computes:
-      - dist_perp: perpendicular distance to the section line (metres)
+      - dist_perp: perpendicular distance to the section line at the collar (metres)
+      - dist_perp_toe: perpendicular distance to the section line at the toe (metres)
       - dist_along: distance along the section axis from origin (metres)
+      - closest_point: 'collar' or 'toe', whichever is closer to the section
 
-    Only holes within `tolerance` metres perpendicular distance are returned.
+    A hole is included when **either** its collar or its toe (or the
+    midpoint between them) falls within `tolerance` metres perpendicular
+    distance. The collar along-axis position is still used to filter the
+    along-section range.
 
     Parameters
     ----------
-    df_pozos : DataFrame with columns X, Y, Z_collar, Z_toe, Len (from procesar_pozos)
-    origin   : np.ndarray [X, Y] section origin
-    azimuth  : degrees from North, clockwise
-    length   : section total length in metres
-    tolerance: max perpendicular distance to include a hole (default 10 m)
+    df_pozos  : DataFrame with columns X, Y, Z_collar, Z_toe, Len
+                (output of procesar_pozos).
+    origin    : np.ndarray [X, Y] section origin.
+    azimuth   : degrees from North, clockwise.
+    length    : section total length in metres.
+    tolerance : max perpendicular distance to include a hole (default 10 m).
+    fecha_corte : ISO date string (YYYY-MM-DD) of the topographic survey.
+                If provided, holes whose ``fecha_tronadura`` is missing or
+                strictly later than this date are dropped from the result
+                (they cannot have caused damage captured by that survey).
 
     Returns
     -------
-    DataFrame filtered and augmented with 'dist_along' and 'dist_perp'.
+    DataFrame filtered and augmented with 'dist_along', 'dist_along_toe',
+    'dist_perp', 'dist_perp_toe' and 'closest_point'.
     """
     if df_pozos.empty:
         return df_pozos
+
+    if fecha_corte is not None and 'fecha_tronadura' in df_pozos.columns:
+        try:
+            cutoff = pd.to_datetime(fecha_corte).date()
+            buffer_days = getattr(DEFAULTS, 'blast_temporal_filter_days', 7)
+            cutoff = cutoff - timedelta(days=buffer_days)
+            fecha_series = pd.to_datetime(
+                df_pozos['fecha_tronadura'], errors='coerce'
+            ).dt.date
+            df_pozos = df_pozos[fecha_series.notna() & (fecha_series <= cutoff)]
+
+            if df_pozos.empty:
+                return df_pozos
+        except (ValueError, TypeError):
+            pass
 
     direction = np.array([np.sin(np.radians(azimuth)),
                           np.cos(np.radians(azimuth))])
@@ -159,21 +188,35 @@ def proyectar_pozos_en_seccion(
     dist_along_collar = dx_collar * direction[0] + dy_collar * direction[1]
     dist_perp_collar = np.abs(dx_collar * normal[0] + dy_collar * normal[1])
 
-    # Defensive guard in case X_toe / Y_toe are not present in raw dataframe
     x_toe_vals = df_pozos['X_toe'].values if 'X_toe' in df_pozos.columns else df_pozos['X'].values
     y_toe_vals = df_pozos['Y_toe'].values if 'Y_toe' in df_pozos.columns else df_pozos['Y'].values
 
     dx_toe = x_toe_vals - origin[0]
     dy_toe = y_toe_vals - origin[1]
     dist_along_toe = dx_toe * direction[0] + dy_toe * direction[1]
+    dist_perp_toe = np.abs(dx_toe * normal[0] + dy_toe * normal[1])
+
+    dist_perp_mid = (dist_perp_collar + dist_perp_toe) / 2.0
 
     half_len = length / 2
-    mask = (dist_perp_collar <= tolerance) & (dist_along_collar >= -half_len) & (dist_along_collar <= half_len)
+    perp_eps = 1e-6
+    mask = (
+        ((dist_perp_collar <= tolerance + perp_eps) | (dist_perp_toe <= tolerance + perp_eps) | (dist_perp_mid <= tolerance + perp_eps))
+        & (dist_along_collar >= -half_len)
+        & (dist_along_collar <= half_len)
+    )
 
     result = df_pozos.loc[mask].copy()
     result['dist_along'] = dist_along_collar[mask]
     result['dist_along_toe'] = dist_along_toe[mask]
     result['dist_perp'] = dist_perp_collar[mask]
+    result['dist_perp_toe'] = dist_perp_toe[mask]
+    closest = np.where(
+        dist_perp_collar[mask] <= dist_perp_toe[mask],
+        'collar',
+        'toe',
+    )
+    result['closest_point'] = closest
 
     return result.sort_values('dist_along').reset_index(drop=True)
 

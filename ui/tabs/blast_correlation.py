@@ -9,6 +9,7 @@ try:
 except ImportError:
     _HAS_STATSMODELS = False
 from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.blast_correlation import compute_signed_deviations
 from core.config import DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
@@ -43,7 +44,31 @@ def render_tab_blast_correlation(config: dict) -> None:
         key="corr_projection_tolerance"
     )
 
-    df_sections_calc = _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, comparison_results, tolerance)
+    use_temporal_filter = st.checkbox(
+        "Filtrar pozos por fecha de tronadura (recomendado)",
+        value=True,
+        key="corr_use_temporal_filter",
+        help="Excluye pozos tronados después del levantamiento topográfico para evitar correlaciones espurias.",
+    )
+    fecha_levantamiento = None
+    if use_temporal_filter:
+        fecha_levantamiento = st.date_input(
+            "Fecha de levantamiento topográfico:",
+            value=None,
+            key="fecha_levantamiento",
+            help="Solo se incluyen pozos tronados en o antes de esta fecha.",
+        )
+        if fecha_levantamiento is None:
+            st.warning("⚠️ No se ha indicado fecha de levantamiento: la correlación puede incluir pozos tronados después del levantamiento, generando resultados espurios.")
+    else:
+        st.info("ℹ️ Filtro temporal desactivado: la correlación puede incluir pozos tronados después del levantamiento.")
+
+    fecha_corte_str = fecha_levantamiento.isoformat() if fecha_levantamiento else None
+
+    df_sections_calc = _get_or_compute_sections_data(
+        sections, mesh_design, mesh_topo, blast_df, comparison_results,
+        tolerance, fecha_corte_str,
+    )
 
     with st.expander("🔎 Filtros del Análisis de Correlación", expanded=True):
         cols_filter = st.columns(3)
@@ -112,7 +137,7 @@ def render_tab_blast_correlation(config: dict) -> None:
     with tab_sec:
         st.markdown("#### Distribución de Energía y Desviación por Sección Transversal")
         
-        col_list = ['section', 'sector', 'num_pozos', 'total_kg', 'area_over', 'area_under', 'avg_abs_dev']
+        col_list = ['section', 'sector', 'num_pozos', 'total_kg', 'area_over', 'area_under', 'avg_over_break', 'avg_under_break']
         display_map = {
             'section': 'Sección',
             'sector': 'Sector',
@@ -120,7 +145,8 @@ def render_tab_blast_correlation(config: dict) -> None:
             'total_kg': 'Carga Explosiva (Kg)',
             'area_over': 'Sobre-excavación (m²)',
             'area_under': 'Deuda / Relleno (m²)',
-            'avg_abs_dev': 'Desviación Abs. Media (m)'
+            'avg_over_break': 'Sobre-excavación Media (m)',
+            'avg_under_break': 'Deuda / Relleno Media (m)'
         }
         
         df_sec_disp = df_filtered_sections[col_list].rename(columns=display_map)
@@ -130,15 +156,15 @@ def render_tab_blast_correlation(config: dict) -> None:
             fig_scatter = px.scatter(
                 df_filtered_sections,
                 x="total_kg",
-                y="area_over",
+                y="avg_over_break",
                 color="sector",
                 hover_name="section",
                 labels={
                     "total_kg": "Carga Explosiva Proyectada (Kg)",
-                    "area_over": "Área de Sobre-excavación (m²)",
+                    "avg_over_break": "Sobre-excavación Media (m)",
                     "sector": "Sector"
                 },
-                title="Correlación: Carga Explosiva vs Área de Sobre-excavación por Sección",
+                title="Correlación: Carga Explosiva vs Sobre-excavación Media por Sección",
                 trendline="ols" if _HAS_STATSMODELS and len(df_filtered_sections) > 2 and np.var(df_filtered_sections['total_kg']) > 0 else None
             )
             fig_scatter.update_layout(height=450)
@@ -147,17 +173,19 @@ def render_tab_blast_correlation(config: dict) -> None:
     with tab_bnc:
         st.markdown("#### Comportamiento Horizontal por Banco / Nivel de Cota")
 
-        df_bench_corr = _compute_bench_correlation(sections, blast_df, df_filtered_comps, tolerance, kg_col)
+        df_bench_corr = _compute_bench_correlation(sections, blast_df, df_filtered_comps, tolerance, kg_col, fecha_corte_str)
         if df_bench_corr.empty:
             st.info("No hay datos de bancos para los filtros seleccionados.")
         else:
-            col_list_b = ['level', 'num_pozos', 'total_kg', 'avg_dev_crest', 'avg_dev_toe']
+            col_list_b = ['level', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under']
             display_map_b = {
                 'level': 'Nivel / Cota',
                 'num_pozos': 'Cantidad de Pozos',
                 'total_kg': 'Carga Explosiva (Kg)',
-                'avg_dev_crest': 'Sobre-quiebre Cresta Medio (m)',
-                'avg_dev_toe': 'Sobre-quiebre Pata Medio (m)'
+                'avg_dev_crest_over': 'Sobre-quiebre Cresta (m)',
+                'avg_dev_crest_under': 'Deuda Cresta (m)',
+                'avg_dev_toe_over': 'Sobre-quiebre Pata (m)',
+                'avg_dev_toe_under': 'Deuda Pata (m)'
             }
             df_b_disp = df_bench_corr[col_list_b].rename(columns=display_map_b)
             st.dataframe(df_b_disp, use_container_width=True, height=300)
@@ -172,22 +200,33 @@ def render_tab_blast_correlation(config: dict) -> None:
             ))
             fig_bench.add_trace(go.Scatter(
                 x=df_bench_corr['level'],
-                y=df_bench_corr['avg_dev_crest'].abs(),
-                name='Desviación Cresta Media (m)',
+                y=df_bench_corr['avg_dev_crest_over'],
+                name='Sobre-quiebre Cresta (m)',
                 mode='lines+markers',
                 line=dict(color='darkorange', width=3),
                 yaxis='y2'
             ))
+            fig_bench.add_trace(go.Scatter(
+                x=df_bench_corr['level'],
+                y=df_bench_corr['avg_dev_crest_under'],
+                name='Deuda Cresta (m)',
+                mode='lines+markers',
+                line=dict(color='steelblue', width=3, dash='dash'),
+                yaxis='y2'
+            ))
             
             fig_bench.update_layout(
-                title='Relación Carga Explosiva vs Desviación de Cresta por Banco',
+                title='Relación Carga Explosiva vs Desviación de Cresta por Banco (con signo)',
                 xaxis=dict(title='Nivel de Banco (Cota)', type='category'),
                 yaxis=dict(title=dict(text='Carga Explosiva Total (Kg)', font=dict(color='crimson')), tickcolor='crimson'),
                 yaxis2=dict(
-                    title=dict(text='Desviación de Cresta Abs. Media (m)', font=dict(color='darkorange')),
+                    title=dict(text='Desviación de Cresta Media (m, con signo)', font=dict(color='darkorange')),
                     tickcolor='darkorange',
                     overlaying='y',
-                    side='right'
+                    side='right',
+                    zeroline=True,
+                    zerolinecolor='gray',
+                    zerolinewidth=1
                 ),
                 height=450,
                 legend=dict(x=0.01, y=0.99)
@@ -197,21 +236,23 @@ def render_tab_blast_correlation(config: dict) -> None:
     with tab_mal:
         st.markdown("#### Evaluación de Daño Geotécnico por Malla / Polígono de Tronadura")
 
-        df_malla_corr = _compute_malla_correlation(sections, blast_df, df_filtered_sections, tolerance, kg_col, malla_col)
+        df_malla_corr = _compute_malla_correlation(sections, blast_df, df_filtered_sections, tolerance, kg_col, malla_col, fecha_corte_str)
         if df_malla_corr.empty:
             st.info("No se identificaron mallas o polígonos de tronadura válidos en los datos cargados.")
         else:
             if sel_mallas:
                 df_malla_corr = df_malla_corr[df_malla_corr['malla'].isin(sel_mallas)]
             
-            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest', 'avg_dev_toe', 'avg_overbreak']
+            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'avg_overbreak']
             display_map_m = {
                 'malla': 'Malla / Polígono',
                 'num_pozos': 'Cantidad de Pozos',
                 'total_kg': 'Carga Explosiva (Kg)',
-                'avg_dev_crest': 'Sobre-quiebre Cresta Medio (m)',
-                'avg_dev_toe': 'Sobre-quiebre Pata Medio (m)',
-                'avg_overbreak': 'Sobre-excavación Media (m²)'
+                'avg_dev_crest_over': 'Sobre-quiebre Cresta (m)',
+                'avg_dev_crest_under': 'Deuda Cresta (m)',
+                'avg_dev_toe_over': 'Sobre-quiebre Pata (m)',
+                'avg_dev_toe_under': 'Deuda Pata (m)',
+                'avg_overbreak': 'Sobre-excavación Media (m)'
             }
             df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
             st.dataframe(df_m_disp, use_container_width=True, height=300)
@@ -233,12 +274,12 @@ def render_tab_blast_correlation(config: dict) -> None:
             st.plotly_chart(fig_malla, use_container_width=True)
 
 
-def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, comparison_results, tolerance) -> pd.DataFrame:
+def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, comparison_results, tolerance, fecha_corte=None) -> pd.DataFrame:
     cut_cache_key = (
         tuple(s.name for s in sections),
         tuple(sorted(blast_df.columns)),
     )
-    full_cache_key = (cut_cache_key, tolerance)
+    full_cache_key = (cut_cache_key, tolerance, fecha_corte)
 
     if 'blast_corr_sections_cache' in st.session_state:
         cached_key, cached_df = st.session_state.blast_corr_sections_cache
@@ -274,18 +315,14 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
             origin=sec.origin,
             azimuth=sec.azimuth,
             length=sec.length,
-            tolerance=tolerance
+            tolerance=tolerance,
+            fecha_corte=fecha_corte,
         )
 
         num_pozos = len(proj)
         total_kg = proj[kg_col].fillna(0).sum() if (kg_col and not proj.empty) else 0.0
 
-        sec_comps = [c for c in comparison_results if c.get('section') == sec.name]
-        avg_abs_dev = 0.0
-        if sec_comps:
-            devs = [abs(c.get('delta_crest', c.get('height_dev', 0))) for c in sec_comps if c.get('delta_crest') is not None or c.get('height_dev') is not None]
-            if devs:
-                avg_abs_dev = np.mean(devs)
+        signed = compute_signed_deviations(comparison_results or [], sec.name)
 
         data_rows.append({
             'section': sec.name,
@@ -294,18 +331,22 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
             'total_kg': total_kg,
             'area_over': a_over,
             'area_under': a_under,
-            'avg_abs_dev': avg_abs_dev
+            'avg_over_break': signed['avg_over'],
+            'avg_under_break': signed['avg_under'],
         })
 
     df = pd.DataFrame(data_rows)
     if df.empty:
-        df = pd.DataFrame(columns=['section', 'sector', 'num_pozos', 'total_kg', 'area_over', 'area_under', 'avg_abs_dev'])
+        df = pd.DataFrame(columns=[
+            'section', 'sector', 'num_pozos', 'total_kg',
+            'area_over', 'area_under', 'avg_over_break', 'avg_under_break',
+        ])
 
     st.session_state.blast_corr_sections_cache = (full_cache_key, df)
     return df
 
 
-def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col) -> pd.DataFrame:
+def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, fecha_corte=None) -> pd.DataFrame:
     if df_comps.empty:
         return pd.DataFrame()
 
@@ -315,11 +356,28 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col) 
     for lvl in unique_levels:
         df_lvl_comps = df_comps[df_comps['level'] == lvl]
         
-        dev_crest_list = df_lvl_comps['delta_crest'].dropna().tolist()
-        dev_toe_list = df_lvl_comps['delta_toe'].dropna().tolist()
+        if 'delta_crest' in df_lvl_comps.columns:
+            dev_crest_over_list = df_lvl_comps['delta_crest'].dropna()
+            dev_crest_over_list = dev_crest_over_list[dev_crest_over_list > 0].tolist()
+            dev_crest_under_list = df_lvl_comps['delta_crest'].dropna()
+            dev_crest_under_list = dev_crest_under_list[dev_crest_under_list < 0].tolist()
+        else:
+            dev_crest_over_list = []
+            dev_crest_under_list = []
+
+        if 'delta_toe' in df_lvl_comps.columns:
+            dev_toe_over_list = df_lvl_comps['delta_toe'].dropna()
+            dev_toe_over_list = dev_toe_over_list[dev_toe_over_list > 0].tolist()
+            dev_toe_under_list = df_lvl_comps['delta_toe'].dropna()
+            dev_toe_under_list = dev_toe_under_list[dev_toe_under_list < 0].tolist()
+        else:
+            dev_toe_over_list = []
+            dev_toe_under_list = []
         
-        avg_dev_crest = np.mean(dev_crest_list) if dev_crest_list else 0.0
-        avg_dev_toe = np.mean(dev_toe_list) if dev_toe_list else 0.0
+        avg_dev_crest_over = float(np.mean(dev_crest_over_list)) if dev_crest_over_list else 0.0
+        avg_dev_crest_under = float(np.mean(dev_crest_under_list)) if dev_crest_under_list else 0.0
+        avg_dev_toe_over = float(np.mean(dev_toe_over_list)) if dev_toe_over_list else 0.0
+        avg_dev_toe_under = float(np.mean(dev_toe_under_list)) if dev_toe_under_list else 0.0
 
         num_pozos = 0
         total_kg = 0.0
@@ -343,7 +401,8 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col) 
                     origin=sec.origin,
                     azimuth=sec.azimuth,
                     length=sec.length,
-                    tolerance=tolerance
+                    tolerance=tolerance,
+                    fecha_corte=fecha_corte,
                 )
                 if not proj.empty:
                     projected_count += len(proj)
@@ -357,8 +416,10 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col) 
             'level': lvl,
             'num_pozos': num_pozos,
             'total_kg': total_kg,
-            'avg_dev_crest': avg_dev_crest,
-            'avg_dev_toe': avg_dev_toe
+            'avg_dev_crest_over': avg_dev_crest_over,
+            'avg_dev_crest_under': avg_dev_crest_under,
+            'avg_dev_toe_over': avg_dev_toe_over,
+            'avg_dev_toe_under': avg_dev_toe_under,
         })
 
     df_b = pd.DataFrame(bench_stats)
@@ -370,7 +431,7 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col) 
     return df_b.drop(columns=['sort_level'])
 
 
-def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_col, malla_col) -> pd.DataFrame:
+def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_col, malla_col, fecha_corte=None) -> pd.DataFrame:
     if not malla_col or malla_col not in blast_df.columns:
         return pd.DataFrame()
 
@@ -389,38 +450,56 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
                 origin=sec.origin,
                 azimuth=sec.azimuth,
                 length=sec.length,
-                tolerance=tolerance
+                tolerance=tolerance,
+                fecha_corte=fecha_corte,
             )
             if not proj.empty:
                 intersected_sections.append(sec.name)
 
-        avg_dev_crest = 0.0
-        avg_dev_toe = 0.0
+        avg_dev_crest_over = 0.0
+        avg_dev_crest_under = 0.0
+        avg_dev_toe_over = 0.0
+        avg_dev_toe_under = 0.0
         avg_overbreak = 0.0
 
         if intersected_sections:
             df_sec_match = df_sections[df_sections['section'].isin(intersected_sections)]
             if not df_sec_match.empty:
-                avg_overbreak = df_sec_match['area_over'].mean()
+                if 'avg_over_break' in df_sec_match.columns:
+                    avg_overbreak = df_sec_match['avg_over_break'].mean()
+                else:
+                    avg_overbreak = df_sec_match['area_over'].mean()
 
             comparison_results = st.session_state.get('comparison_results', [])
             if comparison_results:
                 df_comps = pd.DataFrame(comparison_results)
                 df_comps_match = df_comps[df_comps['section'].isin(intersected_sections)]
                 if not df_comps_match.empty:
-                    dev_c = df_comps_match['delta_crest'].dropna().tolist()
-                    dev_t = df_comps_match['delta_toe'].dropna().tolist()
-                    if dev_c:
-                        avg_dev_crest = np.mean(dev_c)
-                    if dev_t:
-                        avg_dev_toe = np.mean(dev_t)
+                    if 'delta_crest' in df_comps_match.columns:
+                        dc = df_comps_match['delta_crest'].dropna()
+                        over_c = dc[dc > 0].tolist()
+                        under_c = dc[dc < 0].tolist()
+                        if over_c:
+                            avg_dev_crest_over = float(np.mean(over_c))
+                        if under_c:
+                            avg_dev_crest_under = float(np.mean(under_c))
+                    if 'delta_toe' in df_comps_match.columns:
+                        dt = df_comps_match['delta_toe'].dropna()
+                        over_t = dt[dt > 0].tolist()
+                        under_t = dt[dt < 0].tolist()
+                        if over_t:
+                            avg_dev_toe_over = float(np.mean(over_t))
+                        if under_t:
+                            avg_dev_toe_under = float(np.mean(under_t))
 
         malla_stats.append({
             'malla': str(mal),
             'num_pozos': num_pozos,
             'total_kg': total_kg,
-            'avg_dev_crest': avg_dev_crest,
-            'avg_dev_toe': avg_dev_toe,
+            'avg_dev_crest_over': avg_dev_crest_over,
+            'avg_dev_crest_under': avg_dev_crest_under,
+            'avg_dev_toe_over': avg_dev_toe_over,
+            'avg_dev_toe_under': avg_dev_toe_under,
             'avg_overbreak': avg_overbreak
         })
 

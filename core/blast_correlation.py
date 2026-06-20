@@ -35,9 +35,25 @@ class BlastCorrelationRow:
     num_wells: int
     total_kg: float
     mean_abs_deviation: float
+    avg_over_break: float = 0.0
+    avg_under_break: float = 0.0
+    n_over: int = 0
+    n_under: int = 0
 
     def as_tuple(self) -> tuple:
         return (self.section_name, self.num_wells, self.total_kg, self.mean_abs_deviation)
+
+    def as_signed_tuple(self) -> tuple:
+        return (
+            self.section_name,
+            self.num_wells,
+            self.total_kg,
+            self.mean_abs_deviation,
+            self.avg_over_break,
+            self.avg_under_break,
+            self.n_over,
+            self.n_under,
+        )
 
 
 def _first_present(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
@@ -49,11 +65,78 @@ def _first_present(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]
 
 
 def _deviation_column(comparisons: List[dict]) -> Optional[str]:
-    """Pick the first available deviation column from a comparisons list."""
+    """Pick the preferred signed deviation column from a comparisons list.
+
+    Prefers columns that carry sign information about the direction of the
+    deviation (``delta_crest`` and ``delta_toe``). Falls back to unsigned
+    deviation columns (``height_dev`` / ``angle_dev``) when the signed ones
+    are not available.
+    """
     if not comparisons:
         return None
-    keys = [k for k in ("delta_crest", "height_dev", "angle_dev") if k in comparisons[0]]
+    keys = [
+        k for k in ("delta_crest", "delta_toe", "height_dev", "angle_dev")
+        if k in comparisons[0]
+    ]
     return keys[0] if keys else None
+
+
+def compute_signed_deviations(
+    comparisons: List[dict],
+    section_name: str,
+) -> dict:
+    """Aggregate signed crest/toe deviations for one section.
+
+    Returns a dict with:
+        - avg_over  (float): mean of positive ``delta_crest`` (overbreak)
+        - avg_under (float): mean of negative ``delta_crest`` (deuda/underbreak)
+        - n_over    (int):   count of positive values
+        - n_under   (int):   count of negative values
+
+    Sign convention (verified in ``core/param_extractor.py``):
+        delta_crest > 0 → sobre-excavación (topo crest ahead of design)
+        delta_crest < 0 → deuda / sub-excavación (topo crest behind design)
+
+    Falls back to ``delta_toe`` when ``delta_crest`` is not present; falls
+    back to ``height_dev``/``angle_dev`` with ``abs()`` only when no signed
+    column is available (in that case both counters collapse onto ``over``).
+    """
+    if not comparisons:
+        return {"avg_over": 0.0, "avg_under": 0.0, "n_over": 0, "n_under": 0}
+
+    sec_comps = [c for c in comparisons if c.get("section") == section_name]
+    if not sec_comps:
+        return {"avg_over": 0.0, "avg_under": 0.0, "n_over": 0, "n_under": 0}
+
+    signed_col = None
+    for cand in ("delta_crest", "delta_toe"):
+        if any(cand in sc and sc.get(cand) is not None for sc in sec_comps):
+            signed_col = cand
+            break
+
+    if signed_col:
+        deltas = [sc[signed_col] for sc in sec_comps if sc.get(signed_col) is not None]
+        over_vals = [d for d in deltas if d > 0]
+        under_vals = [d for d in deltas if d < 0]
+    else:
+        for cand in ("height_dev", "angle_dev"):
+            if any(cand in sc and sc.get(cand) is not None for sc in sec_comps):
+                deltas = [abs(sc[cand]) for sc in sec_comps if sc.get(cand) is not None]
+                over_vals = deltas
+                under_vals = []
+                break
+        else:
+            return {"avg_over": 0.0, "avg_under": 0.0, "n_over": 0, "n_under": 0}
+
+    avg_over = float(sum(over_vals) / len(over_vals)) if over_vals else 0.0
+    avg_under = float(sum(under_vals) / len(under_vals)) if under_vals else 0.0
+
+    return {
+        "avg_over": avg_over,
+        "avg_under": avg_under,
+        "n_over": len(over_vals),
+        "n_under": len(under_vals),
+    }
 
 
 def _pasadura(df: pd.DataFrame, bench_height: float) -> pd.Series:
@@ -115,6 +198,8 @@ def compute_blast_geotech_correlation(
         else:
             mean_dev = 0.0
 
+        signed = compute_signed_deviations(comparisons or [], sec_name)
+
         proj = proyectar_pozos_en_seccion(
             df_pozos,
             origin=getattr(sec, "origin"),
@@ -137,6 +222,10 @@ def compute_blast_geotech_correlation(
                 num_wells=num_wells,
                 total_kg=total_kg,
                 mean_abs_deviation=mean_dev,
+                avg_over_break=signed["avg_over"],
+                avg_under_break=signed["avg_under"],
+                n_over=signed["n_over"],
+                n_under=signed["n_under"],
             )
         )
     return rows

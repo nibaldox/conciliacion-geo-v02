@@ -62,8 +62,14 @@ def render_tab_ai(config: dict) -> None:
                     dev_col = col_name
                     break
             if dev_col:
-                df_comp['abs_dev'] = df_comp[dev_col].abs()
-                sec_grouped = df_comp.groupby('section')['abs_dev'].mean().reset_index()
+                if dev_col == 'delta_crest':
+                    df_over = df_comp[df_comp['delta_crest'] > 0]
+                    sec_grouped = df_over.groupby('section')['delta_crest'].mean().reset_index()
+                    value_col = 'delta_crest'
+                else:
+                    df_comp['abs_dev'] = df_comp[dev_col].abs()
+                    sec_grouped = df_comp.groupby('section')['abs_dev'].mean().reset_index()
+                    value_col = 'abs_dev'
 
                 corr_data = []
                 for sec in sections:
@@ -71,7 +77,7 @@ def render_tab_ai(config: dict) -> None:
                     match = sec_grouped[sec_grouped['section'] == sec_name]
                     if match.empty:
                         continue
-                    avg_dev = match['abs_dev'].values[0]
+                    avg_dev = match[value_col].values[0]
                     proj_wells = proyectar_pozos_en_seccion(
                         blast_df,
                         origin=sec.origin,
@@ -161,15 +167,19 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
                 dev_col = col_name
                 break
         if dev_col:
-            df_comp['abs_dev'] = df_comp[dev_col].abs()
-            sec_grouped = df_comp.groupby('section')['abs_dev'].mean().reset_index()
+            if dev_col == 'delta_crest':
+                df_over = df_comp[df_comp['delta_crest'] > 0]
+                sec_grouped = df_over.groupby('section')['delta_crest'].mean().reset_index()
+            else:
+                df_valid = df_comp.dropna(subset=[dev_col])
+                sec_grouped = df_valid.groupby('section')[dev_col].mean().reset_index()
 
             for sec in sections:
                 sec_name = sec.name
                 match = sec_grouped[sec_grouped['section'] == sec_name]
                 if match.empty:
                     continue
-                avg_dev = match['abs_dev'].values[0]
+                avg_dev = float(match[dev_col].values[0])
 
                 proj = proyectar_pozos_en_seccion(
                     blast_df,
@@ -180,8 +190,12 @@ def _render_local_blast_advisory(df_final: pd.DataFrame) -> None:
                 )
                 if not proj.empty:
                     total_kg = proj[kg_col].fillna(0).sum()
-                    if avg_dev > 1.0 and total_kg > 2000:
-                        st.info(f"💡 **Recomendación Voladura en {sec_name}**: Se registra daño severo en el talud ({avg_dev:.2f}m) junto con una alta concentración de carga cercana ({total_kg:.0f} Kg). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción.")
+                    severity = avg_dev if dev_col == 'delta_crest' else abs(avg_dev)
+                    if severity > 1.0 and total_kg > 2000:
+                        if dev_col == 'delta_crest':
+                            st.info(f"💡 **Recomendación Voladura en {sec_name}**: Se registra sobre-excavación en el talud ({avg_dev:.2f} m de sobre-quiebre de cresta) junto con una alta concentración de carga cercana ({total_kg:.0f} Kg). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción.")
+                        else:
+                            st.info(f"💡 **Recomendación Voladura en {sec_name}**: Se registra daño severo en el talud ({avg_dev:.2f}m) junto con una alta concentración de carga cercana ({total_kg:.0f} Kg). Se sugiere aumentar el espaciamiento de pre-corte en un 10% o reducir el factor de carga en las primeras filas de producción.")
                         has_alert = True
 
     if not has_alert:
