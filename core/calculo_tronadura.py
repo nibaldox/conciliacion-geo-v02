@@ -84,7 +84,7 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
         raise_error=False,
     )
     explosivo_col = find_df_column(
-        df_work, ['Tipo_Explosivo', 'Explosivo', 'Tipo_explosivo'],
+        df_work, ['Tipo_Explosivo', 'Explosivo', 'Tipo_explosivo', 'Nombre', 'nombre'],
         raise_error=False,
     )
     taco_col = find_df_column(
