@@ -75,33 +75,25 @@ def load_dxf_polyline(file_path: str) -> np.ndarray:
     Returns: np.ndarray of shape (N, 2) with X, Y coordinates.
     """
     try:
+        import ezdxf
         doc = ezdxf.readfile(file_path)
         msp = doc.modelspace()
-        
-        # Look for LWPOLYLINE (most common in 2D) or POLYLINE (3D/Legacy)
-        # We take the first one we find.
-        
-        # 1. Try LWPOLYLINE
+
         lwpolys = msp.query('LWPOLYLINE')
         if len(lwpolys) > 0:
             poly = lwpolys[0]
-            # LWPolyline vertices are typically (x, y, start_width, end_width, bulge)
-            # We just want x, y
             points = []
             with poly.points("xy") as pts:
                 points = list(pts)
             return np.array(points)
-            
-        # 2. Try POLYLINE (2D or 3D)
+
         polys = msp.query('POLYLINE')
         if len(polys) > 0:
             poly = polys[0]
-            # iterate vertices
             points = [v.dxf.location[:2] for v in poly.vertices]
             return np.array(points)
-            
+
         raise ValueError("No se encontraron entidades POLYLINE o LWPOLYLINE en el DXF.")
-        
     except (ValueError, KeyError, AttributeError) as e:
         logger.warning("DXF polyline extraction failed for %s: %s", filepath, e)
         return np.array([])

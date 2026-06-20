@@ -111,3 +111,83 @@ class TestDecimateMeshEdgeCases:
     def test_target_zero_returns_something(self, pit_mesh_design):
         out = decimate_mesh(pit_mesh_design, 2)
         assert len(out.faces) >= 2
+
+
+class TestLoadMeshDXF:
+    def _make_dxf_with_face(self, tmp_path):
+        import ezdxf
+        doc = ezdxf.new(dxfversion="R2010")
+        msp = doc.modelspace()
+        msp.add_3dface([(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)])
+        msp.add_3dface([(0, 0, 0), (10, 10, 0), (10, 0, 10)])
+        path = tmp_path / "test_face.dxf"
+        doc.saveas(str(path))
+        return path
+
+    def test_load_dxf_with_3dface(self, tmp_path):
+        from core.mesh_handler import _load_dxf
+        dxf = self._make_dxf_with_face(tmp_path)
+        mesh = _load_dxf(str(dxf))
+        assert hasattr(mesh, "vertices")
+        assert hasattr(mesh, "faces")
+        assert len(mesh.vertices) > 0
+        assert len(mesh.faces) > 0
+
+    def test_load_dxf_quad_split_into_triangles(self, tmp_path):
+        from core.mesh_handler import _load_dxf
+        dxf = self._make_dxf_with_face(tmp_path)
+        mesh = _load_dxf(str(dxf))
+        assert len(mesh.faces) >= 3
+
+    def test_load_mesh_dispatch_to_dxf(self, tmp_path):
+        dxf = self._make_dxf_with_face(tmp_path)
+        mesh = load_mesh(str(dxf))
+        assert len(mesh.vertices) > 0
+
+    def test_load_mesh_rejects_empty_file(self, tmp_path):
+        empty = tmp_path / "empty.stl"
+        empty.write_bytes(b"")
+        with pytest.raises(Exception):
+            load_mesh(str(empty))
+
+
+class TestLoadDxfPolyline:
+    def _make_dxf_with_polyline(self, tmp_path, points):
+        import ezdxf
+        doc = ezdxf.new(dxfversion="R2010")
+        msp = doc.modelspace()
+        msp.add_lwpolyline(points)
+        path = tmp_path / "poly.dxf"
+        doc.saveas(str(path))
+        return path
+
+    def test_load_polyline_2d(self, tmp_path):
+        from core.mesh_handler import load_dxf_polyline
+        dxf = self._make_dxf_with_polyline(
+            tmp_path, [(0, 0), (10, 0), (10, 10), (0, 10), (0, 0)],
+        )
+        arr = load_dxf_polyline(str(dxf))
+        assert arr.shape[0] >= 4
+        assert arr.shape[1] == 2
+
+    def test_load_polyline_3d_returns_xy(self, tmp_path):
+        from core.mesh_handler import load_dxf_polyline
+        dxf = self._make_dxf_with_polyline(
+            tmp_path, [(0, 0), (5, 0), (5, 5)],
+        )
+        arr = load_dxf_polyline(str(dxf))
+        assert arr.shape[1] == 2
+
+
+class TestVertexClustering:
+    def test_vertex_clustering_reduces_face_count(self, pit_mesh_design):
+        from core.mesh_handler import _vertex_clustering
+        original = len(pit_mesh_design.faces)
+        out = _vertex_clustering(pit_mesh_design, target_faces=original // 4)
+        assert len(out.faces) <= original
+
+    def test_vertex_clustering_target_above_current(self, pit_mesh_design):
+        from core.mesh_handler import _vertex_clustering
+        original = len(pit_mesh_design.faces)
+        out = _vertex_clustering(pit_mesh_design, target_faces=original * 10)
+        assert len(out.faces) >= 1
