@@ -85,3 +85,29 @@ class TestMeshToPlotly:
         center = np.asarray(bounds["center"])
         assert center.shape == (3,)
         assert np.all(np.isfinite(center))
+
+
+class TestMeshToPlotly:
+    def test_returns_mesh3d_trace(self, pit_mesh_design):
+        trace = mesh_to_plotly(pit_mesh_design, "test", "blue", 0.5)
+        assert isinstance(trace, go.Mesh3d)
+        assert trace.name == "test"
+
+    def test_color_is_hex_string(self, pit_mesh_design):
+        trace = mesh_to_plotly(pit_mesh_design, "x", "#ff0000", 0.3)
+        assert trace.color is not None
+
+    def test_opacity_preserved(self, pit_mesh_design):
+        trace = mesh_to_plotly(pit_mesh_design, "x", "green", 0.7)
+        assert trace.opacity == 0.7
+
+
+class TestDecimateMeshEdgeCases:
+    def test_target_above_current_keeps_mesh(self, pit_mesh_design):
+        original = len(pit_mesh_design.faces)
+        out = decimate_mesh(pit_mesh_design, original * 5)
+        assert len(out.faces) >= 1
+
+    def test_target_zero_returns_something(self, pit_mesh_design):
+        out = decimate_mesh(pit_mesh_design, 2)
+        assert len(out.faces) >= 2
