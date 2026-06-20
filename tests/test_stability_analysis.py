@@ -5,8 +5,13 @@ import pytest
 from core.param_extractor import BenchParams
 from core.stability_analysis import (
     BenchStabilityAssessment,
+    HEALTH_THRESHOLDS,
+    SectionHealthScore,
     assess_bench_stability,
     compute_anisotropy_dispersion,
+    compute_planar_factor_of_safety,
+    compute_planar_factor_of_safety_proxy,
+    compute_section_health_score,
     summarize_section_stability,
 )
 from core.config import STABILITY
@@ -20,6 +25,7 @@ def _make_bench(
     catch_bench_adequate=False,
     catch_bench_ratio=0.0,
     face_angle=70.0,
+    bench_height=15.0,
     is_ramp=False,
     wedge_risk=False,
     toppling_risk=False,
@@ -32,7 +38,7 @@ def _make_bench(
         crest_distance=20.0,
         toe_elevation=85.0,
         toe_distance=10.0,
-        bench_height=15.0,
+        bench_height=bench_height,
         face_angle=face_angle,
         berm_width=9.0,
         is_ramp=is_ramp,
@@ -271,3 +277,134 @@ class TestSummarizeSection:
             "critical_bench_numbers",
         ):
             assert key in summary, f"Missing key: {key}"
+
+
+class TestHealthScore:
+    """Phase 11 — C.6 compute_section_health_score aggregates all axes."""
+
+    def test_perfect_section_is_green(self):
+        """All-clean section with gentle slopes → score near 100, category GREEN.
+
+        Uses face_angle=25° (well below phi_typical=35°) so the FS_proxy
+        is ~1.5 (FS_score=75) and the aggregate exceeds the GREEN threshold.
+        """
+        benches = [
+            _make_bench(bench_number=i, overhang_m=0.0, catch_bench_adequate=True,
+                        catch_bench_ratio=1.0, face_angle=25.0)
+            for i in range(1, 4)
+        ]
+        score = compute_section_health_score('S-clean', benches)
+        assert isinstance(score, SectionHealthScore)
+        assert score.health_score >= HEALTH_THRESHOLDS['GREEN']
+        assert score.health_category == 'GREEN'
+        assert score.section_name == 'S-clean'
+
+    def test_section_with_critical_overhang(self):
+        """A bench with overhang >= critical threshold drags score to RED."""
+        benches = [
+            _make_bench(bench_number=1, overhang_m=0.0, catch_bench_adequate=True,
+                        catch_bench_ratio=1.0, face_angle=65.0),
+            _make_bench(bench_number=2, overhang_m=2.5, catch_bench_adequate=False,
+                        catch_bench_ratio=0.2, face_angle=75.0,
+                        toppling_risk=True, wedge_risk=True),
+        ]
+        score = compute_section_health_score('S-bad', benches)
+        assert score.health_score < HEALTH_THRESHOLDS['ORANGE']
+        assert score.health_category == 'RED'
+        assert 2 in score.critical_bench_numbers
+
+    def test_score_components_breakdown(self):
+        """The components dict exposes all 6 axes with 0-100 values."""
+        benches = [_make_bench(bench_number=1, catch_bench_ratio=0.8,
+                               face_angle=68.0, overhang_m=0.3)]
+        score = compute_section_health_score('S1', benches)
+        for axis in ('FS', 'berm', 'overhang', 'wedge', 'toppling', 'anisotropy'):
+            assert axis in score.components, f"Missing axis: {axis}"
+            assert 0.0 <= score.components[axis] <= 100.0
+
+    def test_empty_benches_returns_zero(self):
+        """Empty bench list → score=0, category=RED, no critical benches."""
+        score = compute_section_health_score('S-empty', [])
+        assert score.health_score == 0.0
+        assert score.health_category == 'RED'
+        assert score.critical_bench_numbers == []
+
+    def test_recommended_action_present(self):
+        """Every result carries a non-empty Spanish action string."""
+        score = compute_section_health_score('S', [_make_bench()])
+        assert isinstance(score.recommended_action, str)
+        assert len(score.recommended_action) > 0
+        assert score.recommended_action == {
+            'GREEN': 'Operación normal. Mantener monitoreo de rutina.',
+            'YELLOW': 'Revisar bancos críticos en próximo turno.',
+            'ORANGE': 'Investigar causa de los flags. Considerar instrumentación.',
+            'RED': 'Detener trabajo en zona. Instrumentar y reevaluar.',
+        }[score.health_category]
+
+
+class TestPlanarFS:
+    """Phase 11 — B.1 planar factor of safety (proxy + Hoek-Bray form)."""
+
+    def test_proxy_basic(self):
+        """face_angle=60° → FS_proxy = tan(35°)/tan(60°) ≈ 0.404."""
+        import math
+        bench = _make_bench(face_angle=60.0)
+        fs = compute_planar_factor_of_safety_proxy(bench)
+        expected = math.tan(math.radians(35.0)) / math.tan(math.radians(60.0))
+        assert fs == pytest.approx(expected, abs=1e-6)
+        assert fs == pytest.approx(0.4043, abs=1e-3)
+
+    def test_face_angle_90_returns_zero(self):
+        """Degenerate vertical face returns 0.0 (no FS)."""
+        bench = _make_bench(face_angle=90.0)
+        assert compute_planar_factor_of_safety_proxy(bench) == 0.0
+
+    def test_face_angle_above_90_returns_zero(self):
+        """Angle > 90° is treated as degenerate and returns 0.0."""
+        bench = _make_bench(face_angle=95.0)
+        assert compute_planar_factor_of_safety_proxy(bench) == 0.0
+
+    def test_with_cohesion_and_friction(self):
+        """c=50 kPa, φ=35°, H=5m, ψ=60° → FS > 1 (stable)."""
+        bench = _make_bench(face_angle=60.0, bench_height=5.0)
+        fs = compute_planar_factor_of_safety(bench, cohesion_kpa=50.0,
+                                             friction_angle_deg=35.0)
+        assert fs > 1.0
+
+    def test_water_pressure_reduces_FS(self):
+        """Adding ru=0.3 strictly reduces FS (other inputs equal)."""
+        bench = _make_bench(face_angle=60.0, bench_height=15.0)
+        fs_dry = compute_planar_factor_of_safety(bench, 50.0, 35.0, water_pressure_ratio=0.0)
+        fs_wet = compute_planar_factor_of_safety(bench, 50.0, 35.0, water_pressure_ratio=0.3)
+        assert fs_wet < fs_dry
+
+    def test_full_FS_zero_height_returns_zero(self):
+        """Degenerate H=0 returns 0.0 (no sliding mass)."""
+        bench = _make_bench(face_angle=60.0, bench_height=0.0)
+        assert compute_planar_factor_of_safety(bench, 50.0, 35.0) == 0.0
+
+
+class TestRMRGSI:
+    """Phase 11 — E.1 + E.2 RMR → GSI lookup helpers."""
+
+    def test_rmr_to_gsi(self):
+        """RMR=65 → GSI=60 (offset of 5)."""
+        from core.geology import rmr_to_gsi
+        assert rmr_to_gsi(65.0) == pytest.approx(60.0)
+
+
+class TestRockStrength:
+    """Phase 11 — Hoek-Brown strength estimator from GSI+UCS."""
+
+    def test_zero_inputs_returns_fallback(self):
+        """gsi=0 or ucs=0 → conservative (0, 30°)."""
+        from core.geology import estimate_rock_strength_from_gsi
+        assert estimate_rock_strength_from_gsi(0.0, 100.0) == (0.0, 30.0)
+        assert estimate_rock_strength_from_gsi(70.0, 0.0) == (0.0, 30.0)
+
+    def test_high_gsi_reasonable_strength(self):
+        """gsi=70, ucs=150 MPa → c > 0 and phi > 30°."""
+        from core.geology import estimate_rock_strength_from_gsi
+        c, phi = estimate_rock_strength_from_gsi(70.0, 150.0)
+        assert c > 0.0
+        assert phi > 30.0
