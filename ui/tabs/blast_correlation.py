@@ -14,6 +14,12 @@ from core.blast_correlation import (
     compute_powder_factor,
     compute_signed_deviations,
 )
+from core.blast_model import (
+    compute_energy_density_along_profile,
+    compute_pasadura_toe_correlation,
+    fit_powder_factor_damage_model,
+    predict_damage_for_pf,
+)
 from core.config import DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
@@ -147,6 +153,8 @@ def render_tab_blast_correlation(config: dict) -> None:
     if not df_filtered_sections.empty and bool(df_filtered_sections['_pf_unavailable'].iloc[0]):
         st.info("ℹ️ Powder factor no disponible: faltan columnas de burden/espaciamiento en el archivo de pozos.")
 
+    _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
+
     tab_sec, tab_bnc, tab_mal = st.tabs([
         "📐 Análisis por Sección / Perfil",
         "🧱 Análisis por Banco / Nivel",
@@ -205,6 +213,13 @@ def render_tab_blast_correlation(config: dict) -> None:
             st.plotly_chart(fig_scatter, use_container_width=True)
             if not use_pf_axis:
                 st.caption("⚠️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
+
+            with st.expander("⚡ Densidad de Energía (IDW) a lo largo de la sección", expanded=False):
+                _render_energy_density_along_profile(
+                    blast_df, sections, mesh_design, mesh_topo,
+                    cuts_cache_key=None,
+                    tolerance=tolerance, fecha_corte=fecha_corte_str,
+                )
 
     with tab_bnc:
         st.markdown("#### Comportamiento Horizontal por Banco / Nivel de Cota")
@@ -295,6 +310,8 @@ def render_tab_blast_correlation(config: dict) -> None:
             if yaxis3_cfg:
                 fig_bench.update_layout(yaxis3=yaxis3_cfg)
             st.plotly_chart(fig_bench, use_container_width=True)
+
+            _render_pasadura_toe_block(blast_df, comparison_results)
 
     with tab_mal:
         st.markdown("#### Evaluación de Daño Geotécnico por Malla / Polígono de Tronadura")
@@ -642,3 +659,243 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
         })
 
     return pd.DataFrame(malla_stats).reset_index(drop=True)
+
+
+def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_pf_axis: bool) -> None:
+    """OLS regression: powder factor vs mean overbreak per section.
+
+    Renders β₁, p-value, R², n, 95% CI and a confidence label. Also exposes
+    a scenario slider that calls ``predict_damage_for_pf`` so the user can
+    answer "¿qué pasa si subo/bajo el PF objetivo?" interactively.
+    """
+    st.markdown("---")
+    with st.expander("📈 Modelo Cuantitativo: PF → Sobre-excavación", expanded=True):
+        st.markdown(
+            "Regresión lineal OLS sobre la base de datos filtrada: "
+            "`Sobre-excavación = β₀ + β₁ · PF + ε`. La pendiente β₁ "
+            "expresa cuántos metros de sobre-excavación se asocian, en "
+            "promedio, a cada kg/m³ adicional de powder factor."
+        )
+
+        if not use_pf_axis:
+            st.info("ℹ️ Powder factor no disponible: faltan columnas de burden/espaciamiento. No es posible ajustar el modelo.")
+            return
+
+        valid = df_filtered_sections.dropna(subset=['pf_vol_avg_kgm3', 'avg_over_break']).copy()
+        valid = valid[valid['pf_vol_avg_kgm3'] > 0]
+        pf = valid['pf_vol_avg_kgm3'].values.astype(float)
+        dmg = valid['avg_over_break'].values.astype(float)
+
+        if len(pf) < 5:
+            st.info(f"Datos insuficientes (n={len(pf)} < 5). Necesitas más secciones con PF válido para ajustar el modelo.")
+            return
+
+        model = fit_powder_factor_damage_model(pf, dmg)
+        if not model['is_significant'] and model['confidence'] == 'INSUFFICIENT':
+            st.warning(f"Modelo no confiable (confianza={model['confidence']}). Revisa que los datos tengan variabilidad real en PF.")
+            return
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("β₁ (m por kg/m³)", f"{model['beta1']:.4f}")
+        c2.metric("p-valor", f"{model['p_value']:.4f}")
+        c3.metric("R²", f"{model['r_squared']:.3f}")
+        c4.metric("Confianza", model['confidence'])
+        st.caption(
+            f"n = {model['n']}  |  IC 95% β₁: [{model['ci_beta1_low']:.4f}, {model['ci_beta1_high']:.4f}]"
+        )
+
+        if model['is_significant']:
+            st.success(
+                f"**Cada +0.1 kg/m³ de PF se asocia a {model['beta1'] * 0.1:+.3f} m de sobre-excavación** "
+                f"(p = {model['p_value']:.3f}, n = {model['n']})."
+            )
+        else:
+            st.warning(
+                f"La pendiente no es estadísticamente significativa (p = {model['p_value']:.3f} ≥ 0.05). "
+                "El modelo no soporta una relación causal con estos datos."
+            )
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=pf, y=dmg,
+            mode='markers+text',
+            text=valid['section'].astype(str).values,
+            textposition='top center',
+            marker=dict(size=10, color='crimson'),
+            name='Secciones',
+        ))
+
+        xs_line = np.linspace(float(pf.min()), float(pf.max()), 50)
+        ys_line = model['beta0'] + model['beta1'] * xs_line
+        sse = float(np.sum((pf - model['mean_pf']) ** 2))
+        if sse > 0:
+            se_band = 1.96 * model['std_err_beta1'] * np.sqrt(
+                1.0 / model['n'] + (xs_line - model['mean_pf']) ** 2 / sse
+            )
+            fig.add_trace(go.Scatter(
+                x=np.concatenate([xs_line, xs_line[::-1]]),
+                y=np.concatenate([ys_line + se_band, (ys_line - se_band)[::-1]]),
+                fill='toself',
+                fillcolor='rgba(220, 20, 60, 0.15)',
+                line=dict(color='rgba(255, 255, 255, 0)'),
+                hoverinfo='skip',
+                showlegend=True,
+                name='Banda IC 95%',
+            ))
+        fig.add_trace(go.Scatter(
+            x=xs_line, y=ys_line,
+            mode='lines',
+            line=dict(color='darkred', width=2),
+            name=f'OLS (β₁ = {model["beta1"]:.3f})',
+        ))
+
+        fig.update_layout(
+            title="Regresión OLS: PF (kg/m³) vs Sobre-excavación Media (m)",
+            xaxis_title="Powder Factor Volumétrico (kg/m³)",
+            yaxis_title="Sobre-excavación Media (m)",
+            height=450,
+            margin=dict(l=40, r=20, t=50, b=40),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("**Escenario: ¿qué pasa si ajusto el PF objetivo?**")
+        pf_min = float(min(0.05, pf.min()))
+        pf_max = float(max(2.0, pf.max()))
+        target_pf = st.slider(
+            "PF objetivo (kg/m³):",
+            min_value=pf_min, max_value=pf_max,
+            value=float(model['mean_pf']),
+            step=0.01,
+            key="blast_corr_target_pf",
+        )
+        pred = predict_damage_for_pf(model, target_pf)
+        pa, pb, pc = st.columns(3)
+        pa.metric("PF objetivo", f"{target_pf:.2f} kg/m³")
+        pb.metric("Sobre-excavación predicha", f"{pred['predicted_damage']:+.3f} m")
+        pc.metric("Incertidumbre (±)", f"{pred['uncertainty_m']:.3f} m")
+
+
+def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list) -> None:
+    """Per-bench correlation between pasadura and delta_toe."""
+    st.markdown("---")
+    st.subheader("🔗 Pasadura → Daño del Piso (delta_toe)")
+
+    st.markdown(
+        "Agrupa los pozos por cota del piso (`Z_collar - altura_banco`) y "
+        "los empareja con la `delta_toe` de la conciliación geotécnica del "
+        "mismo nivel. Una correlación negativa sugiere que pasaduras "
+        "cortas están asociadas a mayor sobre-excavación del piso "
+        "(lomo duro)."
+    )
+
+    pas_corr = compute_pasadura_toe_correlation(
+        blast_df, comparison_results, bench_height=DEFAULTS.blast_default_bench_height,
+    )
+
+    cp1, cp2, cp3 = st.columns(3)
+    cp1.metric("Pearson r", f"{pas_corr['r']:.2f}")
+    cp2.metric("n (bancos)", f"{pas_corr['n_benches']}")
+    cp3.metric("Interpretación", pas_corr['interpretation'])
+
+    if pas_corr['n_benches'] >= 2:
+        pas_df = pd.DataFrame({
+            'Nivel (cota)': list(pas_corr['pasadura_per_bench'].keys()),
+            'Pasadura media (m)': list(pas_corr['pasadura_per_bench'].values()),
+            'delta_toe (m)': list(pas_corr['toe_per_bench'].values()),
+        }).sort_values('Nivel (cota)', ascending=False)
+        st.dataframe(pas_df, use_container_width=True, height=200)
+
+    if pas_corr['r'] < -0.3:
+        st.warning(
+            f"📉 Correlación negativa (r = {pas_corr['r']:.2f}): pozos con menor "
+            "pasadura → mayor sobre-excavación del piso. Confirma hipótesis de lomo duro."
+        )
+    elif pas_corr['r'] > 0.3:
+        st.info(
+            f"📈 Correlación positiva (r = {pas_corr['r']:.2f}): pasaduras largas se "
+            "asocian a mayor sobre-excavación del piso. Revisa si hay sobreperforación."
+        )
+
+
+def _render_energy_density_along_profile(
+    blast_df: pd.DataFrame,
+    sections: list,
+    mesh_design,
+    mesh_topo,
+    cuts_cache_key: tuple,
+    tolerance: float,
+    fecha_corte: str,
+) -> None:
+    """Per-section expander: IDW energy density sampled along the topo profile."""
+    if not sections or mesh_design is None or mesh_topo is None or blast_df is None or blast_df.empty:
+        return
+
+    sec_options = [s.name for s in sections]
+    sel_sec_name = st.selectbox(
+        "Sección para muestrear densidad de energía:",
+        sec_options,
+        key="blast_corr_idw_section",
+    )
+    sel_sec = next((s for s in sections if s.name == sel_sec_name), None)
+    if sel_sec is None:
+        return
+
+    pd_prof, pt_prof = _get_profile_pair(sel_sec_name)
+    if pd_prof is None or pt_prof is None:
+        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sel_sec)
+    if not pt_prof or not pt_prof.distances.size:
+        st.info("No hay perfil topográfico disponible para esta sección.")
+        return
+
+    direction = np.array([np.sin(np.radians(sel_sec.azimuth)),
+                         np.cos(np.radians(sel_sec.azimuth))])
+    profile_xs = sel_sec.origin[0] + pt_prof.distances * direction[0]
+    profile_ys = sel_sec.origin[1] + pt_prof.distances * direction[1]
+    z_sample = float(np.nanmean(pt_prof.elevations)) if pt_prof.elevations.size else 0.0
+
+    proj = proyectar_pozos_en_seccion(
+        blast_df, origin=sel_sec.origin, azimuth=sel_sec.azimuth,
+        length=sel_sec.length, tolerance=tolerance, fecha_corte=fecha_corte,
+    )
+    local_df = proj if not proj.empty else blast_df
+
+    energy = compute_energy_density_along_profile(
+        local_df, pt_prof.distances, profile_xs, profile_ys, z_sample=z_sample,
+        search_radius=DEFAULTS.blast_correlation_radius_m,
+    )
+
+    fig = go.Figure()
+    if pd_prof and pd_prof.distances.size:
+        fig.add_trace(go.Scatter(
+            x=pd_prof.distances, y=pd_prof.elevations,
+            mode='lines', line=dict(color='royalblue', width=2),
+            name='Diseño',
+        ))
+    fig.add_trace(go.Scatter(
+        x=pt_prof.distances, y=pt_prof.elevations,
+        mode='lines', line=dict(color='forestgreen', width=2),
+        name='Topografía',
+    ))
+    fig.add_trace(go.Scatter(
+        x=pt_prof.distances, y=energy,
+        mode='lines', line=dict(color='crimson', width=2),
+        name='Energía IDW (kg/m²)',
+        yaxis='y2',
+    ))
+    fig.update_layout(
+        title=f"Densidad de Energía (IDW) — {sel_sec_name}",
+        xaxis_title="Distancia a lo largo de la sección (m)",
+        yaxis=dict(title="Elevación (m)", color='forestgreen'),
+        yaxis2=dict(
+            title="Energía (kg/m²)", overlaying='y', side='right',
+            color='crimson',
+        ),
+        height=450,
+        margin=dict(l=40, r=40, t=50, b=40),
+        legend=dict(x=0.01, y=0.99),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        f"Energía acumulada por punto, radio de búsqueda = {DEFAULTS.blast_correlation_radius_m:.0f} m, "
+        f"z de muestreo = {z_sample:.1f} m."
+    )

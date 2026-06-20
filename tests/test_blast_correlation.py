@@ -351,3 +351,189 @@ class TestBlastCorrelationRowPF:
         assert rows[0].pf_vol_avg_kgm3 > 0
         assert rows[0].energy_total_mj > 0
         assert rows[0].n_pf_valid > 0
+
+
+class TestBlastModel:
+    """Tests for core.blast_model — quantitative PF/damage and pasadura models."""
+
+    def test_fit_powder_factor_damage_model_basic(self):
+        from core.blast_model import fit_powder_factor_damage_model
+
+        rng = np.random.default_rng(42)
+        pf = np.linspace(0.2, 1.2, 10)
+        dmg = 0.5 * pf + 0.05 + rng.normal(0, 0.02, size=10)
+
+        model = fit_powder_factor_damage_model(pf, dmg)
+        assert model["n"] == 10
+        assert model["beta1"] == pytest.approx(0.5, abs=0.05)
+        assert model["is_significant"] is True
+        assert model["p_value"] < 0.05
+        assert model["r_squared"] > 0.9
+        assert model["confidence"] in ("HIGH", "MEDIUM")
+        assert model["ci_beta1_low"] < model["beta1"] < model["ci_beta1_high"]
+        assert model["std_err_beta1"] > 0
+        assert model["mean_pf"] == pytest.approx(float(pf.mean()))
+
+    def test_fit_powder_factor_damage_model_insufficient(self):
+        from core.blast_model import fit_powder_factor_damage_model
+
+        model = fit_powder_factor_damage_model(
+            np.array([0.3, 0.5, 0.7]), np.array([0.1, 0.2, 0.3]),
+        )
+        assert model["confidence"] == "INSUFFICIENT"
+        assert model["is_significant"] is False
+        assert model["n"] == 3
+        assert model["beta1"] == 0.0
+        assert model["r_squared"] == 0.0
+
+    def test_fit_powder_factor_damage_model_nan_handling(self):
+        from core.blast_model import fit_powder_factor_damage_model
+
+        pf = np.array([0.2, np.nan, 0.4, 0.5, 0.6, 0.7])
+        dmg = np.array([0.1, 0.2, np.nan, 0.4, 0.5, 0.6])
+        model = fit_powder_factor_damage_model(pf, dmg)
+        assert model["n"] == 4
+        assert np.isfinite(model["beta1"])
+
+    def test_fit_powder_factor_damage_model_zero_variance_pf(self):
+        from core.blast_model import fit_powder_factor_damage_model
+
+        pf = np.array([0.5] * 10)
+        dmg = np.linspace(0.1, 1.0, 10)
+        model = fit_powder_factor_damage_model(pf, dmg)
+        assert model["confidence"] == "INSUFFICIENT"
+        assert model["n"] == 10
+
+    def test_predict_damage_for_pf_basic(self):
+        from core.blast_model import (
+            fit_powder_factor_damage_model, predict_damage_for_pf,
+        )
+
+        pf = np.linspace(0.2, 1.0, 8)
+        dmg = 0.5 * pf + 0.1
+        model = fit_powder_factor_damage_model(pf, dmg)
+        pred = predict_damage_for_pf(model, 1.0)
+        assert pred["predicted_damage"] == pytest.approx(0.6, abs=0.05)
+        assert pred["delta_from_current"] == pred["predicted_damage"]
+        assert pred["uncertainty_m"] >= 0
+
+    def test_predict_damage_for_pf_insufficient_returns_zero(self):
+        from core.blast_model import predict_damage_for_pf
+
+        pred = predict_damage_for_pf({"confidence": "INSUFFICIENT"}, 1.0)
+        assert pred == {"predicted_damage": 0.0, "delta_from_current": 0.0, "uncertainty_m": 0.0}
+
+    def test_compute_pasadura_toe_correlation_basic(self):
+        from core.blast_model import compute_pasadura_toe_correlation
+
+        df = pd.DataFrame({
+            "X": [0.0, 0.0, 10.0, 10.0],
+            "Y": [0.0, 0.0, 0.0, 0.0],
+            "Z_collar": [4215.0, 4215.0, 4230.0, 4230.0],
+            "Z_toe": [4198.0, 4198.0, 4210.0, 4210.0],
+        })
+        comps = [
+            {"level": "4200", "delta_toe": 0.1},
+            {"level": "4215", "delta_toe": -0.5},
+        ]
+        res = compute_pasadura_toe_correlation(df, comps, bench_height=15.0)
+        assert res["n_benches"] == 2
+        assert res["r"] == pytest.approx(-1.0, abs=1e-6)
+        assert 4215.0 in res["pasadura_per_bench"]
+        assert 4215.0 in res["toe_per_bench"]
+
+    def test_compute_pasadura_toe_correlation_no_data(self):
+        from core.blast_model import compute_pasadura_toe_correlation
+
+        res = compute_pasadura_toe_correlation(pd.DataFrame(), [])
+        assert res["r"] == 0.0
+        assert res["n_benches"] == 0
+        assert "interpretacion" in res["interpretation"].lower() or "datos" in res["interpretation"].lower()
+
+    def test_compute_pasadura_toe_correlation_only_one_bench(self):
+        from core.blast_model import compute_pasadura_toe_correlation
+
+        df = pd.DataFrame({
+            "X": [0.0, 0.0],
+            "Y": [0.0, 0.0],
+            "Z_collar": [4215.0, 4215.0],
+            "Z_toe": [4198.0, 4198.0],
+        })
+        comps = [{"level": "4200", "delta_toe": 0.5}]
+        res = compute_pasadura_toe_correlation(df, comps, bench_height=15.0)
+        assert res["n_benches"] == 1
+        assert res["r"] == 0.0
+        assert "2" in res["interpretation"] or "dos" in res["interpretation"].lower()
+
+    def test_compute_pasadura_toe_correlation_missing_columns(self):
+        from core.blast_model import compute_pasadura_toe_correlation
+
+        df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        comps = [{"level": "4200", "delta_toe": 0.1}]
+        res = compute_pasadura_toe_correlation(df, comps)
+        assert res["n_benches"] == 0
+
+    def test_compute_energy_density_along_profile_basic(self):
+        from core.blast_model import compute_energy_density_along_profile
+
+        df = pd.DataFrame({
+            "X": [0.0, 50.0],
+            "Y": [0.0, 0.0],
+            "Z_collar": [4215.0, 4215.0],
+            "Kilos_Cargados_real": [200.0, 300.0],
+        })
+        prof_x = np.array([10.0, 20.0, 30.0, 40.0, 50.0])
+        prof_y = np.zeros(5)
+        energy = compute_energy_density_along_profile(
+            df, prof_x, prof_x.copy(), prof_y, search_radius=30.0,
+        )
+        assert energy.shape == (5,)
+        assert (energy > 0).all()
+
+    def test_compute_energy_density_along_profile_radius_filter(self):
+        from core.blast_model import compute_energy_density_along_profile
+
+        df = pd.DataFrame({
+            "X": [0.0, 100.0],
+            "Y": [0.0, 0.0],
+            "Z_collar": [4215.0, 4215.0],
+            "Kilos_Cargados_real": [200.0, 300.0],
+        })
+        prof_x = np.array([10.0, 50.0, 90.0])
+        prof_y = np.zeros(3)
+        energy_wide = compute_energy_density_along_profile(
+            df, prof_x, prof_x.copy(), prof_y, search_radius=150.0,
+        )
+        energy_tight = compute_energy_density_along_profile(
+            df, prof_x, prof_x.copy(), prof_y, search_radius=5.0,
+        )
+        assert energy_wide[0] > 0
+        assert energy_wide[1] > 0
+        assert energy_wide[2] > 0
+        assert energy_tight[0] == 0.0
+        assert energy_tight[1] == 0.0
+        assert energy_tight[2] == 0.0
+
+    def test_compute_energy_density_along_profile_empty(self):
+        from core.blast_model import compute_energy_density_along_profile
+
+        empty = compute_energy_density_along_profile(
+            pd.DataFrame(), np.array([]), np.array([]), np.array([]),
+        )
+        assert empty.size == 0
+
+    def test_compute_energy_density_along_profile_no_kg_column(self):
+        from core.blast_model import compute_energy_density_along_profile
+
+        df = pd.DataFrame({
+            "X": [0.0, 10.0],
+            "Y": [0.0, 0.0],
+            "Z_collar": [4215.0, 4215.0],
+        })
+        prof_x = np.array([5.0, 5.0, 5.0])
+        prof_y = np.zeros(3)
+        energy = compute_energy_density_along_profile(
+            df, prof_x, prof_x.copy(), prof_y, search_radius=30.0,
+        )
+        assert energy.shape == (3,)
+        assert (energy > 0).all()

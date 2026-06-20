@@ -285,6 +285,28 @@ def render_modulo_tronadura() -> None:
                     show_design_mesh, show_topo_mesh
                 )
 
+                idw_grid = st.session_state.get('last_idw_grid')
+                if show_energy_grid and idw_grid is not None:
+                    import pandas as _idw_pd
+                    idw_df = _idw_pd.DataFrame({
+                        'X': idw_grid['X'],
+                        'Y': idw_grid['Y'],
+                        'Z': idw_grid['Z'],
+                        'Energy_kg_m2': idw_grid['Energy_kg_m2'],
+                    })
+                    st.download_button(
+                        "⬇️ Descargar grilla IDW como CSV",
+                        data=idw_df.to_csv(index=False).encode('utf-8'),
+                        file_name='energy_idw.csv',
+                        mime='text/csv',
+                        key='download_idw_grid',
+                        help=f"Grilla {len(idw_df)} puntos (X, Y, Z, energía kg/m²).",
+                    )
+                    st.caption(
+                        f"Grilla IDW con {len(idw_df)} puntos calculados. "
+                        "Cada valor es Σ Qᵢ / dᵢ² sobre los pozos cercanos."
+                    )
+
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
                     st.dataframe(df_filtered, use_container_width=True)
 
@@ -682,6 +704,13 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
             d_sq[d_sq < 1e-4] = 1e-4
             energy = np.sum(Q / d_sq)
             energies.append(energy)
+
+        st.session_state['last_idw_grid'] = {
+            'X': points[:, 0].copy(),
+            'Y': points[:, 1].copy(),
+            'Z': points[:, 2].copy(),
+            'Energy_kg_m2': np.asarray(energies, dtype=float).copy(),
+        }
 
         # 4. Draw transparent volumetric scatter trace
         fig.add_trace(go.Scatter3d(
