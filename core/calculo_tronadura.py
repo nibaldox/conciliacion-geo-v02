@@ -44,7 +44,10 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
         Cleaned DataFrame with added columns:
         'X', 'Y', 'Z_collar', 'X_toe', 'Y_toe', 'Z_toe'.
         When present in the input, also captures:
-        'Burden', 'Esp', 'Diam_mm', 'Tipo_Explosivo', 'Taco_m'
+        'Burden', 'Esp', 'Diam_mm', 'Tipo_Explosivo', 'Taco_m',
+        'Secuencia', 'Retardo_ms', 'Fila', 'Carga_Fondo_kg',
+        'Carga_Columna_kg', 'Longitud_Carga_m', 'Tipo_Pozo',
+        'Az_Diseno', 'Incl_Diseno'
         (numeric fields coerced; missing columns skipped silently).
         Columns marked "no usar" are dropped.
         fecha_tronadura is normalized to date-only.
@@ -88,6 +91,42 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
         df_work, ['Taco', 'Taco_m', 'Stemming'],
         raise_error=False,
     )
+    secuencia_col = find_df_column(
+        df_work, ['Secuencia', 'Secuencia_Iniciacion', 'Detonador_Nro'],
+        raise_error=False,
+    )
+    retardo_col = find_df_column(
+        df_work, ['Retardo_ms', 'Delay_ms', 'Tiempo_Retardo'],
+        raise_error=False,
+    )
+    fila_col = find_df_column(
+        df_work, ['Numero_Fila', 'Fila_Pozo', 'Row'],
+        raise_error=False,
+    )
+    fondo_col = find_df_column(
+        df_work, ['Carga_Fondo_kg', 'Kilos_Fondo', 'Bottom_Charge'],
+        raise_error=False,
+    )
+    columna_col = find_df_column(
+        df_work, ['Carga_Columna_kg', 'Kilos_Columna'],
+        raise_error=False,
+    )
+    long_carga_col = find_df_column(
+        df_work, ['Longitud_Carga_m', 'Charge_Length'],
+        raise_error=False,
+    )
+    tipo_pozo_col = find_df_column(
+        df_work, ['Tipo_Pozo', 'Hole_Type'],
+        raise_error=False,
+    )
+    az_diseno_col = find_df_column(
+        df_work, ['Azimuth_Diseno', 'Design_Azimuth'],
+        raise_error=False,
+    )
+    incl_diseno_col = find_df_column(
+        df_work, ['Inclinacion_Diseno', 'Design_Dip'],
+        raise_error=False,
+    )
 
     if z_col:
         df_work['Banco_Original'] = df_work[z_col]
@@ -106,13 +145,36 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
         rename_map[explosivo_col] = 'Tipo_Explosivo'
     if taco_col:
         rename_map[taco_col] = 'Taco_m'
+    if secuencia_col:
+        rename_map[secuencia_col] = 'Secuencia'
+    if retardo_col:
+        rename_map[retardo_col] = 'Retardo_ms'
+    if fila_col:
+        rename_map[fila_col] = 'Fila'
+    if fondo_col:
+        rename_map[fondo_col] = 'Carga_Fondo_kg'
+    if columna_col:
+        rename_map[columna_col] = 'Carga_Columna_kg'
+    if long_carga_col:
+        rename_map[long_carga_col] = 'Longitud_Carga_m'
+    if tipo_pozo_col:
+        rename_map[tipo_pozo_col] = 'Tipo_Pozo'
+    if az_diseno_col:
+        rename_map[az_diseno_col] = 'Az_Diseno'
+    if incl_diseno_col:
+        rename_map[incl_diseno_col] = 'Incl_Diseno'
 
     df_work = df_work.rename(columns=rename_map)
 
     for col in ('X', 'Y', 'Z_collar', 'Incl', 'Az', 'Len',
-                'Burden', 'Esp', 'Diam_mm', 'Taco_m'):
+                'Burden', 'Esp', 'Diam_mm', 'Taco_m',
+                'Retardo_ms', 'Carga_Fondo_kg', 'Carga_Columna_kg',
+                'Longitud_Carga_m', 'Az_Diseno', 'Incl_Diseno'):
         if col in df_work.columns:
             df_work[col] = pd.to_numeric(df_work[col], errors='coerce')
+    for col in ('Secuencia', 'Fila'):
+        if col in df_work.columns:
+            df_work[col] = pd.to_numeric(df_work[col], errors='coerce').astype('Int64')
 
     df_work['Z_collar'] = df_work['Z_collar'] + BENCH_HEIGHT
 

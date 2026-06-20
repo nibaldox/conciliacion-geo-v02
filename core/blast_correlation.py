@@ -16,6 +16,7 @@ import pandas as pd
 
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.config import DEFAULTS, EXPLOSIVE, RAMP
+from core.blast_metrics import enrich_blast_dataframe
 
 
 # Status strings used throughout the codebase for compliance.
@@ -127,6 +128,13 @@ def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
         energy_mj: float (always computed if Kilos + Tipo_Explosivo available)
         burden_est_m: float (resolved Burden)
         esp_est_m: float (resolved Espaciamiento)
+        Plus the derived metrics from :func:`enrich_blast_dataframe`
+        (``stemming_ratio``, ``subdrilling_ratio``,
+        ``spacing_burden_ratio``, ``kg_per_meter``,
+        ``volume_load_kgm3``, ``coupling_ratio``,
+        ``kuznetsov_x50_cm``, ``collar_deviation_deg``,
+        ``bottom_column_ratio``) whenever their source columns are
+        present.
     """
     if df_pozos is None or df_pozos.empty:
         return df_pozos.copy() if df_pozos is not None else df_pozos
@@ -188,6 +196,8 @@ def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
             index=out.index,
         )
     out['energy_mj'] = kilos * mj_per_kg
+
+    out = enrich_blast_dataframe(out)
 
     return out
 
