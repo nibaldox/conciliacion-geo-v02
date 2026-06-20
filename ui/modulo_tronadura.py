@@ -780,25 +780,16 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
     # --- Volumetric Energy Density Grid (IDW 3D) ---
     if show_energy_grid:
         kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
-        x_min, x_max = float(df['X'].min()), float(df['X'].max())
-        y_min, y_max = float(df['Y'].min()), float(df['Y'].max())
-        z_min, z_max = float(df['Z_toe'].min()), float(df['Z_collar'].max())
 
-        grid_nx = st.session_state.get("idw_nx", 10)
-        grid_ny = st.session_state.get("idw_ny", 10)
-        grid_nz = st.session_state.get("idw_nz", 4)
+        grid_nx = st.session_state.get("idw_nx", 15)
+        grid_ny = st.session_state.get("idw_ny", 15)
+        grid_nz = st.session_state.get("idw_nz", 5)
         search_radius = float(st.session_state.get("idw_radius", 30))
-        grid_nx = max(2, int(grid_nx))
-        grid_ny = max(2, int(grid_ny))
-        grid_nz = max(2, int(grid_nz))
+        grid_nx = max(2, min(50, int(grid_nx)))
+        grid_ny = max(2, min(50, int(grid_ny)))
+        grid_nz = max(2, min(15, int(grid_nz)))
         if search_radius <= 0:
             search_radius = 30.0
-
-        xs = np.linspace(x_min, x_max, grid_nx)
-        ys = np.linspace(y_min, y_max, grid_ny)
-        zs = np.linspace(z_min, z_max, grid_nz)
-        grid_x, grid_y, grid_z = np.meshgrid(xs, ys, zs)
-        points = np.vstack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()]).T
 
         C = df[['X', 'Y', 'Z_collar']].values.astype(float)
         T = df[['X_toe', 'Y_toe', 'Z_toe']].values.astype(float)
@@ -807,56 +798,78 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         V_len_sq[V_len_sq == 0] = 1e-6
         Q = df[kg_col].fillna(0).values if kg_col else np.ones(len(df))
 
-        energies = []
-        for gp in points:
+        x_min, x_max = float(C[:, 0].min()), float(C[:, 0].max())
+        y_min, y_max = float(C[:, 1].min()), float(C[:, 1].max())
+        z_min, z_max = float(T[:, 2].min()), float(C[:, 2].max())
+
+        xs = np.linspace(x_min, x_max, grid_nx)
+        ys = np.linspace(y_min, y_max, grid_ny)
+        zs = np.linspace(z_min, z_max, grid_nz)
+        grid_x, grid_y, grid_z = np.meshgrid(xs, ys, zs)
+        points = np.vstack([grid_x.ravel(), grid_y.ravel(), grid_z.ravel()]).T
+
+        energies = np.empty(len(points), dtype=float)
+        for i, gp in enumerate(points):
             W = gp - C
             t = np.sum(W * V, axis=1) / V_len_sq
             t_c = np.clip(t, 0.0, 1.0)
             closest = C + t_c[:, np.newaxis] * V
             d_sq = np.sum((gp - closest)**2, axis=1)
-            d_sq[d_sq < 1e-4] = 1e-4
+            d_sq = np.maximum(d_sq, 1e-4)
             weights = np.exp(-d_sq / (2.0 * search_radius ** 2))
-            energy = float(np.sum(Q * weights))
-            energies.append(energy)
+            energies[i] = float(np.sum(Q * weights))
+
+        visible_mask = energies >= (energies.max() * 0.005)
+        points_v = points[visible_mask]
+        energies_v = energies[visible_mask]
 
         st.session_state['last_idw_grid'] = {
             'X': points[:, 0].copy(),
             'Y': points[:, 1].copy(),
             'Z': points[:, 2].copy(),
-            'Energy_kg_m2': np.asarray(energies, dtype=float).copy(),
+            'Energy_kg_m2': energies.copy(),
         }
 
-        energies_arr = np.asarray(energies, dtype=float)
         idw_custom = np.column_stack([
-            points[:, 0],
-            points[:, 1],
-            points[:, 2],
-            energies_arr,
+            points_v[:, 0],
+            points_v[:, 1],
+            points_v[:, 2],
+            energies_v,
         ])
 
-        fig.add_trace(go.Scatter3d(
-            x=points[:, 0], y=points[:, 1], z=points[:, 2],
-            mode='markers',
-            marker=dict(
-                size=10,
-                color=energies_arr,
-                colorscale='YlOrRd',
-                opacity=0.5,
-                showscale=True,
-                colorbar=dict(title='Energía IDW (kg/m²)', x=1.05, len=0.6),
-            ),
-            name=f'Densidad Energía (radio {search_radius:.0f} m)',
-            customdata=idw_custom,
-            hovertemplate=(
-                "X: %{customdata[0]:.1f} m<br>"
-                "Y: %{customdata[1]:.1f} m<br>"
-                "Z: %{customdata[2]:.1f} m<br>"
-                "Densidad: %{customdata[3]:.4g}<br>"
-                "<extra>Energía acumulada ΣQ·exp(-d²/2σ²) en "
-                f"{search_radius:.0f}m</extra>"
-            ),
-            showlegend=True,
-        ))
+        p_lo = float(np.percentile(energies_v, 2)) if len(energies_v) > 0 else 0.0
+        p_hi = float(np.percentile(energies_v, 98)) if len(energies_v) > 0 else 1.0
+        if p_hi <= p_lo:
+            p_hi = p_lo + 1e-9
+
+        if len(points_v) > 0:
+            fig.add_trace(go.Scatter3d(
+                x=points_v[:, 0], y=points_v[:, 1], z=points_v[:, 2],
+                mode='markers',
+                marker=dict(
+                    size=5,
+                    color=energies_v,
+                    colorscale='YlOrRd',
+                    cmin=p_lo,
+                    cmax=p_hi,
+                    opacity=0.45,
+                    showscale=True,
+                    colorbar=dict(
+                        title=dict(text=f'IDW<br>P2–P98<br>{search_radius:.0f}m σ',
+                                   font=dict(size=10)),
+                        x=1.05, len=0.55, thickness=14,
+                    ),
+                    line=dict(width=0),
+                ),
+                name=f'IDW energía (σ={search_radius:.0f}m)',
+                customdata=idw_custom,
+                hovertemplate=(
+                    "<b>IDW @ (%{customdata[0]:.0f}, %{customdata[1]:.0f}, %{customdata[2]:.0f})</b><br>"
+                    "Densidad: %{customdata[3]:.3g}<br>"
+                    f"<extra>σ={search_radius:.0f}m Gaussiano · {len(points_v)} nodos visibles de {len(points)} totales</extra>"
+                ),
+                showlegend=True,
+            ))
 
     fig.update_layout(
         scene=dict(
@@ -874,31 +887,20 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
 
     if show_energy_grid:
         st.caption(
-            "💡 La densidad de energía IDW (ΣQ·exp(−d²/2σ²)) representa la intensidad "
-            "ponderada de la carga explosiva en cada punto del espacio 3D, con peso "
-            "gaussiano respecto a la distancia al segmento collar-toe de cada pozo. "
-            "Útil para visualizar zonas de concentración de energía antes de "
-            "evaluar sobre-excavación. Ajusta resolución y radio en los controles "
-            "de arriba para refinar la grilla."
+            "💡 **Densidad de Energía IDW (ΣQ·exp(−d²/2σ²))**: cada nodo recibe la "
+            "suma ponderada gaussiana de la carga explosiva de los pozos cercanos "
+            "(σ = radio de búsqueda). La escala se calibra automáticamente entre "
+            "P2 y P98 de los valores visibles para evitar que outliers compriman "
+            "el rango. Solo se muestran nodos con densidad ≥ 0.5% del máximo "
+            "para reducir ruido visual en zonas sin actividad."
         )
 
         col_idw1, col_idw2, col_idw3 = st.columns(3)
-        grid_nx = col_idw1.slider(
-            "Resolución X", 5, 30, 10, key="idw_nx_widget",
-            help="Cantidad de nodos en X para la grilla IDW.",
-        )
-        grid_ny = col_idw2.slider(
-            "Resolución Y", 5, 30, 10, key="idw_ny_widget",
-            help="Cantidad de nodos en Y para la grilla IDW.",
-        )
-        grid_nz = col_idw3.slider(
-            "Resolución Z", 2, 10, 4, key="idw_nz_widget",
-            help="Cantidad de nodos en Z para la grilla IDW.",
-        )
-        st.slider(
-            "Radio de búsqueda IDW (m)", 5, 50, 30, key="idw_radius",
-            help="Desviación estándar σ del kernel gaussiano (m).",
-        )
+        grid_nx = col_idw1.slider("Resolución X", 5, 50, 15, key="idw_nx")
+        grid_ny = col_idw2.slider("Resolución Y", 5, 50, 15, key="idw_ny")
+        grid_nz = col_idw3.slider("Resolución Z", 2, 15, 5, key="idw_nz")
+        st.slider("Radio de búsqueda σ (m)", 5, 80, 30, key="idw_radius",
+                  help="Desviación estándar del kernel gaussiano. Mayor = más suavizado.")
 
 
 def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: list[str], label_prefix: str) -> None:
