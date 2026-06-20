@@ -1,8 +1,11 @@
-"""Tests for core.mesh_handler — load, decimation, bounds."""
+"""Tests for core.mesh_handler — load, decimation, bounds, plotly export."""
 
 import numpy as np
+import plotly.graph_objects as go
+import pytest
 
 from core import load_mesh, get_mesh_bounds, decimate_mesh
+from core.mesh_handler import mesh_to_plotly
 
 
 class TestLoadMesh:
@@ -42,3 +45,43 @@ class TestLoadMesh:
         # Zmax debería ser ~3900 (crest elevation) y zmin ~3840 (4 bancos × 15m)
         assert bounds["zmax"] > 3850
         assert bounds["zmin"] < 3870
+
+
+class TestDecimateNoOp:
+    def test_decimate_below_target_returns_same_face_count(self, pit_mesh_design):
+        """When the mesh already has <= target faces, decimate is a no-op."""
+        original_faces = len(pit_mesh_design.faces)
+        result = decimate_mesh(pit_mesh_design, target_faces=original_faces + 10000)
+        assert len(result.faces) == original_faces
+
+    def test_decimate_aggressive_reduces_faces(self, pit_mesh_design):
+        """A much smaller target still yields a mesh with no more faces."""
+        original_faces = len(pit_mesh_design.faces)
+        result = decimate_mesh(pit_mesh_design, target_faces=max(original_faces // 20, 50))
+        assert len(result.faces) <= original_faces
+
+
+class TestMeshToPlotly:
+    def test_returns_mesh3d_trace(self, pit_mesh_design):
+        trace = mesh_to_plotly(pit_mesh_design, name="design", color="blue", opacity=0.5)
+        assert isinstance(trace, go.Mesh3d)
+
+    def test_trace_carries_metadata(self, pit_mesh_design):
+        trace = mesh_to_plotly(pit_mesh_design, name="topo", color="red", opacity=0.8)
+        assert trace.name == "topo"
+        assert trace.opacity == 0.8
+
+    def test_trace_arrays_non_empty(self, pit_mesh_design):
+        trace = mesh_to_plotly(pit_mesh_design, name="m", color="green", opacity=1.0)
+        assert len(trace.x) > 0
+        assert len(trace.y) > 0
+        assert len(trace.z) > 0
+        assert len(trace.i) > 0
+        assert len(trace.j) > 0
+        assert len(trace.k) > 0
+
+    def test_bounds_center_is_finite(self, pit_mesh_design):
+        bounds = get_mesh_bounds(pit_mesh_design)
+        center = np.asarray(bounds["center"])
+        assert center.shape == (3,)
+        assert np.all(np.isfinite(center))
