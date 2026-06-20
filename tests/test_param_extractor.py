@@ -770,3 +770,279 @@ class TestCatchBench:
             assert hasattr(b, "catch_bench_ratio")
             assert isinstance(b.catch_bench_adequate, bool)
             assert isinstance(b.catch_bench_ratio, float)
+
+
+class TestWedgeShape:
+    """Phase 10 — A.3 wedge shape detection (acute dihedral proxy)."""
+
+    def _make_bench(self, face_angle, bench_height):
+        from core.param_extractor import BenchParams
+        return BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=100.0 - bench_height,
+            toe_distance=10.0,
+            bench_height=float(bench_height),
+            face_angle=float(face_angle),
+            berm_width=9.0,
+        )
+
+    def test_steep_tall_bench_flagged(self):
+        """face_angle=68, bench_height=14 → heuristic proxy flags it."""
+        from core.param_extractor import _detect_wedge_shape_in_face
+        bench = self._make_bench(face_angle=68.0, bench_height=14.0)
+        assert _detect_wedge_shape_in_face(bench) is True
+
+    def test_moderate_bench_not_flagged(self):
+        """face_angle=60, bench_height=14 → below the 65° threshold, not flagged."""
+        from core.param_extractor import _detect_wedge_shape_in_face
+        bench = self._make_bench(face_angle=60.0, bench_height=14.0)
+        assert _detect_wedge_shape_in_face(bench) is False
+
+    def test_short_steep_bench_not_flagged(self):
+        """face_angle=80 but bench_height=8 → height too small, not flagged."""
+        from core.param_extractor import _detect_wedge_shape_in_face
+        bench = self._make_bench(face_angle=80.0, bench_height=8.0)
+        assert _detect_wedge_shape_in_face(bench) is False
+
+    def test_explicit_dihedral_detection(self):
+        """Three explicit face points forming a 45° dihedral → flagged.
+
+        Geometry: (0,0) → (1,0) → (1+cos(45°), sin(45°)) = (1.707, 0.707).
+        v1=(1,0), v2=(0.707, 0.707) → angle=45° < 60° → wedge.
+        """
+        from core.param_extractor import _detect_wedge_shape_in_face
+        bench = self._make_bench(face_angle=70.0, bench_height=15.0)
+        face_pts = [(0.0, 0.0), (1.0, 0.0), (1.707, 0.707)]
+        assert _detect_wedge_shape_in_face(bench, face_pts=face_pts) is True
+
+    def test_explicit_dihedral_no_acute_angle(self):
+        """Three explicit face points forming a 90° (right) dihedral → not flagged.
+
+        Geometry: (0,0) → (1,0) → (1,1). v1=(1,0), v2=(0,1) → angle=90° ≥ 60° → no wedge.
+        """
+        from core.param_extractor import _detect_wedge_shape_in_face
+        bench = self._make_bench(face_angle=70.0, bench_height=15.0)
+        face_pts = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+        assert _detect_wedge_shape_in_face(bench, face_pts=face_pts) is False
+
+    def test_explicit_too_few_points_falls_back_to_heuristic(self):
+        """With < 3 explicit points, fall back to the heuristic proxy."""
+        from core.param_extractor import _detect_wedge_shape_in_face
+        bench_steep = self._make_bench(face_angle=70.0, bench_height=14.0)
+        bench_mild = self._make_bench(face_angle=60.0, bench_height=14.0)
+        assert _detect_wedge_shape_in_face(bench_steep, face_pts=[(0, 1)]) is True
+        assert _detect_wedge_shape_in_face(bench_mild, face_pts=[(0, 1)]) is False
+
+
+class TestToppling:
+    """Phase 10 — A.4 toppling potential (Goodman & Bray 1976 proxy)."""
+
+    def _make_bench(self, face_angle, bench_height, is_ramp=False):
+        from core.param_extractor import BenchParams
+        return BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=100.0 - bench_height,
+            toe_distance=10.0,
+            bench_height=float(bench_height),
+            face_angle=float(face_angle),
+            berm_width=9.0,
+            is_ramp=is_ramp,
+        )
+
+    def test_extreme_face_angle_flagged(self):
+        """face_angle=82 > 80° threshold → toppling risk regardless of height."""
+        from core.param_extractor import _detect_toppling_potential
+        bench = self._make_bench(face_angle=82.0, bench_height=8.0)
+        assert _detect_toppling_potential(bench) is True
+
+    def test_tall_steep_bench_flagged(self):
+        """face_angle=77, bench_height=16 → steep + tall triggers toppling."""
+        from core.param_extractor import _detect_toppling_potential
+        bench = self._make_bench(face_angle=77.0, bench_height=16.0)
+        assert _detect_toppling_potential(bench) is True
+
+    def test_moderate_bench_not_flagged(self):
+        """face_angle=70, bench_height=10 → moderate, no toppling risk."""
+        from core.param_extractor import _detect_toppling_potential
+        bench = self._make_bench(face_angle=70.0, bench_height=10.0)
+        assert _detect_toppling_potential(bench) is False
+
+    def test_upper_release_combination(self):
+        """Upper bench steep + this bench tall enough → toppling risk via release."""
+        from core.param_extractor import _detect_toppling_potential
+        bench = self._make_bench(face_angle=68.0, bench_height=13.0)
+        # upper face 78° > 75°, this face 68° > 65°, height 13 > 12
+        assert _detect_toppling_potential(bench, upper_bench_face_angle=78.0) is True
+
+    def test_no_upper_release_does_not_trigger_third_rule(self):
+        """Without upper face, the third rule is not evaluated."""
+        from core.param_extractor import _detect_toppling_potential
+        bench = self._make_bench(face_angle=68.0, bench_height=13.0)
+        assert _detect_toppling_potential(bench) is False
+
+
+class TestAngleConsistency:
+    """Phase 10 — A.5 face_angle vs inter_ramp_angle consistency."""
+
+    def _make_bench(self, face_angle):
+        from core.param_extractor import BenchParams
+        return BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=85.0,
+            toe_distance=10.0,
+            bench_height=15.0,
+            face_angle=float(face_angle),
+            berm_width=9.0,
+        )
+
+    def test_consistent_angles_not_flagged(self):
+        """|face_angle - inter_ramp| < 8° → not flagged."""
+        from core.param_extractor import _evaluate_angle_consistency
+        benches = [self._make_bench(face_angle=70.0)]
+        _evaluate_angle_consistency(benches, inter_ramp_angle=72.0, overall_angle=60.0)
+        assert benches[0].face_angle_inconsistent is False
+
+    def test_inconsistent_angle_flagged(self):
+        """|face_angle - inter_ramp| > 8° → flagged."""
+        from core.param_extractor import _evaluate_angle_consistency
+        benches = [self._make_bench(face_angle=72.0)]
+        _evaluate_angle_consistency(benches, inter_ramp_angle=85.0, overall_angle=60.0)
+        assert benches[0].face_angle_inconsistent is True
+
+    def test_inconsistent_below_inter_ramp_flagged(self):
+        """face_angle much smaller than inter_ramp is also flagged."""
+        from core.param_extractor import _evaluate_angle_consistency
+        benches = [self._make_bench(face_angle=55.0)]
+        _evaluate_angle_consistency(benches, inter_ramp_angle=70.0, overall_angle=60.0)
+        assert benches[0].face_angle_inconsistent is True
+
+    def test_exact_boundary_not_flagged(self):
+        """|diff| == 8° exactly → boundary; function uses strict >, so not flagged."""
+        from core.param_extractor import _evaluate_angle_consistency
+        benches = [self._make_bench(face_angle=78.0)]
+        _evaluate_angle_consistency(benches, inter_ramp_angle=70.0, overall_angle=60.0)
+        assert benches[0].face_angle_inconsistent is False
+
+    def test_extract_parameters_populates_consistency(self):
+        """End-to-end: extract_parameters sets face_angle_inconsistent on each bench."""
+        from core.param_extractor import extract_parameters
+        distances = np.linspace(0, 200, 401)
+        elevations = np.where(
+            distances < 100.0, 110.0,
+            np.where(distances < 105.0, 110.0 - (distances - 100.0) * 2.0, 100.0),
+        )
+        result = extract_parameters(distances, elevations, "S-CONS", "Phase10")
+        for b in result.benches:
+            assert isinstance(b.face_angle_inconsistent, bool)
+
+
+class TestAnisotropy:
+    """Phase 10 — A.8 anisotropy dispersion across non-ramp benches."""
+
+    def _make_bench(self, face_angle, is_ramp=False):
+        from core.param_extractor import BenchParams
+        return BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=85.0,
+            toe_distance=10.0,
+            bench_height=15.0,
+            face_angle=float(face_angle),
+            berm_width=9.0,
+            is_ramp=is_ramp,
+        )
+
+    def test_uniform_face_angles_low_dispersion(self):
+        """All benches with the same face_angle → std ≈ 0."""
+        from core.stability_analysis import compute_anisotropy_dispersion
+        benches = [self._make_bench(face_angle=70.0) for _ in range(5)]
+        dispersion = compute_anisotropy_dispersion(benches)
+        assert np.isclose(dispersion, 0.0, atol=1e-9)
+
+    def test_mixed_face_angles_high_dispersion(self):
+        """Benches with varied face_angles → std > 5°."""
+        from core.stability_analysis import compute_anisotropy_dispersion
+        benches = [
+            self._make_bench(face_angle=55.0),
+            self._make_bench(face_angle=70.0),
+            self._make_bench(face_angle=85.0),
+        ]
+        dispersion = compute_anisotropy_dispersion(benches)
+        # Mean ~70, deviations (15, 0, -15) → std ~ 12
+        assert dispersion > 5.0
+
+    def test_single_bench_returns_zero(self):
+        """Fewer than 2 non-ramp benches → return 0.0 (no dispersion defined)."""
+        from core.stability_analysis import compute_anisotropy_dispersion
+        benches = [self._make_bench(face_angle=70.0)]
+        assert compute_anisotropy_dispersion(benches) == 0.0
+
+    def test_ramp_benches_excluded(self):
+        """Ramps are excluded from the dispersion calculation."""
+        from core.stability_analysis import compute_anisotropy_dispersion
+        benches = [
+            self._make_bench(face_angle=70.0),
+            self._make_bench(face_angle=70.0),
+            self._make_bench(face_angle=999.0, is_ramp=True),
+        ]
+        # Only the two non-ramp benches contribute; std = 0
+        assert np.isclose(compute_anisotropy_dispersion(benches), 0.0, atol=1e-9)
+
+    def test_extract_parameters_populates_anisotropy(self):
+        """End-to-end: every bench carries the same anisotropy_dispersion_deg value."""
+        from core.param_extractor import extract_parameters
+        distances = np.linspace(0, 200, 401)
+        elevations = np.where(
+            distances < 100.0, 110.0,
+            np.where(distances < 105.0, 110.0 - (distances - 100.0) * 2.0, 100.0),
+        )
+        result = extract_parameters(distances, elevations, "S-ANISO", "Phase10")
+        if len(result.benches) >= 2:
+            dispersions = {b.anisotropy_dispersion_deg for b in result.benches}
+            assert len(dispersions) == 1
+        for b in result.benches:
+            assert isinstance(b.anisotropy_dispersion_deg, float)
+
+
+class TestPhase10DefaultsAndFieldPresence:
+    """Phase 10 — verify the new fields exist with the right defaults and types."""
+
+    def test_benchparams_has_phase10_fields(self):
+        """BenchParams declares the 4 new fields with backward-compat defaults."""
+        from core.param_extractor import BenchParams
+        bench = BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=85.0,
+            toe_distance=10.0,
+            bench_height=15.0,
+            face_angle=70.0,
+            berm_width=9.0,
+        )
+        assert bench.wedge_risk is False
+        assert bench.toppling_risk is False
+        assert bench.face_angle_inconsistent is False
+        assert bench.anisotropy_dispersion_deg == 0.0
+
+    def test_extract_parameters_populates_phase10_fields(self):
+        """End-to-end: extract_parameters sets all 4 new fields on every bench."""
+        from core.param_extractor import extract_parameters
+        distances = np.linspace(0, 200, 401)
+        elevations = np.where(
+            distances < 100.0, 110.0,
+            np.where(distances < 105.0, 110.0 - (distances - 100.0) * 2.0, 100.0),
+        )
+        result = extract_parameters(distances, elevations, "S-P10", "Phase10")
+        for b in result.benches:
+            assert isinstance(b.wedge_risk, bool)
+            assert isinstance(b.toppling_risk, bool)
+            assert isinstance(b.face_angle_inconsistent, bool)
+            assert isinstance(b.anisotropy_dispersion_deg, float)

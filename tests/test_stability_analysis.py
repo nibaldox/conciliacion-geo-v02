@@ -1,4 +1,4 @@
-"""Tests for core.stability_analysis — Phase 9 stability helpers."""
+"""Tests for core.stability_analysis — Phase 9 + Phase 10 stability helpers."""
 
 import pytest
 
@@ -6,6 +6,7 @@ from core.param_extractor import BenchParams
 from core.stability_analysis import (
     BenchStabilityAssessment,
     assess_bench_stability,
+    compute_anisotropy_dispersion,
     summarize_section_stability,
 )
 from core.config import STABILITY
@@ -18,6 +19,12 @@ def _make_bench(
     rock_bridge_height_m=0.0,
     catch_bench_adequate=False,
     catch_bench_ratio=0.0,
+    face_angle=70.0,
+    is_ramp=False,
+    wedge_risk=False,
+    toppling_risk=False,
+    face_angle_inconsistent=False,
+    anisotropy_dispersion_deg=0.0,
 ):
     return BenchParams(
         bench_number=bench_number,
@@ -26,13 +33,18 @@ def _make_bench(
         toe_elevation=85.0,
         toe_distance=10.0,
         bench_height=15.0,
-        face_angle=70.0,
+        face_angle=face_angle,
         berm_width=9.0,
+        is_ramp=is_ramp,
         overhang_m=overhang_m,
         rock_bridge_thickness_m=rock_bridge_thickness_m,
         rock_bridge_height_m=rock_bridge_height_m,
         catch_bench_adequate=catch_bench_adequate,
         catch_bench_ratio=catch_bench_ratio,
+        wedge_risk=wedge_risk,
+        toppling_risk=toppling_risk,
+        face_angle_inconsistent=face_angle_inconsistent,
+        anisotropy_dispersion_deg=anisotropy_dispersion_deg,
     )
 
 
@@ -94,6 +106,10 @@ class TestStabilityAnalysis:
         assert summary['n_overhangs_warning'] == 0
         assert summary['n_overhangs_critical'] == 0
         assert summary['n_catch_bench_adequate'] == 0
+        assert summary['n_wedge_risk'] == 0
+        assert summary['n_toppling_risk'] == 0
+        assert summary['n_face_angle_inconsistent'] == 0
+        assert summary['anisotropy_dispersion_deg'] == 0.0
         assert summary['critical_bench_numbers'] == []
 
     def test_summarize_section_mixed_severities(self):
@@ -160,3 +176,98 @@ class TestStabilityAnalysis:
             assert fn(bench_crit).overhang_severity == 'CRITICAL'
         finally:
             sa_mod.STABILITY = original
+
+
+class TestAssessBenchStability:
+    """Phase 10 — BenchStabilityAssessment carries the 4 new geotech proxies."""
+
+    def test_includes_new_fields(self):
+        """All Phase 10 fields are present on the assessment dataclass."""
+        bench = _make_bench(
+            wedge_risk=True,
+            toppling_risk=False,
+            face_angle_inconsistent=True,
+            anisotropy_dispersion_deg=8.5,
+        )
+        a = assess_bench_stability(bench)
+        assert hasattr(a, "wedge_risk")
+        assert hasattr(a, "toppling_risk")
+        assert hasattr(a, "face_angle_inconsistent")
+        assert hasattr(a, "anisotropy_dispersion_deg")
+        assert a.wedge_risk is True
+        assert a.toppling_risk is False
+        assert a.face_angle_inconsistent is True
+        assert a.anisotropy_dispersion_deg == pytest.approx(8.5)
+
+    def test_assessment_propagates_bench_values_verbatim(self):
+        """The wrapper is a pure passthrough for the new boolean/scalar fields."""
+        bench = _make_bench(
+            face_angle=68.0,
+            wedge_risk=True,
+            toppling_risk=True,
+            face_angle_inconsistent=False,
+            anisotropy_dispersion_deg=12.3,
+        )
+        a = assess_bench_stability(bench)
+        assert a.wedge_risk is True
+        assert a.toppling_risk is True
+        assert a.face_angle_inconsistent is False
+        assert a.anisotropy_dispersion_deg == pytest.approx(12.3)
+
+
+class TestSummarizeSection:
+    """Phase 10 — summarize_section_stability counts the new proxies."""
+
+    def test_counts_wedge_toppling_inconsistent(self):
+        """n_wedge_risk / n_toppling_risk / n_face_angle_inconsistent are counted."""
+        benches = [
+            _make_bench(bench_number=1, wedge_risk=True),
+            _make_bench(bench_number=2, toppling_risk=True),
+            _make_bench(bench_number=3, face_angle_inconsistent=True),
+            _make_bench(bench_number=4, wedge_risk=True, toppling_risk=True),
+        ]
+        summary = summarize_section_stability(benches)
+        assert summary['n_wedge_risk'] == 2
+        assert summary['n_toppling_risk'] == 2
+        assert summary['n_face_angle_inconsistent'] == 1
+
+    def test_anisotropy_dispersion_in_summary(self):
+        """The summary exposes anisotropy_dispersion_deg computed from the benches."""
+        benches = [
+            _make_bench(bench_number=1, face_angle=55.0),
+            _make_bench(bench_number=2, face_angle=70.0),
+            _make_bench(bench_number=3, face_angle=85.0),
+        ]
+        summary = summarize_section_stability(benches)
+        # dispersion is recomputed from the face_angle, not read from the field
+        assert summary['anisotropy_dispersion_deg'] > 5.0
+        # It must match the standalone helper
+        assert summary['anisotropy_dispersion_deg'] == pytest.approx(
+            compute_anisotropy_dispersion(benches)
+        )
+
+    def test_ramp_excluded_from_anisotropy_dispersion(self):
+        """A ramp with an extreme face_angle does not bias the dispersion."""
+        benches = [
+            _make_bench(bench_number=1, face_angle=70.0),
+            _make_bench(bench_number=2, face_angle=70.0, is_ramp=True),
+        ]
+        summary = summarize_section_stability(benches)
+        # Only the first (non-ramp) bench contributes; need >=2 non-ramp for nonzero.
+        assert summary['anisotropy_dispersion_deg'] == 0.0
+
+    def test_summary_keys_complete(self):
+        """The summary dict exposes every documented key."""
+        summary = summarize_section_stability([_make_bench()])
+        for key in (
+            "n_benches_total",
+            "n_overhangs_warning",
+            "n_overhangs_critical",
+            "n_catch_bench_adequate",
+            "n_wedge_risk",
+            "n_toppling_risk",
+            "n_face_angle_inconsistent",
+            "anisotropy_dispersion_deg",
+            "critical_bench_numbers",
+        ):
+            assert key in summary, f"Missing key: {key}"

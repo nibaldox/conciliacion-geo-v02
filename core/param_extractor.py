@@ -82,6 +82,10 @@ class BenchParams:
     rock_bridge_height_m: float = 0.0
     catch_bench_adequate: bool = False
     catch_bench_ratio: float = 0.0
+    wedge_risk: bool = False
+    toppling_risk: bool = False
+    face_angle_inconsistent: bool = False
+    anisotropy_dispersion_deg: float = 0.0
 
 
 @dataclass
@@ -337,7 +341,8 @@ def extract_parameters(distances, elevations, section_name, sector,
                 final_angle = weighted_angle
 
             bench_num += 1
-            benches.append(BenchParams(
+            prev_face_angle = benches[-1].face_angle if benches else None
+            new_bench = BenchParams(
                 bench_number=bench_num,
                 crest_elevation=float(crest[1]),
                 crest_distance=float(crest[0]),
@@ -350,7 +355,10 @@ def extract_parameters(distances, elevations, section_name, sector,
                 effective_berm_width=0.0,
                 spill_start_distance=float(spill_pt[0]),
                 spill_start_elevation=float(spill_pt[1])
-            ))
+            )
+            new_bench.wedge_risk = _detect_wedge_shape_in_face(new_bench)
+            new_bench.toppling_risk = _detect_toppling_potential(new_bench, prev_face_angle)
+            benches.append(new_bench)
 
     _compute_berm_widths_from_profile(
         benches, simplified, d_simp, e_simp,
@@ -386,6 +394,15 @@ def extract_parameters(distances, elevations, section_name, sector,
     elif len(benches) == 1:
         result.overall_angle = benches[0].face_angle
         result.inter_ramp_angle = benches[0].face_angle
+
+    if benches:
+        _evaluate_angle_consistency(
+            benches, result.inter_ramp_angle, result.overall_angle,
+        )
+        from core.stability_analysis import compute_anisotropy_dispersion
+        dispersion = compute_anisotropy_dispersion(benches)
+        for b in benches:
+            b.anisotropy_dispersion_deg = dispersion
 
     return result
 
@@ -575,6 +592,138 @@ def _evaluate_catch_bench_adequacy(benches, berm_design_min_m=None):
             b.catch_bench_adequate = (
                 float(b.effective_berm_width) >= float(berm_design_min_m)
             )
+
+
+def _angle_between_segments(v1: tuple[float, float], v2: tuple[float, float]) -> float:
+    """Return the angle between two 2D segments in degrees.
+
+    Parameters
+    ----------
+    v1, v2 : tuple of (dx, dy)
+        Segment vectors (2D). Zero-length segments return 0.0 to avoid
+        division-by-zero.
+    """
+    dot = v1[0] * v2[0] + v1[1] * v2[1]
+    mag1 = (v1[0] ** 2 + v1[1] ** 2) ** 0.5
+    mag2 = (v2[0] ** 2 + v2[1] ** 2) ** 0.5
+    if mag1 == 0.0 or mag2 == 0.0:
+        return 0.0
+    cos_a = max(-1.0, min(1.0, dot / (mag1 * mag2)))
+    return float(np.degrees(np.arccos(cos_a)))
+
+
+def _detect_wedge_shape_in_face(
+    bench: BenchParams,
+    face_pts: list[tuple[float, float]] | None = None,
+) -> bool:
+    """Detect acute dihedral angles in the bench face.
+
+    Wedge shape proxy: looks for pairs of consecutive segments in the
+    face that form a dihedral angle < 60°. This is a weak proxy (proper
+    Markland test requires discontinuity orientation, see audit E.3) but
+    it flags geometric configurations that *resemble* wedges.
+
+    Parameters
+    ----------
+    bench : BenchParams
+        The bench to analyze.
+    face_pts : list of (x, z) tuples, optional
+        Optional explicit face points (for testing). When provided with
+        at least 3 points, computes dihedral angles between consecutive
+        segments. When ``None`` or fewer than 3 points, falls back to a
+        conservative heuristic proxy: any bench with
+        ``face_angle > 65°`` AND ``bench_height > 12 m`` is flagged.
+
+    Returns
+    -------
+    bool
+        ``True`` if wedge shape is detected.
+    """
+    if face_pts is not None and len(face_pts) >= 3:
+        for i in range(len(face_pts) - 2):
+            v1 = (
+                face_pts[i + 1][0] - face_pts[i][0],
+                face_pts[i + 1][1] - face_pts[i][1],
+            )
+            v2 = (
+                face_pts[i + 2][0] - face_pts[i + 1][0],
+                face_pts[i + 2][1] - face_pts[i + 1][1],
+            )
+            angle = _angle_between_segments(v1, v2)
+            if angle < 60.0:
+                return True
+        return False
+    return bench.face_angle > 65.0 and bench.bench_height > 12.0
+
+
+def _detect_toppling_potential(
+    bench: BenchParams,
+    upper_bench_face_angle: float | None = None,
+) -> bool:
+    """Toppling proxy: tall bench with steep face and upper release.
+
+    Empirical thresholds (Goodman & Bray, 1976):
+
+    - ``face_angle > 80°`` alone → toppling potential (near-vertical face).
+    - ``face_angle > 75°`` AND ``bench_height > 15 m`` → toppling potential
+      (steep + tall block is unstable).
+    - ``face_angle > 65°`` AND ``bench_height > 12 m`` AND the bench
+      immediately above has ``face_angle > 75°`` → toppling potential
+      (the upper release surface provides the kinematic freedom).
+
+    Parameters
+    ----------
+    bench : BenchParams
+        The bench to analyze.
+    upper_bench_face_angle : float, optional
+        Face angle of the bench immediately above (release condition).
+        When ``None`` the third rule is skipped.
+
+    Returns
+    -------
+    bool
+        ``True`` if toppling risk is detected.
+    """
+    if bench.face_angle > 80.0:
+        return True
+    if bench.face_angle > 75.0 and bench.bench_height > 15.0:
+        return True
+    if (
+        upper_bench_face_angle is not None
+        and upper_bench_face_angle > 75.0
+        and bench.face_angle > 65.0
+        and bench.bench_height > 12.0
+    ):
+        return True
+    return False
+
+
+def _evaluate_angle_consistency(
+    benches: list[BenchParams],
+    inter_ramp_angle: float,
+    overall_angle: float,
+) -> list[BenchParams]:
+    """Flag benches whose face_angle is inconsistent with the inter-ramp angle.
+
+    Criteria:
+
+    - If ``|face_angle - inter_ramp_angle| > 8°`` → flag
+      ``face_angle_inconsistent = True``. This indicates the bench is
+      either anomalously steep or shallow relative to the overall slope
+      geometry.
+
+    ``overall_angle`` is accepted for forward compatibility (the audit
+    also discussed |face_angle - overall_angle| comparisons), but the
+    current rule uses ``inter_ramp_angle`` as the reference, which is
+    the more conservative (steeper) reference value.
+
+    Updates in place: ``bench.face_angle_inconsistent``. Returns the
+    same list for convenience.
+    """
+    for b in benches:
+        if abs(float(b.face_angle) - float(inter_ramp_angle)) > 8.0:
+            b.face_angle_inconsistent = True
+    return benches
 
 
 def _evaluate_status(deviation, tol_neg, tol_pos):
