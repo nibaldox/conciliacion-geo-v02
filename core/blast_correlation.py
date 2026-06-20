@@ -9,25 +9,25 @@ two output formats stay in sync.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.column_utils import first_present_column, kilos_column
+from core.compliance_status import (
+    STATUS_BANCO_ADICIONAL,
+    STATUS_CUMPLE,
+    STATUS_EXTRA,
+    STATUS_FALTA_BANCO,
+    STATUS_FUERA,
+    STATUS_NO_CONSTRUIDO,
+    STATUS_NO_CUMPLE,
+    STATUS_RAMPA_OK,
+)
 from core.config import DEFAULTS, EXPLOSIVE, RAMP
 from core.blast_metrics import enrich_blast_dataframe
-
-
-# Status strings used throughout the codebase for compliance.
-STATUS_CUMPLE = "CUMPLE"
-STATUS_FUERA = "FUERA DE TOLERANCIA"
-STATUS_NO_CUMPLE = "NO CUMPLE"
-STATUS_NO_CONSTRUIDO = "NO CONSTRUIDO"
-STATUS_FALTA_BANCO = "FALTA BANCO"
-STATUS_EXTRA = "EXTRA"
-STATUS_BANCO_ADICIONAL = "BANCO ADICIONAL"
-STATUS_RAMPA_OK = "RAMPA OK"
 
 
 @dataclass
@@ -64,22 +64,6 @@ class BlastCorrelationRow:
             self.energy_total_mj,
             self.n_pf_valid,
         )
-
-
-def _first_present(df: pd.DataFrame, candidates: Iterable[str]) -> Optional[str]:
-    """Return the first column name from `candidates` that exists in `df`."""
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
-
-
-def _kilos_column(df: pd.DataFrame) -> Optional[str]:
-    """Locate the kilograms-of-explosive column across vendor naming variants."""
-    return _first_present(
-        df,
-        ["Kilos_Cargados_real", "Kilos_Cargados", "Carga_kg", "Explosivo_kg"],
-    )
 
 
 def _knn_spacing(df_group: pd.DataFrame, k: int = 4) -> tuple:
@@ -141,7 +125,7 @@ def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
 
     out = df_pozos.copy()
 
-    kg_col = _kilos_column(out)
+    kg_col = kilos_column(out)
     kilos = pd.to_numeric(out[kg_col], errors='coerce') if kg_col else pd.Series(
         [np.nan] * len(out), index=out.index
     )
@@ -239,7 +223,7 @@ def aggregate_powder_factor_by_group(
     if df_pozos is None or df_pozos.empty or projected_pozos is None or projected_pozos.empty:
         return out
 
-    key_col = _first_present(projected_pozos, [group_by, 'section', 'section_name'])
+    key_col = first_present_column(projected_pozos, [group_by, 'section', 'section_name'])
     if not key_col:
         return out
 
@@ -250,7 +234,7 @@ def aggregate_powder_factor_by_group(
     n_wells = len(sub)
     out["n_wells"] = int(n_wells)
 
-    kg_col = _kilos_column(sub)
+    kg_col = kilos_column(sub)
     kg_total = float(sub[kg_col].fillna(0).sum()) if kg_col else 0.0
     out["kg_total"] = kg_total
 
@@ -353,12 +337,12 @@ def compute_signed_deviations(
 
 
 def _pasadura(df: pd.DataFrame, bench_height: float) -> pd.Series:
-    """Sub-drilling depth (m): collar minus bench floor minus toe."""
+    """Sub-drill depth (m): collar minus bench floor minus toe."""
     return (df["Z_collar"] - bench_height) - df["Z_toe"]
 
 
 def compute_pasadura_stats(df_pozos: pd.DataFrame) -> dict:
-    """Aggregate sub-drilling statistics for a blast-hole DataFrame.
+    """Aggregate sub-drill statistics for a blast-hole DataFrame.
 
     Returns a dict with keys: total, mean, optimal_count, optimal_pct.
     """
@@ -405,7 +389,7 @@ def compute_blast_geotech_correlation(
     if tolerance is None:
         tolerance = DEFAULTS.blast_correlation_radius_m
 
-    kg_col = _kilos_column(df_pozos)
+    kg_col = kilos_column(df_pozos)
     dev_col = _deviation_column(comparisons)
     df_comp = pd.DataFrame(comparisons) if comparisons else pd.DataFrame()
 

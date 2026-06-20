@@ -19,6 +19,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from core.column_utils import KILOS_CANDIDATES, first_present_column
 from core.config import EXPLOSIVE
 
 
@@ -29,7 +30,6 @@ ROCK_DENSITY_DEFAULT_TM3 = 2.7
 
 _MJ_PER_KG_TO_CAL_PER_G = 1000.0 / 4.184
 
-_KILOS_CANDIDATES = ("Kilos_Cargados_real", "Kilos_Cargados", "Carga_kg", "Explosivo_kg")
 _LENGTH_CANDIDATES = ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
 _DIAM_CANDIDATES = ("Diam_mm", "Diametro", "Diametro_pozo", "Diametro_perforacion", "D_mm")
 _BURDEN_CANDIDATES = ("Burden", "Burden_Real", "Burden_diseno", "B")
@@ -39,15 +39,8 @@ _INCL_CANDIDATES = ("Incl", "Inclinacion_real", "Inclinacion", "Inclination")
 _AZ_CANDIDATES = ("Az", "Azimuth_real", "Azimuth", "Azimut")
 
 
-def _first_present(df: pd.DataFrame, candidates: tuple) -> Optional[str]:
-    for c in candidates:
-        if c in df.columns:
-            return c
-    return None
-
-
 def _col_or_nan(df: pd.DataFrame, candidates: tuple) -> pd.Series:
-    col = _first_present(df, candidates)
+    col = first_present_column(df, candidates)
     if col is None:
         return pd.Series([np.nan] * len(df), index=df.index, dtype=float)
     return pd.to_numeric(df[col], errors="coerce")
@@ -92,7 +85,7 @@ def compute_spacing_burden_ratio(df: pd.DataFrame) -> pd.Series:
 
 def compute_kg_per_meter(df: pd.DataFrame) -> pd.Series:
     """Kilograms of explosive per metre of hole length."""
-    kilos = _col_or_nan(df, _KILOS_CANDIDATES)
+    kilos = _col_or_nan(df, KILOS_CANDIDATES)
     length = _col_or_nan(df, _LENGTH_CANDIDATES)
     out = pd.Series([np.nan] * len(df), index=df.index, dtype=float)
     valid = kilos.notna() & length.notna() & (length > 0)
@@ -152,7 +145,7 @@ def compute_decoupling_ratio(
     if not diam.notna().any():
         return empty
 
-    kg_col = well_kg_col or _first_present(df, _KILOS_CANDIDATES)
+    kg_col = well_kg_col or first_present_column(df, KILOS_CANDIDATES)
     if kg_col is None:
         return empty
     kilos = pd.to_numeric(df[kg_col], errors="coerce")
@@ -251,7 +244,7 @@ def compute_kuznetsov_x50(
     if not burden.notna().any() or not esp.notna().any():
         return nan
 
-    kg_col = _first_present(df, _KILOS_CANDIDATES)
+    kg_col = first_present_column(df, KILOS_CANDIDATES)
     if kg_col is None:
         return nan
     kilos = pd.to_numeric(df[kg_col], errors="coerce")
@@ -312,7 +305,7 @@ def compute_ispu(
     if not burden.notna().any() or not esp.notna().any():
         return nan
 
-    kg_col = _first_present(blast_df, _KILOS_CANDIDATES)
+    kg_col = first_present_column(blast_df, KILOS_CANDIDATES)
     if kg_col is None or "energy_mj" not in blast_df.columns:
         return nan
     energy_mj = pd.to_numeric(blast_df["energy_mj"], errors="coerce")
@@ -399,12 +392,12 @@ def enrich_blast_dataframe(
     if "Burden" in out.columns and "Esp" in out.columns:
         out["spacing_burden_ratio"] = compute_spacing_burden_ratio(out)
 
-    has_kilos = _first_present(out, _KILOS_CANDIDATES) is not None
-    has_len = _first_present(out, _LENGTH_CANDIDATES) is not None
+    has_kilos = first_present_column(out, KILOS_CANDIDATES) is not None
+    has_len = first_present_column(out, _LENGTH_CANDIDATES) is not None
     if has_kilos and has_len:
         out["kg_per_meter"] = compute_kg_per_meter(out)
 
-    if _first_present(out, _DIAM_CANDIDATES) is not None:
+    if first_present_column(out, _DIAM_CANDIDATES) is not None:
         decoupling = compute_decoupling_ratio(out)
         out["volume_load_kgm3"] = decoupling["volume_load_kgm3"]
         out["coupling_ratio"] = decoupling["coupling_ratio"]
@@ -432,12 +425,12 @@ def enrich_blast_dataframe(
     if bottom_ratio is not None:
         out["bottom_column_ratio"] = bottom_ratio
 
-    has_len = _first_present(out, _LENGTH_CANDIDATES) is not None
-    has_taco = _first_present(out, _TACO_CANDIDATES) is not None
+    has_len = first_present_column(out, _LENGTH_CANDIDATES) is not None
+    has_taco = first_present_column(out, _TACO_CANDIDATES) is not None
     if has_len and has_taco:
         out["altura_carga_m"] = compute_altura_carga_m(
-            pd.to_numeric(out[_first_present(out, _LENGTH_CANDIDATES)], errors="coerce"),
-            pd.to_numeric(out[_first_present(out, _TACO_CANDIDATES)], errors="coerce"),
+            pd.to_numeric(out[first_present_column(out, _LENGTH_CANDIDATES)], errors="coerce"),
+            pd.to_numeric(out[first_present_column(out, _TACO_CANDIDATES)], errors="coerce"),
         )
 
     return out

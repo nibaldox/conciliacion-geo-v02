@@ -76,7 +76,7 @@ class DeployDefaults:
     """
     # Logging
     log_level: str = field(default_factory=lambda: os.environ.get("CONCILIACION_LOG_LEVEL", "INFO"))
-    log_format: str = field(default_factory=lambda: os.environ.get("CONCILIATION_LOG_FORMAT", "plain"))
+    log_format: str = field(default_factory=lambda: os.environ.get("CONCILIACION_LOG_FORMAT", "plain"))
 
     # Rate limiting (slowapi)
     rate_limit_enabled: bool = field(default_factory=lambda: _env_bool("CONCILIACION_RATE_LIMIT_ENABLED", False))
@@ -91,7 +91,7 @@ class DeployDefaults:
     cors_origins_env: str = field(default_factory=lambda: os.environ.get("CONCILIACION_CORS_ORIGINS", ""))
 
     # Runtime
-    workers: int = field(default_factory=lambda: _env_int("CONCILIATION_WORKERS", 1))
+    workers: int = field(default_factory=lambda: _env_int("CONCILIACION_WORKERS", 1))
     data_dir: str = field(default_factory=lambda: os.environ.get("CONCILIACION_DATA_DIR", ""))
 
 
@@ -116,6 +116,11 @@ class ExplosiveEnergy:
 
     Used to convert total_kg to total energy (MJ) when comparing blasts with
     different explosive products. Typical values from ENAEX product catalog.
+
+    ``pirex_energy_by_grade`` / ``pirex_density_by_grade`` are the single
+    source of truth for the per-grade Pirex emulsion values consumed by
+    :mod:`core.explosive_properties` (formerly hardcoded there in
+    parallel ``PIREX_ENERGY_MJ_KG`` / ``PIREX_DENSITY_G_CM3`` dicts).
     """
     anfo_energy: float = 3.72
     emulsion_energy: float = 2.78
@@ -126,6 +131,19 @@ class ExplosiveEnergy:
     emulsion_density: float = 1.20
     heavy_anfo_density: float = 1.05
     bulk_emulsion_density: float = 1.15
+
+    pirex_energy_by_grade: Dict[str, float] = field(default_factory=lambda: {
+        'Pirex-930': 3.05,
+        'Pirex-920': 2.95,
+        'Pirex-950': 3.15,
+        'Pirex-970': 3.25,
+    })
+    pirex_density_by_grade: Dict[str, float] = field(default_factory=lambda: {
+        'Pirex-930': 1.20,
+        'Pirex-920': 1.15,
+        'Pirex-950': 1.23,
+        'Pirex-970': 1.25,
+    })
 
     def energy_mj_per_kg(self, explosive_type: str) -> float:
         """Return MJ/kg for a given explosive type string (case-insensitive)."""
@@ -168,6 +186,8 @@ class BlastAdvisorDefaults:
     min_samples_for_advice: int = 5
     high_confidence_n: int = 15
     medium_confidence_n: int = 8
+    pf_upper_bound_factor: float = 1.5
+    pf_max_operational_kgm3: float = 1.50
 
 
 @dataclass(frozen=True)

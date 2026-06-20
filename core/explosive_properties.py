@@ -2,24 +2,20 @@
 
 Used by compute_altura_carga() and the 3D viewer to enrich well tooltips.
 Values from ENAEX product catalog (Pirex emulsions + Enaline cartridges).
+
+The per-grade Pirex energy/density tables are sourced from
+:data:`core.config.EXPLOSIVE` (single source of truth) instead of being
+duplicated here.
 """
 from __future__ import annotations
 
 from typing import Optional
 
+from core.config import EXPLOSIVE
 
-PIREX_ENERGY_MJ_KG = {
-    'Pirex-930': 3.05,
-    'Pirex-920': 2.95,
-    'Pirex-950': 3.15,
-    'Pirex-970': 3.25,
-}
-PIREX_DENSITY_G_CM3 = {
-    'Pirex-930': 1.20,
-    'Pirex-920': 1.15,
-    'Pirex-950': 1.23,
-    'Pirex-970': 1.25,
-}
+
+PIREX_ENERGY_MJ_KG = dict(EXPLOSIVE.pirex_energy_by_grade)
+PIREX_DENSITY_G_CM3 = dict(EXPLOSIVE.pirex_density_by_grade)
 ENALINE_DENSITY_G_CM3 = 1.10
 ENALINE_ENERGY_MJ_KG = 2.85
 

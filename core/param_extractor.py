@@ -10,6 +10,15 @@ from scipy.interpolate import interp1d
 from scipy.ndimage import uniform_filter1d
 
 from core.blast_correlation import classify_berm_as_ramp
+from core.compliance_status import (
+    STATUS_BANCO_ADICIONAL,
+    STATUS_CUMPLE,
+    STATUS_EXTRA,
+    STATUS_FALTA_BANCO,
+    STATUS_FUERA,
+    STATUS_NO_CONSTRUIDO,
+    STATUS_NO_CUMPLE,
+)
 from core.config import DETECTION, RAMP
 
 SegmentType = Literal["crest", "berm_top", "berm_bottom", "toe", "face", "ramp"]
@@ -193,7 +202,7 @@ def extract_parameters(distances, elevations, section_name, sector,
                        max_berm_width=DETECTION.max_berm_width):
     """
     Extract geotechnical parameters using Vector Simplification (RDP).
-    
+
     1. Simplify profile using Ramer-Douglas-Peucker (epsilon=DETECTION.simplify_epsilon)
     2. Compute angles of simplified segments
     3. Classify and merge segments
@@ -206,45 +215,45 @@ def extract_parameters(distances, elevations, section_name, sector,
 
     # Prepare points
     points = np.column_stack((distances, elevations))
-    
+
     # 1. Simplify
-    # Epsilon determines how much "noise" we ignore. 
+    # Epsilon determines how much "noise" we ignore.
     # For accurate crests/toes, we want high precision.
     epsilon = DETECTION.simplify_epsilon
     simplified = ramer_douglas_peucker(points, epsilon)
-    
+
     if len(simplified) < 2:
         return result
-        
+
     d_simp = simplified[:, 0]
     e_simp = simplified[:, 1]
-    
+
     # 2. Compute Segment Angles
     dx = np.diff(d_simp)
     dy = np.diff(e_simp)
     dists = np.sqrt(dx**2 + dy**2)
-    
+
     # Avoid zero-length segments
     valid_seg = dists > 1e-4
     if not np.any(valid_seg):
         return result
-        
+
     angles = np.zeros(len(dx))
     # Angle in degrees (always positive)
     angles[valid_seg] = np.abs(np.degrees(np.arctan2(dy[valid_seg], dx[valid_seg])))
-    
+
     # 3. Classify Segments
     # Use thresholds provided
     segment_type = np.full(len(angles), 0) # 0=Unknown, 1=Face, 2=Berm
-    
+
     # Strict classification
     segment_type[angles >= face_threshold] = 1 # Face
     segment_type[angles <= berm_threshold] = 2 # Berm
-    
+
     # Merge consecutive segments of same type
     # For "Unknown" segments, we can try to merge them into neighbors or ignore
     # Let's simple merge same types.
-    
+
     merged_segments = []
     if len(segment_type) > 0:
         current_type = segment_type[0]
@@ -263,11 +272,11 @@ def extract_parameters(distances, elevations, section_name, sector,
             'start_idx': start_idx,
             'end_idx': len(segment_type)
         })
-        
+
     # 4. Extract Benches
     # A bench is usually Berm -> Face (or just Face if it's the bottom and we start there)
     # We look for Face segments.
-    # Crest is the top point of a face (dist, elev at start of face segment if going left-to-right? 
+    # Crest is the top point of a face (dist, elev at start of face segment if going left-to-right?
     # Wait, distances are sorted? Yes usually distance along section.
     # If distance increases, and we look at profile:
     # Face goes DOWN usually? Or UP?
@@ -276,44 +285,44 @@ def extract_parameters(distances, elevations, section_name, sector,
     # Slopes usually go down or up.
     # Let's assume standard behavior: we just care about the segment geometry.
     # "Crest" is higher elevation point of face. "Toe" is lower elevation point.
-    
+
     benches = []
     bench_num = 0
-    
+
     for seg in merged_segments:
         if seg['type'] == 1: # Face
             # Indices in simplified array
             idx_start = seg['start_idx']
             idx_end = seg['end_idx'] # Exclusive, so point index is idx_end
-            
+
             # Points defining this face sequence
             face_pts = simplified[idx_start : idx_end + 1]
-            
+
             # Start and End of the face "macro-segment"
             p_start = face_pts[0]
             p_end = face_pts[-1]
-            
+
             # Determine Crest and Toe based on elevation
             sorted_face_pts = face_pts[np.argsort(-face_pts[:, 1])]
             crest = sorted_face_pts[0]
             toe = sorted_face_pts[-1]
-            
+
             bench_height = abs(crest[1] - toe[1])
-            
+
             if bench_height < DETECTION.min_bench_height:
                 continue
-                
+
             local_dx = dx[idx_start:idx_end]
             local_dy = dy[idx_start:idx_end]
             local_len = dists[idx_start:idx_end]
             local_ang = angles[idx_start:idx_end]
-            
+
             steep_mask = local_ang > (face_threshold - DETECTION.face_threshold_margin)
             if np.sum(local_len[steep_mask]) > 0.1:
                 weighted_angle = np.average(local_ang[steep_mask], weights=local_len[steep_mask])
             else:
                 weighted_angle = np.average(local_ang, weights=local_len)
-                
+
             d_min = min(crest[0], toe[0])
             d_max = max(crest[0], toe[0])
             mask_raw = (
@@ -372,12 +381,12 @@ def extract_parameters(distances, elevations, section_name, sector,
     _evaluate_catch_bench_adequacy(benches)
 
     result.benches = benches
-    
+
     # Calculate angles
     if len(benches) >= 2:
         top = benches[0]
         bot = benches[-1]
-        
+
         # Overall: Crest top to Toe bot
         dz = top.crest_elevation - bot.toe_elevation
         dx = abs(top.crest_distance - bot.toe_distance)
@@ -413,38 +422,38 @@ def _compute_berm_widths_from_profile(
 ):
     """Compute berm widths as the horizontal distance between toe and crest of adjacent benches.
 
-    Geotechnically, the berm of a bench (e.g. Bench i) is the horizontal platform 
+    Geotechnically, the berm of a bench (e.g. Bench i) is the horizontal platform
     located in its UPPER part (at its crest), connecting it to the previous bench i-1.
-    
+
     For Bench i >= 1:
       berm_width = abs(min(curr_crest, curr_toe) - max(prev_crest, prev_toe))
     """
     n_benches = len(benches)
     if n_benches == 0:
         return
-        
+
     # Initialize the first bench's berm to 0.0 (it might be updated later by leading berm check)
     benches[0].berm_width = 0.0
     benches[0].effective_berm_width = 0.0
     benches[0].is_ramp = False
     benches[0].group_break = False
-        
+
     for i in range(n_benches - 1):
         b_curr = benches[i]
         b_next = benches[i + 1]
-        
+
         curr_right = max(b_curr.toe_distance, b_curr.crest_distance)
         next_left = min(b_next.toe_distance, b_next.crest_distance)
-        
+
         width = float(abs(next_left - curr_right))
         b_next.berm_width = width
         b_next.effective_berm_width = float(max(width - b_curr.spill_width, 0.0))
-        
+
         if classify_berm_as_ramp(width):
             b_next.is_ramp = True
         else:
             b_next.is_ramp = False
-            
+
         if width >= max_berm_width:
             b_next.group_break = True
         else:
@@ -737,11 +746,11 @@ def _evaluate_status(deviation, tol_neg, tol_pos):
 
     abs_dev = abs(deviation)
     if abs_dev <= limit:
-        return "CUMPLE"
+        return STATUS_CUMPLE
     elif abs_dev <= limit * 1.5:
-        return "FUERA DE TOLERANCIA"
+        return STATUS_FUERA
     else:
-        return "NO CUMPLE"
+        return STATUS_NO_CUMPLE
 
 
 def _build_reconciled_points(
@@ -966,13 +975,13 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     from scipy.optimize import linear_sum_assignment
 
     comparisons = []
-    
+
     benches_design = params_design.benches
     benches_topo = params_topo.benches
-    
+
     n_d = len(benches_design)
     n_t = len(benches_topo)
-    
+
     if n_d == 0 and n_t == 0:
         return []
 
@@ -982,14 +991,14 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     # Create Cost Matrix (Weighted 2D Euclidean Distance between Bench Centroids)
     # Rows: Design, Cols: Topo
     cost_matrix = np.zeros((n_d, n_t))
-    
+
     for i, bd in enumerate(benches_design):
         bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
         bd_x = (bd.crest_distance + bd.toe_distance) / 2
         for j, bt in enumerate(benches_topo):
             bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
             bt_x = (bt.crest_distance + bt.toe_distance) / 2
-            
+
             # If vertical difference is too large, assign a massive cost
             # to prevent matching across different vertical levels!
             diff_z = abs(bd_z - bt_z)
@@ -998,10 +1007,10 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
             else:
                 # 2D Euclidean distance: Z has 1.5x weight for vertical priority, X has 1.0x weight
                 cost_matrix[i, j] = np.sqrt(1.5 * (bd_z - bt_z)**2 + 1.0 * (bd_x - bt_x)**2)
-            
+
     # Solve Assignment Problem (Minimize total 2D distance cost)
     row_ind, col_ind = linear_sum_assignment(cost_matrix)
-    
+
     # Gather valid match candidates
     candidates = []
     for r, c in zip(row_ind, col_ind):
@@ -1012,10 +1021,10 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
         diff_z = abs(bd_z - bt_z)
         if diff_z < match_threshold:
             candidates.append((r, c, cost_matrix[r, c]))
-            
+
     # Sort candidates by design index r to enforce sequential monotonicity
     candidates.sort(key=lambda x: x[0])
-    
+
     # Resolve cross-matching conflicts greedily based on cost
     valid_matches = []
     for cand in candidates:
@@ -1032,7 +1041,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 # Replace conflicting matches with the better one
                 valid_matches = [x for x in valid_matches if x not in conflicts]
                 valid_matches.append(cand)
-                
+
     # Sort final matches by design index r
     valid_matches.sort(key=lambda x: x[0])
 
@@ -1059,7 +1068,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
             berm_real = round(bt.berm_width, 2)
 
             berm_complies = berm_real >= min_berm
-            berm_status = "CUMPLE" if berm_complies else "NO CUMPLE"
+            berm_status = STATUS_CUMPLE if berm_complies else STATUS_NO_CUMPLE
             berm_score = 60 if berm_complies else 0
 
             angle_complies = abs(angle_dev) <= (tol_a['neg'] if angle_dev < 0 else tol_a['pos'])
@@ -1101,7 +1110,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'height_score': height_score,
                 'bench_score': bench_score,
             })
-    
+
     # Process Unmatched Design (Missing Benches)
     for i in range(n_d):
         if i not in matched_design_indices:
@@ -1115,7 +1124,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'height_design': round(bd.bench_height, 2),
                 'height_real': None,
                 'height_dev': None,
-                'height_status': "NO CONSTRUIDO",
+                'height_status': STATUS_NO_CONSTRUIDO,
                 'angle_design': round(bd.face_angle, 1),
                 'angle_real': None,
                 'angle_dev': None,
@@ -1123,7 +1132,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_design': round(bd.berm_width, 2),
                 'berm_real': None,
                 'berm_min': None,
-                'berm_status': "FALTA BANCO",
+                'berm_status': STATUS_FALTA_BANCO,
                 'spill_width': None,
                 'effective_berm': None,
                 'delta_crest': None,
@@ -1135,7 +1144,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'height_score': 0,
                 'bench_score': 0,
             })
-            
+
     # Process Unmatched Topo (Extra Benches)
     for j in range(n_t):
         if j not in matched_topo_indices:
@@ -1149,7 +1158,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'height_design': None,
                 'height_real': round(bt.bench_height, 2),
                 'height_dev': None,
-                'height_status': "EXTRA",
+                'height_status': STATUS_EXTRA,
                 'angle_design': None,
                 'angle_real': round(bt.face_angle, 1),
                 'angle_dev': None,
@@ -1157,7 +1166,7 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'berm_design': None,
                 'berm_real': round(bt.berm_width, 2),
                 'berm_min': None,
-                'berm_status': "BANCO ADICIONAL",
+                'berm_status': STATUS_BANCO_ADICIONAL,
                 'spill_width': round(bt.spill_width, 2),
                 'effective_berm': round(bt.effective_berm_width, 2),
                 'delta_crest': None,
@@ -1169,17 +1178,17 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
                 'height_score': 0,
                 'bench_score': 0,
             })
-            
+
     # Calculate section-level compliance score (average of MATCH bench scores)
     match_scores = [c['bench_score'] for c in comparisons if c['type'] == 'MATCH']
     section_score = round(sum(match_scores) / len(match_scores), 1) if match_scores else 0.0
-    section_status = "CUMPLE" if section_score >= 70 else "NO CUMPLE"
+    section_status = STATUS_CUMPLE if section_score >= 70 else STATUS_NO_CUMPLE
 
     for c in comparisons:
         c['section_score'] = section_score
         c['section_status'] = section_status
-            
+
     # Sort by Level (Descending) for display
     comparisons.sort(key=lambda x: float(x['level']) if x['level'].replace('.','',1).isdigit() else 0, reverse=True)
-    
+
     return comparisons

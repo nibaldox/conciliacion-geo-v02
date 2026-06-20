@@ -19,13 +19,14 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from core.compliance_status import (
+    FEASIBILITY_APPLICABLE,
+    FEASIBILITY_CAUTION,
+    FEASIBILITY_INFEASIBLE,
+    FEASIBILITY_INSUFFICIENT,
+)
 from core.config import ADVISOR, POWDER_FACTOR
 
-
-FEASIBILITY_APPLICABLE = "APPLICABLE"
-FEASIBILITY_CAUTION = "CAUTION"
-FEASIBILITY_INFEASIBLE = "INFEASIBLE"
-FEASIBILITY_INSUFFICIENT = "INSUFFICIENT_DATA"
 
 DIRECTION_REDUCE = "REDUCE"
 DIRECTION_INCREASE = "INCREASE"
@@ -61,7 +62,7 @@ def _classify_feasibility(
         return FEASIBILITY_INSUFFICIENT
     if target_pf < 0.0:
         return FEASIBILITY_CAUTION
-    upper_bound = pf_optimal * 1.5
+    upper_bound = pf_optimal * ADVISOR.pf_upper_bound_factor
     if upper_bound > 0.0 and target_pf > upper_bound:
         return FEASIBILITY_CAUTION
     if np.isfinite(delta_pf_pct) and abs(delta_pf_pct) > ADVISOR.max_recommendation_pct:
@@ -106,9 +107,9 @@ def _build_message(
                 f"PF objetivo ({tgt:.2f} kg/m3) resulta fisicamente imposible (negativo); "
                 "revisar beta1 y beta0 del modelo antes de recomendar."
             )
-        upper = POWDER_FACTOR.pf_optimal_kgm3 * 1.5
+        upper = POWDER_FACTOR.pf_optimal_kgm3 * ADVISOR.pf_upper_bound_factor
         return (
-            f"PF objetivo ({tgt:.2f} kg/m3) supera 1.5x el optimo de diseno ({upper:.2f} kg/m3); "
+            f"PF objetivo ({tgt:.2f} kg/m3) supera {ADVISOR.pf_upper_bound_factor:g}x el optimo de diseno ({upper:.2f} kg/m3); "
             "revisar patron de carga antes de aplicar."
         )
 
@@ -446,7 +447,7 @@ def validate_recommendation(
         (``max_recommendation_pct``). Supported keys:
         - max_recommendation_pct : float (default from ADVISOR)
         - min_pf_kgm3 : float (default 0.10)
-        - max_pf_kgm3 : float (default 1.50)
+        - max_pf_kgm3 : float (default ``ADVISOR.pf_max_operational_kgm3``)
 
     Returns
     -------
@@ -470,7 +471,7 @@ def validate_recommendation(
 
     max_pct = float(constraints.get("max_recommendation_pct", ADVISOR.max_recommendation_pct))
     min_pf = float(constraints.get("min_pf_kgm3", 0.10))
-    max_pf = float(constraints.get("max_pf_kgm3", 1.50))
+    max_pf = float(constraints.get("max_pf_kgm3", ADVISOR.pf_max_operational_kgm3))
 
     warnings: List[str] = []
     feasibility = str(rec.get("feasibility", FEASIBILITY_INSUFFICIENT))

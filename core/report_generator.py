@@ -16,6 +16,11 @@ from core.blast_correlation import (
     compute_pasadura_stats,
 )
 from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.compliance_status import (
+    STATUS_CUMPLE,
+    STATUS_FUERA,
+    STATUS_NO_CUMPLE,
+)
 from core.config import DEFAULTS
 
 def create_section_plot(params_design, params_topo, distances_d, elevations_d, distances_t, elevations_t,
@@ -62,7 +67,7 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
             from core.geom_utils import calculate_profile_deviation
             devs = calculate_profile_deviation(pd_prof, pt_prof)
             T = tolerances.get('bench_height', {}).get('pos', 1.5)
-            
+
             mask_ok = devs <= T
             mask_warn = (devs > T) & (devs <= 1.5 * T)
             mask_nok = devs > 1.5 * T
@@ -73,7 +78,7 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
                 ax.scatter(distances_t[mask_warn], elevations_t[mask_warn], color='#FFD700', s=12, zorder=5)
             if np.any(mask_nok):
                 ax.scatter(distances_t[mask_nok], elevations_t[mask_nok], color='#FF0000', s=12, zorder=5)
-            
+
             ax.plot([], [], color='forestgreen', linewidth=2, label='Topografía Real')
         else:
             ax.plot(distances_t, elevations_t, color='forestgreen', label='Topografía Real', linewidth=2)
@@ -232,11 +237,11 @@ def create_compliance_pie_charts(comparisons):
 
     # Soft, high-contrast palette (readable on screen and printed).
     category_colors = {
-        'CUMPLE':             '#7FBF7F',  # soft green
-        'FUERA DE TOLERANCIA':'#FFD27F',  # soft amber
-        'NO CUMPLE':          '#F08C8C',  # soft red
+        STATUS_CUMPLE:        '#7FBF7F',  # soft green
+        STATUS_FUERA:         '#FFD27F',  # soft amber
+        STATUS_NO_CUMPLE:     '#F08C8C',  # soft red
     }
-    category_order = ['CUMPLE', 'FUERA DE TOLERANCIA', 'NO CUMPLE']
+    category_order = [STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE]
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
@@ -270,7 +275,7 @@ def create_compliance_pie_charts(comparisons):
                 at.set_fontsize(8)
 
             total = sum(sizes)
-            n_ok = counts['CUMPLE']
+            n_ok = counts[STATUS_CUMPLE]
             pct = (n_ok / total * 100) if total > 0 else 0
             ax.text(0, 0, f"{pct:.0f}%\nLogro",
                     ha='center', va='center', fontsize=10, weight='bold')
@@ -292,9 +297,9 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
                          df_pozos=None, sections=None, plot_options=None):
     if project_info is None:
         project_info = {}
-        
+
     doc = Document()
-    
+
     for section in doc.sections:
         section.orientation = WD_ORIENT.LANDSCAPE
         new_width, new_height = section.page_height, section.page_width
@@ -307,29 +312,29 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 
     if plot_options is None:
         plot_options = {}
-    
+
     title = doc.add_heading(f"Informe de Conciliación Geotécnica", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
+
     p = doc.add_paragraph()
     p.add_run(f"Proyecto: {project_info.get('project', 'N/A')}\n").bold = True
     p.add_run(f"Elaborado por: {project_info.get('author', 'N/A')}\n")
     p.add_run(f"Fecha: {datetime.now().strftime('%d/%m/%Y')}\n")
-    
+
     doc.add_heading("1. Resumen Ejecutivo", level=1)
-    
+
     if comparisons:
         match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
         if match_comps:
             section_score = match_comps[0].get('section_score', 0.0)
-            section_status = match_comps[0].get('section_status', 'NO CUMPLE')
+            section_status = match_comps[0].get('section_status', STATUS_NO_CUMPLE)
         else:
             section_score = 0.0
-            section_status = 'NO CUMPLE'
-        
+            section_status = STATUS_NO_CUMPLE
+
         doc.add_paragraph(f"Se evaluaron {len(match_comps)} bancos emparejados.")
         doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.0f}/100 — {section_status}")
-        
+
         try:
             pie_stream = create_compliance_pie_charts(comparisons)
             p_pie = doc.add_paragraph()
@@ -348,14 +353,14 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Parámetro'
-        hdr_cells[1].text = 'CUMPLE'
+        hdr_cells[1].text = STATUS_CUMPLE
         hdr_cells[2].text = 'Fuera de Tolerancia'
-        hdr_cells[3].text = 'NO CUMPLE'
+        hdr_cells[3].text = STATUS_NO_CUMPLE
         hdr_cells[4].text = '% Logro'
         hdr_cells[5].text = 'Valor Promedio (Real)'
 
-        for col_idx, h in enumerate(['Parámetro', 'CUMPLE',
-                                     'Fuera de Tolerancia', 'NO CUMPLE',
+        for col_idx, h in enumerate(['Parámetro', STATUS_CUMPLE,
+                                     'Fuera de Tolerancia', STATUS_NO_CUMPLE,
                                      '% Logro', 'Valor Promedio (Real)']):
             for paragraph in hdr_cells[col_idx].paragraphs:
                 for run in paragraph.runs:
@@ -372,9 +377,9 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         ]
         for key, label, real_field, unit in param_avg_specs:
             row_cells = table.add_row().cells
-            n_ok = sum(1 for c in match_comps if c[key] == "CUMPLE")
-            n_ft = sum(1 for c in match_comps if c[key] == "FUERA DE TOLERANCIA")
-            n_nok = sum(1 for c in match_comps if c[key] == "NO CUMPLE")
+            n_ok = sum(1 for c in match_comps if c[key] == STATUS_CUMPLE)
+            n_ft = sum(1 for c in match_comps if c[key] == STATUS_FUERA)
+            n_nok = sum(1 for c in match_comps if c[key] == STATUS_NO_CUMPLE)
             total = n_ok + n_ft + n_nok
             pct = (n_ok / total * 100) if total > 0 else 0
 
@@ -458,14 +463,14 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
     doc.add_page_break()
 
     doc.add_heading("3. Detalle por Sección", level=1)
-    
+
     valid_items = []
     for item in all_data:
         sec_name = item['section_name']
         sec_comps = [c for c in comparisons if c['section'] == sec_name]
         if sec_comps:
             valid_items.append((item, sec_comps))
-            
+
     chunks = [valid_items[i:i + 6] for i in range(0, len(valid_items), 6)]
 
     for chunk_idx, chunk in enumerate(chunks):
@@ -561,44 +566,44 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 
 def generate_section_images_zip(all_data, plot_options=None, sections=None, df_pozos=None, filtered_comps=None):
     import zipfile
-    
+
     if plot_options is None:
         plot_options = {}
 
     zip_buffer = io.BytesIO()
-    
+
     with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
         for item in all_data:
             sec_name = item['section_name']
-            
+
             filtered_bench_nums = None
             if filtered_comps:
                 sec_comps = [c for c in filtered_comps if c['section'] == sec_name]
                 if not sec_comps:
                     continue
                 filtered_bench_nums = {c['bench_num'] for c in sec_comps}
-            
+
             pd = item['params_design']
             pt = item['params_topo']
             prof_d = item['profile_d']
             prof_t = item['profile_t']
-            
+
             sec_obj = None
             if sections:
                 for s in sections:
                     if s.name == sec_name:
                         sec_obj = s
                         break
-            
+
             img_buf = create_section_plot(
                 pd, pt, prof_d[0], prof_d[1], prof_t[0], prof_t[1],
                 plot_options=plot_options, section=sec_obj, df_pozos=df_pozos,
                 filtered_bench_nums=filtered_bench_nums
             )
-            
+
             filename = f"{sec_name}.png"
             zip_file.writestr(filename, img_buf.getvalue())
             img_buf.close()
-            
+
     zip_buffer.seek(0)
     return zip_buffer

@@ -10,6 +10,8 @@ from typing import Generator, Optional
 
 from openai import OpenAI
 
+from core.compliance_status import STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +29,7 @@ PROVIDERS = {
     },
 }
 
-SYSTEM_PROMPT = """Eres un Ingeniero Geotécnico Senior con 20 años de experiencia en minería a cielo abierto. 
+SYSTEM_PROMPT = """Eres un Ingeniero Geotécnico Senior con 20 años de experiencia en minería a cielo abierto.
 Tu especialidad es la conciliación geotécnica: comparar el diseño planificado vs la topografía real (as-built).
 
 Tu trabajo es analizar datos de conciliación y generar informes ejecutivos profesionales en español.
@@ -110,30 +112,34 @@ def build_analysis_prompt(results: list[dict], sections: list[dict], settings: d
     if total == 0:
         return "No hay resultados de análisis disponibles. Solicita al usuario que ejecute el procesamiento primero."
 
+    status_ok_token = STATUS_CUMPLE
+    status_nok_token = STATUS_NO_CUMPLE
+    status_warn_token = STATUS_FUERA
+
     # Count by status
     height_ok = sum(
         1 for r in results
-        if "CUMPLE" in r.get("height_status", "").upper()
-        and "NO" not in r.get("height_status", "").upper()
+        if status_ok_token in r.get("height_status", "").upper()
+        and status_nok_token not in r.get("height_status", "").upper()
     )
     angle_ok = sum(
         1 for r in results
-        if "CUMPLE" in r.get("angle_status", "").upper()
-        and "NO" not in r.get("angle_status", "").upper()
+        if status_ok_token in r.get("angle_status", "").upper()
+        and status_nok_token not in r.get("angle_status", "").upper()
     )
     berm_ok = sum(
         1 for r in results
-        if "CUMPLE" in r.get("berm_status", "").upper()
-        and "NO" not in r.get("berm_status", "").upper()
+        if status_ok_token in r.get("berm_status", "").upper()
+        and status_nok_token not in r.get("berm_status", "").upper()
     )
 
-    height_warn = sum(1 for r in results if "FUERA" in r.get("height_status", "").upper())
-    angle_warn = sum(1 for r in results if "FUERA" in r.get("angle_status", "").upper())
-    berm_warn = sum(1 for r in results if "FUERA" in r.get("berm_status", "").upper())
+    height_warn = sum(1 for r in results if status_warn_token in r.get("height_status", "").upper())
+    angle_warn = sum(1 for r in results if status_warn_token in r.get("angle_status", "").upper())
+    berm_warn = sum(1 for r in results if status_warn_token in r.get("berm_status", "").upper())
 
-    height_nok = sum(1 for r in results if "NO CUMPLE" in r.get("height_status", "").upper())
-    angle_nok = sum(1 for r in results if "NO CUMPLE" in r.get("angle_status", "").upper())
-    berm_nok = sum(1 for r in results if "NO CUMPLE" in r.get("berm_status", "").upper())
+    height_nok = sum(1 for r in results if status_nok_token in r.get("height_status", "").upper())
+    angle_nok = sum(1 for r in results if status_nok_token in r.get("angle_status", "").upper())
+    berm_nok = sum(1 for r in results if status_nok_token in r.get("berm_status", "").upper())
 
     # Missing/Extra
     missing = sum(1 for r in results if r.get("type") == "MISSING")

@@ -14,6 +14,15 @@ from core.blast_correlation import (
     compute_blast_geotech_correlation,
     compute_pasadura_stats,
 )
+from core.column_utils import KILOS_CANDIDATES
+from core.compliance_status import (
+    STATUS_CUMPLE,
+    STATUS_EXTRA,
+    STATUS_FUERA,
+    STATUS_NO_CONSTRUIDO,
+    STATUS_NO_CUMPLE,
+    is_passing_status,
+)
 from core.geom_utils import find_df_column
 from core.config import DEFAULTS
 
@@ -46,19 +55,19 @@ FONT_PURPLE = Font(color="4B0082")
 def _apply_status_style(cell: Cell) -> None:
     """Apply conditional formatting based on status text."""
     val = cell.value
-    if val == "CUMPLE":
+    if val == STATUS_CUMPLE:
         cell.fill = FILL_OK
         cell.font = FONT_OK
-    elif val == "FUERA DE TOLERANCIA":
+    elif val == STATUS_FUERA:
         cell.fill = FILL_WARN
         cell.font = FONT_WARN
-    elif val == "NO CUMPLE" or "FALTA" in str(val):
+    elif val == STATUS_NO_CUMPLE or "FALTA" in str(val):
         cell.fill = FILL_NOK
         cell.font = FONT_NOK
-    elif val == "NO CONSTRUIDO":
+    elif val == STATUS_NO_CONSTRUIDO:
         cell.fill = FILL_GREY
         cell.font = FONT_GREY
-    elif val == "EXTRA" or "ADICIONAL" in str(val) or "RAMPA" in str(val):
+    elif val == STATUS_EXTRA or "ADICIONAL" in str(val) or "RAMPA" in str(val):
         cell.fill = FILL_PURPLE
         cell.font = FONT_PURPLE
 
@@ -145,7 +154,7 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
             bold=True, size=12)
         row += 1
         _write_header(ws, row,
-                      ["Parametro", "CUMPLE", "FUERA TOL.", "NO CUMPLE",
+                      ["Parametro", STATUS_CUMPLE, "FUERA TOL.", STATUS_NO_CUMPLE,
                        "Total", "% Cumpl."])
         row += 1
 
@@ -157,10 +166,10 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
             # inflate the denominator.
             match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
             total = len(match_comps)
-            n_ok = sum(1 for c in match_comps if c[key] == "CUMPLE")
+            n_ok = sum(1 for c in match_comps if c[key] == STATUS_CUMPLE)
             n_warn = sum(1 for c in match_comps
-                        if c[key] == "FUERA DE TOLERANCIA")
-            n_nok = sum(1 for c in match_comps if c[key] == "NO CUMPLE")
+                        if c[key] == STATUS_FUERA)
+            n_nok = sum(1 for c in match_comps if c[key] == STATUS_NO_CUMPLE)
             pct = n_ok / total * 100 if total > 0 else 0
 
             ws.cell(row=row, column=1, value=label).border = THIN_BORDER
@@ -259,17 +268,17 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
     total = len(comparisons)
     row = 3
     _write_header(ws, row,
-                  ["Parametro", "CUMPLE", "FUERA TOL.", "NO CUMPLE",
+                  ["Parametro", STATUS_CUMPLE, "FUERA TOL.", STATUS_NO_CUMPLE,
                    "% Cumplimiento"])
     row += 1
 
     for key, label in [('height_status', 'Altura de banco'),
                        ('angle_status', 'Angulo de cara'),
                        ('berm_status', 'Ancho de berma')]:
-        n_ok = sum(1 for c in comparisons if c[key] == "CUMPLE")
+        n_ok = sum(1 for c in comparisons if c[key] == STATUS_CUMPLE)
         n_warn = sum(1 for c in comparisons
-                    if c[key] == "FUERA DE TOLERANCIA")
-        n_nok = sum(1 for c in comparisons if c[key] == "NO CUMPLE")
+                    if c[key] == STATUS_FUERA)
+        n_nok = sum(1 for c in comparisons if c[key] == STATUS_NO_CUMPLE)
         pct = n_ok / total * 100 if total > 0 else 0
 
         ws.cell(row=row, column=1, value=label).border = THIN_BORDER
@@ -292,7 +301,7 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
     n_ok_all = sum(
         1 for c in comparisons
         for k in ['height_status', 'angle_status', 'berm_status']
-        if c[k] == "CUMPLE"
+        if c[k] == STATUS_CUMPLE
     )
     pct_global = n_ok_all / n_all * 100 if n_all > 0 else 0
 
@@ -307,56 +316,56 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
 def _write_sector_summary(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
     """Create Executive Summary by Sector."""
     ws = wb.create_sheet("Resumen Ejecutivo")
-    
+
     ws.cell(row=1, column=1, value="RESUMEN EJECUTIVO POR SECTOR").font = Font(bold=True, size=14, color="2F5496")
-    
+
     headers = ["Sector", "Total Bancos", "Cumplimiento Global", "Cumpl. Altura", "Cumpl. Angulo", "Cumpl. Berma"]
     _write_header(ws, 3, headers)
-    
+
     # Group by sector
     sectors = sorted(list(set(c['sector'] for c in comparisons)))
-    
+
     row = 4
     for sector in sectors:
         sec_comps = [c for c in comparisons if c['sector'] == sector]
         total = len(sec_comps)
-        
+
         # Helper to count matches
         def count_ok(key):
-            return sum(1 for c in sec_comps if c.get(key) == "CUMPLE" or c.get(key) == "RAMPA OK")
-            
+            return sum(1 for c in sec_comps if is_passing_status(c.get(key)))
+
         ok_h = count_ok('height_status')
         ok_a = count_ok('angle_status')
         ok_b = count_ok('berm_status')
-        
+
         # Calculate percentages
         # Note: Global compliance is average of all parameters? Or average of banks that pass all?
         # Let's use % of total parameters (3 per bank)
         n_params = total * 3
         n_ok_total = ok_h + ok_a + ok_b
         pct_global = (n_ok_total / n_params * 100) if n_params > 0 else 0
-        
+
         pct_h = (ok_h / total * 100) if total > 0 else 0
         pct_a = (ok_a / total * 100) if total > 0 else 0
         pct_b = (ok_b / total * 100) if total > 0 else 0
-        
+
         ws.cell(row=row, column=1, value=sector).border = THIN_BORDER
         ws.cell(row=row, column=2, value=total).border = THIN_BORDER
-        
+
         # Global
         c_Glob = ws.cell(row=row, column=3, value=f"{pct_global:.1f}%")
         c_Glob.border = THIN_BORDER
         if pct_global >= 90: c_Glob.fill = FILL_OK; c_Glob.font = FONT_OK
         elif pct_global >= 75: c_Glob.fill = FILL_WARN; c_Glob.font = FONT_WARN
         else: c_Glob.fill = FILL_NOK; c_Glob.font = FONT_NOK
-            
+
         # Per param
         ws.cell(row=row, column=4, value=f"{pct_h:.1f}%").border = THIN_BORDER
         ws.cell(row=row, column=5, value=f"{pct_a:.1f}%").border = THIN_BORDER
         ws.cell(row=row, column=6, value=f"{pct_b:.1f}%").border = THIN_BORDER
-        
+
         row += 1
-        
+
     _auto_width(ws)
 
 
@@ -480,7 +489,7 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     # Touch `stats` so the computation is exercised even if no consumer reads it
     _ = stats["total"], stats["mean"], stats["optimal_pct"]
 
-    kg_col = find_df_column(df_pozos, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
+    kg_col = find_df_column(df_pozos, list(KILOS_CANDIDATES), raise_error=False)
     label_col = find_df_column(df_pozos, ['label_pozo'], raise_error=False)
     incl_col = 'Incl'
     az_col = 'Az'
