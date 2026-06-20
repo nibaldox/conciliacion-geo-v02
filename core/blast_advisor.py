@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -427,3 +427,83 @@ def format_recommendation_text(rec: Dict[str, Any], section_name: str = "") -> s
         f"{pct_str}) proyecta acotar sobre-excavacion de {predicted_damage:.2f} m al "
         f"objetivo de {target_damage:.2f} m."
     ).strip()
+
+
+def validate_recommendation(
+    rec: Dict[str, Any],
+    constraints: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Validate a recommendation against operational constraints.
+
+    Parameters
+    ----------
+    rec : dict
+        Output of :func:`recommend_pf_adjustment` or a row from
+        :func:`recommend_by_sector`.
+    constraints : dict, optional
+        Operational limits. Defaults to those declared in
+        :class:`core.config.BlastAdvisorDefaults`
+        (``max_recommendation_pct``). Supported keys:
+        - max_recommendation_pct : float (default from ADVISOR)
+        - min_pf_kgm3 : float (default 0.10)
+        - max_pf_kgm3 : float (default 1.50)
+
+    Returns
+    -------
+    dict
+        - ``valid`` : bool (no critical violations)
+        - ``warnings`` : list[str] (human-readable, Spanish-neutral)
+        - ``adjusted_feasibility`` : str (may equal rec['feasibility']
+          or be degraded to 'CAUTION' on critical violation)
+        - ``message`` : str (Spanish-neutral summary)
+    """
+    if not isinstance(rec, dict):
+        return {
+            "valid": False,
+            "warnings": ["Recomendacion invalida: se esperaba un diccionario."],
+            "adjusted_feasibility": FEASIBILITY_INSUFFICIENT,
+            "message": "Recomendacion invalida.",
+        }
+
+    if constraints is None:
+        constraints = {}
+
+    max_pct = float(constraints.get("max_recommendation_pct", ADVISOR.max_recommendation_pct))
+    min_pf = float(constraints.get("min_pf_kgm3", 0.10))
+    max_pf = float(constraints.get("max_pf_kgm3", 1.50))
+
+    warnings: List[str] = []
+    feasibility = str(rec.get("feasibility", FEASIBILITY_INSUFFICIENT))
+    delta_pf_pct = float(rec.get("delta_pf_pct", 0.0))
+    target_pf = float(rec.get("target_pf", 0.0))
+
+    if abs(delta_pf_pct) > max_pct:
+        warnings.append(
+            f"Cambio propuesto {delta_pf_pct:+.1f}% excede el maximo operativo permitido ({max_pct:.0f}%)."
+        )
+        if feasibility == FEASIBILITY_APPLICABLE:
+            feasibility = FEASIBILITY_CAUTION
+
+    if np.isfinite(target_pf) and target_pf > 0:
+        if target_pf < min_pf:
+            warnings.append(
+                f"PF objetivo {target_pf:.3f} kg/m3 esta por debajo del minimo operativo ({min_pf:.2f})."
+            )
+            feasibility = FEASIBILITY_CAUTION
+        elif target_pf > max_pf:
+            warnings.append(
+                f"PF objetivo {target_pf:.3f} kg/m3 excede el maximo operativo ({max_pf:.2f}); explosivo o burden insuficientes."
+            )
+            feasibility = FEASIBILITY_CAUTION
+
+    if warnings:
+        message = " | ".join(warnings)
+    else:
+        message = "Recomendacion dentro de los limites operativos."
+
+    return {
+        "valid": len(warnings) == 0,
+        "warnings": warnings,
+        "adjusted_feasibility": feasibility,
+        "message": message,
+    }

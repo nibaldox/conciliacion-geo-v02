@@ -82,9 +82,29 @@ def check_provider_health(provider: str) -> dict:
         }
 
 
-def build_analysis_prompt(results: list[dict], sections: list[dict], settings: dict) -> str:
-    """Build the analysis prompt from results data."""
+def build_analysis_prompt(results: list[dict], sections: list[dict], settings: dict,
+                          blast_trend: dict | None = None) -> str:
+    """Build the analysis prompt from results data.
 
+    Parameters
+    ----------
+    results : list of dict
+        Per-bench reconciliation rows (height_dev, angle_dev, statuses, etc.).
+    sections : list of dict
+        Section metadata (name, sector, length, etc.).
+    settings : dict
+        User-tunable settings including tolerances.
+    blast_trend : dict or None
+        Optional temporal/aggregate metrics from the blast dataset.
+        Expected keys (all optional):
+            - pf_promedio: float
+            - pf_desviacion: float
+            - n_pozos_total: int
+            - outliers: list[dict] with pf_vol_kgm3 and label_pozo
+            - trend_slope_pf_per_month: float
+            - trend_direction: 'subiendo' | 'bajando' | 'estable'
+            - ratios: dict with stemming_ratio, subdrilling_ratio, kg_per_meter means
+    """
     # Compute summary statistics
     total = len(results)
     if total == 0:
@@ -170,6 +190,36 @@ def build_analysis_prompt(results: list[dict], sections: list[dict], settings: d
         prompt += f"- Altura: {tolerances.get('bench_height', {})}\n"
         prompt += f"- Ángulo: {tolerances.get('face_angle', {})}\n"
         prompt += f"- Berma mínima: {tolerances.get('berm_width', {})}\n"
+
+    if blast_trend:
+        prompt += "\n### Métricas de Tronadura (Powder Factor y Tendencia)\n"
+        pf_avg = blast_trend.get('pf_promedio')
+        if pf_avg is not None:
+            prompt += f"- PF promedio: {pf_avg:.3f} kg/m³\n"
+        pf_std = blast_trend.get('pf_desviacion')
+        if pf_std is not None:
+            prompt += f"- PF desviación estándar: {pf_std:.3f} kg/m³\n"
+        n_total = blast_trend.get('n_pozos_total')
+        if n_total is not None:
+            prompt += f"- N pozos totales: {n_total}\n"
+        slope = blast_trend.get('trend_slope_pf_per_month')
+        direction = blast_trend.get('trend_direction')
+        if slope is not None and direction:
+            prompt += f"- Tendencia PF mensual: {slope:+.4f} kg/m³/mes ({direction})\n"
+        ratios = blast_trend.get('ratios', {})
+        if ratios:
+            prompt += "- Ratios promedio:\n"
+            for k, v in ratios.items():
+                if v is not None:
+                    prompt += f"  - {k}: {v:.3f}\n"
+        outliers = blast_trend.get('outliers', [])
+        if outliers:
+            prompt += f"- Pozos con PF atípico (IQR 1.5×): {len(outliers)} (revisar)\n"
+            for o in outliers[:5]:
+                label = o.get('label_pozo', '?')
+                pf_v = o.get('pf_vol_kgm3')
+                if pf_v is not None:
+                    prompt += f"  - {label}: PF={pf_v:.3f} kg/m³\n"
 
     prompt += "\nGenera el informe ejecutivo de conciliación geotécnica basado en estos datos reales."
     return prompt
