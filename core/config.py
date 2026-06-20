@@ -158,6 +158,18 @@ class PowderFactor:
     pf_low_warn_kgm3: float = 0.20
 
 
+@dataclass(frozen=True)
+class BlastAdvisorDefaults:
+    """Tuning knobs for the recommendation engine."""
+    target_overbreak_m: float = 0.5
+    target_underbreak_m: float = -0.3
+    pf_optimal_default_kgm3: float = 0.35
+    max_recommendation_pct: float = 30.0
+    min_samples_for_advice: int = 5
+    high_confidence_n: int = 15
+    medium_confidence_n: int = 8
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -167,3 +179,4 @@ RAMP = RampDetection()
 DEPLOY = DeployDefaults()
 EXPLOSIVE = ExplosiveEnergy()
 POWDER_FACTOR = PowderFactor()
+ADVISOR = BlastAdvisorDefaults()
