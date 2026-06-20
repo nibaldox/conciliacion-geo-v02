@@ -88,7 +88,7 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
         raise_error=False,
     )
     taco_col = find_df_column(
-        df_work, ['Taco', 'Taco_m', 'Stemming'],
+        df_work, ['Taco', 'Taco_m', 'Stemming', 'stemming_real'],
         raise_error=False,
     )
     secuencia_col = find_df_column(
