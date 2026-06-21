@@ -13,6 +13,8 @@ Three public functions live here:
 """
 
 import warnings
+from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 
@@ -25,6 +27,7 @@ from core.compliance_status import (
     STATUS_NO_CUMPLE,
     STATUS_FUERA,
 )
+from core.config import SECTOR_DEVIATION
 from core.profile_extract import (
     ReconciledPoint,
     ReconciledProfile,
@@ -351,3 +354,186 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     comparisons.sort(key=lambda x: float(x['level']) if x['level'].replace('.','',1).isdigit() else 0, reverse=True)
 
     return comparisons
+
+
+@dataclass
+class SectorDeviation:
+    """Integrated deviations for a single sector between two profile points.
+
+    A sector is a contiguous span ``[d_start, d_end]`` of the design
+    profile (delimited by design crests/toes, or the whole profile when
+    the design has no inflection points). The fields integrate the signed
+    vertical gap ``topo - design`` over that span.
+
+    ``area_above_m2`` follows the convention used in Phase 21: positive
+    gap (as-built above design) is **overbreak** (sobre-excavación), and
+    negative gap (as-built below design) is **underbreak** (deuda).
+    """
+    sector_id: int
+    d_start: float
+    d_end: float
+    area_above_m2: float
+    area_below_m2: float
+    net_area_m2: float
+    classification: str
+    mean_delta_h: float
+    max_delta_h: float
+    centroid_d: float
+    centroid_delta_h: float
+
+
+def _design_sector_boundaries(design_d: np.ndarray, design_e: np.ndarray) -> List[float]:
+    """Return sorted distance values of design local extrema (crests/toes).
+
+    A crest is a local maximum and a toe a local minimum of the design
+    elevation. Endpoints are never reported. The returned distances are
+    interpolated to the exact crossing of consecutive slope signs so the
+    boundary lands on the apex rather than the nearest grid node.
+    """
+    d = np.asarray(design_d, dtype=float)
+    e = np.asarray(design_e, dtype=float)
+    n = len(d)
+    if n < 3:
+        return []
+    de = np.diff(e)
+    sign = np.sign(de)
+    sign[sign == 0] = 1
+    boundaries: List[float] = []
+    for i in range(1, n - 1):
+        if sign[i - 1] > 0 and sign[i] < 0:
+            boundaries.append(float(d[i]))
+        elif sign[i - 1] < 0 and sign[i] > 0:
+            boundaries.append(float(d[i]))
+    boundaries = sorted(set(boundaries))
+    return boundaries
+
+
+def _classify_sector(area_above: float, area_below: float, width: float, tolerance_m: float) -> str:
+    """Classify a sector from its over/under-break areas and width."""
+    threshold = tolerance_m * width
+    over = area_above > threshold
+    under = area_below > threshold
+    if over and under:
+        return "mixed"
+    if over:
+        return "overbreak"
+    if under:
+        return "underbreak"
+    return "compliant"
+
+
+def compute_sector_deviations(
+    design_d: np.ndarray,
+    design_e: np.ndarray,
+    topo_d: np.ndarray,
+    topo_e: np.ndarray,
+    tolerance_m: float = SECTOR_DEVIATION.tolerance_m,
+) -> List[SectorDeviation]:
+    """Segment a profile into sectors and compute integrated deviations.
+
+    The design and topo curves are interpolated onto a common distance
+    grid (resolution :attr:`SECTOR_DEVIATION.grid_resolution_m`) over the
+    overlap of their distance ranges. The design is then split into
+    sectors at its local extrema (crests/toes); when the design is
+    monotonic (no inflection points) a single whole-profile sector is
+    returned.
+
+    For every sector:
+
+    - ``delta = topo_interp - design_interp`` (positive = overbreak).
+    - ``area_above_m2`` = ``trapz(max(delta, 0))`` (overbreak area).
+    - ``area_below_m2`` = ``trapz(max(-delta, 0))`` (deuda area).
+    - ``net_area_m2`` = ``trapz(delta)`` (signed, positive = net overbreak).
+    - ``mean_delta_h`` / ``max_delta_h`` from the per-node delta.
+    - ``centroid_d`` = area-weighted centroid distance (midpoint when the
+      sector is flat); ``centroid_delta_h`` = delta sampled there.
+
+    Classification uses ``tolerance_m * width`` as the area threshold:
+
+    - ``"overbreak"`` if ``area_above`` alone exceeds it,
+    - ``"underbreak"`` if ``area_below`` alone exceeds it,
+    - ``"mixed"`` if both exceed it,
+    - ``"compliant"`` otherwise.
+
+    Parameters
+    ----------
+    design_d, design_e
+        Design profile (crests, faces, toes).
+    topo_d, topo_e
+        As-built (topographic) profile.
+    tolerance_m
+        Vertical tolerance for the ``"compliant"`` classification.
+
+    Returns
+    -------
+    list[SectorDeviation]
+        Sectors ordered by distance, or an empty list when the two
+        profiles do not overlap.
+    """
+    design_d = np.asarray(design_d, dtype=float)
+    design_e = np.asarray(design_e, dtype=float)
+    topo_d = np.asarray(topo_d, dtype=float)
+    topo_e = np.asarray(topo_e, dtype=float)
+
+    if design_d.size < 2 or topo_d.size < 2:
+        return []
+
+    d_lo = float(max(design_d.min(), topo_d.min()))
+    d_hi = float(min(design_d.max(), topo_d.max()))
+    if d_hi <= d_lo:
+        return []
+
+    res = float(SECTOR_DEVIATION.grid_resolution_m)
+    n_nodes = max(2, int(np.ceil((d_hi - d_lo) / res)) + 1)
+    common_d = np.linspace(d_lo, d_hi, n_nodes)
+
+    order_d = np.argsort(design_d)
+    design_interp = np.interp(common_d, design_d[order_d], design_e[order_d])
+    order_t = np.argsort(topo_d)
+    topo_interp = np.interp(common_d, topo_d[order_t], topo_e[order_t])
+
+    boundaries = _design_sector_boundaries(design_d[order_d], design_e[order_d])
+    edges = [d_lo] + [b for b in boundaries if d_lo < b < d_hi] + [d_hi]
+    edges = sorted(set(edges))
+
+    sectors: List[SectorDeviation] = []
+    for i in range(len(edges) - 1):
+        start = edges[i]
+        end = edges[i + 1]
+        mask = (common_d >= start) & (common_d <= end)
+        if not np.any(mask):
+            continue
+        d_seg = common_d[mask]
+        delta = topo_interp[mask] - design_interp[mask]
+        width = float(d_seg[-1] - d_seg[0])
+        if width <= 0:
+            continue
+        positive = np.clip(delta, 0.0, None)
+        negative = np.clip(-delta, 0.0, None)
+        area_above = float(np.trapezoid(positive, d_seg))
+        area_below = float(np.trapezoid(negative, d_seg))
+        net_area = float(np.trapezoid(delta, d_seg))
+        mean_delta = float(np.mean(delta))
+        max_delta = float(np.max(np.abs(delta)))
+        weight = np.abs(delta)
+        if weight.sum() > 1e-9:
+            centroid_d = float(np.sum(d_seg * weight) / np.sum(weight))
+        else:
+            centroid_d = float(0.5 * (start + end))
+        centroid_delta = float(np.interp(centroid_d, d_seg, delta))
+        classification = _classify_sector(area_above, area_below, width, float(tolerance_m))
+        sectors.append(SectorDeviation(
+            sector_id=len(sectors) + 1,
+            d_start=float(start),
+            d_end=float(end),
+            area_above_m2=area_above,
+            area_below_m2=area_below,
+            net_area_m2=net_area,
+            classification=classification,
+            mean_delta_h=mean_delta,
+            max_delta_h=max_delta,
+            centroid_d=centroid_d,
+            centroid_delta_h=centroid_delta,
+        ))
+
+    return sectors

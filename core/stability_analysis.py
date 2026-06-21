@@ -16,11 +16,15 @@ section-level health score and recommended action.
 
 from __future__ import annotations
 
+import math
+import warnings
 from dataclasses import dataclass, field
 from typing import Iterable
 
+import numpy as np
+
 from core.param_extractor import BenchParams
-from core.config import STABILITY
+from core.config import STABILITY, SECTOR_DEVIATION
 
 
 @dataclass
@@ -367,3 +371,175 @@ def compute_planar_factor_of_safety(
     friction_term = (tan_phi / math.tan(math.radians(psi_f))) * (1.0 - ru)
 
     return cohesion_term + friction_term
+
+
+def _resolve_face_angle_strength(
+    rock_mass_rating,
+    cohesion_kpa,
+    friction_angle_deg,
+):
+    """Resolve (cohesion_kpa, friction_angle_deg) for the face-angle solver.
+
+    When explicit cohesion / friction are given they win. Otherwise the
+    Hoek-Brown estimator (:func:`estimate_rock_strength_from_gsi`) is fed
+    ``rmr_to_gsi(rmr)`` with the default UCS of 100 MPa, as specified by
+    Phase 21. The estimator's cohesion is fit over the full confinement
+    range (up to σci) and therefore returns an intact-rock-regime value
+    that is several orders of magnitude above a rock-mass bench face; we
+    scale it down by :attr:`SECTOR_DEVIATION.rockmass_cohesion_scale` so
+    the infinite-slope equation behaves in the physically meaningful
+    (non-saturated) regime. The friction angle is used verbatim.
+    """
+    from core.geology import estimate_rock_strength_from_gsi, rmr_to_gsi
+
+    if cohesion_kpa is not None and friction_angle_deg is not None:
+        return float(cohesion_kpa), float(friction_angle_deg)
+
+    if rock_mass_rating is None:
+        raise ValueError(
+            "Either (cohesion_kpa, friction_angle_deg) or rock_mass_rating "
+            "must be provided."
+        )
+
+    gsi = rmr_to_gsi(float(rock_mass_rating))
+    c_est, phi_est = estimate_rock_strength_from_gsi(gsi, ucs_mpa=100.0)
+    phi = float(friction_angle_deg) if friction_angle_deg is not None else float(phi_est)
+    if cohesion_kpa is not None:
+        c = float(cohesion_kpa)
+    else:
+        c = max(0.0, float(c_est)) * float(SECTOR_DEVIATION.rockmass_cohesion_scale)
+    return c, phi
+
+
+def _hoek_bray_factor_of_safety(
+    face_angle_deg,
+    cohesion_kpa,
+    friction_angle_deg,
+    bench_height_m,
+    unit_weight_kn_m3,
+    water_pressure_ratio,
+):
+    """Hoek & Bray (1981) infinite-slope FS for a face angle.
+
+    FS = c / (γ·H·sin(ψ)·cos(ψ)) + (tan(φ) / tan(ψ)) · (1 - r_u)
+
+    Returns ``+inf`` at the degenerate endpoints where the slope is
+    frictionless-flat or perfectly vertical (sin·cos → 0).
+    """
+    psi = math.radians(face_angle_deg)
+    sin_psi = math.sin(psi)
+    cos_psi = math.cos(psi)
+    denom = unit_weight_kn_m3 * bench_height_m * sin_psi * cos_psi
+    if denom <= 0.0:
+        return float('inf')
+    cohesion_term = cohesion_kpa / denom
+    friction_term = (math.tan(math.radians(friction_angle_deg)) / math.tan(psi)) * (
+        1.0 - water_pressure_ratio
+    )
+    return cohesion_term + friction_term
+
+
+def suggest_face_angle_for_fs(
+    fs_target: float = 1.3,
+    rock_mass_rating: float | None = None,
+    cohesion_kpa: float | None = None,
+    friction_angle_deg: float | None = None,
+    bench_height_m: float = 15.0,
+    unit_weight_kn_m3: float = 27.0,
+    water_pressure_ratio: float = 0.0,
+) -> float:
+    """Suggest the maximum stable face angle to achieve a target FS.
+
+    Solves the Hoek-Bray 1981 infinite-slope equation for the face angle
+    ``ψ`` that still satisfies ``FS >= fs_target``:
+
+        FS = (c / (γ·H·sin(ψ)·cos(ψ))) + (tan(φ) / tan(ψ)) · (1 - r_u)
+
+    ``FS(ψ)`` is U-shaped over (0°, 90°): it is large for shallow angles,
+    decreases to a minimum around mid-range, then rises again toward 90°
+    as the cohesion term ``c / (γ·H·sin·cos)`` blows up (a numerical
+    artifact of the simplified form, not a real gain in stability). The
+    physically meaningful "steepest stable face" is therefore the angle
+    on the **descending branch**, found by bisection on ``[ψ_floor, ψ_min]``
+    where ``ψ_min`` is the angle of minimum FS. The cohesion artifact
+    near 90° is excluded by construction.
+
+    Parameters
+    ----------
+    fs_target
+        Target factor of safety (must be >= 1.0; <1.0 is failure by
+        design and is rejected).
+    rock_mass_rating
+        RMR of the rock mass. Used to derive cohesion / friction via the
+        Hoek-Brown estimator when the explicit values are not supplied.
+    cohesion_kpa, friction_angle_deg
+        Explicit material strength. When both are given they override the
+        RMR-derived estimates.
+    bench_height_m
+        Bench height (m).
+    unit_weight_kn_m3
+        Rock unit weight (kN/m³).
+    water_pressure_ratio
+        Pore-pressure ratio ``r_u`` (0 = dry, <1).
+
+    Returns
+    -------
+    float
+        Maximum face angle in degrees that satisfies ``fs_target`` on the
+        descending branch. If even the shallowest admissible angle cannot
+        reach the target, returns
+        :attr:`SECTOR_DEVIATION.suggested_face_angle_unreachable_deg`
+        (30°) and emits a warning.
+    """
+    if fs_target < 1.0:
+        raise ValueError("fs_target must be >= 1.0 (FS < 1.0 is failure by design).")
+    if bench_height_m <= 0.0:
+        raise ValueError("bench_height_m must be positive.")
+    if not (0.0 <= water_pressure_ratio < 1.0):
+        raise ValueError("water_pressure_ratio must be in [0, 1).")
+
+    cohesion, phi = _resolve_face_angle_strength(
+        rock_mass_rating, cohesion_kpa, friction_angle_deg,
+    )
+
+    floor = SECTOR_DEVIATION.suggested_face_angle_floor_deg
+    ceiling = SECTOR_DEVIATION.suggested_face_angle_ceiling_deg
+    tol = SECTOR_DEVIATION.suggested_face_angle_tolerance_deg
+
+    def fs_of(psi_deg):
+        return _hoek_bray_factor_of_safety(
+            psi_deg, cohesion, phi, bench_height_m,
+            unit_weight_kn_m3, water_pressure_ratio,
+        )
+
+    grid = np.arange(floor, ceiling + 1e-9, 0.5)
+    fs_grid = np.array([fs_of(float(p)) for p in grid])
+    i_min = int(np.argmin(fs_grid))
+    psi_min = float(grid[i_min])
+    fs_at_floor = float(fs_grid[0])
+    fs_at_min = float(fs_grid[i_min])
+
+    if fs_at_floor < fs_target:
+        warnings.warn(
+            f"Target FS={fs_target} is unreachable even at the shallowest "
+            f"admissible face angle ({floor}°, FS={fs_at_floor:.2f}). "
+            f"Returning the fallback angle "
+            f"{SECTOR_DEVIATION.suggested_face_angle_unreachable_deg}°.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return SECTOR_DEVIATION.suggested_face_angle_unreachable_deg
+
+    if fs_at_min >= fs_target:
+        return psi_min
+
+    lo, hi = floor, psi_min
+    for _ in range(200):
+        mid = 0.5 * (lo + hi)
+        if mid - lo < tol:
+            break
+        if fs_of(mid) >= fs_target:
+            lo = mid
+        else:
+            hi = mid
+    return float(lo)

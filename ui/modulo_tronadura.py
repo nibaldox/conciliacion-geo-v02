@@ -9,19 +9,24 @@ import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
 from core.geom_utils import find_df_column
-from core.config import DEFAULTS
+from core.config import DEFAULTS, SECTOR_DEVIATION
 from core.blast_correlation import (
     aggregate_powder_factor_by_group,
     compute_powder_factor,
 )
 from core.blast_metrics import enrich_blast_dataframe
+from core.profile_compliance import compute_sector_deviations
+from core.section_cutter import cut_both_surfaces
+from core.stability_analysis import suggest_face_angle_for_fs
 from ui.ref_lines import add_ref_lines_3d
+from ui.tabs.export import _get_profile_pair
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +358,8 @@ def render_modulo_tronadura() -> None:
                 margin=dict(l=40, r=20, t=40, b=40)
             )
             st.plotly_chart(fig_pas, use_container_width=True)
+
+            _render_sector_deviations()
 
             st.markdown("---")
             st.subheader("💥 Correlación Geotécnica: Daño vs Explosivos")
@@ -964,6 +971,166 @@ def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: li
             customdata=collar_custom,
             hovertemplate=_COLLAR_HOVERTEMPLATE,
         ))
+
+
+_SECTOR_FACE_ANGLE_NOTE = (
+    "Ángulo de talud sugerido por detrás del perfil conciliado para alcanzar "
+    "el FS objetivo, considerando el macizo rocoso (RMR) y la altura de banco."
+)
+
+
+def _sector_fill_color(classification: str) -> str:
+    if classification == "overbreak":
+        return "rgba(220, 50, 50, 0.45)"
+    if classification == "underbreak":
+        return "rgba(255, 200, 50, 0.45)"
+    if classification == "compliant":
+        return "rgba(80, 200, 120, 0.35)"
+    return "rgba(180, 80, 180, 0.45)"
+
+
+def _render_sector_deviations() -> None:
+    sections = st.session_state.get('sections', [])
+    mesh_design = st.session_state.get('mesh_design')
+    mesh_topo = st.session_state.get('mesh_topo')
+
+    if not sections or mesh_design is None or mesh_topo is None:
+        return
+
+    with st.expander(
+        "🟥🟨 Sectorización de sobre-excavación / deuda (hover por tramo)",
+        expanded=False,
+    ):
+        st.markdown(
+            "Cada tramo entre crestas/patas del diseño se clasifica por la "
+            "desviación integrada frente a la topografía real: **rojo = "
+            "sobre-excavación**, **amarillo = deuda**, **verde = cumplimiento**, "
+            "**morado = mixto**. Pasa el mouse sobre un tramo para ver sus valores."
+        )
+
+        sec_names = [s.name for s in sections]
+        sel_name = st.selectbox("Sección a sectorizar:", sec_names, key="sector_dev_section")
+        sel_sec = next((s for s in sections if s.name == sel_name), None)
+        if sel_sec is None:
+            return
+
+        tolerance_m = st.slider(
+            "Tolerancia vertical para clasificar 'cumplimiento' (m):",
+            min_value=0.05, max_value=1.0,
+            value=float(SECTOR_DEVIATION.tolerance_m), step=0.05,
+            key="sector_dev_tolerance",
+        )
+
+        pd_prof, pt_prof = _get_profile_pair(sel_name)
+        if pd_prof is None or pt_prof is None:
+            pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sel_sec)
+        if (
+            pd_prof is None or pt_prof is None
+            or getattr(pd_prof, 'distances', None) is None
+            or getattr(pt_prof, 'distances', None) is None
+            or pd_prof.distances.size < 2 or pt_prof.distances.size < 2
+        ):
+            st.info("No hay perfiles de diseño/topografía disponibles para esta sección.")
+            return
+
+        design_d = np.asarray(pd_prof.distances, dtype=float)
+        design_e = np.asarray(pd_prof.elevations, dtype=float)
+        topo_d = np.asarray(pt_prof.distances, dtype=float)
+        topo_e = np.asarray(pt_prof.elevations, dtype=float)
+
+        do = np.argsort(design_d)
+        design_d, design_e = design_d[do], design_e[do]
+        to = np.argsort(topo_d)
+        topo_d, topo_e = topo_d[to], topo_e[to]
+
+        sectors = compute_sector_deviations(
+            design_d, design_e, topo_d, topo_e, tolerance_m=tolerance_m,
+        )
+        if not sectors:
+            st.info("Los perfiles de diseño y topografía no se superponen; no hay tramos que sectorizar.")
+            return
+
+        fig_sectors = go.Figure()
+        for s in sectors:
+            mask = (topo_d >= s.d_start) & (topo_d <= s.d_end)
+            if not np.any(mask):
+                continue
+            d_clip = topo_d[mask]
+            e_design_clip = np.interp(d_clip, design_d, design_e)
+            e_topo_clip = topo_e[mask]
+
+            fig_sectors.add_trace(go.Scatter(
+                x=np.concatenate([d_clip, d_clip[::-1]]),
+                y=np.concatenate([e_design_clip, e_topo_clip[::-1]]),
+                fill="toself",
+                fillcolor=_sector_fill_color(s.classification),
+                line=dict(width=0),
+                name=f"Sector {s.sector_id} ({s.classification})",
+                hoveron="fills",
+                hovertemplate=(
+                    f"<b>Sector {s.sector_id}</b><br>"
+                    f"Clase: {s.classification}<br>"
+                    f"Rango: [{s.d_start:.1f}, {s.d_end:.1f}] m<br>"
+                    f"Δh medio: {s.mean_delta_h:+.2f} m<br>"
+                    f"Δh máx: {s.max_delta_h:+.2f} m<br>"
+                    f"Área sobre: {s.area_above_m2:.2f} m²<br>"
+                    f"Área deuda: {s.area_below_m2:.2f} m²<br>"
+                    f"<extra></extra>"
+                ),
+                showlegend=False,
+            ))
+
+        fig_sectors.add_trace(go.Scatter(
+            x=design_d, y=design_e, mode="lines", name="Diseño",
+            line=dict(color="royalblue", width=2),
+        ))
+        fig_sectors.add_trace(go.Scatter(
+            x=topo_d, y=topo_e, mode="lines", name="Topografía",
+            line=dict(color="forestgreen", width=2),
+        ))
+
+        fig_sectors.update_layout(
+            title=(
+                "Sectores con desviaciones clasificadas "
+                "(rojo=sobre-excavación, amarillo=deuda, verde=cumplimiento)"
+            ),
+            xaxis_title="Distancia (m)",
+            yaxis_title="Elevación (m)",
+            height=450,
+            legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        )
+        st.plotly_chart(fig_sectors, use_container_width=True)
+
+        rows = []
+        for s in sectors:
+            rows.append({
+                "Sector": s.sector_id,
+                "Rango (m)": f"[{s.d_start:.1f}, {s.d_end:.1f}]",
+                "Clase": s.classification,
+                "Δh medio (m)": f"{s.mean_delta_h:+.2f}",
+                "Δh máx (m)": f"{s.max_delta_h:+.2f}",
+                "Área sobre (m²)": f"{s.area_above_m2:.2f}",
+                "Área deuda (m²)": f"{s.area_below_m2:.2f}",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+
+        _render_face_angle_suggestion()
+
+
+def _render_face_angle_suggestion() -> None:
+    with st.expander("🎯 Sugerencia de ángulo de cara (FS objetivo)", expanded=False):
+        st.caption(_SECTOR_FACE_ANGLE_NOTE)
+        fs_target = st.slider("Factor de seguridad objetivo", 1.0, 2.5, 1.3, 0.05, key="sector_fs_target")
+        rmr = st.number_input("RMR del macizo (0-100)", 0, 100, 60, key="sector_rmr")
+        h = st.number_input("Altura de banco objetivo (m)", 5, 30, 15, key="sector_bench_h")
+        if st.button("Calcular ángulo sugerido", key="sector_calc_angle"):
+            try:
+                ang = suggest_face_angle_for_fs(
+                    fs_target=fs_target, rock_mass_rating=float(rmr), bench_height_m=float(h),
+                )
+                st.success(f"Ángulo de cara máximo sugerido: {ang:.1f}° (FS ≥ {fs_target})")
+            except Exception as exc:
+                st.error(f"No se pudo calcular: {exc}")
 
 
 

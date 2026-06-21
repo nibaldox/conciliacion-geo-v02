@@ -213,6 +213,28 @@ class StabilityDefaults:
     rockfall_catch_factor: float = 0.6
 
 
+@dataclass(frozen=True)
+class SectorDeviationDefaults:
+    """Phase 21 — per-sector overbreak / underbreak reconciliation thresholds.
+
+    Controls :func:`core.profile_compliance.compute_sector_deviations`:
+
+    - ``tolerance_m`` is the vertical tolerance used to flag a sector as
+      ``"compliant"`` (sectors whose integrated deviation stays below
+      ``tolerance_m * width`` are compliant).
+    - ``grid_resolution_m`` is the spacing of the common distance grid used
+      to interpolate design and topo before integrating areas.
+    - ``face_angle_suggestion`` knobs bound :func:`suggest_face_angle_for_fs`.
+    """
+    tolerance_m: float = 0.3
+    grid_resolution_m: float = 0.1
+    suggested_face_angle_floor_deg: float = 5.0
+    suggested_face_angle_ceiling_deg: float = 89.0
+    suggested_face_angle_unreachable_deg: float = 30.0
+    suggested_face_angle_tolerance_deg: float = 0.01
+    rockmass_cohesion_scale: float = 0.001
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -224,3 +246,4 @@ EXPLOSIVE = ExplosiveEnergy()
 POWDER_FACTOR = PowderFactor()
 ADVISOR = BlastAdvisorDefaults()
 STABILITY = StabilityDefaults()
+SECTOR_DEVIATION = SectorDeviationDefaults()

@@ -1,5 +1,7 @@
 """Tests for core.stability_analysis — Phase 9 + Phase 10 stability helpers."""
 
+import math
+
 import pytest
 
 from core.param_extractor import BenchParams
@@ -13,6 +15,7 @@ from core.stability_analysis import (
     compute_planar_factor_of_safety_proxy,
     compute_section_health_score,
     summarize_section_stability,
+    suggest_face_angle_for_fs,
 )
 from core.config import STABILITY
 
@@ -408,3 +411,78 @@ class TestRockStrength:
         c, phi = estimate_rock_strength_from_gsi(70.0, 150.0)
         assert c > 0.0
         assert phi > 30.0
+
+
+class TestSuggestFaceAngle:
+    """Phase 21 — suggest_face_angle_for_fs solves Hoek-Bray for max ψ."""
+
+    def test_basic_input(self):
+        """RMR=60, H=15, FS=1.3 → reasonable angle between 50° and 80°."""
+        angle = suggest_face_angle_for_fs(
+            fs_target=1.3, rock_mass_rating=60, bench_height_m=15,
+        )
+        assert isinstance(angle, float)
+        assert math.isfinite(angle)
+        assert 50.0 <= angle <= 80.0
+
+    def test_higher_rmr_allows_steeper_angle(self):
+        """RMR=80 yields a steeper suggested angle than RMR=40 (same FS, H)."""
+        angle_80 = suggest_face_angle_for_fs(fs_target=1.3, rock_mass_rating=80)
+        angle_40 = suggest_face_angle_for_fs(fs_target=1.3, rock_mass_rating=40)
+        assert angle_80 > angle_40
+
+    def test_taller_bench_requires_smaller_angle(self):
+        """H=20 yields a flatter suggested angle than H=10 (same RMR)."""
+        angle_h20 = suggest_face_angle_for_fs(
+            fs_target=1.3, rock_mass_rating=60, bench_height_m=20,
+        )
+        angle_h10 = suggest_face_angle_for_fs(
+            fs_target=1.3, rock_mass_rating=60, bench_height_m=10,
+        )
+        assert angle_h20 < angle_h10
+
+    def test_higher_fs_target_smaller_angle(self):
+        """FS=1.5 yields a flatter suggested angle than FS=1.2 (same RMR)."""
+        angle_15 = suggest_face_angle_for_fs(fs_target=1.5, rock_mass_rating=60)
+        angle_12 = suggest_face_angle_for_fs(fs_target=1.2, rock_mass_rating=60)
+        assert angle_15 < angle_12
+
+    def test_water_pressure_reduces_angle(self):
+        """ru=0.3 yields a flatter suggested angle than ru=0 (same RMR)."""
+        angle_wet = suggest_face_angle_for_fs(
+            fs_target=1.3, rock_mass_rating=60, water_pressure_ratio=0.3,
+        )
+        angle_dry = suggest_face_angle_for_fs(
+            fs_target=1.3, rock_mass_rating=60, water_pressure_ratio=0.0,
+        )
+        assert angle_wet < angle_dry
+
+    def test_explicit_strength_overrides_rmr(self):
+        """Explicit (c, phi) are used verbatim and reach FS>=target at the angle."""
+        angle = suggest_face_angle_for_fs(
+            fs_target=1.3,
+            cohesion_kpa=50.0,
+            friction_angle_deg=35.0,
+            bench_height_m=15.0,
+        )
+        fs = math.tan(math.radians(35.0)) / math.tan(math.radians(angle))
+        fs_full = 50.0 / (27.0 * 15.0 * math.sin(math.radians(angle)) * math.cos(math.radians(angle))) + fs
+        assert fs_full >= 1.3 - 1e-6
+
+    def test_fs_target_below_one_raises(self):
+        """fs_target < 1.0 is failure by design and is rejected."""
+        with pytest.raises(ValueError):
+            suggest_face_angle_for_fs(fs_target=0.9, rock_mass_rating=60)
+
+    def test_unreachable_target_returns_fallback(self, recwarn):
+        """A target above FS at the shallowest angle returns the 30° fallback.
+
+        With a weak, cohesionless material (φ=15°) the FS at 5° is
+        tan(15°)/tan(5°)≈3.06, so an FS target of 4.0 is unreachable.
+        """
+        angle = suggest_face_angle_for_fs(
+            fs_target=4.0, cohesion_kpa=0.0, friction_angle_deg=15.0,
+            bench_height_m=15.0,
+        )
+        assert angle == 30.0
+        assert any(issubclass(w.category, UserWarning) for w in recwarn.list)
