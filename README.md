@@ -6,8 +6,8 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6)](https://www.typescriptlang.org)
 [![PWA](https://img.shields.io/badge/PWA-ready-5A29E4)](https://web.dev/progressive-web-apps/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-473%2F473-brightgreen)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-633%2F633-brightgreen)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-95%25%20(v2)-brightgreen)](tests/)
 
 > **Open-source geotechnical reconciliation for open-pit mining.** Compare
 > 3D design surfaces vs as-built topography, generate cross-sections,
@@ -176,7 +176,7 @@ For deploy step-by-step see [web/DEPLOY.md](web/DEPLOY.md).
 ## 🧪 Running tests
 
 ```bash
-pytest tests/ -v                             # 473 backend tests, 94% coverage
+pytest tests/ -v                             # 633 backend tests, 95% coverage on core/ai_v2/
 python test_pipeline.py                      # end-to-end pipeline
 cd web && npm run build                      # TypeScript + Vite build
 cd web && npm run lint                       # ESLint
@@ -241,12 +241,12 @@ core/             ← domain logic, imported by BOTH interfaces
   excel_writer.py
   report_generator.py            (Word report + PNG ZIP)
   geom_utils.py
-  ai_service.py / ai_reporter.py (LLM integration for analysis reports)
+  ai_v2/                        (LLM agent v2 — provider-agnostic, async, 95% coverage)
   breaklines.py                  (breakline detection for section generation)
   config.py                      (frozen dataclasses with all defaults: tolerances, explosives)
 
 api/              ← FastAPI backend (modular, /api/v1/*)
-  routers/        (meshes, sections, process, export, settings, ai)
+  routers/        (meshes, sections, process, export, settings)
   middleware*.py  (request id, structured log, rate limit)
   main.py         (app factory + lifespan + health probes)
 
@@ -264,7 +264,7 @@ docs/             ← additional documentation
   BLAST_ADVISOR.md               (API reference del motor de recomendaciones)
   CLEAN_CODE_AUDIT.md            (auditoría clean code + clean architecture)
 scripts/          ← one-off generators (demo data, etc.)
-tests/            ← pytest suite for core/ + api/ (473 tests)
+tests/            ← pytest suite for core/ + api/ (633 tests)
 ARCHITECTURE.md   ← architecture overview
 AGENTS.md         ← entry point for AI agents
 CONTRIBUTING.md   ← contribution guide
