@@ -16,6 +16,38 @@ Three operations live here:
 import numpy as np
 
 from core.blast_correlation import classify_berm_as_ramp
+from core.config import DETECTION
+
+
+def _is_ramp(d_start: float, d_end: float, e_start: float, e_end: float,
+             min_width: float = 6.0, max_slope_deg: float = 15.0) -> bool:
+    """Return True when a segment is wide and gently sloped enough to be a ramp."""
+    width = abs(d_end - d_start)
+    if width < min_width:
+        return False
+    slope = abs(float(np.degrees(np.arctan2(e_end - e_start, width))))
+    return slope < max_slope_deg
+
+
+def _segment_is_ramp(d_start: float, d_end: float,
+                     e_start: float, e_end: float, width: float) -> bool:
+    """Classify the berm/ramp segment between two consecutive benches.
+
+    A segment is a ramp when it falls in the classic ramp width band
+    (:func:`classify_berm_as_ramp`) OR when it is a genuinely descending
+    gentle segment wide enough to be a ramp. The descent guard keeps flat
+    catch berms (toe of the upper bench ≈ crest of the lower bench) from
+    being mislabelled as ramps.
+    """
+    if classify_berm_as_ramp(width):
+        return True
+    descent = abs(e_end - e_start)
+    if descent > DETECTION.ramp_min_descent_m and _is_ramp(
+            d_start, d_end, e_start, e_end,
+            min_width=DETECTION.ramp_narrow_min_width,
+            max_slope_deg=DETECTION.ramp_max_slope_deg):
+        return True
+    return False
 
 
 def _compute_berm_widths_from_profile(
@@ -37,6 +69,7 @@ def _compute_berm_widths_from_profile(
     benches[0].berm_width = 0.0
     benches[0].effective_berm_width = 0.0
     benches[0].is_ramp = False
+    benches[0].ramp_segment = False
     benches[0].group_break = False
 
     for i in range(n_benches - 1):
@@ -50,10 +83,13 @@ def _compute_berm_widths_from_profile(
         b_next.berm_width = width
         b_next.effective_berm_width = float(max(width - b_curr.spill_width, 0.0))
 
-        if classify_berm_as_ramp(width):
-            b_next.is_ramp = True
-        else:
-            b_next.is_ramp = False
+        is_ramp_seg = _segment_is_ramp(
+            curr_right, next_left,
+            float(b_curr.toe_elevation), float(b_next.crest_elevation),
+            width,
+        )
+        b_next.is_ramp = is_ramp_seg
+        b_next.ramp_segment = is_ramp_seg
 
         if width >= max_berm_width:
             b_next.group_break = True
@@ -98,6 +134,7 @@ def _apply_leading_berm(benches, distances, elevations, berm_threshold):
         first.berm_width = width
         if classify_berm_as_ramp(width):
             first.is_ramp = True
+            first.ramp_segment = True
 
 
 def _apply_trailing_berm(benches, distances, elevations, berm_threshold):
@@ -118,3 +155,4 @@ def _apply_trailing_berm(benches, distances, elevations, berm_threshold):
         last.berm_width = width
         if classify_berm_as_ramp(width):
             last.is_ramp = True
+            last.ramp_segment = True

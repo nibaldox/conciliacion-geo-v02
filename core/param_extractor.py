@@ -13,6 +13,8 @@ from core.bench_classify import (
     _apply_trailing_berm,
     _compute_berm_widths_from_profile,
     _flat_segment_width,
+    _is_ramp,
+    _segment_is_ramp,
 )
 from core.bench_hazards import (
     _angle_between_segments,
@@ -33,7 +35,12 @@ from core.profile_extract import (
     ExtractionResult,
     ReconciledPoint,
     ReconciledProfile,
+    ReconciliationGap,
     _build_reconciled_points,
+    _detect_sub_benches,
+    _discrete_curvature,
+    _find_local_extrema,
+    _vote_bench_detection,
     extract_parameters,
 )
 from core.profile_simplify import (
@@ -43,10 +50,14 @@ from core.profile_simplify import (
 
 __all__ = [
     "ReconciledPoint", "ReconciledProfile", "BenchParams", "ExtractionResult",
+    "ReconciliationGap",
     "extract_parameters", "_build_reconciled_points",
+    "_detect_sub_benches", "_discrete_curvature", "_find_local_extrema",
+    "_vote_bench_detection",
     "ramer_douglas_peucker", "_detect_and_project_solid_toe",
     "_compute_berm_widths_from_profile", "_flat_segment_width",
     "_apply_leading_berm", "_apply_trailing_berm",
+    "_is_ramp", "_segment_is_ramp",
     "_detect_overhangs_and_bridges", "_evaluate_catch_bench_adequacy",
     "_angle_between_segments", "_detect_wedge_shape_in_face",
     "_detect_toppling_potential", "_evaluate_angle_consistency",

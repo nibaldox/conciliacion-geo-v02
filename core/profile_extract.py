@@ -14,9 +14,14 @@ The supporting helpers live in sibling modules:
 
 import logging
 from dataclasses import dataclass, field
-from typing import List, Literal
+from typing import List, Literal, Tuple
 
 import numpy as np
+
+try:
+    from scipy.signal import savgol_filter as _savgol_filter
+except Exception:  # pragma: no cover - scipy is a declared dependency
+    _savgol_filter = None
 
 from core.bench_classify import (
     _apply_leading_berm,
@@ -30,7 +35,7 @@ from core.bench_hazards import (
     _evaluate_angle_consistency,
     _evaluate_catch_bench_adequacy,
 )
-from core.config import DETECTION
+from core.config import DETECTION, TOLERANCES
 from core.profile_simplify import (
     _detect_and_project_solid_toe,
     ramer_douglas_peucker,
@@ -111,6 +116,24 @@ class BenchParams:
     toppling_risk: bool = False
     face_angle_inconsistent: bool = False
     anisotropy_dispersion_deg: float = 0.0
+    confidence_score: float = 1.0
+    detection_method: str = "angle_only"
+    n_detection_methods_agreeing: int = 1
+    source_points: int = 0
+    ramp_segment: bool = False
+
+
+@dataclass
+class ReconciliationGap:
+    section_name: str
+    sector: str
+    d_start: float
+    d_end: float
+    expected_bench_height: float
+    actual_height: float
+    delta_h: float
+    location: str
+    severity: str
 
 
 @dataclass
@@ -121,13 +144,301 @@ class ExtractionResult:
     benches: List[BenchParams] = field(default_factory=list)
     inter_ramp_angle: float = 0.0
     overall_angle: float = 0.0
+    gaps: List[ReconciliationGap] = field(default_factory=list)
+
+
+def _adaptive_smooth(elevations) -> np.ndarray:
+    """Savitzky-Golay smoothing with a window scaled to profile length."""
+    e = np.asarray(elevations, dtype=float)
+    n = len(e)
+    if n < 5 or _savgol_filter is None:
+        return e
+    window = min(DETECTION.smoothing_max_window,
+                 max(DETECTION.smoothing_min_window, n // 30))
+    if window % 2 == 0:
+        window += 1
+    if window >= n:
+        window = n if n % 2 == 1 else n - 1
+    if window < DETECTION.smoothing_min_window:
+        return e
+    polyorder = min(3, window - 1)
+    try:
+        return _savgol_filter(e, window, polyorder=polyorder)
+    except Exception:  # pragma: no cover - defensive
+        return e
+
+
+def _discrete_curvature(distances, elevations) -> np.ndarray:
+    """Absolute change in local slope (degrees) at each profile point."""
+    d = np.asarray(distances, dtype=float)
+    e = np.asarray(elevations, dtype=float)
+    n = len(d)
+    curv = np.zeros(n)
+    if n < 3:
+        return curv
+    a_next = np.arctan2(e[2:] - e[1:-1], d[2:] - d[1:-1])
+    a_prev = np.arctan2(e[1:-1] - e[:-2], d[1:-1] - d[:-2])
+    curv[1:-1] = np.degrees(np.abs(a_next - a_prev))
+    return curv
+
+
+def _find_local_extrema(distances, elevations, window: int = 3) -> Tuple[List[int], List[int]]:
+    """Return ``(crests, toes)`` as index lists.
+
+    A crest is a slope sign change from non-descending to descending
+    (the corner at the top of a face, including the flat-berm → face
+    transition). A toe is the symmetric change at the bottom. Flat
+    berms (zero-slope plateaus) are handled correctly: an interior
+    plateau point is neither a crest nor a toe.
+    """
+    d = np.asarray(distances, dtype=float)
+    e = np.asarray(elevations, dtype=float)
+    n = len(d)
+    crests: List[int] = []
+    toes: List[int] = []
+    if n < 2 * window + 1:
+        return crests, toes
+    slope_sign = np.sign(np.diff(e))
+    for i in range(window, n - window):
+        incoming = slope_sign[i - 1]
+        outgoing = slope_sign[i]
+        if incoming >= 0 and outgoing < 0:
+            crests.append(i)
+        if incoming < 0 and outgoing >= 0:
+            toes.append(i)
+    return crests, toes
+
+
+def _vote_bench_detection(
+    d_min: float,
+    d_max: float,
+    distances,
+    elevations,
+    face_threshold: float,
+) -> Tuple[int, str]:
+    """Count how many detection methods agree a ``[d_min, d_max]`` span is a face.
+
+    Method A (RDP + angle) always agrees because it produced the candidate.
+    Methods B (curvature), C (local extrema) and D (smoothed slope) vote
+    independently. Returns ``(n_agreeing, method_label)``.
+    """
+    d = np.asarray(distances, dtype=float)
+    e = np.asarray(elevations, dtype=float)
+    n_agree = 1
+    labels = ["angle"]
+
+    lo = min(d_min, d_max)
+    hi = max(d_min, d_max)
+    span = max(hi - lo, 1e-6)
+    zone = span * 0.4 + 2.0
+
+    curv = _discrete_curvature(d, e)
+    left_mask = (d >= lo - zone) & (d <= lo + zone)
+    right_mask = (d >= hi - zone) & (d <= hi + zone)
+    left_curv = np.any(curv[left_mask] > DETECTION.curvature_threshold) if np.any(left_mask) else False
+    right_curv = np.any(curv[right_mask] > DETECTION.curvature_threshold) if np.any(right_mask) else False
+    if left_curv and right_curv:
+        n_agree += 1
+        labels.append("curvature")
+
+    crests, toes = _find_local_extrema(d, e, window=DETECTION.extrema_window)
+    has_crest = any(lo - zone <= d[c] <= hi + zone for c in crests)
+    has_toe = any(lo - zone <= d[t] <= hi + zone for t in toes)
+    if has_crest and has_toe:
+        n_agree += 1
+        labels.append("extrema")
+
+    e_smooth = _adaptive_smooth(e)
+    band = (d >= lo) & (d <= hi)
+    if np.sum(band) >= 2:
+        seg_d = d[band]
+        seg_e = e_smooth[band]
+        denom = abs(float(seg_d[-1] - seg_d[0]))
+        if denom > 1e-6:
+            slope = abs(float(np.degrees(np.arctan2(seg_e[-1] - seg_e[0], denom))))
+            if slope >= face_threshold - DETECTION.face_threshold_margin:
+                n_agree += 1
+                labels.append("smooth")
+
+    label = "consensus" if n_agree >= DETECTION.consensus_quorum else "disputed"
+    return n_agree, label
+
+
+def _confidence_from_vote(n_agree: int, source_points: int) -> float:
+    """Map method agreement + point density to a 0..1 confidence score."""
+    if n_agree < DETECTION.consensus_quorum:
+        return 0.5
+    density = min(1.0, source_points / float(DETECTION.confidence_density_floor))
+    return min(1.0, (n_agree / 4.0) * density)
+
+
+def _detect_sub_benches(face_pts: np.ndarray, max_width: float) -> List[np.ndarray]:
+    """Split a wide face at intermediate elevation minima (hidden berms).
+
+    Returns a list of point arrays, one per sub-bank. When the face is
+    narrower than ``max_width`` or has no usable split points, a single
+    array (the input) is returned unchanged.
+    """
+    pts = np.asarray(face_pts, dtype=float)
+    if len(pts) < 4:
+        return [pts]
+    d = pts[:, 0]
+    e = pts[:, 1]
+    span = abs(float(d.max() - d.min()))
+    if span <= max_width:
+        return [pts]
+
+    order = np.argsort(d)
+    d = d[order]
+    e = e[order]
+    split_idx = []
+    for i in range(1, len(d) - 1):
+        if e[i] <= e[i - 1] and e[i] <= e[i + 1]:
+            left_top = e[:i].max()
+            right_top = e[i + 1:].max()
+            prominence = min(left_top - e[i], right_top - e[i])
+            if prominence >= DETECTION.sub_bench_min_prominence:
+                split_idx.append(i)
+    if not split_idx:
+        return [pts]
+    boundaries = [0] + split_idx + [len(d)]
+    sub_arrays = []
+    for a, b in zip(boundaries[:-1], boundaries[1:]):
+        chunk = pts[order][a:b + 1]
+        if len(chunk) >= 2:
+            sub_arrays.append(chunk)
+    return sub_arrays if sub_arrays else [pts]
+
+
+def _bench_from_points(
+    pts: np.ndarray,
+    distances,
+    elevations,
+    face_threshold: float,
+    bench_number: int,
+    detection_method: str,
+    confidence_score: float,
+    n_agreeing: int,
+) -> BenchParams:
+    """Build a :class:`BenchParams` from a face point cloud (sub-bank path)."""
+    pts = np.asarray(pts, dtype=float)
+    sorted_pts = pts[np.argsort(-pts[:, 1])]
+    crest = sorted_pts[0]
+    toe = sorted_pts[-1]
+    bench_height = float(abs(crest[1] - toe[1]))
+    dx = abs(float(crest[0] - toe[0]))
+    if dx > 1e-3:
+        face_angle = float(np.degrees(np.arctan2(abs(crest[1] - toe[1]), dx)))
+    else:
+        face_angle = face_threshold
+    d_lo = min(float(crest[0]), float(toe[0]))
+    d_hi = max(float(crest[0]), float(toe[0]))
+    d_arr = np.asarray(distances, dtype=float)
+    source_points = int(np.sum((d_arr >= d_lo - 0.1) & (d_arr <= d_hi + 0.1)))
+    return BenchParams(
+        bench_number=bench_number,
+        crest_elevation=float(crest[1]),
+        crest_distance=float(crest[0]),
+        toe_elevation=float(toe[1]),
+        toe_distance=float(toe[0]),
+        bench_height=bench_height,
+        face_angle=face_angle,
+        berm_width=0.0,
+        detection_method=detection_method,
+        confidence_score=float(confidence_score),
+        n_detection_methods_agreeing=int(n_agreeing),
+        source_points=source_points,
+    )
+
+
+def _emit_reconciliation_gaps(
+    detected: List[BenchParams],
+    design_benches: List[BenchParams],
+    tolerances,
+    section_name: str,
+    sector: str,
+) -> List[ReconciliationGap]:
+    """Compare detected benches against design and emit deviation gaps."""
+    gaps: List[ReconciliationGap] = []
+    if not design_benches:
+        return gaps
+
+    tol_h = tolerances.get("bench_height", {"neg": 1.0, "pos": 1.5})
+    tol_pos = float(tol_h.get("pos", 1.5))
+    tol_neg = float(tol_h.get("neg", 1.0))
+    tol_mag = max(tol_pos, tol_neg)
+
+    matched_topo: set = set()
+    for bd in design_benches:
+        bd_mid = 0.5 * (bd.crest_elevation + bd.toe_elevation)
+        best_j = None
+        best_dz = DETECTION.gap_match_threshold
+        for j, bt in enumerate(detected):
+            if j in matched_topo:
+                continue
+            bt_mid = 0.5 * (bt.crest_elevation + bt.toe_elevation)
+            dz = abs(bt_mid - bd_mid)
+            if dz < best_dz:
+                best_dz = dz
+                best_j = j
+        if best_j is None:
+            d_start = min(bd.crest_distance, bd.toe_distance)
+            d_end = max(bd.crest_distance, bd.toe_distance)
+            gaps.append(ReconciliationGap(
+                section_name=section_name,
+                sector=sector,
+                d_start=float(d_start),
+                d_end=float(d_end),
+                expected_bench_height=float(bd.bench_height),
+                actual_height=0.0,
+                delta_h=float(-bd.bench_height),
+                location="missing_crest",
+                severity="severe",
+            ))
+            continue
+        matched_topo.add(best_j)
+        bt = detected[best_j]
+        delta_h = float(bt.bench_height - bd.bench_height)
+        if abs(delta_h) > tol_mag:
+            location = "overbreak" if delta_h > 0 else "extra_material"
+            if abs(delta_h) > 2.0 * tol_mag:
+                severity = "severe"
+            elif abs(delta_h) > 1.5 * tol_mag:
+                severity = "moderate"
+            else:
+                severity = "minor"
+            d_start = min(bt.crest_distance, bt.toe_distance, bd.crest_distance, bd.toe_distance)
+            d_end = max(bt.crest_distance, bt.toe_distance, bd.crest_distance, bd.toe_distance)
+            gaps.append(ReconciliationGap(
+                section_name=section_name,
+                sector=sector,
+                d_start=float(d_start),
+                d_end=float(d_end),
+                expected_bench_height=float(bd.bench_height),
+                actual_height=float(bt.bench_height),
+                delta_h=delta_h,
+                location=location,
+                severity=severity,
+            ))
+    return gaps
+
+
+_GAP_TOLERANCES = {
+    "bench_height": {
+        "neg": TOLERANCES.bench_height["neg"],
+        "pos": TOLERANCES.bench_height["pos"],
+    },
+}
 
 
 def extract_parameters(distances, elevations, section_name, sector,
                        resolution=DETECTION.profile_resolution,
                        face_threshold=DETECTION.face_threshold,
                        berm_threshold=DETECTION.berm_threshold,
-                       max_berm_width=DETECTION.max_berm_width):
+                       max_berm_width=DETECTION.max_berm_width,
+                       design_benches=None,
+                       max_single_bench_width=DETECTION.max_single_bench_width,
+                       tolerances=None):
     """
     Extract geotechnical parameters using Vector Simplification (RDP).
 
@@ -246,25 +557,58 @@ def extract_parameters(distances, elevations, section_name, sector,
             else:
                 final_angle = weighted_angle
 
-            bench_num += 1
-            prev_face_angle = benches[-1].face_angle if benches else None
-            new_bench = BenchParams(
-                bench_number=bench_num,
-                crest_elevation=float(crest[1]),
-                crest_distance=float(crest[0]),
-                toe_elevation=float(toe[1]),
-                toe_distance=final_toe_x,
-                bench_height=float(bench_height),
-                face_angle=float(final_angle),
-                berm_width=0.0,
-                spill_width=float(spill_w),
-                effective_berm_width=0.0,
-                spill_start_distance=float(spill_pt[0]),
-                spill_start_elevation=float(spill_pt[1])
-            )
-            new_bench.wedge_risk = _detect_wedge_shape_in_face(new_bench)
-            new_bench.toppling_risk = _detect_toppling_potential(new_bench, prev_face_angle)
-            benches.append(new_bench)
+            face_mask = (distances >= d_min - 0.1) & (distances <= d_max + 0.1)
+            face_span_pts = np.column_stack((distances[face_mask], elevations[face_mask]))
+            source_points_total = int(np.sum(face_mask))
+            sub_arrays = _detect_sub_benches(face_span_pts, max_single_bench_width)
+
+            if len(sub_arrays) > 1:
+                for sub in sub_arrays:
+                    bench_num += 1
+                    sub_lo = float(min(sub[:, 0].min(), sub[:, 0].max()))
+                    sub_hi = float(max(sub[:, 0].min(), sub[:, 0].max()))
+                    sub_n, _ = _vote_bench_detection(
+                        sub_lo, sub_hi, distances, elevations, face_threshold)
+                    sub_conf = _confidence_from_vote(
+                        sub_n, source_points_total) * DETECTION.sub_bench_confidence_factor
+                    sub_bench = _bench_from_points(
+                        sub, distances, elevations, face_threshold,
+                        bench_number=bench_num,
+                        detection_method="sub_bank_split",
+                        confidence_score=sub_conf,
+                        n_agreeing=sub_n,
+                    )
+                    prev_face_angle = benches[-1].face_angle if benches else None
+                    sub_bench.wedge_risk = _detect_wedge_shape_in_face(sub_bench)
+                    sub_bench.toppling_risk = _detect_toppling_potential(sub_bench, prev_face_angle)
+                    benches.append(sub_bench)
+            else:
+                bench_num += 1
+                n_agree, method_label = _vote_bench_detection(
+                    d_min, d_max, distances, elevations, face_threshold)
+                confidence = _confidence_from_vote(n_agree, source_points_total)
+                prev_face_angle = benches[-1].face_angle if benches else None
+                new_bench = BenchParams(
+                    bench_number=bench_num,
+                    crest_elevation=float(crest[1]),
+                    crest_distance=float(crest[0]),
+                    toe_elevation=float(toe[1]),
+                    toe_distance=final_toe_x,
+                    bench_height=float(bench_height),
+                    face_angle=float(final_angle),
+                    berm_width=0.0,
+                    spill_width=float(spill_w),
+                    effective_berm_width=0.0,
+                    spill_start_distance=float(spill_pt[0]),
+                    spill_start_elevation=float(spill_pt[1]),
+                    confidence_score=float(confidence),
+                    detection_method=method_label,
+                    n_detection_methods_agreeing=int(n_agree),
+                    source_points=int(source_points_total),
+                )
+                new_bench.wedge_risk = _detect_wedge_shape_in_face(new_bench)
+                new_bench.toppling_risk = _detect_toppling_potential(new_bench, prev_face_angle)
+                benches.append(new_bench)
 
     _compute_berm_widths_from_profile(
         benches, simplified, d_simp, e_simp,
@@ -304,6 +648,12 @@ def extract_parameters(distances, elevations, section_name, sector,
         dispersion = compute_anisotropy_dispersion(benches)
         for b in benches:
             b.anisotropy_dispersion_deg = dispersion
+
+    if design_benches is not None:
+        tols = tolerances if tolerances is not None else _GAP_TOLERANCES
+        result.gaps = _emit_reconciliation_gaps(
+            benches, list(design_benches), tols, section_name, sector,
+        )
 
     return result
 

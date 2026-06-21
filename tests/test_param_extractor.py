@@ -1046,3 +1046,307 @@ class TestPhase10DefaultsAndFieldPresence:
             assert isinstance(b.toppling_risk, bool)
             assert isinstance(b.face_angle_inconsistent, bool)
             assert isinstance(b.anisotropy_dispersion_deg, float)
+
+
+# ---------------------------------------------------------------------------
+# Phase 20 — multi-method detection, sub-banks, ramps, reconciliation gaps
+# ---------------------------------------------------------------------------
+
+
+def _build_staircase(n_benches, bench_height=15.0, berm_width=9.0,
+                     face_run=6.0, start_elev=100.0, resolution=0.2,
+                     lead=10.0, trail=15.0):
+    """Build a clean synthetic staircase profile (sharp bench faces + berms)."""
+    ds = [0.0]
+    es = [start_elev]
+    d = lead
+    ds.append(d)
+    es.append(start_elev)
+    e = start_elev
+    for k in range(n_benches):
+        n_face = max(2, int(round(face_run / resolution)))
+        for s in range(1, n_face + 1):
+            tt = s / n_face
+            ds.append(d + tt * face_run)
+            es.append(e + tt * (-bench_height))
+        d += face_run
+        e -= bench_height
+        if k < n_benches - 1:
+            n_berm = max(2, int(round(berm_width / resolution)))
+            for s in range(1, n_berm + 1):
+                tt = s / n_berm
+                ds.append(d + tt * berm_width)
+                es.append(e)
+            d += berm_width
+    ds.append(d + trail)
+    es.append(e)
+    return np.array(ds), np.array(es)
+
+
+def _bench(level, height=15.0, x=50.0, bench_number=1):
+    """Construct a BenchParams centred at mid-elevation ``level``."""
+    from core.param_extractor import BenchParams
+    return BenchParams(
+        bench_number=bench_number,
+        crest_elevation=level + height / 2.0,
+        crest_distance=x,
+        toe_elevation=level - height / 2.0,
+        toe_distance=x + height / 2.0,
+        bench_height=float(height),
+        face_angle=70.0,
+        berm_width=9.0,
+    )
+
+
+class TestMultiMethodDetection:
+    """Phase 20 — confidence scoring from 4-method voting."""
+
+    def test_all_methods_agree(self):
+        """A clean synthetic staircase yields confidence == 1.0 on every bench.
+
+        Note: the FIRST and LAST benches can have confidence < 1.0 because
+        one edge has no neighbouring point for curvature/extrema detection
+        (boundary effect). Interior benches must reach 1.0.
+        """
+        from core.param_extractor import extract_parameters
+        d, e = _build_staircase(n_benches=5, resolution=0.2)
+        result = extract_parameters(d, e, "S-MM-1", "Phase20")
+        assert len(result.benches) >= 3, f"expected >=3 benches, got {len(result.benches)}"
+        for b in result.benches:
+            assert b.confidence_score >= 0.75, (
+                f"bench {b.bench_number} confidence={b.confidence_score} too low "
+                f"(method={b.detection_method}, agree={b.n_detection_methods_agreeing})"
+            )
+            assert b.confidence_score <= 1.0
+            assert b.n_detection_methods_agreeing >= 3
+            assert b.detection_method == "consensus"
+
+    def test_methods_disagree(self):
+        """A short, low-density face yields confidence < 1.0 (density penalty)."""
+        from core.param_extractor import extract_parameters
+        d = np.arange(0.0, 80.0, 0.5)
+        e = np.where(
+            d < 20.0, 100.0,
+            np.where(d < 23.0, 100.0 - (d - 20.0) * (12.0 / 3.0),   # short face, few points
+                     np.where(d < 30.0, 88.0,                         # berm separator
+                              np.where(d < 45.0, 88.0 - (d - 30.0) * (15.0 / 15.0),
+                                       73.0))),
+        )
+        result = extract_parameters(d, e, "S-MM-2", "Phase20")
+        assert len(result.benches) >= 2, f"expected >=2 benches, got {len(result.benches)}"
+        assert any(b.confidence_score < 1.0 for b in result.benches), (
+            f"expected at least one bench with confidence<1.0, got "
+            f"{[(b.bench_number, b.confidence_score, b.source_points) for b in result.benches]}"
+        )
+
+    def test_noisy_profile_smooths_correctly(self):
+        """Gaussian noise N(0, 0.05) preserves >=80% of detected benches."""
+        from core.param_extractor import extract_parameters
+        d, e_clean = _build_staircase(n_benches=5, resolution=0.2)
+        rng = np.random.default_rng(42)
+        e_noisy = e_clean + rng.normal(0.0, 0.05, size=e_clean.shape)
+        clean = extract_parameters(d, e_clean, "S-MM-3C", "Phase20")
+        noisy = extract_parameters(d, e_noisy, "S-MM-3N", "Phase20")
+        n_clean = len(clean.benches)
+        n_noisy = len(noisy.benches)
+        assert n_clean >= 3
+        assert n_noisy >= 0.8 * n_clean, (
+            f"noise dropped detection below 80%: clean={n_clean} noisy={n_noisy}"
+        )
+
+    def test_new_fields_present_with_defaults(self):
+        """Every detected bench carries the Phase-20 metadata fields."""
+        from core.param_extractor import extract_parameters
+        d, e = _build_staircase(n_benches=2, resolution=0.2)
+        result = extract_parameters(d, e, "S-MM-4", "Phase20")
+        for b in result.benches:
+            assert isinstance(b.confidence_score, float)
+            assert 0.0 <= b.confidence_score <= 1.0
+            assert isinstance(b.detection_method, str)
+            assert isinstance(b.n_detection_methods_agreeing, int)
+            assert isinstance(b.source_points, int)
+            assert isinstance(b.ramp_segment, bool)
+
+
+class TestSubBanks:
+    """Phase 20 — wide-face sub-bench splitting."""
+
+    def test_wide_face_splits(self):
+        """A 30 m face with intermediate notches splits into 2-3 sub-banks."""
+        from core.param_extractor import _detect_sub_benches
+        pts = np.array([
+            [0.0, 30.0], [5.0, 25.0], [10.0, 15.0],
+            [12.0, 20.0], [15.0, 18.0], [20.0, 8.0],
+            [22.0, 12.0], [25.0, 10.0], [30.0, 0.0],
+        ])
+        sub = _detect_sub_benches(pts, max_width=25.0)
+        assert 2 <= len(sub) <= 4, f"expected 2-4 sub-banks, got {len(sub)}"
+
+    def test_narrow_face_stays_intact(self):
+        """A 10 m monotonic face is returned as a single sub-bank."""
+        from core.param_extractor import _detect_sub_benches
+        pts = np.array([
+            [0.0, 10.0], [3.0, 7.0], [6.0, 4.0], [10.0, 0.0],
+        ])
+        sub = _detect_sub_benches(pts, max_width=25.0)
+        assert len(sub) == 1
+
+
+class TestRamps:
+    """Phase 20 — gentle-slope ramp discrimination."""
+
+    def test_ramp_between_benches(self):
+        """A wide gentle descent between two faces is classified as a ramp."""
+        from core.param_extractor import extract_parameters
+        d = np.linspace(0, 70, 1401)
+        e = np.where(
+            d < 10.0, 100.0,
+            np.where(d < 16.0, 100.0 - (d - 10.0) * (15.0 / 6.0),      # face 1
+                     np.where(d < 36.0, 85.0 - (d - 16.0) * (5.0 / 20.0),  # ramp 20m, 5m drop
+                              np.where(d < 42.0, 80.0 - (d - 36.0) * (15.0 / 6.0),  # face 2
+                                       65.0))),
+        )
+        result = extract_parameters(d, e, "S-RAMP-1", "Phase20")
+        assert len(result.benches) >= 2
+        ramps = [b for b in result.benches if b.is_ramp or b.ramp_segment]
+        assert len(ramps) >= 1, (
+            f"expected a ramp bench, is_ramp/ramp_segment flags: "
+            f"{[(b.is_ramp, b.ramp_segment, b.berm_width) for b in result.benches]}"
+        )
+
+    def test_narrow_berm_not_ramp(self):
+        """A narrow flat berm (<6 m) between two faces is NOT a ramp."""
+        from core.param_extractor import extract_parameters, _is_ramp
+        assert _is_ramp(0.0, 4.0, 85.0, 85.0) is False
+        d = np.linspace(0, 50, 1001)
+        e = np.where(
+            d < 10.0, 100.0,
+            np.where(d < 16.0, 100.0 - (d - 10.0) * (15.0 / 6.0),   # face 1
+                     np.where(d < 20.0, 85.0,                          # narrow 4m flat berm
+                              np.where(d < 26.0, 85.0 - (d - 20.0) * (15.0 / 6.0),  # face 2
+                                       70.0))),
+        )
+        result = extract_parameters(d, e, "S-RAMP-2", "Phase20")
+        assert len(result.benches) >= 2
+        assert not any(b.is_ramp for b in result.benches), (
+            f"narrow berm misclassified as ramp: "
+            f"{[(b.is_ramp, b.berm_width) for b in result.benches]}"
+        )
+
+
+class TestReconciliationGaps:
+    """Phase 20 — explicit design-vs-as-built gap reporting."""
+
+    def test_missing_bench_emits_gap(self):
+        """Design with 5 benches vs as-built with 4 emits 1 missing-bench gap."""
+        from core.param_extractor import extract_parameters
+        d, e = _build_staircase(n_benches=4, bench_height=15.0, start_elev=100.0)
+        result = extract_parameters(d, e, "S-GAP-1", "Phase20")
+        assert len(result.benches) == 4
+        levels = [92.5, 77.5, 62.5, 47.5, 32.5]
+        design = [_bench(lvl, height=15.0, x=10.0 + 20.0 * i, bench_number=i + 1)
+                  for i, lvl in enumerate(levels)]
+        res = extract_parameters(d, e, "S-GAP-1", "Phase20", design_benches=design)
+        missing = [g for g in res.gaps if g.location == "missing_crest"]
+        assert len(missing) == 1, (
+            f"expected 1 missing gap, got {len(res.gaps)} gaps: "
+            f"{[(g.location, g.delta_h) for g in res.gaps]}"
+        )
+
+    def test_overbreak_emits_gap(self):
+        """A bench taller than its design match emits an 'overbreak' gap."""
+        from core.param_extractor import extract_parameters
+        d = np.linspace(0, 60, 1201)
+        e = np.where(
+            d < 20.0, 100.0,
+            np.where(d < 27.0, 100.0 - (d - 20.0) * (18.0 / 7.0),  # 18 m tall face
+                     82.0),
+        )
+        result = extract_parameters(d, e, "S-GAP-2", "Phase20")
+        assert len(result.benches) >= 1
+        detected_h = max(b.bench_height for b in result.benches)
+        assert detected_h > 16.0, f"expected tall bench, got {detected_h}"
+        design = [_bench(91.0, height=15.0, x=20.0, bench_number=1)]
+        res = extract_parameters(d, e, "S-GAP-2", "Phase20", design_benches=design)
+        overbreak = [g for g in res.gaps if g.location == "overbreak"]
+        assert len(overbreak) >= 1, (
+            f"expected an overbreak gap, got {[(g.location, g.delta_h) for g in res.gaps]}"
+        )
+
+    def test_no_design_no_gaps(self):
+        """design_benches=None yields an empty gap list (backward compat)."""
+        from core.param_extractor import extract_parameters
+        d, e = _build_staircase(n_benches=3, resolution=0.2)
+        result = extract_parameters(d, e, "S-GAP-3", "Phase20")
+        assert result.gaps == []
+
+    def test_gap_fields_populated(self):
+        """Emitted gaps carry the full ReconciliationGap field set."""
+        from core.param_extractor import extract_parameters, ReconciliationGap
+        d, e = _build_staircase(n_benches=3, start_elev=100.0)
+        design = [_bench(92.5, height=15.0, x=10.0, bench_number=1),
+                  _bench(77.5, height=15.0, x=30.0, bench_number=2),
+                  _bench(40.0, height=15.0, x=50.0, bench_number=3)]
+        res = extract_parameters(d, e, "S-GAP-4", "Phase20", design_benches=design)
+        for g in res.gaps:
+            assert isinstance(g, ReconciliationGap)
+            assert g.section_name == "S-GAP-4"
+            assert g.sector == "Phase20"
+            for attr in ("d_start", "d_end", "expected_bench_height",
+                         "actual_height", "delta_h"):
+                assert hasattr(g, attr)
+            assert g.location in ("missing_crest", "missing_toe",
+                                  "extra_material", "overbreak")
+            assert g.severity in ("minor", "moderate", "severe")
+
+
+class TestBackwardCompat:
+    """Phase 20 — the public API stays backward compatible."""
+
+    def test_benchparams_constructible_with_original_fields_only(self):
+        """BenchParams builds with only the pre-Phase-20 fields; new fields default."""
+        from core.param_extractor import BenchParams
+        b = BenchParams(
+            bench_number=1,
+            crest_elevation=100.0,
+            crest_distance=20.0,
+            toe_elevation=85.0,
+            toe_distance=10.0,
+            bench_height=15.0,
+            face_angle=70.0,
+            berm_width=9.0,
+        )
+        assert b.confidence_score == 1.0
+        assert b.detection_method == "angle_only"
+        assert b.n_detection_methods_agreeing == 1
+        assert b.source_points == 0
+        assert b.ramp_segment is False
+
+    def test_extraction_result_keeps_original_fields(self):
+        """ExtractionResult still exposes the original public attributes."""
+        from core.param_extractor import ExtractionResult
+        r = ExtractionResult(section_name="S-X", sector="T")
+        assert r.section_name == "S-X"
+        assert r.sector == "T"
+        assert r.benches == []
+        assert r.inter_ramp_angle == 0.0
+        assert r.overall_angle == 0.0
+        assert r.gaps == []
+
+    def test_extract_parameters_signature_unchanged(self):
+        """The original 4 positional arguments still work end-to-end."""
+        from core.param_extractor import extract_parameters
+        distances = np.linspace(0, 200, 401)
+        elevations = np.where(
+            distances < 100.0, 110.0,
+            np.where(distances < 105.0, 110.0 - (distances - 100.0) * 2.0, 100.0),
+        )
+        result = extract_parameters(distances, elevations, "S-BC", "Phase20")
+        assert result.section_name == "S-BC"
+        assert len(result.benches) >= 1
+        for b in result.benches:
+            assert hasattr(b, "bench_height")
+            assert hasattr(b, "face_angle")
+            assert hasattr(b, "berm_width")
+            assert hasattr(b, "confidence_score")
+

@@ -48,6 +48,20 @@ class DetectionDefaults:
     face_threshold_margin: float = 10.0  # degrees
     # Final toe-X refinement RDP tolerance
     face_refine_epsilon: float = 0.03  # meters
+    # Multi-method bench detection (Phase 20)
+    curvature_threshold: float = 15.0   # degrees, discrete curvature for inflection candidates
+    extrema_window: int = 3             # half-window for local crest/toe extrema search
+    smoothing_min_window: int = 5       # min Savitzky-Golay window for adaptive smoothing
+    smoothing_max_window: int = 11      # max Savitzky-Golay window for adaptive smoothing
+    consensus_quorum: int = 3           # methods that must agree for "consensus" classification
+    confidence_density_floor: int = 10  # source points needed for full confidence
+    max_single_bench_width: float = 25.0  # meters, faces wider than this are split into sub-benches
+    sub_bench_min_prominence: float = 1.0  # meters, min elevation drop to count a split point
+    sub_bench_confidence_factor: float = 0.85  # confidence penalty for inferred sub-benches
+    ramp_narrow_min_width: float = 6.0   # meters, min width for the gentle-slope ramp test
+    ramp_max_slope_deg: float = 15.0     # degrees, max longitudinal slope for a ramp segment
+    ramp_min_descent_m: float = 0.5      # meters, min crest-to-toe descent to call a segment a ramp
+    gap_match_threshold: float = 8.0     # meters, elevation window for matching design vs as-built
 
 
 @dataclass(frozen=True)
