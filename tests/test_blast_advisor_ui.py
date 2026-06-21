@@ -231,17 +231,19 @@ class TestUIRecommendationIntegration:
         assert "Recomendaciones de Ajuste de Carga" in self.blast_correlation_source
         assert "advisor_target_overbreak" in self.blast_correlation_source
 
-    @pytest.mark.skip(reason="ui/tabs/ai_report.py was replaced with a v2 stub in Phase 2; full LLM integration re-lands in Phase 4.")
+    @pytest.mark.skip(reason="Legacy blast_advisor import was removed in Phase 2; v2 uses providers/builder directly (covered by core/ai_v2 tests).")
     def test_ai_report_imports_advisor(self):
         assert "from core.blast_advisor import" in self.ai_report_source
         assert "from core.blast_model import" in self.ai_report_source
         assert "fit_powder_factor_damage_model" in self.ai_report_source
 
-    @pytest.mark.skip(reason="ui/tabs/ai_report.py was replaced with a v2 stub in Phase 2; quantitative recommendations re-lands in Phase 4.")
+    @pytest.mark.skip(reason="Legacy quantitative recommendations were removed in Phase 2; the v2 tab exposes providers + report generation instead.")
     def test_ai_report_has_quantitative_block(self):
         assert "Recomendaciones Cuantitativas del Modelo" in self.ai_report_source
         assert "_render_quantitative_recommendations" in self.ai_report_source
 
-    def test_ai_report_v2_stub_exists(self):
-        assert "Agente IA v2" in self.ai_report_source
+    def test_ai_report_v2_wiring(self):
+        assert "core.ai_v2" in self.ai_report_source
         assert "render_tab_ai" in self.ai_report_source
+        assert "stream_report" in self.ai_report_source
+        assert "ProviderType" in self.ai_report_source

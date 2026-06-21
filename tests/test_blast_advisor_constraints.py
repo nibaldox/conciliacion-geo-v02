@@ -82,7 +82,6 @@ class TestValidateRecommendation:
         assert res_loose['valid'] is True
 
 
-@pytest.mark.skip(reason="build_analysis_prompt from core.ai_service removed in Phase 2; re-implement in core.ai_v2 (Phase 3).")
 class TestBuildAnalysisPrompt:
     def test_basic_prompt_includes_results(self):
         results = [
@@ -90,9 +89,11 @@ class TestBuildAnalysisPrompt:
              'type': 'MATCH', 'section': 'S1', 'height_dev': 0.2, 'angle_dev': 1.5,
              'bench_num': 1},
         ]
-        prompt = build_analysis_prompt(results, [], {'tolerances': {}})
-        assert 'Total de comparaciones: 1' in prompt
-        assert 'S1' in prompt
+        from core.ai_v2.builder import build_analysis_prompt
+        system, user = build_analysis_prompt(results, [], {'tolerances': {}}, seccion='S1')
+        assert '1/1 bancos comparados' in user
+        assert 'S1' in user
+        assert system != ''
 
     def test_blast_trend_block_included(self):
         results = [{'height_status': 'CUMPLE', 'type': 'MATCH', 'section': 'S1',
@@ -106,17 +107,16 @@ class TestBuildAnalysisPrompt:
             'ratios': {'stemming_ratio': 0.85, 'subdrilling_ratio': 0.3},
             'outliers': [{'label_pozo': 'P-007', 'pf_vol_kgm3': 0.92}],
         }
-        prompt = build_analysis_prompt(results, [], {}, blast_trend=trend)
-        assert 'PF promedio: 0.420 kg/m' in prompt
-        assert 'Tendencia PF mensual' in prompt
-        assert 'bajando' in prompt
-        assert 'stemming_ratio' in prompt
-        assert 'P-007' in prompt
+        from core.ai_v2.builder import build_analysis_prompt
+        system, user = build_analysis_prompt(results, [], {}, blast_trend=trend)
+        assert '0.42 kg/m³' in user
+        assert 'bajando' in user
+        assert 'P-007' in user
 
     def test_blast_trend_optional(self):
         results = [{'height_status': 'CUMPLE', 'type': 'MATCH', 'section': 'S1',
                     'height_dev': 0.1, 'angle_dev': 0.0, 'bench_num': 1}]
-        prompt_no_trend = build_analysis_prompt(results, [], {})
-        prompt_with_none = build_analysis_prompt(results, [], {}, blast_trend=None)
-        assert prompt_no_trend == prompt_with_none
-        assert 'Powder Factor y Tendencia' not in prompt_no_trend
+        from core.ai_v2.builder import build_analysis_prompt
+        _, user_no_trend = build_analysis_prompt(results, [], {})
+        _, user_with_none = build_analysis_prompt(results, [], {}, blast_trend=None)
+        assert user_no_trend == user_with_none
