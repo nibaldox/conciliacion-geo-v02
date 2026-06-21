@@ -123,9 +123,69 @@ def _render_settings() -> tuple[ProviderType, str, AIConfig, OpenAICompatiblePro
     return ptype, model, config, provider
 
 
+def _apply_table_filters(
+    comparisons: list[dict],
+) -> tuple[list[dict], dict[str, list]]:
+    """Apply the same filters as ui/tabs/table.py to the comparisons list.
+
+    Reads st.session_state.table_filter_{sector,level,section,bench} and
+    returns (filtered_list, active_filters_dict). Returns the input list
+    untouched if no filter is active.
+    """
+    sel_sectors: list = st.session_state.get("table_filter_sector") or []
+    sel_levels: list = st.session_state.get("table_filter_level") or []
+    sel_sections: list = st.session_state.get("table_filter_section") or []
+    sel_benches: list = st.session_state.get("table_filter_bench") or []
+
+    active = {
+        "sector": list(sel_sectors),
+        "level": list(sel_levels),
+        "section": list(sel_sections),
+        "bench": list(sel_benches),
+    }
+    if not any(active.values()):
+        return comparisons, active
+
+    out: list[dict] = []
+    for r in comparisons:
+        if sel_sectors and r.get("sector") not in sel_sectors:
+            continue
+        if sel_levels and r.get("level") not in sel_levels:
+            continue
+        if sel_sections and r.get("section") not in sel_sections:
+            continue
+        if sel_benches and r.get("bench_num") not in sel_benches:
+            continue
+        out.append(r)
+    return out, active
+
+
+def _filters_summary(active: dict[str, list]) -> str:
+    parts: list[str] = []
+    if active["sector"]:
+        parts.append(f"sector={','.join(map(str, active['sector']))}")
+    if active["section"]:
+        parts.append(f"sección={','.join(map(str, active['section']))}")
+    if active["level"]:
+        parts.append(f"cota={','.join(map(str, active['level']))}")
+    if active["bench"]:
+        parts.append(f"banco={','.join(map(str, active['bench']))}")
+    return "; ".join(parts) if parts else "ninguno"
+
+
 def _build_ai_request(
-    comparisons: list[dict], ptype: ProviderType, model: str
+    comparisons: list[dict], ptype: ProviderType, model: str,
+    filters_active: dict[str, list] | None = None,
 ) -> AIRequest:
+    metadata: dict = {
+        "project_name": st.session_state.get("project_name", "Sin nombre"),
+        "fecha_informe": datetime.date.today().isoformat(),
+        "seccion": ", ".join(str(s) for s in (filters_active or {}).get("section") or [])
+                if (filters_active and (filters_active.get("section") or [])) else
+                st.session_state.get("active_section", "global"),
+        "banco": ", ".join(str(b) for b in (filters_active or {}).get("bench") or [])
+                if (filters_active and (filters_active.get("bench") or [])) else "N/A",
+    }
     return AIRequest(
         results={"comparisons": comparisons},
         sections=None,
@@ -134,12 +194,7 @@ def _build_ai_request(
         model=model,
         stream=True,
         use_cache=False,
-        metadata={
-            "project_name": st.session_state.get("project_name", "Sin nombre"),
-            "fecha_informe": datetime.date.today().isoformat(),
-            "seccion": st.session_state.get("active_section", "global"),
-            "banco": "N/A",
-        },
+        metadata=metadata,
     )
 
 
@@ -163,16 +218,36 @@ def render_tab_ai(config: dict) -> None:
 
     ptype, model, ai_config, provider = _render_settings()
 
-    st.caption(
-        f"{len(comparisons)} comparaciones disponibles · "
-        f"Provider={ptype.value} · Endpoint={PROVIDER_PRESETS[ptype]['base_url']}"
-    )
+    filtered, active_filters = _apply_table_filters(comparisons)
+    n_total = len(comparisons)
+    n_filtered = len(filtered)
+    filters_str = _filters_summary(active_filters)
+
+    if active_filters and n_filtered != n_total:
+        st.caption(
+            f"**Filtros activos**: {filters_str} · "
+            f"**{n_filtered}**/{n_total} comparaciones después del filtro · "
+            f"Provider={ptype.value}"
+        )
+    else:
+        st.caption(
+            f"**{n_total}** comparaciones (sin filtros) · "
+            f"Provider={ptype.value} · Endpoint={PROVIDER_PRESETS[ptype]['base_url']}"
+        )
+
+    if n_filtered == 0:
+        st.warning(
+            "⚠️ El filtro de la pestaña 'Tabla Detallada' dejó 0 bancos. "
+            "Ajustá los filtros (o quítalos) antes de generar el informe."
+        )
+        return
+
     if not st.button(
         "📝 Generar Informe Ejecutivo", type="primary", key="ai_v2_generate"
     ):
         return
 
-    request = _build_ai_request(comparisons, ptype, model)
+    request = _build_ai_request(filtered, ptype, model, filters_active=active_filters)
 
     placeholder = st.empty()
     full_report = ""
@@ -192,8 +267,9 @@ def render_tab_ai(config: dict) -> None:
         placeholder.markdown(full_report)
         elapsed = (datetime.datetime.now() - start).total_seconds()
         duration_box.success(
-            f"✅ Informe generado en {elapsed:.2f}s "
-            f"(provider={ptype.value}, model={model})"
+            f"✅ Informe generado en {elapsed:.2f}s · "
+            f"{n_filtered}/{n_total} bancos · "
+            f"provider={ptype.value}, model={model}"
         )
     except Exception as exc:
         placeholder.empty()
