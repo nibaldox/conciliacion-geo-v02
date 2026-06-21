@@ -389,14 +389,8 @@ def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
             c_crest = "red" if d_crest and d_crest < -0.5 else "blue" if d_crest and d_crest > 0.5 else "black"
             c_toe = "red" if d_toe and d_toe < -0.5 else "blue" if d_toe and d_toe > 0.5 else "black"
 
-            h_design = bd.bench_height
             h_real = bt.bench_height if bt else None
-            h_delta = (h_real - h_design) if (h_real is not None and h_design is not None) else None
-            h_line = (
-                f"H.diseño: {h_design:.2f}m / H.real: {h_real:.2f}m (Δ{h_delta:+.2f}m)"
-                if h_real is not None and h_delta is not None
-                else f"H.diseño: {h_design:.2f}m / H.real: N/A"
-            )
+            h_line = f"H.real: {h_real:.2f}m" if h_real is not None else "H.real: N/A"
 
             hover_x.append(bd.crest_distance)
             hover_y.append(bd.crest_elevation)
@@ -415,7 +409,8 @@ def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
             marker=dict(color=hover_colors, symbol=hover_symbols, size=10,
                         line=dict(color='black', width=1)),
             text=hover_text, hoverinfo='text',
-            hoverlabel=dict(bgcolor="rgba(255, 255, 255, 0.2)", font_size=15),
+            hoverlabel=dict(bgcolor="rgba(20, 20, 20, 0.55)", bordercolor="rgba(255,255,255,0.3)",
+                             font=dict(color="white"), font_size=13),
             showlegend=False))
 
 
