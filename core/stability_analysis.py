@@ -543,3 +543,83 @@ def suggest_face_angle_for_fs(
         else:
             hi = mid
     return float(lo)
+
+
+@dataclass
+class BenchAngleSuggestion:
+    bench_number: int
+    detected_face_angle_deg: float
+    target_face_angle_deg: float
+    satisfies_target_fs: bool
+    fs_at_detected_angle: float
+    safety_margin_deg: float
+    confidence: float
+
+
+def suggest_face_angles_for_benches(
+    benches: list[BenchParams],
+    fs_target: float = 1.3,
+    rock_mass_rating: float | None = None,
+    cohesion_kpa: float | None = None,
+    friction_angle_deg: float | None = None,
+    unit_weight_kn_m3: float = 27.0,
+    water_pressure_ratio: float = 0.0,
+) -> list[BenchAngleSuggestion]:
+    """Suggest a target face angle per bench for the given FS target.
+
+    Resolves the rock-mass strength once (explicit ``cohesion_kpa`` /
+    ``friction_angle_deg`` win over ``rock_mass_rating``, same rule as
+    :func:`suggest_face_angle_for_fs`) and reuses it for every bench so the
+    per-bench target angle and the FS computed at the detected angle stay on
+    the same resistance basis. Benches with a non-positive height cannot be
+    solved and are returned with ``NaN`` numeric fields and
+    ``confidence = 0.0``.
+
+    Returns a list parallel to ``benches`` (one :class:`BenchAngleSuggestion`
+    per input bench, in order).
+    """
+    cohesion, phi = _resolve_face_angle_strength(
+        rock_mass_rating, cohesion_kpa, friction_angle_deg,
+    )
+
+    suggestions: list[BenchAngleSuggestion] = []
+    for bench in benches:
+        detected = float(bench.face_angle)
+        height = float(bench.bench_height)
+
+        if height <= 0.0:
+            suggestions.append(BenchAngleSuggestion(
+                bench_number=int(bench.bench_number),
+                detected_face_angle_deg=detected,
+                target_face_angle_deg=float('nan'),
+                satisfies_target_fs=False,
+                fs_at_detected_angle=float('nan'),
+                safety_margin_deg=float('nan'),
+                confidence=0.0,
+            ))
+            continue
+
+        target = suggest_face_angle_for_fs(
+            fs_target=fs_target,
+            cohesion_kpa=cohesion,
+            friction_angle_deg=phi,
+            bench_height_m=height,
+            unit_weight_kn_m3=unit_weight_kn_m3,
+            water_pressure_ratio=water_pressure_ratio,
+        )
+        fs_detected = compute_planar_factor_of_safety(
+            bench, cohesion, phi, water_pressure_ratio,
+        )
+        margin = float(target) - detected
+
+        suggestions.append(BenchAngleSuggestion(
+            bench_number=int(bench.bench_number),
+            detected_face_angle_deg=detected,
+            target_face_angle_deg=float(target),
+            satisfies_target_fs=bool(detected <= float(target)),
+            fs_at_detected_angle=float(fs_detected),
+            safety_margin_deg=margin,
+            confidence=max(0.0, min(1.0, float(bench.confidence_score))),
+        ))
+
+    return suggestions
