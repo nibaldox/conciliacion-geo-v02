@@ -193,12 +193,12 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
         for bench in st.session_state.params_topo[i].benches:
             fig.add_annotation(
                 x=bench.crest_distance, y=bench.crest_elevation,
-                text=f"B{bench.bench_number}",
+                text=f"B{bench.bench_number}<br>{bench.face_angle:.1f}°",
                 showarrow=True, arrowhead=2,
                 font=dict(size=10, color="red"))
             fig.add_annotation(
                 x=bench.toe_distance, y=bench.toe_elevation,
-                text=f"Pa{bench.bench_number}",
+                text=f"Pa{bench.bench_number}<br>{bench.face_angle:.1f}°",
                 showarrow=True, arrowhead=2,
                 font=dict(size=9, color="darkred"),
                 ax=20, ay=0)
