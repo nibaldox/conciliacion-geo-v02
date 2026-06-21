@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import os
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -17,6 +18,7 @@ from core.ai_v2.config import AIConfig
 from core.ai_v2.models import AIRequest, AIResponseChunk
 from core.ai_v2.providers import (
     PROVIDER_PRESETS,
+    OpenAICompatibleProvider,
     ProviderRegistry,
     ProviderType,
 )
@@ -27,13 +29,35 @@ PROVIDER_LABELS: dict[str, str] = {
     "ollama": "Ollama (local)",
     "lmstudio": "LM Studio (local)",
     "openai": "OpenAI",
+    "openrouter": "OpenRouter (cloud)",
     "minimax": "MiniMax",
     "glm": "GLM",
     "grok": "Grok",
 }
 
 
-def _render_settings() -> tuple[ProviderType, str, AIConfig]:
+PROVIDERS_NEEDING_KEY: frozenset[str] = frozenset(
+    {"openai", "openrouter", "minimax", "glm", "grok"}
+)
+
+PROVIDER_ENV_VAR: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
+    "glm": "GLM_API_KEY",
+    "grok": "GROK_API_KEY",
+}
+
+
+def _resolve_api_key(ptype: ProviderType) -> str:
+    env_var = PROVIDER_ENV_VAR.get(ptype.value, "")
+    env_val = os.environ.get(env_var, "")
+    if env_val:
+        return env_val
+    return st.session_state.get(f"ai_v2_key_{ptype.value}", "")
+
+
+def _render_settings() -> tuple[ProviderType, str, AIConfig, OpenAICompatibleProvider]:
     st.markdown("#### Configuración del agente")
     cols = st.columns(3)
     provider_name = cols[0].selectbox(
@@ -51,6 +75,25 @@ def _render_settings() -> tuple[ProviderType, str, AIConfig]:
     temperature = cols[2].slider(
         "Temperatura", 0.0, 2.0, 0.3, 0.05, key="ai_v2_temperature"
     )
+
+    if ptype.value in PROVIDERS_NEEDING_KEY:
+        st.session_state.setdefault(f"ai_v2_key_{ptype.value}", "")
+        api_key = st.text_input(
+            f"🔑 {PROVIDER_ENV_VAR[ptype.value]}",
+            value=st.session_state[f"ai_v2_key_{ptype.value}"],
+            type="password",
+            key=f"ai_v2_key_input_{ptype.value}",
+            help=(
+                f"Puedes dejar vacío si ya configuraste la variable "
+                f"de entorno {PROVIDER_ENV_VAR[ptype.value]} en tu shell."
+            ),
+        )
+        st.session_state[f"ai_v2_key_{ptype.value}"] = api_key
+        if not _resolve_api_key(ptype):
+            st.warning(
+                f"⚠️ No se detectó API key para {ptype.value}. "
+                f"Configúrala arriba o exporta `{PROVIDER_ENV_VAR[ptype.value]}` antes de lanzar Streamlit."
+            )
 
     with st.expander("Avanzado", expanded=False):
         adv = st.columns(3)
@@ -72,7 +115,12 @@ def _render_settings() -> tuple[ProviderType, str, AIConfig]:
         timeout_s=float(timeout_s),
         enable_cache=bool(enable_cache),
     )
-    return ptype, model, config
+    api_key = _resolve_api_key(ptype)
+    if api_key:
+        provider = ProviderRegistry.get(ptype, api_key=api_key)
+    else:
+        provider = ProviderRegistry.get(ptype)
+    return ptype, model, config, provider
 
 
 def _build_ai_request(
@@ -95,8 +143,10 @@ def _build_ai_request(
     )
 
 
-def _run_stream(request: AIRequest, config: AIConfig) -> AsyncIterator[AIResponseChunk]:
-    return stream_report(request, config=config)
+def _run_stream(
+    request: AIRequest, config: AIConfig, provider: OpenAICompatibleProvider
+) -> AsyncIterator[AIResponseChunk]:
+    return stream_report(request, provider=provider, config=config)
 
 
 def render_tab_ai(config: dict) -> None:
@@ -111,9 +161,12 @@ def render_tab_ai(config: dict) -> None:
         )
         return
 
-    ptype, model, ai_config = _render_settings()
+    ptype, model, ai_config, provider = _render_settings()
 
-    st.caption(f"{len(comparisons)} comparaciones disponibles.")
+    st.caption(
+        f"{len(comparisons)} comparaciones disponibles · "
+        f"Provider={ptype.value} · Endpoint={PROVIDER_PRESETS[ptype]['base_url']}"
+    )
     if not st.button(
         "📝 Generar Informe Ejecutivo", type="primary", key="ai_v2_generate"
     ):
@@ -129,7 +182,7 @@ def render_tab_ai(config: dict) -> None:
     try:
         async def _consume() -> None:
             nonlocal full_report
-            async for chunk in _run_stream(request, ai_config):
+            async for chunk in _run_stream(request, ai_config, provider):
                 if chunk.content:
                     full_report += chunk.content
                     placeholder.markdown(full_report + "▌")

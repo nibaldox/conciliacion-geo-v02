@@ -25,8 +25,9 @@ def test_provider_type_values():
 def test_list_providers():
     names = ProviderRegistry.list_providers()
     assert "ollama" in names
+    assert "openrouter" in names
     assert "grok" in names
-    assert len(names) == 6
+    assert len(names) == 7
 
 
 def test_get_default_model():

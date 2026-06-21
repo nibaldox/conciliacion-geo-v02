@@ -11,6 +11,7 @@ class ProviderType(str, Enum):
     OLLAMA = "ollama"
     LMSTUDIO = "lmstudio"
     OPENAI = "openai"
+    OPENROUTER = "openrouter"
     MINIMAX = "minimax"
     GLM = "glm"
     GROK = "grok"
@@ -28,6 +29,10 @@ PROVIDER_PRESETS: dict[ProviderType, dict[str, str]] = {
     ProviderType.OPENAI: {
         "base_url": "https://api.openai.com/v1",
         "default_model": "gpt-4o-mini",
+    },
+    ProviderType.OPENROUTER: {
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "nvidia/nemotron-3-ultra-550b-a55b:free",
     },
     ProviderType.MINIMAX: {
         "base_url": "https://api.minimax.io/anthropic",
