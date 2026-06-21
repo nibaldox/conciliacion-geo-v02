@@ -175,6 +175,7 @@ def _filters_summary(active: dict[str, list]) -> str:
 
 def _build_ai_request(
     comparisons: list[dict], ptype: ProviderType, model: str,
+    use_cache: bool,
     filters_active: dict[str, list] | None = None,
 ) -> AIRequest:
     metadata: dict = {
@@ -193,7 +194,7 @@ def _build_ai_request(
         provider=ptype.value,
         model=model,
         stream=True,
-        use_cache=False,
+        use_cache=use_cache,
         metadata=metadata,
     )
 
@@ -247,7 +248,11 @@ def render_tab_ai(config: dict) -> None:
     ):
         return
 
-    request = _build_ai_request(filtered, ptype, model, filters_active=active_filters)
+    request = _build_ai_request(
+        filtered, ptype, model,
+        use_cache=bool(ai_config.enable_cache),
+        filters_active=active_filters,
+    )
 
     placeholder = st.empty()
     full_report = ""

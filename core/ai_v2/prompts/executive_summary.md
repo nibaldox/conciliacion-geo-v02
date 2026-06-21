@@ -8,6 +8,10 @@
 
 {verdict_global}
 
+## Criterios de cumplimiento
+
+{criterios_tolerancia}
+
 ## 2. Cumplimiento por Parámetro
 
 {tabla_cumplimiento}
