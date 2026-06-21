@@ -116,3 +116,47 @@ class TestComputeSectorDeviations:
         assert sectors[0].classification == "overbreak"
         sectors_ok = compute_sector_deviations(d, e, d, e + 0.25, tolerance_m=0.3)
         assert sectors_ok[0].classification == "compliant"
+
+
+class TestSectorHoverData:
+
+    _HOVER_FIELDS = (
+        "sector_id", "classification", "d_start", "d_end",
+        "mean_delta_h", "max_delta_h", "area_above_m2", "area_below_m2",
+    )
+
+    def test_customdata_shape(self):
+        d, e = _linear_profile()
+        sectors = compute_sector_deviations(d, e, d, e + 0.5, tolerance_m=0.3)
+        assert len(sectors) >= 1
+        customdata = np.column_stack([
+            [getattr(s, f) for s in sectors] for f in self._HOVER_FIELDS
+        ])
+        assert customdata.shape == (len(sectors), 8)
+
+    def test_classification_strings(self):
+        d, e = _linear_profile()
+        sectors = compute_sector_deviations(d, e, d, e + 0.5, tolerance_m=0.3)
+        valid = {"overbreak", "underbreak", "compliant", "mixed"}
+        assert len(sectors) >= 1
+        assert all(isinstance(s.classification, str) for s in sectors)
+        assert all(s.classification in valid for s in sectors)
+
+    def test_hoverable_with_strict_overbreak(self):
+        d, e = _linear_profile()
+        sectors = compute_sector_deviations(d, e, d, e + 5.0, tolerance_m=0.3)
+        assert len(sectors) >= 1
+        assert all(s.classification == "overbreak" for s in sectors)
+        for s in sectors:
+            assert s.mean_delta_h > 0
+            assert s.area_above_m2 > 0.0
+            assert s.area_below_m2 == pytest.approx(0.0, abs=1e-6)
+
+    def test_hoverable_with_strict_underbreak(self):
+        d, e = _linear_profile()
+        sectors = compute_sector_deviations(d, e, d, e - 5.0, tolerance_m=0.3)
+        assert len(sectors) >= 1
+        assert all(s.classification == "underbreak" for s in sectors)
+        for s in sectors:
+            assert s.mean_delta_h < 0
+            assert s.area_below_m2 > 0.0

@@ -9,6 +9,8 @@ import streamlit as st
 
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles, find_df_column
+from core.profile_compliance import compute_sector_deviations
+from core.stability_analysis import suggest_face_angle_for_fs
 
 
 BLAST_HOLE_DISPLAY_RADIUS_M = 10.0
@@ -32,6 +34,10 @@ def render_tab_profiles(config: dict) -> None:
             "Mostrar Área de Derrame",
             value=True, key="show_spill_areas",
             help="Muestra el área del material de derrame en la base de los bancos")
+        show_sector_areas = st.checkbox(
+            "🎯 Sectores coloreados por desviación",
+            value=True, key="profile_show_sector_areas",
+            help="Rellena el área entre diseño y topografía clasificada por sector: rojo=sobre-excavación, amarillo=deuda, verde=cumple.")
             
     with ctrl_cols[2]:
         show_semaphore = st.checkbox(
@@ -86,6 +92,7 @@ def render_tab_profiles(config: dict) -> None:
                     id(st.session_state.get('area_fill_design')),
                     show_areas, show_spill_areas, show_semaphore,
                     show_reconciled, show_pozos, blast_tolerance,
+                    show_sector_areas,
                     num_cols,
                 )
                 cached = fig_cache.get(i)
@@ -100,15 +107,32 @@ def render_tab_profiles(config: dict) -> None:
                         show_reconciled=show_reconciled,
                         show_pozos=show_pozos,
                         blast_tolerance=blast_tolerance,
-                        config=config)
+                        config=config,
+                        show_sector_areas=show_sector_areas)
                     fig_cache[i] = (cache_key, fig)
                 with cols[col_idx]:
                     st.plotly_chart(fig, use_container_width=True)
+                    if show_sector_areas:
+                        with st.expander("🎯 Sugerencia de ángulo de cara (FS objetivo)", expanded=False):
+                            col_fs1, col_fs2, col_fs3 = st.columns(3)
+                            fs_target = col_fs1.slider("Factor de seguridad objetivo", 1.0, 2.5, 1.3, 0.05, key=f"fs_target_{i}")
+                            rmr = col_fs2.number_input("RMR del macizo (0-100)", 0, 100, 60, key=f"fs_rmr_{i}")
+                            h = col_fs3.number_input("Altura de banco objetivo (m)", 5, 30, 15, key=f"fs_h_{i}")
+                            if st.button(f"Calcular ángulo sugerido para {section.name}", key=f"fs_btn_{i}"):
+                                try:
+                                    angle = suggest_face_angle_for_fs(
+                                        fs_target=fs_target,
+                                        rock_mass_rating=rmr if rmr > 0 else None,
+                                        bench_height_m=float(h),
+                                    )
+                                    st.success(f"Ángulo de cara máximo sugerido: **{angle:.1f}°** (FS ≥ {fs_target})")
+                                except Exception as e:
+                                    st.error(f"No se pudo calcular: {e}")
 
 
 def _build_profile_figure(i, section, pd_prof, pt_prof,
                            show_areas, show_spill_areas, show_semaphore, show_reconciled,
-                           show_pozos, blast_tolerance, config):
+                           show_pozos, blast_tolerance, config, show_sector_areas=False):
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -122,7 +146,9 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
     else:
         a_over, a_under, d_i, z_ref_i, z_eval_i = calculate_area_between_profiles(pd_prof, pt_prof)
 
-    if show_areas:
+    if show_sector_areas:
+        _add_sector_areas_traces(fig, pd_prof, pt_prof, d_i, z_ref_i, z_eval_i, a_over, a_under)
+    elif show_areas:
         _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under)
 
     if show_spill_areas and i < len(st.session_state.params_topo):
@@ -218,6 +244,73 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
         margin=dict(l=60, r=20, t=40, b=40),
     )
     return fig
+
+
+SECTOR_AREA_COLORS = {
+    "overbreak": "rgba(220, 50, 50, 0.45)",
+    "underbreak": "rgba(255, 200, 50, 0.45)",
+    "compliant": "rgba(80, 200, 120, 0.35)",
+    "mixed": "rgba(180, 80, 180, 0.45)",
+}
+
+_SECTOR_AREA_HOVERTEMPLATE = (
+    "<b>Sector %{customdata[0]}</b><br>"
+    "Clase: %{customdata[1]}<br>"
+    "Rango: [%{customdata[2]:.1f}, %{customdata[3]:.1f}] m<br>"
+    "Δh medio: %{customdata[4]:+.2f} m<br>"
+    "Δh máx: %{customdata[5]:+.2f} m<br>"
+    "Área sobre: %{customdata[6]:.2f} m²<br>"
+    "Área deuda: %{customdata[7]:.2f} m²<br>"
+    "<extra></extra>"
+)
+
+
+def _add_sector_areas_traces(fig, pd_prof, pt_prof, d_i, z_ref_i, z_eval_i, a_over, a_under):
+    try:
+        design_d = np.asarray(pd_prof.distances, dtype=float)
+        design_e = np.asarray(pd_prof.elevations, dtype=float)
+        topo_d = np.asarray(pt_prof.distances, dtype=float)
+        topo_e = np.asarray(pt_prof.elevations, dtype=float)
+        sectors = compute_sector_deviations(design_d, design_e, topo_d, topo_e)
+    except Exception:
+        sectors = []
+
+    if not sectors:
+        _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under)
+        return
+
+    do = np.argsort(design_d)
+    design_d, design_e = design_d[do], design_e[do]
+    to = np.argsort(topo_d)
+    topo_d, topo_e = topo_d[to], topo_e[to]
+
+    customdata = np.empty((len(sectors), 8), dtype=object)
+    for k, s in enumerate(sectors):
+        customdata[k] = [
+            s.sector_id, s.classification, s.d_start, s.d_end,
+            s.mean_delta_h, s.max_delta_h, s.area_above_m2, s.area_below_m2,
+        ]
+
+    for k, s in enumerate(sectors):
+        mask = (topo_d >= s.d_start) & (topo_d <= s.d_end)
+        if not np.any(mask):
+            continue
+        d_clip = topo_d[mask]
+        e_design_clip = np.interp(d_clip, design_d, design_e)
+        e_topo_clip = topo_e[mask]
+        trace_customdata = np.tile(customdata[k], (2 * len(d_clip), 1))
+        fig.add_trace(go.Scatter(
+            x=np.concatenate([d_clip, d_clip[::-1]]),
+            y=np.concatenate([e_design_clip, e_topo_clip[::-1]]),
+            fill="toself",
+            fillcolor=SECTOR_AREA_COLORS.get(s.classification, SECTOR_AREA_COLORS["compliant"]),
+            line=dict(width=0),
+            hoveron="fills",
+            hovertemplate=_SECTOR_AREA_HOVERTEMPLATE,
+            customdata=trace_customdata,
+            name=f"Sector {s.sector_id} ({s.classification})",
+            showlegend=False,
+        ))
 
 
 def _add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under):
