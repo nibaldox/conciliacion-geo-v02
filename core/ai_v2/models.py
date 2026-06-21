@@ -15,9 +15,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-_VALID_PROVIDERS: frozenset[str] = frozenset(
-    {"ollama", "lmstudio", "openai", "minimax", "glm", "grok"}
-)
+from core.ai_v2.providers.registry import PROVIDER_PRESETS
+
+_VALID_PROVIDERS: frozenset[str] = frozenset(p.value for p in PROVIDER_PRESETS)
 
 
 class AIUsage(BaseModel):

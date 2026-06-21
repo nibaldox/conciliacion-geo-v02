@@ -17,9 +17,9 @@ from __future__ import annotations
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_VALID_PROVIDERS: frozenset[str] = frozenset(
-    {"ollama", "lmstudio", "openai", "minimax", "glm", "grok"}
-)
+from core.ai_v2.providers.registry import PROVIDER_PRESETS
+
+_VALID_PROVIDERS: frozenset[str] = frozenset(p.value for p in PROVIDER_PRESETS)
 
 
 class AIConfig(BaseSettings):
