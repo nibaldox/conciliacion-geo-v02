@@ -6,16 +6,20 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6)](https://www.typescriptlang.org)
 [![PWA](https://img.shields.io/badge/PWA-ready-5A29E4)](https://web.dev/progressive-web-apps/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-97%2F97-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-473%2F473-brightgreen)](tests/)
+[![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen)](tests/)
 
 > **Open-source geotechnical reconciliation for open-pit mining.** Compare
 > 3D design surfaces vs as-built topography, generate cross-sections,
-> evaluate compliance against configurable tolerances, export
-> professional Excel/Word/DXF reports. All in your browser.
+> evaluate compliance against configurable tolerances, integrate
+> Drill & Blast data with quantitative stability analysis (FS planar,
+> health score, alert system), export professional Excel/Word/DXF
+> reports. All in your browser.
 >
 > *Conciliación geotécnica open-source para minería a cielo abierto.
 > Compara superficies 3D de diseño vs topografía real, genera
-> secciones, evalúa cumplimiento contra tolerancias.*
+> secciones, evalúa cumplimiento contra tolerancias, e integra
+> tronadura con análisis cuantitativo de estabilidad.*
 
 [Live demo](https://nibaldox.github.io/conciliacion-geo-v02/) ·
 [Architecture](ARCHITECTURE.md) ·
@@ -40,15 +44,32 @@ Render.com (free tier) only when you upload your own data.
 
 ## ✨ Features
 
+### Core reconciliation
 - **Multi-format mesh support** — STL, OBJ, PLY, DXF
 - **Auto-section generation** — by start/end line, by polyline file, or click-on-map
 - **3D native interactions** — select and edit cross-section paths directly on the 3D terrain viewer
 - **Asymmetric profiles & rich graphs** — configure independent up/down profile lengths and view live reconciliation data (Delta Crest, Delta Toe) directly on interactive 2D profile graphs
 - **RDP + Hungarian matching** — robust bench / berm / face detection with no double-counting
 - **Compliance dashboard** — CUMPLE / FUERA / NO CUMPLE per sector, parameter, bench
-- **3D and 2D views** — CesiumJS for the terrain, Plotly for interactive profiles, Chart.js for charts
 - **Excel / Word / DXF exports** — formatted reports ready for engineering review
-- **Drill & Blast ↔ Geotech correlation** — project blast holes onto cross-sections, see which benches over- or under-excavated
+
+### Drill & Blast integration
+- **Powder Factor volumétrico** (kg/m³) con k-NN fallback si no hay burden/espaciamiento
+- **6 ratios derivados** — stemming/burden, subdrilling/burden, S/B, kg/m, coupling, collar deviation
+- **Catálogo ENAEX** — Pirex-930/920/950/970, Enaline, parser de diámetro `"10 5/8"` → 270 mm
+- **Modelo cuantitativo PF→daño** — β₁, p-valor, R², IC 95%, confianza (HIGH/MEDIUM/LOW)
+- **Motor de recomendaciones** — ΔPF objetivo con factibilidad y restricciones operacionales
+- **Heatmap 2D IDW** — densidad de energía integrada en Z, con sliders de resolución y σ
+- **Tendencia temporal** de PF/daño y comparativa pre/post campaña
+
+### Geotechnical stability
+- **Detección de precursores de falla** — overhangs, rock bridges, catch bench effectiveness, wedge (diedros agudos), toppling, consistencia de ángulos, anisotropía de caras
+- **Factor de seguridad planar** — Hoek-Bray 1981 con cohesión, fricción, presión de poros
+- **RMR/GSI lookup** desde CSV geomecánico con estimación Hoek-Brown de (c, φ)
+- **Health score semáforo** — 0-100 con categorías GREEN/YELLOW/ORANGE/RED
+- **Alert system categorizado** — OVERHANG_CRITICAL, CATCH_BENCH_INADEQUATE, TOPPLING_RISK, WEDGE_RISK, ANGLE_INCONSISTENT
+
+### Platform
 - **🌐 Bilingual UI** — Spanish (default) + English, switchable from the header
 - **📱 PWA** — installable, works offline, sub-330 KB initial bundle
 - **🎮 Demo mode** — pre-computed synthetic pit, 4 benches, 5 sections, 40 compliance rows, no upload needed
@@ -155,11 +176,40 @@ For deploy step-by-step see [web/DEPLOY.md](web/DEPLOY.md).
 ## 🧪 Running tests
 
 ```bash
-pytest tests/ -v                             # 97 backend tests
+pytest tests/ -v                             # 473 backend tests, 94% coverage
 python test_pipeline.py                      # end-to-end pipeline
 cd web && npm run build                      # TypeScript + Vite build
 cd web && npm run lint                       # ESLint
+
+# Coverage breakdown (current snapshot, June 2026)
+python -m coverage run -m pytest tests/ --tb=short
+python -m coverage report --include="core/*.py"
 ```
+
+Coverage highlights (all core/ files ≥ 87%):
+
+| File | Stmts | Cover |
+|------|-------|-------|
+| `core/alert_system.py` | 45 | 100% |
+| `core/column_utils.py` | 11 | 100% |
+| `core/compliance_status.py` | 18 | 100% |
+| `core/geology.py` | 73 | 100% |
+| `core/param_extractor.py` (shim) | 6 | 100% |
+| `core/profile_extract.py` | 175 | 98% |
+| `core/excel_writer.py` | 318 | 98% |
+| `core/calculo_tronadura.py` | 143 | 98% |
+| `core/geom_utils.py` | 48 | 98% |
+| `core/report_generator.py` | 402 | 98% |
+| `core/section_cutter.py` | 117 | 97% |
+| `core/blast_metrics.py` | 203 | 97% |
+| `core/config.py` | 126 | 97% |
+| `core/explosive_properties.py` | 56 | 96% |
+| `core/profile_compliance.py` | 118 | 96% |
+| `core/blast_correlation.py` | 190 | 95% |
+| `core/profile_simplify.py` | 65 | 94% |
+| `core/blast_advisor.py` | 172 | 91% |
+| `core/blast_model.py` | 137 | 88% |
+| `core/mesh_handler.py` | 103 | 87% |
 
 The frontend has no unit tests yet — Playwright is installed but
 not wired into CI. PRs adding Vitest + RTL would be very welcome.
@@ -170,14 +220,30 @@ not wired into CI. PRs adding Vitest + RTL would be very welcome.
 
 ```
 core/             ← domain logic, imported by BOTH interfaces
-  blast_correlation.py   (Drill & Blast ↔ geotech correlation)
+  mesh_handler.py                (load_mesh, decimate_mesh, mesh_to_plotly, DXF loader)
+  section_cutter.py              (cut_mesh_with_section, generate_perpendicular_sections)
+  param_extractor.py             (compat shim: re-exports from the 4 modules below)
+  profile_simplify.py            (RDP + toe projection)
+  profile_extract.py             (ReconciledPoint/Profile, BenchParams, ExtractionResult)
+  bench_classify.py              (berm width + leading/trailing berm)
+  bench_hazards.py               (overhang, rock bridge, wedge, toppling, anisotropy)
+  profile_compliance.py          (compare_design_vs_asbuilt, build_reconciled_profile)
+  blast_correlation.py           (Drill & Blast ↔ geotech correlation, signed deviations)
+  blast_metrics.py               (PF, stemming ratio, kg/m, altura de carga, Kuznetsov X₅₀)
+  blast_model.py                 (PF→damage regression, pasadura↔toe correlation, IDW profile)
+  blast_advisor.py               (recommend_pf_adjustment, validate_recommendation)
+  stability_analysis.py          (FS planar Hoek-Bray, health score 0-100)
+  alert_system.py                (categorized alerts: OVERHANG_CRITICAL, TOPPLING_RISK, etc.)
+  geology.py                     (RMR/GSI lookup + Hoek-Brown strength estimation)
+  explosive_properties.py        (ENAEX catalogue: Pirex/Enaline + diameter parser)
+  column_utils.py                (shared column candidate lists for CSV ingestion)
+  compliance_status.py           (single source of truth: STATUS_CUMPLE, STATUS_FUERA, ...)
   excel_writer.py
+  report_generator.py            (Word report + PNG ZIP)
   geom_utils.py
-  mesh_handler.py
-  param_extractor.py
-  report_generator.py
-  section_cutter.py
-  config.py                (frozen dataclasses with all defaults)
+  ai_service.py / ai_reporter.py (LLM integration for analysis reports)
+  breaklines.py                  (breakline detection for section generation)
+  config.py                      (frozen dataclasses with all defaults: tolerances, explosives)
 
 api/              ← FastAPI backend (modular, /api/v1/*)
   routers/        (meshes, sections, process, export, settings, ai)
@@ -192,8 +258,13 @@ web/              ← React 19 + Vite 6 + CesiumJS frontend
   DEPLOY.md        (step-by-step deploy guide)
 
 app.py / ui/      ← LEGACY Streamlit UI (do not modify)
+docs/             ← additional documentation
+  BLAST_DATA_AUDIT.md            (31 mejoras para el módulo de tronadura)
+  SLOPE_STABILITY_AUDIT.md       (31 mejoras geotécnicas)
+  BLAST_ADVISOR.md               (API reference del motor de recomendaciones)
+  CLEAN_CODE_AUDIT.md            (auditoría clean code + clean architecture)
 scripts/          ← one-off generators (demo data, etc.)
-tests/            ← pytest suite for core/ + api/
+tests/            ← pytest suite for core/ + api/ (473 tests)
 ARCHITECTURE.md   ← architecture overview
 AGENTS.md         ← entry point for AI agents
 CONTRIBUTING.md   ← contribution guide
@@ -244,9 +315,12 @@ on the frontend).
 We love PRs! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full
 guide. Highlights:
 
-- **Streamlit (`app.py`, `ui/`, `core/`, `cli.py`) is OFF-LIMITS** — the
+- **Streamlit (`app.py`, `ui/`) is OFF-LIMITS** — the
   maintainer uses it daily for real work. New work goes in
   `web/` and `api/`, and must be **additive**.
+- **`core/` is shared domain logic** — both interfaces depend on
+  it. Changes to `core/` are welcome but should preserve the
+  public API of the legacy-stable modules in `core/__init__.py`.
 - **Both locales, always** — when adding a UI string, add it to
   BOTH `es.json` and `en.json`.
 - **Conventional commits** (`feat:`, `fix:`, `refactor:`, `test:`,
@@ -256,6 +330,63 @@ guide. Highlights:
 
 Our [Code of Conduct](CODE_OF_CONDUCT.md) is Contributor Covenant
 2.1.
+
+## 📐 Using the Drill & Blast pipeline programmatically
+
+The blast analysis can be used outside Streamlit (e.g. from a
+Jupyter notebook or a batch script):
+
+```python
+import pandas as pd
+from core.calculo_tronadura import procesar_pozos
+from core.blast_metrics import enrich_blast_dataframe
+from core.blast_model import fit_powder_factor_damage_model
+from core.blast_advisor import recommend_pf_adjustment, format_recommendation_text
+
+# 1. Load your blast hole CSV/XLSX (ENAEX, Datamine, etc.)
+df = pd.read_excel("enaex_pozos_tronadura_2026.xlsx", sheet_name="Data")
+
+# 2. Process holes: project collar→toe, derive coordinates
+df_clean, *_ = procesar_pozos(df)
+
+# 3. Enrich with PF, stemming ratio, kg/m, etc.
+df_enriched = enrich_blast_dataframe(df_clean)
+
+# 4. Fit damage model from observed deviations
+model = fit_powder_factor_damage_model(
+    pf=df_enriched["pf_vol_avg"],
+    damage=df_enriched["delta_crest"],
+)
+
+# 5. Get actionable recommendation
+rec = recommend_pf_adjustment(model, current_pf=0.55, target_overbreak_m=0.5)
+print(format_recommendation_text(rec, section_name="NORTE_4200"))
+# → "Reducir PF de 0.55 a 0.38 kg/m³ (-31%) proyecta acotar sobre-excavación..."
+```
+
+For stability analysis (requires RMR CSV or default parameters):
+
+```python
+from core.param_extractor import extract_parameters
+from core.stability_analysis import (
+    compute_section_health_score,
+    compute_planar_factor_of_safety,
+    aggregate_section_alerts,
+)
+
+# Run reconciliation as usual
+result = extract_parameters(distances, elevations, section_name="SEC_01")
+
+# Health score 0-100 with traffic-light category
+health = compute_section_health_score("SEC_01", result.benches)
+print(f"{health.health_category}: {health.health_score:.0f}/100")
+print(health.recommended_action)
+
+# Get all alerts with categorized severity
+report = aggregate_section_alerts("SEC_01", result.benches)
+for alert in report.alerts:
+    print(f"[{alert.level}] {alert.message} → {alert.action}")
+```
 
 ---
 
