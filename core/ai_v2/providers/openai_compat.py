@@ -25,7 +25,7 @@ class OpenAICompatibleProvider(BaseProvider):
     def name(self) -> str:
         return self._name
 
-    async def stream(
+    def stream(
         self,
         messages: list[ChatCompletionMessageParam],
         *,
@@ -33,6 +33,23 @@ class OpenAICompatibleProvider(BaseProvider):
         temperature: float = 0.3,
         max_tokens: int = 4096,
         timeout_s: float = 120.0,
+    ):
+        return self._stream_impl(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout_s=timeout_s,
+        )
+
+    async def _stream_impl(
+        self,
+        messages: list[ChatCompletionMessageParam],
+        *,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout_s: float,
     ):
         from core.ai_v2.models import AIResponseChunk
 
