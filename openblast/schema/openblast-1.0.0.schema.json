@@ -1,0 +1,190 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/nibaldox/conciliacion-geo-v02/blob/main/openblast/schema/openblast-1.0.0.schema.json",
+  "title": "OpenBlast CSV v1.0",
+  "description": "Vendor-neutral CSV format for open-pit drill and blast hole data, designed for geotechnical reconciliation workflows. One row per loaded blasthole.",
+  "version": "1.0.0",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "required": [
+      "hole_id", "blast_id", "sequence",
+      "easting", "northing", "elevation",
+      "dip", "azimuth",
+      "hole_length_actual", "diameter_mm",
+      "burden", "spacing",
+      "explosive_type", "explosive_kg_actual",
+      "stemming_length_m",
+      "mine_site", "bench_id", "shot_at"
+    ],
+    "properties": {
+      "hole_id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Unique hole identifier within the dataset. Equivalent to BHID in Datamine/MinePlan, Nombre in ENAEX."
+      },
+      "blast_id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Identifier of the blast/polygon the hole belongs to. Allows grouping holes for powder factor, vibration and fragmentation analyses."
+      },
+      "sequence": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "Initiation sequence row (delay row). Holes in the same blast with the same sequence fire simultaneously."
+      },
+
+      "easting": {
+        "type": "number",
+        "description": "Easting coordinate of the collar (metres). Coordinate Reference System (CRS) declared in datapackage.json. ENAEX: Longitud_Geo. Datamine: XCOLLAR."
+      },
+      "northing": {
+        "type": "number",
+        "description": "Northing coordinate of the collar (metres). ENAEX: Latitud_Geo. Datamine: YCOLLAR."
+      },
+      "elevation": {
+        "type": "number",
+        "description": "Collar elevation (metres). ENAEX: Z_collar (after +15 m bench offset). Datamine: ZCOLLAR."
+      },
+
+      "dip": {
+        "type": "number",
+        "minimum": -90,
+        "maximum": 90,
+        "description": "Hole dip angle in degrees; positive downward, negative upward. ENAEX: Inclinacion_real. Datamine: DIP."
+      },
+      "azimuth": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 360,
+        "description": "Hole azimuth in degrees clockwise from North (0=N, 90=E, 180=S, 270=W). ENAEX: Azimuth_real. Datamine: BRG."
+      },
+
+      "hole_length_planned": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Planned drilled length (metres). ENAEX: Longitud_teo."
+      },
+      "hole_length_actual": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Actual drilled length (metres). ENAEX: longitud_real. Datamine: LENGTH."
+      },
+      "diameter_mm": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Bit diameter in millimetres. ENAEX: diametro (mm) or diametro_pulgada (inches × 25.4)."
+      },
+      "burden": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Burden (metres). Distance to the nearest free face at the moment of charging."
+      },
+      "spacing": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Spacing (metres). Distance to the nearest neighbouring hole in the same row."
+      },
+      "subdrill": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Subdrilling / pasadura (metres). Length drilled below the planned toe to ensure the floor breaks cleanly."
+      },
+
+      "explosive_type": {
+        "type": "string",
+        "enum": ["ANFO", "Heavy ANFO", "Emulsion", "Bulk emulsion", "ANFO + Emulsion", "Other"],
+        "description": "Main explosive category. ENAEX: Nombre (Pirex-930/920/950/970, Enaline, etc.)."
+      },
+      "explosive_kg_actual": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Actual kg of explosive loaded into the hole. ENAEX: Kilos_Cargados_real."
+      },
+      "explosive_kg_planned": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Planned kg of explosive per design (theoretical)."
+      },
+      "explosive_density_g_cc": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 2,
+        "description": "In-situ explosive density (g/cm³). ANFO ≈ 0.80, emulsions ≈ 1.15-1.25, heavy ANFO ≈ 1.00-1.20."
+      },
+
+      "emulsion_kg": {"type": "number", "minimum": 0, "description": "Kg of emulsion component (if mix)."},
+      "anfo_kg": {"type": "number", "minimum": 0, "description": "Kg of ANFO component (if mix)."},
+      "bulk_kg": {"type": "number", "minimum": 0, "description": "Kg of bulk-loaded explosive (pumped or augered)."},
+
+      "stemming_length_m": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Stemming (taco) length (metres) at the top of the hole. ENAEX: stemming_real."
+      },
+
+      "mine_site": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Mine site / pit identifier. ENAEX: Nombre_Rajo (constant within a dataset)."
+      },
+      "bench_id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Bench identifier. ENAEX: Nombre_Banco."
+      },
+      "shot_at": {
+        "type": "string",
+        "format": "date-time",
+        "description": "ISO-8601 timestamp of detonation with UTC offset. Example: 2026-04-12T13:42:00-03:00. ENAEX: fecha_tronadura."
+      },
+      "operator": {
+        "type": "string",
+        "description": "Company or crew that loaded the hole. ENAEX: holes_dateUpdated (indirect)."
+      },
+
+      "rock_mass_rating": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "description": "Bieniawski RMR (0-100). Optional; required for Hoek-Brown FS calculation if provided."
+      },
+      "density_rock_t_m3": {
+        "type": "number",
+        "minimum": 1.5,
+        "maximum": 4.0,
+        "description": "In-situ rock density (tonnes/m³). Typical 2.6-2.8 for hard rock. Used to convert PF by mass to PF by volume."
+      },
+      "initiation_system": {
+        "type": "string",
+        "enum": ["Nonel", "Electronic", "Detonating cord", "Other"],
+        "description": "Initiation system type."
+      },
+      "delay_ms": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Total delay in milliseconds from the blast reference time."
+      },
+
+      "bottom_hole_x": {"type": "number", "description": "Bottom-hole X coordinate (if downhole survey)."},
+      "bottom_hole_y": {"type": "number", "description": "Bottom-hole Y coordinate (if downhole survey)."},
+      "bottom_hole_z": {"type": "number", "description": "Bottom-hole Z coordinate (if downhole survey)."},
+
+      "decoupling_ratio": {
+        "type": "number",
+        "description": "Ratio of charge diameter to hole diameter (1.0 = full coupling, <1.0 = decoupled)."
+      },
+      "comment": {
+        "type": "string",
+        "description": "Free-text comment about this hole (e.g. 'wet hole', 'detonado parcialmente')."
+      },
+      "anomaly_flag": {
+        "type": "string",
+        "enum": ["loaded", "misfire", "cutoff", "wet_hole", "bootleg", "refilled", "empty"],
+        "description": "Anomaly classification. Use 'misfire' for unexploded holes, 'cutoff' if detonation stopped mid-hole, etc."
+      }
+    },
+    "additionalProperties": true
+  }
+}

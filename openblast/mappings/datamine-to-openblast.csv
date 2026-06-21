@@ -1,0 +1,37 @@
+openblast_field,datamine_field,datamine_table,datamine_dtype,transformation,notes
+hole_id,BHID,collar,string,,"Datamine/MinePlan hole identifier (single table primary key)."
+blast_id,PROJECT,collar,string,concat(PROJECT, '_', SHOT_ID),Datamine does not always have SHOT_ID at collar level; concat with project.
+sequence,",collar,int,derive from SURVEY.AT,Derive from delay series in survey table.
+easting,XCOLLAR,collar,float,,"Datamine Easting coordinate (XCOLLAR = X at collar)."
+northing,YCOLLAR,collar,float,,"Datamine Northing coordinate."
+elevation,ZCOLLAR,collar,float,,"Datamine collar elevation."
+dip,DIP,collar,float,,"Datamine convention: positive = down-dip, negative = up-dip."
+azimuth,BRG,collar,float,,"Datamine bearing, clockwise from North."
+hole_length_planned,LENGTH,collar,float,,"Datamine single LENGTH column used as both planned and actual."
+hole_length_actual,LENGTH,collar,float,,"Datamine does not separate planned vs actual."
+diameter_mm,,,float,manual input,Datamine does not store diameter in collar table; must be added from drilling plan.
+burden,,,float,compute,Derive from neighbouring BHID coordinates: distance to nearest free face.
+spacing,,,float,compute,Derive from neighbouring BHID coordinates: nearest in-row distance.
+subdrill,,,float,manual input,Not in Datamine; user adds via custom column.
+explosive_type,,,string,manual input,Datamine collar table does NOT include explosive info (exploration-focused).
+explosive_kg_actual,,,float,manual input,Not in Datamine; from charge plan or separate explosives table.
+explosive_kg_planned,,,float,manual input,Not in Datamine.
+explosive_density_g_cc,,,float,lookup,Lookup from product name.
+emulsion_kg,,,float,manual input,Not in Datamine.
+anfo_kg,,,float,manual input,Not in Datamine.
+bulk_kg,,,float,manual input,Not in Datamine.
+stemming_length_m,,,float,manual input,Not in Datamine.
+mine_site,PROJECT,collar,string,,"Datamine project code."
+bench_id,BENCH,collar,string,,"Datamine bench field (custom column)."
+shot_at,,,datetime,manual input,Not in Datamine collar.
+operator,,,string,manual input,Not in Datamine.
+rock_mass_rating,RMR,assay,float,join,Join from assay/geology table by BHID.
+density_rock_t_m3,DENSITY,assay,float,join,Join from assay table.
+initiation_system,,,string,manual input,Not in Datamine.
+delay_ms,AT,survey,float,"aggregate max(AT)",Last delay in survey series.
+bottom_hole_x,XEND,survey,float,last point,"End of hole X from last survey record."
+bottom_hole_y,YEND,survey,float,last point,"End of hole Y from last survey record."
+bottom_hole_z,ZEND,survey,float,last point,"End of hole Z from last survey record."
+decoupling_ratio,,,float,manual input,Not in Datamine.
+anomaly_flag,,,string,manual input,Not in Datamine.
+comment,,,string,manual input,Not in Datamine.

@@ -1,0 +1,37 @@
+openblast_field,enaex_field,enaex_dtype,transformation,notes
+hole_id,Nombre,string,,"ENAEX uses \"Nombre\" (Spanish for \"name\") for the hole identifier; map to hole_id."
+blast_id,",string,"concat(Nombre_Rajo, '_', fecha_tronadura),ENAEX does not have a single blast_id field; concat pit name + shot date.
+sequence,Secuencia,int,,"ENAEX numeric column for initiation row."
+easting,Longitud_Geo,float,,"ENAEX naming is reversed: Longitud_Geo = Easting, Latitud_Geo = Northing (mine convention)."
+northing,Latitud_Geo,float,,"See note on easting."
+elevation,Z_collar,float,,"After procesar_pozos() adds +15 m bench height offset."
+dip,Inclinacion_real,float,,"ENAEX uses 0 = vertical, 90 = horizontal; positive convention."
+azimuth,Azimuth_real,float,,"ENAEX azimuth clockwise from North (0=N, 90=E)."
+hole_length_planned,Longitud_teo,float,,"ENAEX planned depth column."
+hole_length_actual,longitud_real,float,,"ENAEX actual depth column (real drilled length)."
+diameter_mm,diametro,int,,"ENAEX already provides diameter in mm."
+burden,",float,"derive from holes_polygon + spacing,ENAEX does not include burden; derive from polygon hole-layout grid.
+spacing,",float,"derive from holes_polygon,ENAEX does not include spacing; derive from polygon hole-layout grid.
+subdrill,,float,compute(Z_collar - 15) - Z_toe,Calculate from collar/bench/toe relationship; typically 0.5-1.5 m.
+explosive_type,Nombre,string,lookup,ENAEX uses 'Nombre' for explosive product (Pirex-930/920/950/970, Enaline). Map to enum: ANFO/Heavy ANFO/Emulsion/Bulk emulsion/ANFO + Emulsion/Other.
+explosive_kg_actual,Kilos_Cargados_real,float,,"ENAEX: actual kg loaded per hole."
+explosive_kg_planned,Kilos_Cargados_teo,float,,"ENAEX: planned kg per design."
+explosive_density_g_cc,,float,lookup by explosive_type,Not in ENAEX directly; lookup from core/explosive_properties.py: ANFO=0.80, Emulsion=1.20, Heavy ANFO=1.15.
+emulsion_kg,,float,partial,If explosive_type starts with Pirex/Enaline, split: 60-80% emulsion, rest ANFO. Mark as approximation.
+anfo_kg,,float,partial,Same as above.
+bulk_kg,,float,exact,ENAEX cargadoras report bulk kg separately if 'camion' column populated.
+stemming_length_m,stemming_real,float,,"ENAEX: stemming (taco) length in metres."
+mine_site,Nombre_Rajo,string,,"ENAEX: pit name (constant within a dataset)."
+bench_id,Nombre_Banco,string,,"ENAEX: bench name (numeric level)."
+shot_at,fecha_tronadura,datetime,ISO-8601,ENAEX stores naive datetime; convert to ISO-8601 with explicit UTC offset.
+operator,,string,"""ENAEX-Zalivar""",ENAEX does not include operator; set from filename or constant in adapter.
+rock_mass_rating,,float,,"Not in ENAEX production file. Must come from separate geomechanical mapping (CSV or core/geology.py lookup)."
+density_rock_t_m3,,float,,"Not in ENAEX. Typical 2.6-2.8 t/m³ for hard rock."
+initiation_system,,string,enum,Look at holes_polygon and camion. Nonel typical, Electronic when detonador_Nro != NULL.
+delay_ms,,float,sum,ENAEX has Secuencia + Retardo_ms; total delay = sum within blast.
+bottom_hole_x,,float,,"Not in ENAEX by default. Available only with downhole survey (rare)."
+bottom_hole_y,,float,,"Same as above."
+bottom_hole_z,,float,,"Same as above."
+decoupling_ratio,,float,compute,diameter_charge / diameter_hole. ENAEX has diameter but not charge diameter.
+anomaly_flag,",string,enum,ENAEX has no explicit anomaly flag. Derive from water_level, number_primes, holes_polygon == 'MALLA-AUX'.
+comment,,string,free,"ENAEX has no comment column."

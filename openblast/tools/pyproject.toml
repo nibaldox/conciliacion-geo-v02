@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openblast"
+version = "1.0.0"
+description = "Vendor-neutral CSV format for open-pit drill and blast hole data"
+readme = "../README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "conciliacion-geo project"}
+]
+keywords = ["mining", "drill-and-blast", "csv", "openblast", "geotechnical"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
+    "License :: OSI Approved :: Apache Software License",
+]
+
+[project.scripts]
+openblast = "openblast.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["openblast*"]

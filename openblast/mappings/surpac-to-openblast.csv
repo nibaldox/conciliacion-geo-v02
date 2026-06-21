@@ -1,0 +1,37 @@
+openblast_field,surpac_field,surpac_table,surpac_dtype,transformation,notes
+hole_id,hole_id,collar,string,,"Surpac hole identifier (case-sensitive)."
+blast_id,project,collar,string,concat(project, '_', blast_date),Surpac project name; concat with blast date if available.
+sequence,,,int,derive,Derive from delay series.
+easting,XCOLLAR,collar,float,,"Surpac X at collar."
+northing,YCOLLAR,collar,float,,"Surpac Y at collar."
+elevation,ZCOLLAR,collar,float,,"Surpac collar elevation."
+dip,DIP,collar,float,,"Surpac dip, positive downward."
+azimuth,BRG,collar,float,,"Surpac bearing."
+hole_length_planned,LENGTH,collar,float,,"Surpac planned length."
+hole_length_actual,LENGTH,collar,float,,"Surpac single LENGTH (no planned/actual split)."
+diameter_mm,,,float,manual input,Not in Surpac collar.
+burden,,,float,compute,Derive from neighbouring hole coordinates.
+spacing,,,float,compute,Derive from neighbouring hole coordinates.
+subdrill,,,float,manual input,Not in Surpac.
+explosive_type,,,string,manual input,Not in Surpac collar (exploration-focused).
+explosive_kg_actual,,,float,manual input,Not in Surpac.
+explosive_kg_planned,,,float,manual input,Not in Surpac.
+explosive_density_g_cc,,,float,lookup,Lookup by product.
+emulsion_kg,,,float,manual input,Not in Surpac.
+anfo_kg,,,float,manual input,Not in Surpac.
+bulk_kg,,,float,manual input,Not in Surpac.
+stemming_length_m,,,float,manual input,Not in Surpac.
+mine_site,project,collar,string,,"Surpac project name."
+bench_id,bench,collar,string,,"Surpac bench field (custom column)."
+shot_at,,,datetime,manual input,Not in Surpac.
+operator,,,string,manual input,Not in Surpac.
+rock_mass_rating,RMR,geology,float,join,Join from geology table.
+density_rock_t_m3,density,geology,float,join,Join from geology table.
+initiation_system,,,string,manual input,Not in Surpac.
+delay_ms,,,float,manual input,Not in Surpac.
+bottom_hole_x,,,float,manual input,Not in Surpac.
+bottom_hole_y,,,float,manual input,Not in Surpac.
+bottom_hole_z,,,float,manual input,Not in Surpac.
+decoupling_ratio,,,float,manual input,Not in Surpac.
+anomaly_flag,,,string,manual input,Not in Surpac.
+comment,,,string,manual input,Not in Surpac.
