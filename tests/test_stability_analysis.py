@@ -6,7 +6,6 @@ import pytest
 
 from core.param_extractor import BenchParams
 from core.stability_analysis import (
-    BenchAngleSuggestion,
     BenchStabilityAssessment,
     HEALTH_THRESHOLDS,
     SectionHealthScore,
@@ -17,7 +16,6 @@ from core.stability_analysis import (
     compute_section_health_score,
     summarize_section_stability,
     suggest_face_angle_for_fs,
-    suggest_face_angles_for_benches,
 )
 from core.config import STABILITY
 
@@ -488,77 +486,3 @@ class TestSuggestFaceAngle:
         )
         assert angle == 30.0
         assert any(issubclass(w.category, UserWarning) for w in recwarn.list)
-
-
-class TestSuggestFaceAnglesForBenches:
-    """Phase 23 — per-bench target face angle for a given FS."""
-
-    def test_returns_list_of_suggestions(self):
-        benches = [
-            _make_bench(bench_number=1, face_angle=65.0, bench_height=15.0),
-            _make_bench(bench_number=2, face_angle=70.0, bench_height=15.0),
-            _make_bench(bench_number=3, face_angle=75.0, bench_height=15.0),
-        ]
-        suggestions = suggest_face_angles_for_benches(
-            benches, fs_target=1.3, rock_mass_rating=60,
-        )
-        assert len(suggestions) == 3
-        assert [s.bench_number for s in suggestions] == [1, 2, 3]
-        assert all(isinstance(s, BenchAngleSuggestion) for s in suggestions)
-
-    def test_safety_margin_positive_for_safe_bench(self):
-        bench = _make_bench(bench_number=1, face_angle=40.0, bench_height=15.0)
-        suggestions = suggest_face_angles_for_benches(
-            [bench], fs_target=1.3, rock_mass_rating=60,
-        )
-        s = suggestions[0]
-        assert s.safety_margin_deg == pytest.approx(
-            s.target_face_angle_deg - s.detected_face_angle_deg
-        )
-        assert s.target_face_angle_deg > 40.0
-        assert s.safety_margin_deg > 0.0
-        assert s.satisfies_target_fs is True
-
-    def test_safety_margin_negative_for_steep_bench(self):
-        bench = _make_bench(bench_number=1, face_angle=89.0, bench_height=15.0)
-        suggestions = suggest_face_angles_for_benches(
-            [bench], fs_target=1.3, rock_mass_rating=60,
-        )
-        s = suggestions[0]
-        assert s.safety_margin_deg < 0.0
-        assert s.satisfies_target_fs is False
-
-    def test_uses_bench_height(self):
-        short = _make_bench(bench_number=1, bench_height=10.0)
-        tall = _make_bench(bench_number=2, bench_height=20.0)
-        suggestions = suggest_face_angles_for_benches(
-            [short, tall], fs_target=1.3, rock_mass_rating=60,
-        )
-        assert suggestions[1].target_face_angle_deg < suggestions[0].target_face_angle_deg
-
-    def test_empty_bench_list(self):
-        assert suggest_face_angles_for_benches(
-            [], fs_target=1.3, rock_mass_rating=60,
-        ) == []
-
-    def test_explicit_strength_overrides_rmr(self):
-        bench = _make_bench(bench_number=1, face_angle=60.0, bench_height=15.0)
-        suggestion = suggest_face_angles_for_benches(
-            [bench],
-            fs_target=1.3,
-            cohesion_kpa=50.0,
-            friction_angle_deg=35.0,
-            rock_mass_rating=20,
-        )[0]
-        fs_expected = compute_planar_factor_of_safety(bench, 50.0, 35.0, 0.0)
-        assert suggestion.fs_at_detected_angle == pytest.approx(fs_expected)
-
-    def test_zero_height_bench_returns_nan_suggestion(self):
-        bench = _make_bench(bench_number=1, face_angle=70.0, bench_height=0.0)
-        s = suggest_face_angles_for_benches(
-            [bench], fs_target=1.3, rock_mass_rating=60,
-        )[0]
-        assert s.confidence == 0.0
-        assert math.isnan(s.safety_margin_deg)
-        assert math.isnan(s.target_face_angle_deg)
-        assert math.isnan(s.fs_at_detected_angle)

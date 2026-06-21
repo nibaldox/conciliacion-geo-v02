@@ -2,8 +2,6 @@
 Results tab: cross-section profiles with semaphore, area fill, bench annotations,
 and blast-hole overlay.
 """
-import math
-
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -12,7 +10,7 @@ import streamlit as st
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.geom_utils import calculate_profile_deviation, calculate_area_between_profiles, find_df_column
 from core.profile_compliance import compute_sector_deviations
-from core.stability_analysis import suggest_face_angle_for_fs, suggest_face_angles_for_benches
+from core.stability_analysis import suggest_face_angle_for_fs
 
 
 BLAST_HOLE_DISPLAY_RADIUS_M = 10.0
@@ -40,10 +38,6 @@ def render_tab_profiles(config: dict) -> None:
             "🎯 Sectores coloreados por desviación",
             value=True, key="profile_show_sector_areas",
             help="Rellena el área entre diseño y topografía clasificada por sector: rojo=sobre-excavación, amarillo=deuda, verde=cumple.")
-        show_target_face_lines = st.checkbox(
-            "🎯 Ángulo sugerido por banco",
-            value=True, key="show_target_face_lines",
-            help="Dibuja líneas punteadas detrás de cada banco con el ángulo de cara objetivo para alcanzar el FS seleccionado (verde=cumple, rojo=no cumple).")
             
     with ctrl_cols[2]:
         show_semaphore = st.checkbox(
@@ -91,8 +85,6 @@ def render_tab_profiles(config: dict) -> None:
         for col_idx in range(num_cols):
             if j + col_idx < len(valid_plots):
                 i, section, pd_prof, pt_prof = valid_plots[j + col_idx]
-                bench_fs_target = st.session_state.get(f"bench_fs_target_{i}", 1.3)
-                bench_fs_rmr = st.session_state.get(f"bench_fs_rmr_{i}", 60)
                 cache_key = (
                     i,
                     id(pd_prof), id(pt_prof),
@@ -101,7 +93,6 @@ def render_tab_profiles(config: dict) -> None:
                     show_areas, show_spill_areas, show_semaphore,
                     show_reconciled, show_pozos, blast_tolerance,
                     show_sector_areas,
-                    show_target_face_lines, bench_fs_target, bench_fs_rmr,
                     num_cols,
                 )
                 cached = fig_cache.get(i)
@@ -117,8 +108,7 @@ def render_tab_profiles(config: dict) -> None:
                         show_pozos=show_pozos,
                         blast_tolerance=blast_tolerance,
                         config=config,
-                        show_sector_areas=show_sector_areas,
-                        show_target_face_lines=show_target_face_lines)
+                        show_sector_areas=show_sector_areas)
                     fig_cache[i] = (cache_key, fig)
                 with cols[col_idx]:
                     st.plotly_chart(fig, use_container_width=True)
@@ -138,43 +128,11 @@ def render_tab_profiles(config: dict) -> None:
                                     st.success(f"Ángulo de cara máximo sugerido: **{angle:.1f}°** (FS ≥ {fs_target})")
                                 except Exception as e:
                                     st.error(f"No se pudo calcular: {e}")
-                        with st.expander("🎯 Ángulo de cara por banco (FS objetivo)", expanded=False):
-                            col_b1, col_b2 = st.columns(2)
-                            col_b1.slider("FS objetivo", 1.0, 2.5, 1.3, 0.05, key=f"bench_fs_target_{i}")
-                            col_b2.number_input("RMR", 0, 100, 60, key=f"bench_fs_rmr_{i}")
-
-                            benches = st.session_state.params_topo[i].benches if i < len(st.session_state.params_topo) else []
-                            if benches:
-                                bench_fs_target_v = st.session_state.get(f"bench_fs_target_{i}", 1.3)
-                                bench_rmr_v = st.session_state.get(f"bench_fs_rmr_{i}", 60)
-                                try:
-                                    suggestions = suggest_face_angles_for_benches(
-                                        benches,
-                                        fs_target=bench_fs_target_v,
-                                        rock_mass_rating=bench_rmr_v if bench_rmr_v > 0 else None,
-                                    )
-                                except Exception as e:
-                                    suggestions = []
-                                    st.error(f"No se pudo calcular el ángulo por banco: {e}")
-                                if suggestions:
-                                    rows = []
-                                    for s in suggestions:
-                                        status = "✅" if s.satisfies_target_fs else "❌"
-                                        rows.append({
-                                            "Banco": s.bench_number,
-                                            "Detectado (°)": f"{s.detected_face_angle_deg:.1f}",
-                                            "Sugerido (°)": f"{s.target_face_angle_deg:.1f}",
-                                            "FS @ detectado": f"{s.fs_at_detected_angle:.2f}",
-                                            "Margen (°)": f"{s.safety_margin_deg:+.1f}",
-                                            "Estado": status,
-                                        })
-                                    st.dataframe(pd.DataFrame(rows), use_container_width=True)
 
 
 def _build_profile_figure(i, section, pd_prof, pt_prof,
                            show_areas, show_spill_areas, show_semaphore, show_reconciled,
-                           show_pozos, blast_tolerance, config, show_sector_areas=False,
-                           show_target_face_lines=False):
+                           show_pozos, blast_tolerance, config, show_sector_areas=False):
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
@@ -244,21 +202,6 @@ def _build_profile_figure(i, section, pd_prof, pt_prof,
                 showarrow=True, arrowhead=2,
                 font=dict(size=9, color="darkred"),
                 ax=20, ay=0)
-
-    if show_target_face_lines and i < len(st.session_state.params_topo):
-        benches_i = st.session_state.params_topo[i].benches
-        if benches_i:
-            fs_t = st.session_state.get(f"bench_fs_target_{i}", 1.3)
-            rmr_v = st.session_state.get(f"bench_fs_rmr_{i}", 60)
-            try:
-                bench_suggestions = suggest_face_angles_for_benches(
-                    benches_i,
-                    fs_target=fs_t,
-                    rock_mass_rating=rmr_v if rmr_v > 0 else None,
-                )
-                _add_target_face_lines(fig, benches_i, bench_suggestions)
-            except Exception:
-                pass
 
     if show_pozos and blast_tolerance is not None:
         _add_blast_holes(fig, section, blast_tolerance)
@@ -695,37 +638,6 @@ def _add_spill_areas_traces(fig, benches, pt_prof):
                     showlegend=not legend_added
                 ))
                 legend_added = True
-
-
-def _add_target_face_lines(fig, benches, suggestions):
-    for b, s in zip(benches, suggestions):
-        target = s.target_face_angle_deg
-        if not math.isfinite(target) or target >= 89.0:
-            continue
-        if b.bench_height <= 0:
-            continue
-        color = "red" if not s.satisfies_target_fs else "limegreen"
-        offset = b.bench_height / math.tan(math.radians(target))
-        x0 = b.crest_distance
-        y0 = b.crest_elevation
-        sign = -1.0 if b.toe_distance <= b.crest_distance else 1.0
-        x1 = x0 + sign * offset
-        y1 = y0 - b.bench_height
-        fig.add_trace(go.Scatter(
-            x=[x0, x1], y=[y0, y1],
-            mode='lines',
-            line=dict(color=color, dash='dash', width=2),
-            name=f'Banco {b.bench_number}: target {target:.1f}°',
-            hoveron='points',
-            hovertemplate=(
-                f"<b>Banco {b.bench_number}</b><br>"
-                f"Target FS={target:.1f}°<br>"
-                f"Detectado={s.detected_face_angle_deg:.1f}°<br>"
-                f"Margen={s.safety_margin_deg:+.1f}°<br>"
-                f"<extra></extra>"
-            ),
-            showlegend=False,
-        ))
 
 
 
