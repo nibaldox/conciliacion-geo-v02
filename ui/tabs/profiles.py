@@ -393,6 +393,8 @@ def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
 
             h_real = bt.bench_height if bt else None
             h_line = f"H.real: {h_real:.2f}m" if h_real is not None else "H.real: N/A"
+            face_angle_real = bt.face_angle if bt else None
+            face_line = f"Cara: {face_angle_real:.1f}°" if face_angle_real is not None else "Cara: N/A"
 
             hover_x.append(bd.crest_distance)
             hover_y.append(bd.crest_elevation)
@@ -400,7 +402,7 @@ def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
                 f"<b>Cota {bd.toe_elevation:.0f}</b> {b_status}<br>"
                 f"ΔCr: <span style='color:{c_crest}'>{txt_crest}</span><br>"
                 f"ΔPa: <span style='color:{c_toe}'>{txt_toe}</span><br>"
-                f"<b>Cara: {bd.face_angle:.1f}°</b><br>"
+                f"<b>{face_line}</b><br>"
                 f"<b>{h_line}</b>")
             hover_colors.append(color_s)
             hover_symbols.append("circle")
