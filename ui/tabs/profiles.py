@@ -394,7 +394,8 @@ def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
             hover_text.append(
                 f"<b>Cota {bd.toe_elevation:.0f}</b> {b_status}<br>"
                 f"ΔCr: <span style='color:{c_crest}'>{txt_crest}</span><br>"
-                f"ΔPa: <span style='color:{c_toe}'>{txt_toe}</span>")
+                f"ΔPa: <span style='color:{c_toe}'>{txt_toe}</span><br>"
+                f"<b>Cara: {bd.face_angle:.1f}°</b>")
             hover_colors.append(color_s)
             hover_symbols.append("circle")
 
