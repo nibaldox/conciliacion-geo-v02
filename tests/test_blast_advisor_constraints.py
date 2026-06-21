@@ -11,7 +11,6 @@ from core.blast_advisor import (
     FEASIBILITY_CAUTION,
     FEASIBILITY_INSUFFICIENT,
 )
-from core.ai_service import build_analysis_prompt
 
 
 def _model(beta1=1.4, n=20, p=0.01, conf='HIGH'):
@@ -83,6 +82,7 @@ class TestValidateRecommendation:
         assert res_loose['valid'] is True
 
 
+@pytest.mark.skip(reason="build_analysis_prompt from core.ai_service removed in Phase 2; re-implement in core.ai_v2 (Phase 3).")
 class TestBuildAnalysisPrompt:
     def test_basic_prompt_includes_results(self):
         results = [

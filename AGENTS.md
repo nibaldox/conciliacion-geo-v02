@@ -48,12 +48,12 @@ from core.mesh_handler import load_mesh                        # wrong
 | Layer | Dir | Entrypoint |
 |-------|-----|------------|
 | Domain (shared) | `core/` | `__init__.py` re-exports public API (see "Import rules" below) |
-| API (FastAPI) | `api/` | `api/main.py` — routers: meshes, sections, process, export, settings, ai |
+| API (FastAPI) | `api/` | `api/main.py` — routers: meshes, sections, process, export, settings |
 | Web frontend (active dev) | `web/` | Vite + React 19, proxies `/api` → `:8000`, PWA |
 | Streamlit (LEGACY, OFF-LIMITS) | `app.py` + `ui/` | Maintainer forbids changes — PRs here will be rejected |
 | Electron portable bundle | `electron/` | Wraps PyInstaller API sidecar + web build as AppImage / Windows installer |
 
-**Key core modules**: `mesh_handler`, `section_cutter`, `param_extractor`, `excel_writer`, `report_generator`, `calculo_tronadura`, `blast_correlation`, `geom_utils`, `ai_reporter`, `ai_service`, `breaklines`, `config`.
+**Key core modules**: `mesh_handler`, `section_cutter`, `param_extractor`, `excel_writer`, `report_generator`, `calculo_tronadura`, `blast_correlation`, `geom_utils`, `ai_v2` (replaces retired `ai_reporter`/`ai_service`), `breaklines`, `config`.
 **Tests**: 10 modules in `tests/` (pytest, `pythonpath="."` in pyproject.toml).
 
 ### Import rules — gotcha

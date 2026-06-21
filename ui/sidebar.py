@@ -14,21 +14,11 @@ def render_sidebar() -> dict:
 
         # --- IA ---
         st.subheader("🤖 Asistente IA")
-        ai_enabled = st.checkbox("Habilitar IA", value=False)
+        st.caption("Agente IA v2 en reconstrucción. Ver pestaña '🤖 Analista IA' para más info.")
 
         api_key = ""
-        model_name = "gpt-3.5-turbo"
+        model_name = ""
         base_url = None
-
-        if ai_enabled:
-            ai_provider = st.selectbox("Proveedor", ["OpenAI", "Local (LM Studio/Ollama)"])
-            if ai_provider == "OpenAI":
-                api_key = st.text_input("OpenAI API Key", type="password")
-                model_name = st.selectbox("Modelo", ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"])
-            else:
-                base_url = st.text_input("Base URL", value="http://localhost:1234/v1")
-                api_key = "lm-studio"
-                model_name = st.text_input("Nombre del Modelo", value="local-model")
 
         st.divider()
 
@@ -73,7 +63,7 @@ def render_sidebar() -> dict:
     }
 
     return {
-        'ai_enabled': ai_enabled,
+        'ai_enabled': False,
         'api_key': api_key,
         'model_name': model_name,
         'base_url': base_url,

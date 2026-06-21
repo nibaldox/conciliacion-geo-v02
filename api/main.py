@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.database import init_db, cleanup_old_sessions
 from api.middleware import install_health_endpoints, install_middleware
 from api.middleware_ratelimit import install_rate_limiter
-from api.routers import meshes, sections, process, export, settings, ai
+from api.routers import meshes, sections, process, export, settings
 from core.config import DEFAULTS, DEPLOY
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,6 @@ app.include_router(sections.router, prefix="/api/v1")
 app.include_router(process.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
-app.include_router(ai.router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------
