@@ -364,6 +364,8 @@ def _add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
         if not bd:
             continue
 
+        bt = comp.get('bench_real')
+
         start_dist = bd.toe_distance
         end_dist = bd.crest_distance + bd.berm_width
         idx_start = np.searchsorted(d_i, start_dist)
