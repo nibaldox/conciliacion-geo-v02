@@ -71,8 +71,18 @@ def test_render_stability_summary_empty():
 
 
 def test_render_stability_summary_with_data():
+    # No bench_real with overhang metadata → must fall back to "Sin datos."
+    # (Idea 1 from brainstorm: no hardcoded FS string).
     out = _render_stability_summary([{"x": 1}])
-    assert "FS" in out
+    assert "Sin datos" in out
+
+
+def test_render_stability_summary_with_overhang_data():
+    out = _render_stability_summary(
+        [{"bench_real": {"overhang_m": 1.8}}, {"bench_real": {"overhang_m": 0.2}}]
+    )
+    assert "overhang" in out.lower()
+    assert "CRITICAL" in out
 
 
 def test_render_blast_recommendations_no_data():
@@ -101,9 +111,29 @@ def test_render_action_plan_empty():
 
 
 def test_render_action_plan_with_data():
+    # Without critical signals (no NO_CUMPLE rows, no deltas),
+    # the new action plan falls back to a "monitor" stub (Idea 1).
     out = _render_action_plan([{"x": 1}], None)
-    assert "Validar" in out
-    assert "1." in out
+    assert "Sin hallazgos críticos" in out
+
+
+def test_render_action_plan_with_critical_signals():
+    # With a NO_CUMPLE berm row, the plan surfaces a bullet for the LLM
+    # to elaborate on.
+    out = _render_action_plan(
+        [
+            {
+                "type": "MATCH",
+                "bench_num": 4,
+                "berm_status": "NO CUMPLE",
+                "height_status": "CUMPLE",
+                "angle_status": "CUMPLE",
+            }
+        ],
+        None,
+    )
+    assert "berma fuera de norma" in out
+    assert "banco 4" in out
 
 
 def test_build_analysis_prompt_returns_tuple():

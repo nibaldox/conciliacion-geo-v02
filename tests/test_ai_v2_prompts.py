@@ -17,10 +17,17 @@ def test_get_all_template_names():
 
 def test_load_system_role():
     text = load_prompt_template("system_role.md")
-    assert "Ingeniero Geotécnico Senior" in text
+    assert "Ingeniero Geotécnico" in text
     assert "Reglas" in text
     assert "1. " in text
     assert "10. " in text
+    # New anti-hallucination block (brainstorm idea #3):
+    assert "DATOS INSUFICIENTES" in text
+    assert "RMR" in text or "Hoek" in text
+    # New MATCH/MISSING/EXTRA semantic block (idea #6):
+    assert "MATCH" in text and "MISSING" in text and "EXTRA" in text
+    # New format rules block (idea #5):
+    assert "600 palabras" in text or "Responde SOLO" in text
 
 
 def test_load_executive_summary():
