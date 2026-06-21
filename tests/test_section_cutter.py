@@ -2,12 +2,16 @@
 
 import numpy as np
 import pytest
+import trimesh
 
 from core import SectionLine, cut_mesh_with_section
 from core.section_cutter import (
     ProfileResult,
-    generate_sections_along_crest,
     azimuth_to_direction,
+    compute_local_azimuth,
+    cut_both_surfaces,
+    generate_perpendicular_sections,
+    generate_sections_along_crest,
 )
 
 
@@ -177,3 +181,143 @@ class TestAzimuthDirection:
         """Azimuth 270° → dirección Oeste (-1, 0)."""
         d = azimuth_to_direction(270.0)
         np.testing.assert_allclose(d, [-1.0, 0.0], atol=1e-10)
+
+
+def _plane_mesh(a=0.0, b=0.0, c=1000.0, extent=100.0, step=10.0):
+    xs = np.arange(-extent, extent + step, step)
+    ys = np.arange(-extent, extent + step, step)
+    X, Y = np.meshgrid(xs, ys)
+    Z = a * X + b * Y + c
+    verts = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
+    nx, ny = len(xs), len(ys)
+    faces = []
+    for i in range(ny - 1):
+        for j in range(nx - 1):
+            v0 = i * nx + j
+            v1 = v0 + 1
+            v2 = (i + 1) * nx + j
+            v3 = v2 + 1
+            faces.append([v0, v1, v2])
+            faces.append([v1, v3, v2])
+    return trimesh.Trimesh(vertices=verts, faces=np.array(faces))
+
+
+class TestCutBothSurfaces:
+    """Tests for cutting design + topo with the same section."""
+
+    def test_cut_both_returns_profiles(self, pit_mesh_design, pit_mesh_asbuilt):
+        section = SectionLine(
+            name="S-BOTH",
+            origin=np.array([250.0, 250.0]),
+            azimuth=0.0,
+            length=400.0,
+            sector="Test",
+        )
+        pd_prof, pt_prof = cut_both_surfaces(pit_mesh_design, pit_mesh_asbuilt, section)
+
+        assert pd_prof is not None
+        assert pt_prof is not None
+        assert isinstance(pd_prof, ProfileResult)
+        assert isinstance(pt_prof, ProfileResult)
+        assert len(pd_prof.distances) >= 2
+        assert len(pt_prof.distances) >= 2
+
+    def test_cut_both_far_returns_none_none(self, pit_mesh_design, pit_mesh_asbuilt):
+        section = SectionLine(
+            name="S-FAR",
+            origin=np.array([9999.0, 9999.0]),
+            azimuth=0.0,
+            length=400.0,
+            sector="Test",
+        )
+        pd_prof, pt_prof = cut_both_surfaces(pit_mesh_design, pit_mesh_asbuilt, section)
+        assert pd_prof is None
+        assert pt_prof is None
+
+
+class TestComputeLocalAzimuth:
+    """Tests for steepest-descent azimuth on a mesh surface."""
+
+    def test_sloped_plane_returns_downhill_azimuth(self):
+        mesh = _plane_mesh(a=-1.0, b=0.0, c=1000.0)
+        az = compute_local_azimuth(mesh, np.array([0.0, 0.0]), radius=50.0)
+        assert az == pytest.approx(90.0, abs=1.0)
+
+    def test_flat_plane_returns_zero(self):
+        mesh = _plane_mesh(a=0.0, b=0.0, c=1000.0)
+        az = compute_local_azimuth(mesh, np.array([0.0, 0.0]), radius=50.0)
+        assert az == 0.0
+
+    def test_sparse_vertices_returns_zero(self):
+        box = trimesh.creation.box(extents=[1.0, 1.0, 1.0])
+        az = compute_local_azimuth(box, np.array([0.0, 0.0]), radius=2.0)
+        assert az == 0.0
+
+
+class TestGeneratePerpendicularSections:
+    """Tests for sections perpendicular to a polyline."""
+
+    def test_basic_perpendicular_sections(self):
+        pts = np.array([[0.0, 0.0], [100.0, 0.0], [200.0, 0.0]])
+        sections = generate_perpendicular_sections(pts, spacing=50.0, section_length=200.0)
+
+        assert len(sections) >= 2
+        for s in sections:
+            assert s.azimuth == pytest.approx(180.0, abs=0.1)
+            assert s.length == 200.0
+
+    def test_with_design_mesh_azimuth(self):
+        mesh = _plane_mesh(a=-1.0, b=0.0, c=1000.0)
+        pts = np.array([[0.0, 0.0], [100.0, 0.0]])
+        sections = generate_perpendicular_sections(
+            pts, spacing=50.0, section_length=200.0, design_mesh=mesh
+        )
+        assert len(sections) >= 1
+        for s in sections:
+            assert s.azimuth == pytest.approx(90.0, abs=2.0)
+
+    def test_too_few_points_returns_empty(self):
+        sections = generate_perpendicular_sections(
+            np.array([[5.0, 5.0]]), spacing=50.0, section_length=200.0
+        )
+        assert sections == []
+
+    def test_zero_length_polyline_returns_empty(self):
+        sections = generate_perpendicular_sections(
+            np.array([[5.0, 5.0], [5.0, 5.0]]), spacing=50.0, section_length=200.0
+        )
+        assert sections == []
+
+    def test_short_line_yields_single_mid_section(self):
+        pts = np.array([[0.0, 0.0], [5.0, 0.0]])
+        sections = generate_perpendicular_sections(pts, spacing=50.0, section_length=200.0)
+        assert len(sections) == 1
+
+    def test_length_up_down_propagated(self):
+        pts = np.array([[0.0, 0.0], [100.0, 0.0]])
+        sections = generate_perpendicular_sections(
+            pts, spacing=50.0, section_length=200.0, length_up=150.0, length_down=50.0
+        )
+        assert len(sections) >= 1
+        for s in sections:
+            assert s.length_up == 150.0
+            assert s.length_down == 50.0
+            assert s.length == 200.0
+
+
+class TestGenerateSectionsAlongCrestEdgeCases:
+    """Edge cases for generate_sections_along_crest."""
+
+    def test_single_section_at_midpoint(self):
+        start = np.array([100.0, 250.0])
+        end = np.array([400.0, 250.0])
+        sections = generate_sections_along_crest(
+            None,
+            start_point=start,
+            end_point=end,
+            n_sections=1,
+            section_azimuth=0.0,
+            section_length=200.0,
+        )
+        assert len(sections) == 1
+        np.testing.assert_allclose(sections[0].origin, [250.0, 250.0], atol=1e-6)
