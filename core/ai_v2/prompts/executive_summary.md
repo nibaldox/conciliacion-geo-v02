@@ -28,6 +28,10 @@
 
 {recomendaciones_blast}
 
-## 6. Plan de Acción
+## 6. Flags de Seguridad
+
+{flags_seguridad}
+
+## 7. Plan de Acción
 
 {plan_accion_priorizado}

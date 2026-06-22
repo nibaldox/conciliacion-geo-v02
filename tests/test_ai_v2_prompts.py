@@ -12,7 +12,7 @@ from core.ai_v2.prompts import (
 
 def test_get_all_template_names():
     names = get_all_template_names()
-    assert names == ["system_role.md", "executive_summary.md", "blast_enrichment.md"]
+    assert names == ["system_role.md", "executive_summary.md", "blast_enrichment.md", "fewshot_example.md"]
 
 
 def test_load_system_role():

@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import json
 import os
 from collections.abc import AsyncIterator
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from core.ai_v2.config import AIConfig
-from core.ai_v2.models import AIRequest, AIResponseChunk
+from core.ai_v2.models import AIRequest, AIResponseChunk, AIUsage
 from core.ai_v2.providers import (
     PROVIDER_PRESETS,
     OpenAICompatibleProvider,
@@ -47,6 +49,82 @@ PROVIDER_ENV_VAR: dict[str, str] = {
     "glm": "GLM_API_KEY",
     "grok": "GROK_API_KEY",
 }
+
+
+LOCAL_PROVIDERS: frozenset[str] = frozenset({"ollama", "lmstudio"})
+CLOUD_PROMPT_RATE_USD_PER_TOKEN: float = 0.10 / 1_000_000.0
+CLOUD_COMPLETION_RATE_USD_PER_TOKEN: float = 0.30 / 1_000_000.0
+
+
+def _estimate_cost(provider_name: str, usage: AIUsage | None) -> float:
+    """USD cost estimate — uses usage.cost_usd if populated, else a flat cloud
+    rate ($0.10/1M prompt + $0.30/1M completion); $0.00 for local providers."""
+    if usage is None:
+        return 0.0
+    if usage.cost_usd is not None:
+        return usage.cost_usd
+    if provider_name in LOCAL_PROVIDERS:
+        return 0.0
+    return round(
+        usage.prompt_tokens * CLOUD_PROMPT_RATE_USD_PER_TOKEN
+        + usage.completion_tokens * CLOUD_COMPLETION_RATE_USD_PER_TOKEN,
+        4,
+    )
+
+
+def _format_usage_line(
+    provider_name: str, usage: AIUsage | None, elapsed_s: float
+) -> str:
+    """One-line token + cost summary appended to the success box."""
+    if usage is None:
+        return f"⏱️ {elapsed_s:.2f}s · sin métricas de uso"
+    tps = (usage.completion_tokens / elapsed_s) if elapsed_s > 0 else 0.0
+    if provider_name in LOCAL_PROVIDERS:
+        cost_str = "$0.0000 (local)"
+    else:
+        cost_str = f"${_estimate_cost(provider_name, usage):.4f}"
+    return (
+        f"⏱️ {elapsed_s:.2f}s · "
+        f"Tokens: {usage.prompt_tokens:,} in / "
+        f"{usage.completion_tokens:,} out / "
+        f"{usage.total_tokens:,} total · "
+        f"{tps:.1f} tok/s · 💰 {cost_str}"
+    )
+
+
+def _render_copy_button(markdown: str) -> None:
+    """Inject a browser-side copy-to-clipboard button via the Clipboard API,
+    with a textarea+execCommand fallback for sandboxed iframes."""
+    safe_md = json.dumps(markdown)
+    payload = (
+        '<div style="margin:0;">'
+        '<button id="ai_copy_btn" type="button" '
+        'style="background:#f63366;color:white;border:none;'
+        'padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.9rem;">'
+        "📋 Copiar al portapapeles"
+        "</button></div>"
+        "<script>(function(){"
+        "const md = " + safe_md + ";"
+        "const btn = document.getElementById('ai_copy_btn');"
+        "btn.addEventListener('click', async () => {"
+        "  try {"
+        "    await navigator.clipboard.writeText(md);"
+        "    const o = btn.textContent;"
+        "    btn.textContent = '✅ Copiado';"
+        "    setTimeout(()=>{btn.textContent=o;}, 1500);"
+        "  } catch(e) {"
+        "    const ta = document.createElement('textarea');"
+        "    ta.value = md; ta.style.position='fixed'; ta.style.opacity='0';"
+        "    document.body.appendChild(ta); ta.select();"
+        "    try { document.execCommand('copy'); btn.textContent='✅ Copiado'; }"
+        "    catch(_) { btn.textContent = '❌ Falló'; }"
+        "    document.body.removeChild(ta);"
+        "    setTimeout(()=>{btn.textContent='📋 Copiar al portapapeles';}, 1500);"
+        "  }"
+        "});"
+        "})();</script>"
+    )
+    components.html(payload, height=42)
 
 
 def _resolve_api_key(ptype: ProviderType) -> str:
@@ -173,6 +251,79 @@ def _filters_summary(active: dict[str, list]) -> str:
     return "; ".join(parts) if parts else "ninguno"
 
 
+def _compute_blast_trend_metadata() -> dict | None:
+    """Compute ``blast_trend`` metadata for the AI prompt (Idea 11).
+
+    Pulls the enriched blast-hole DataFrame from ``st.session_state`` and
+    runs :func:`compute_blast_geotech_correlation` against the active
+    sections + comparisons. Returns ``None`` when there is no blast data
+    (the builder will then render its "No hay datos de tronadura"
+    fallback). The returned dict matches the shape expected by the
+    ``blast_enrichment.md`` prompt template.
+    """
+    import numpy as np
+
+    df_pozos = st.session_state.get("blast_df_clean")
+    sections = st.session_state.get("sections") or []
+    comparisons = st.session_state.get("comparison_results") or []
+    if df_pozos is None or len(df_pozos) == 0 or not sections:
+        return None
+
+    try:
+        from core.blast_correlation import compute_blast_geotech_correlation
+        from core.blast_metrics import compute_spacing_burden_ratio
+
+        rows = compute_blast_geotech_correlation(df_pozos, sections, comparisons)
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    pf_values = [
+        r.pf_vol_avg_kgm3 for r in rows
+        if r.pf_vol_avg_kgm3 and r.pf_vol_avg_kgm3 > 0
+    ]
+    n_pozos_total = sum(r.num_wells for r in rows)
+    if not pf_values:
+        return None
+
+    pf_mean = float(sum(pf_values) / len(pf_values))
+    pf_std = (
+        float(np.std(pf_values, ddof=0)) if len(pf_values) > 1 else 0.0
+    )
+
+    # Outliers via Tukey's IQR rule on the per-section PF averages.
+    if len(pf_values) >= 4:
+        q1, q3 = np.percentile(pf_values, [25, 75])
+        iqr = q3 - q1
+        lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+        outliers = [f"{v:.2f} kg/m³" for v in pf_values if v < lo or v > hi]
+    else:
+        outliers = []
+
+    # Operational ratios (mean across holes). Falls back to "N/A" when
+    # the source columns are not present in the DataFrame.
+    ratios: dict[str, str] = {}
+    try:
+        sb = compute_spacing_burden_ratio(df_pozos)
+        if sb.notna().any():
+            ratios["S/B"] = f"{float(sb.mean()):.2f}"
+    except Exception:
+        pass
+
+    return {
+        "pf_promedio": round(pf_mean, 3),
+        "pf_desviacion": round(pf_std, 3),
+        "n_pozos_total": int(n_pozos_total),
+        # We only have a snapshot — no time series to fit a real slope.
+        "trend_slope_pf_per_month": 0.0,
+        "trend_direction": "estable",
+        "ratios": ratios,
+        "outliers": outliers,
+    }
+
+
 def _build_ai_request(
     comparisons: list[dict], ptype: ProviderType, model: str,
     use_cache: bool,
@@ -187,6 +338,9 @@ def _build_ai_request(
         "banco": ", ".join(str(b) for b in (filters_active or {}).get("bench") or [])
                 if (filters_active and (filters_active.get("bench") or [])) else "N/A",
     }
+    blast_trend = _compute_blast_trend_metadata()
+    if blast_trend is not None:
+        metadata["blast_trend"] = blast_trend
     return AIRequest(
         results={"comparisons": comparisons},
         sections=None,
@@ -255,29 +409,66 @@ def render_tab_ai(config: dict) -> None:
     )
 
     placeholder = st.empty()
-    full_report = ""
+    full_report: str = ""
+    usage: AIUsage | None = None
     duration_box = st.empty()
+    progress_bar = st.progress(0.0, text="Generando informe…")
     start = datetime.datetime.now()
+    max_tokens = int(ai_config.max_tokens)
+
+    def _post_stream_buttons(report_text: str) -> None:
+        """Render copy + download buttons (works for full or partial report)."""
+        st.session_state["ai_v2_full_report"] = report_text
+        date_str = datetime.date.today().isoformat()
+        project_name = st.session_state.get("project_name", "informe")
+        file_name = f"informe_{project_name}_{date_str}.md"
+        btn_cols = st.columns([1, 1, 4])
+        with btn_cols[0]:
+            _render_copy_button(report_text)
+        with btn_cols[1]:
+            st.download_button(
+                "💾 Descargar .md",
+                data=report_text,
+                file_name=file_name,
+                mime="text/markdown",
+                key="ai_v2_download_md",
+            )
 
     try:
         async def _consume() -> None:
-            nonlocal full_report
+            nonlocal full_report, usage
             async for chunk in _run_stream(request, ai_config, provider):
+                if chunk.usage is not None:
+                    usage = chunk.usage
                 if chunk.content:
                     full_report += chunk.content
+                    st.session_state["ai_v2_full_report"] = full_report
                     placeholder.markdown(full_report + "▌")
+                    ratio = (
+                        min(0.95, len(full_report.split()) / max_tokens)
+                        if max_tokens
+                        else 0.5
+                    )
+                    progress_bar.progress(ratio, text="Generando informe…")
 
         asyncio.run(_consume())
 
         placeholder.markdown(full_report)
+        progress_bar.progress(1.0, text="✅ Listo")
         elapsed = (datetime.datetime.now() - start).total_seconds()
+        usage_line = _format_usage_line(ptype.value, usage, elapsed)
         duration_box.success(
             f"✅ Informe generado en {elapsed:.2f}s · "
             f"{n_filtered}/{n_total} bancos · "
-            f"provider={ptype.value}, model={model}"
+            f"provider={ptype.value}, model={model}\n\n{usage_line}"
         )
+        _post_stream_buttons(full_report)
     except Exception as exc:
+        progress_bar.empty()
         placeholder.empty()
+        if full_report:
+            st.caption("⚠️ Streaming falló — se conservó el contenido parcial.")
+            _post_stream_buttons(full_report)
         st.error(
             f"❌ No se pudo generar el informe con {ptype.value}/{model}.\n\n"
             f"**Error**: {type(exc).__name__}: {exc}\n\n"

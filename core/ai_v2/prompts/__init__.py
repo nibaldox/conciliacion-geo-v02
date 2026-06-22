@@ -11,6 +11,7 @@ def get_all_template_names() -> list[str]:
         "system_role.md",
         "executive_summary.md",
         "blast_enrichment.md",
+        "fewshot_example.md",
     ]
 
 
