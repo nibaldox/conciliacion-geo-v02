@@ -149,14 +149,189 @@ def build_reconciled_profile_v2(
     )
 
 
+def _build_cost_matrix(
+    benches_design: list, benches_topo: list, match_threshold: float = 8.0,
+) -> np.ndarray:
+    """Pairwise cost matrix (design x topo). Pairs above threshold are
+    blocked with a huge cost so the Hungarian solver won't pair them.
+    Cost = sqrt(1.5 * dz**2 + 1.0 * dx**2) (z-weighted)."""
+    n_d = len(benches_design)
+    n_t = len(benches_topo)
+    cost = np.zeros((n_d, n_t))
+    for i, bd in enumerate(benches_design):
+        bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
+        bd_x = (bd.crest_distance + bd.toe_distance) / 2
+        for j, bt in enumerate(benches_topo):
+            bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
+            bt_x = (bt.crest_distance + bt.toe_distance) / 2
+            diff_z = abs(bd_z - bt_z)
+            if diff_z >= match_threshold:
+                cost[i, j] = 1e9
+            else:
+                cost[i, j] = np.sqrt(1.5 * (bd_z - bt_z) ** 2 + 1.0 * (bd_x - bt_x) ** 2)
+    return cost
+
+
+def _build_match_row(
+    bd, bt, params_design, tolerances,
+) -> dict:
+    """Build a single MATCH comparison row (design + topo benches paired)."""
+    height_dev = bt.bench_height - bd.bench_height
+    angle_dev = bt.face_angle - bd.face_angle
+
+    tol_h = tolerances['bench_height']
+    tol_a = tolerances['face_angle']
+    tol_b = tolerances['berm_width']
+
+    min_berm = tol_b.get('min', 0.0)
+    berm_real = round(bt.berm_width, 2)
+
+    berm_complies = berm_real >= min_berm
+    berm_status = STATUS_CUMPLE if berm_complies else STATUS_NO_CUMPLE
+    berm_score = 60 if berm_complies else 0
+
+    angle_complies = abs(angle_dev) <= (tol_a['neg'] if angle_dev < 0 else tol_a['pos'])
+    angle_status = _evaluate_status(angle_dev, tol_a['neg'], tol_a['pos'])
+    angle_score = 10 if angle_complies else 0
+
+    height_complies = abs(height_dev) <= (tol_h['neg'] if height_dev < 0 else tol_h['pos'])
+    height_status = _evaluate_status(height_dev, tol_h['neg'], tol_h['pos'])
+    height_score = 30 if height_complies else 0
+
+    return {
+        'sector': params_design.sector,
+        'section': params_design.section_name,
+        'bench_num': bd.bench_number,
+        'type': 'MATCH',
+        'level': f"{bd.toe_elevation:.0f}",
+        'height_design': round(bd.bench_height, 2),
+        'height_real': round(bt.bench_height, 2),
+        'height_dev': round(height_dev, 2),
+        'height_status': height_status,
+        'angle_design': round(bd.face_angle, 1),
+        'angle_real': round(bt.face_angle, 1),
+        'angle_dev': round(angle_dev, 1),
+        'angle_status': angle_status,
+        'berm_design': round(bd.berm_width, 2),
+        'berm_real': berm_real,
+        'berm_min': min_berm,
+        'berm_status': berm_status,
+        'spill_width': round(bt.spill_width, 2),
+        'effective_berm': round(bt.effective_berm_width, 2),
+        'delta_crest': round(
+            (bt.crest_distance - bd.crest_distance) *
+            (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
+        'delta_toe': round(
+            (bt.toe_distance - bd.toe_distance) *
+            (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
+        'bench_design': bd,
+        'bench_real': bt,
+        'berm_score': berm_score,
+        'angle_score': angle_score,
+        'height_score': height_score,
+        'bench_score': berm_score + angle_score + height_score,
+    }
+
+
+def _build_missing_row(bd, params_design) -> dict:
+    """Build a MISSING comparison row (design has bench, topo doesn't)."""
+    return {
+        'sector': params_design.sector,
+        'section': params_design.section_name,
+        'bench_num': bd.bench_number,
+        'type': 'MISSING',
+        'level': f"{bd.toe_elevation:.0f}",
+        'height_design': round(bd.bench_height, 2),
+        'height_real': None,
+        'height_dev': None,
+        'height_status': STATUS_NO_CONSTRUIDO,
+        'angle_design': round(bd.face_angle, 1),
+        'angle_real': None,
+        'angle_dev': None,
+        'angle_status': "-",
+        'berm_design': round(bd.berm_width, 2),
+        'berm_real': None,
+        'berm_min': None,
+        'berm_status': STATUS_FALTA_BANCO,
+        'spill_width': None,
+        'effective_berm': None,
+        'delta_crest': None,
+        'delta_toe': None,
+        'bench_design': bd,
+        'bench_real': None,
+        'berm_score': 0, 'angle_score': 0, 'height_score': 0, 'bench_score': 0,
+    }
+
+
+def _build_extra_row(bt, params_design) -> dict:
+    """Build an EXTRA comparison row (topo has bench, design doesn't)."""
+    return {
+        'sector': params_design.sector,
+        'section': params_design.section_name,
+        'bench_num': 999,
+        'type': 'EXTRA',
+        'level': f"{bt.toe_elevation:.0f}",
+        'height_design': None,
+        'height_real': round(bt.bench_height, 2),
+        'height_dev': None,
+        'height_status': STATUS_EXTRA,
+        'angle_design': None,
+        'angle_real': round(bt.face_angle, 1),
+        'angle_dev': None,
+        'angle_status': "-",
+        'berm_design': None,
+        'berm_real': round(bt.berm_width, 2),
+        'berm_min': None,
+        'berm_status': STATUS_BANCO_ADICIONAL,
+        'spill_width': round(bt.spill_width, 2),
+        'effective_berm': round(bt.effective_berm_width, 2),
+        'delta_crest': None,
+        'delta_toe': None,
+        'bench_design': None,
+        'bench_real': bt,
+        'berm_score': 0, 'angle_score': 0, 'height_score': 0, 'bench_score': 0,
+    }
+
+
+def _resolve_optimal_matches(
+    cost_matrix: np.ndarray, match_threshold: float = 8.0,
+) -> list[tuple[int, int, float]]:
+    """Run Hungarian assignment and filter to pairs below match_threshold."""
+    from scipy.optimize import linear_sum_assignment
+    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    candidates: list[tuple[int, int, float]] = []
+    for r, c in zip(row_ind, col_ind):
+        if cost_matrix[r, c] < match_threshold:
+            candidates.append((r, c, cost_matrix[r, c]))
+    candidates.sort(key=lambda x: x[0])
+    return candidates
+
+
+def _greedy_match_filter(candidates: list[tuple[int, int, float]]) -> list[tuple[int, int, float]]:
+    """Greedy conflict resolution: prefer earlier-row / lower-cost matches.
+    If a new candidate conflicts with a selected one, replace iff strictly
+    cheaper in total."""
+    valid: list[tuple[int, int, float]] = []
+    for cand in candidates:
+        r, c, cost = cand
+        conflicts = [v for v in valid if c <= v[1]]
+        if not conflicts:
+            valid.append(cand)
+            continue
+        total_conflict_cost = sum(x[2] for x in conflicts)
+        if cost < total_conflict_cost:
+            valid = [x for x in valid if x not in conflicts]
+            valid.append(cand)
+    valid.sort(key=lambda x: x[0])
+    return valid
+
+
 def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     """
     Compare design vs as-built parameters using Global Best-Fit Matching (Hungarian Algorithm).
     Now returns matches, missing design benches, and extra topo benches.
     """
-    from scipy.optimize import linear_sum_assignment
-
-    comparisons = []
+    comparisons: list[dict] = []
 
     benches_design = params_design.benches
     benches_topo = params_topo.benches
@@ -168,49 +343,9 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
         return []
 
     match_threshold = 8.0
-
-    cost_matrix = np.zeros((n_d, n_t))
-
-    for i, bd in enumerate(benches_design):
-        bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
-        bd_x = (bd.crest_distance + bd.toe_distance) / 2
-        for j, bt in enumerate(benches_topo):
-            bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
-            bt_x = (bt.crest_distance + bt.toe_distance) / 2
-
-            diff_z = abs(bd_z - bt_z)
-            if diff_z >= match_threshold:
-                cost_matrix[i, j] = 1e9
-            else:
-                cost_matrix[i, j] = np.sqrt(1.5 * (bd_z - bt_z)**2 + 1.0 * (bd_x - bt_x)**2)
-
-    row_ind, col_ind = linear_sum_assignment(cost_matrix)
-
-    candidates = []
-    for r, c in zip(row_ind, col_ind):
-        bd = benches_design[r]
-        bt = benches_topo[c]
-        bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
-        bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
-        diff_z = abs(bd_z - bt_z)
-        if diff_z < match_threshold:
-            candidates.append((r, c, cost_matrix[r, c]))
-
-    candidates.sort(key=lambda x: x[0])
-
-    valid_matches = []
-    for cand in candidates:
-        r, c, cost = cand
-        conflicts = [v for v in valid_matches if c <= v[1]]
-        if not conflicts:
-            valid_matches.append(cand)
-        else:
-            total_conflict_cost = sum(x[2] for x in conflicts)
-            if cost < total_conflict_cost:
-                valid_matches = [x for x in valid_matches if x not in conflicts]
-                valid_matches.append(cand)
-
-    valid_matches.sort(key=lambda x: x[0])
+    cost_matrix = _build_cost_matrix(benches_design, benches_topo, match_threshold)
+    candidates = _resolve_optimal_matches(cost_matrix, match_threshold)
+    valid_matches = _greedy_match_filter(candidates)
 
     matched_design_indices = {r for r, c, _ in valid_matches}
     matched_topo_indices = {c for r, c, _ in valid_matches}
@@ -219,129 +354,17 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     for r in range(n_d):
         if r in matched_design_indices:
             c = design_to_topo[r]
-            bd = benches_design[r]
-            bt = benches_topo[c]
-
-            height_dev = bt.bench_height - bd.bench_height
-            angle_dev = bt.face_angle - bd.face_angle
-
-            tol_h = tolerances['bench_height']
-            tol_a = tolerances['face_angle']
-            tol_b = tolerances['berm_width']
-
-            min_berm = tol_b.get('min', 0.0)
-
-            berm_real = round(bt.berm_width, 2)
-
-            berm_complies = berm_real >= min_berm
-            berm_status = STATUS_CUMPLE if berm_complies else STATUS_NO_CUMPLE
-            berm_score = 60 if berm_complies else 0
-
-            angle_complies = abs(angle_dev) <= (tol_a['neg'] if angle_dev < 0 else tol_a['pos'])
-            angle_status = _evaluate_status(angle_dev, tol_a['neg'], tol_a['pos'])
-            angle_score = 10 if angle_complies else 0
-
-            height_complies = abs(height_dev) <= (tol_h['neg'] if height_dev < 0 else tol_h['pos'])
-            height_status = _evaluate_status(height_dev, tol_h['neg'], tol_h['pos'])
-            height_score = 30 if height_complies else 0
-
-            bench_score = berm_score + angle_score + height_score
-
-            comparisons.append({
-                'sector': params_design.sector,
-                'section': params_design.section_name,
-                'bench_num': bd.bench_number,
-                'type': 'MATCH',
-                'level': f"{bd.toe_elevation:.0f}",
-                'height_design': round(bd.bench_height, 2),
-                'height_real': round(bt.bench_height, 2),
-                'height_dev': round(height_dev, 2),
-                'height_status': height_status,
-                'angle_design': round(bd.face_angle, 1),
-                'angle_real': round(bt.face_angle, 1),
-                'angle_dev': round(angle_dev, 1),
-                'angle_status': angle_status,
-                'berm_design': round(bd.berm_width, 2),
-                'berm_real': berm_real,
-                'berm_min': min_berm,
-                'berm_status': berm_status,
-                'spill_width': round(bt.spill_width, 2),
-                'effective_berm': round(bt.effective_berm_width, 2),
-                'delta_crest': round((bt.crest_distance - bd.crest_distance) * (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
-                'delta_toe': round((bt.toe_distance - bd.toe_distance) * (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
-                'bench_design': bd,
-                'bench_real': bt,
-                'berm_score': berm_score,
-                'angle_score': angle_score,
-                'height_score': height_score,
-                'bench_score': bench_score,
-            })
+            comparisons.append(
+                _build_match_row(benches_design[r], benches_topo[c], params_design, tolerances)
+            )
 
     for i in range(n_d):
         if i not in matched_design_indices:
-            bd = benches_design[i]
-            comparisons.append({
-                'sector': params_design.sector,
-                'section': params_design.section_name,
-                'bench_num': bd.bench_number,
-                'type': 'MISSING',
-                'level': f"{bd.toe_elevation:.0f}",
-                'height_design': round(bd.bench_height, 2),
-                'height_real': None,
-                'height_dev': None,
-                'height_status': STATUS_NO_CONSTRUIDO,
-                'angle_design': round(bd.face_angle, 1),
-                'angle_real': None,
-                'angle_dev': None,
-                'angle_status': "-",
-                'berm_design': round(bd.berm_width, 2),
-                'berm_real': None,
-                'berm_min': None,
-                'berm_status': STATUS_FALTA_BANCO,
-                'spill_width': None,
-                'effective_berm': None,
-                'delta_crest': None,
-                'delta_toe': None,
-                'bench_design': bd,
-                'bench_real': None,
-                'berm_score': 0,
-                'angle_score': 0,
-                'height_score': 0,
-                'bench_score': 0,
-            })
+            comparisons.append(_build_missing_row(benches_design[i], params_design))
 
     for j in range(n_t):
         if j not in matched_topo_indices:
-            bt = benches_topo[j]
-            comparisons.append({
-                'sector': params_design.sector,
-                'section': params_design.section_name,
-                'bench_num': 999,
-                'type': 'EXTRA',
-                'level': f"{bt.toe_elevation:.0f}",
-                'height_design': None,
-                'height_real': round(bt.bench_height, 2),
-                'height_dev': None,
-                'height_status': STATUS_EXTRA,
-                'angle_design': None,
-                'angle_real': round(bt.face_angle, 1),
-                'angle_dev': None,
-                'angle_status': "-",
-                'berm_design': None,
-                'berm_real': round(bt.berm_width, 2),
-                'berm_min': None,
-                'berm_status': STATUS_BANCO_ADICIONAL,
-                'spill_width': round(bt.spill_width, 2),
-                'effective_berm': round(bt.effective_berm_width, 2),
-                'delta_crest': None,
-                'delta_toe': None,
-                'bench_design': None,
-                'bench_real': bt,
-                'berm_score': 0,
-                'angle_score': 0,
-                'height_score': 0,
-                'bench_score': 0,
-            })
+            comparisons.append(_build_extra_row(benches_topo[j], params_design))
 
     match_scores = [c['bench_score'] for c in comparisons if c['type'] == 'MATCH']
     section_score = round(sum(match_scores) / len(match_scores), 1) if match_scores else 0.0

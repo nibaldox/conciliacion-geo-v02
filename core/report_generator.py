@@ -293,13 +293,9 @@ def create_compliance_pie_charts(comparisons):
     return buf
 
 
-def generate_word_report(comparisons, all_data, output_path, project_info=None,
-                         df_pozos=None, sections=None, plot_options=None):
-    if project_info is None:
-        project_info = {}
-
+def _setup_landscape_doc() -> Document:
+    """Create a Document with landscape orientation and 0.5in margins."""
     doc = Document()
-
     for section in doc.sections:
         section.orientation = WD_ORIENT.LANDSCAPE
         new_width, new_height = section.page_height, section.page_width
@@ -309,6 +305,15 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         section.bottom_margin = Inches(0.5)
         section.left_margin = Inches(0.5)
         section.right_margin = Inches(0.5)
+    return doc
+
+
+def generate_word_report(comparisons, all_data, output_path, project_info=None,
+                         df_pozos=None, sections=None, plot_options=None):
+    if project_info is None:
+        project_info = {}
+
+    doc = _setup_landscape_doc()
 
     if plot_options is None:
         plot_options = {}

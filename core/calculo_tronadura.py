@@ -22,6 +22,146 @@ COLS_DROP = [
 BENCH_HEIGHT = 15.0
 
 
+_CANONICAL_COLUMN_ALIASES: dict[str, list[str]] = {
+    "X": ["Latitud_Geo", "Latitud", "X", "Este"],
+    "Y": ["Longitud_Geo", "Longitud", "Y", "Norte"],
+    "Z_collar": ["Nombre_Banco", "Banco", "Cota_Collar", "Z"],
+    "Incl": ["Inclinacion_real", "Inclinacion", "Inclination"],
+    "Az": ["Azimuth_real", "Azimuth", "Azimut"],
+    "Len": ["longitud_real", "Longitud", "Length", "Profundidad"],
+    "Burden": ["Burden", "Burden_Real", "Burden_diseno", "B"],
+    "Esp": ["Espaciamiento", "Espaciamiento_Real", "Espaciamiento_diseno", "S", "Esp"],
+    "Diam_mm": ["Diametro", "Diametro_pozo", "Diametro_perforacion", "D_mm", "Diam_mm"],
+    "Tipo_Explosivo": ["Tipo_Explosivo", "Explosivo", "Tipo_explosivo", "Nombre", "nombre"],
+    "Taco_m": ["Taco", "Taco_m", "Stemming", "stemming_real"],
+    "Secuencia": ["Secuencia", "Secuencia_Iniciacion", "Detonador_Nro"],
+    "Retardo_ms": ["Retardo_ms", "Delay_ms", "Tiempo_Retardo"],
+    "Fila": ["Numero_Fila", "Fila_Pozo", "Row"],
+    "Carga_Fondo_kg": ["Carga_Fondo_kg", "Kilos_Fondo", "Bottom_Charge"],
+    "Carga_Columna_kg": ["Carga_Columna_kg", "Kilos_Columna"],
+    "Longitud_Carga_m": ["Longitud_Carga_m", "Charge_Length"],
+    "Tipo_Pozo": ["Tipo_Pozo", "Hole_Type"],
+    "Az_Diseno": ["Azimuth_Diseno", "Design_Azimuth"],
+    "Incl_Diseno": ["Inclinacion_Diseno", "Design_Dip"],
+}
+
+
+def _resolve_column_aliases(df_work: pd.DataFrame) -> dict[str, str | None]:
+    """Return {canonical: original_column_name | None} for each known field.
+
+    ``find_df_column`` raises when no alias is found unless
+    ``raise_error=False`` is passed. We pass it for every optional
+    field so the same loop works for both required and optional.
+    """
+    out: dict[str, str | None] = {}
+    _REQUIRED_CANONICAL = {"X", "Y", "Z_collar", "Incl", "Az", "Len"}
+    for canonical, aliases in _CANONICAL_COLUMN_ALIASES.items():
+        required = canonical in _REQUIRED_CANONICAL
+        # raise_error=True means "raise if no match". Required fields
+        # should raise, optional ones should return None silently.
+        out[canonical] = find_df_column(
+            df_work, aliases, raise_error=required,
+        )
+    return out
+
+
+def _rename_to_canonical(
+    df_work: pd.DataFrame, resolved: dict[str, str | None],
+) -> pd.DataFrame:
+    """Build the rename map from resolved aliases and apply it.
+
+    Tracks the original Z_collar (Nombre_Banco) as Banco_Original so
+    downstream modules can recover the target bench.
+    """
+    if resolved.get("Z_collar"):
+        df_work["Banco_Original"] = df_work[resolved["Z_collar"]]
+
+    rename_map: dict[str, str] = {
+        resolved["X"]: "X",
+        resolved["Y"]: "Y",
+        resolved["Z_collar"]: "Z_collar",
+        resolved["Incl"]: "Incl",
+        resolved["Az"]: "Az",
+        resolved["Len"]: "Len",
+    }
+    for canonical in _CANONICAL_COLUMN_ALIASES:
+        if canonical in rename_map:
+            continue
+        orig = resolved.get(canonical)
+        if orig:
+            rename_map[orig] = canonical
+    return df_work.rename(columns=rename_map)
+
+
+def _coerce_typed_columns(df_work: pd.DataFrame) -> None:
+    """Mutate ``df_work`` in place, coercing numeric and int columns.
+
+    Numeric columns get ``pd.to_numeric(errors='coerce')`` so that
+    unparseable values become NaN instead of raising. Sequence/row
+    columns become Int64 (nullable integer) for the typical IDs.
+    """
+    numeric = (
+        "X", "Y", "Z_collar", "Incl", "Az", "Len",
+        "Burden", "Esp", "Diam_mm", "Taco_m",
+        "Retardo_ms", "Carga_Fondo_kg", "Carga_Columna_kg",
+        "Longitud_Carga_m", "Az_Diseno", "Incl_Diseno",
+    )
+    for col in numeric:
+        if col in df_work.columns:
+            df_work[col] = pd.to_numeric(df_work[col], errors="coerce")
+    for col in ("Secuencia", "Fila"):
+        if col in df_work.columns:
+            df_work[col] = pd.to_numeric(df_work[col], errors="coerce").astype("Int64")
+
+
+def _compute_hole_toes(df_work: pd.DataFrame) -> None:
+    """Add X_toe / Y_toe / Z_toe columns using Incl/Az/Length vector math.
+
+    The toe is ``BENCH_HEIGHT + offset`` where the offset is the
+    directional vector of length L along the inclined hole.
+    """
+    incl_rad = np.radians(df_work["Incl"].values.astype(float))
+    az_rad = np.radians(df_work["Az"].values.astype(float))
+    length = df_work["Len"].values.astype(float)
+    dz = -length * np.cos(incl_rad)
+    dx = length * np.sin(incl_rad) * np.sin(az_rad)
+    dy = length * np.sin(incl_rad) * np.cos(az_rad)
+    df_work["X_toe"] = df_work["X"] + dx
+    df_work["Y_toe"] = df_work["Y"] + dy
+    df_work["Z_toe"] = df_work["Z_collar"] + dz
+
+
+def _build_scatter_lines(
+    df_work: pd.DataFrame,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (x_lines, y_lines, z_lines) where each hole is encoded
+    as 3 points: (collar, toe, None). Plotly treats the None as a
+    line break, so a single trace draws all trajectories."""
+    x_collar = df_work["X"].values.astype(float)
+    y_collar = df_work["Y"].values.astype(float)
+    z_collar = df_work["Z_collar"].values.astype(float)
+    x_toe = df_work["X_toe"].values.astype(float)
+    y_toe = df_work["Y_toe"].values.astype(float)
+    z_toe = df_work["Z_toe"].values.astype(float)
+
+    n = len(df_work)
+    x_lines = np.empty(n * 3, dtype=object)
+    y_lines = np.empty(n * 3, dtype=object)
+    z_lines = np.empty(n * 3, dtype=object)
+    for i in range(n):
+        j = i * 3
+        x_lines[j] = x_collar[i]
+        x_lines[j + 1] = x_toe[i]
+        x_lines[j + 2] = None
+        y_lines[j] = y_collar[i]
+        y_lines[j + 1] = y_toe[i]
+        y_lines[j + 2] = None
+        z_lines[j] = z_collar[i]
+        z_lines[j + 1] = z_toe[i]
+        z_lines[j + 2] = None
+    return x_lines, y_lines, z_lines
+
+
 def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
@@ -61,163 +201,21 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
     drop_present = [c for c in COLS_DROP if c in df_work.columns]
     df_work.drop(columns=drop_present, inplace=True)
 
-    if 'fecha_tronadura' in df_work.columns:
-        df_work['fecha_tronadura'] = pd.to_datetime(
-            df_work['fecha_tronadura'], errors='coerce').dt.date
+    if "fecha_tronadura" in df_work.columns:
+        df_work["fecha_tronadura"] = pd.to_datetime(
+            df_work["fecha_tronadura"], errors="coerce"
+        ).dt.date
 
-    x_col = find_df_column(df_work, ['Latitud_Geo', 'Latitud', 'X', 'Este'])
-    y_col = find_df_column(df_work, ['Longitud_Geo', 'Longitud', 'Y', 'Norte'])
-    z_col = find_df_column(df_work, ['Nombre_Banco', 'Banco', 'Cota_Collar', 'Z'])
-    incl_col = find_df_column(df_work, ['Inclinacion_real', 'Inclinacion', 'Inclination'])
-    az_col = find_df_column(df_work, ['Azimuth_real', 'Azimuth', 'Azimut'])
-    len_col = find_df_column(df_work, ['longitud_real', 'Longitud', 'Length', 'Profundidad'])
-    burden_col = find_df_column(
-        df_work, ['Burden', 'Burden_Real', 'Burden_diseno', 'B'],
-        raise_error=False,
-    )
-    esp_col = find_df_column(
-        df_work, ['Espaciamiento', 'Espaciamiento_Real', 'Espaciamiento_diseno', 'S', 'Esp'],
-        raise_error=False,
-    )
-    diam_col = find_df_column(
-        df_work, ['Diametro', 'Diametro_pozo', 'Diametro_perforacion', 'D_mm', 'Diam_mm'],
-        raise_error=False,
-    )
-    explosivo_col = find_df_column(
-        df_work, ['Tipo_Explosivo', 'Explosivo', 'Tipo_explosivo', 'Nombre', 'nombre'],
-        raise_error=False,
-    )
-    taco_col = find_df_column(
-        df_work, ['Taco', 'Taco_m', 'Stemming', 'stemming_real'],
-        raise_error=False,
-    )
-    secuencia_col = find_df_column(
-        df_work, ['Secuencia', 'Secuencia_Iniciacion', 'Detonador_Nro'],
-        raise_error=False,
-    )
-    retardo_col = find_df_column(
-        df_work, ['Retardo_ms', 'Delay_ms', 'Tiempo_Retardo'],
-        raise_error=False,
-    )
-    fila_col = find_df_column(
-        df_work, ['Numero_Fila', 'Fila_Pozo', 'Row'],
-        raise_error=False,
-    )
-    fondo_col = find_df_column(
-        df_work, ['Carga_Fondo_kg', 'Kilos_Fondo', 'Bottom_Charge'],
-        raise_error=False,
-    )
-    columna_col = find_df_column(
-        df_work, ['Carga_Columna_kg', 'Kilos_Columna'],
-        raise_error=False,
-    )
-    long_carga_col = find_df_column(
-        df_work, ['Longitud_Carga_m', 'Charge_Length'],
-        raise_error=False,
-    )
-    tipo_pozo_col = find_df_column(
-        df_work, ['Tipo_Pozo', 'Hole_Type'],
-        raise_error=False,
-    )
-    az_diseno_col = find_df_column(
-        df_work, ['Azimuth_Diseno', 'Design_Azimuth'],
-        raise_error=False,
-    )
-    incl_diseno_col = find_df_column(
-        df_work, ['Inclinacion_Diseno', 'Design_Dip'],
-        raise_error=False,
-    )
+    resolved = _resolve_column_aliases(df_work)
+    df_work = _rename_to_canonical(df_work, resolved)
+    _coerce_typed_columns(df_work)
 
-    if z_col:
-        df_work['Banco_Original'] = df_work[z_col]
+    df_work["Z_collar"] = df_work["Z_collar"] + BENCH_HEIGHT
+    df_work = df_work.dropna(subset=["X", "Y", "Z_collar", "Incl", "Az", "Len"])
+    df_work = df_work[df_work["Len"] > 0]
 
-    rename_map: dict = {
-        x_col: 'X', y_col: 'Y', z_col: 'Z_collar',
-        incl_col: 'Incl', az_col: 'Az', len_col: 'Len',
-    }
-    if burden_col:
-        rename_map[burden_col] = 'Burden'
-    if esp_col:
-        rename_map[esp_col] = 'Esp'
-    if diam_col:
-        rename_map[diam_col] = 'Diam_mm'
-    if explosivo_col:
-        rename_map[explosivo_col] = 'Tipo_Explosivo'
-    if taco_col:
-        rename_map[taco_col] = 'Taco_m'
-    if secuencia_col:
-        rename_map[secuencia_col] = 'Secuencia'
-    if retardo_col:
-        rename_map[retardo_col] = 'Retardo_ms'
-    if fila_col:
-        rename_map[fila_col] = 'Fila'
-    if fondo_col:
-        rename_map[fondo_col] = 'Carga_Fondo_kg'
-    if columna_col:
-        rename_map[columna_col] = 'Carga_Columna_kg'
-    if long_carga_col:
-        rename_map[long_carga_col] = 'Longitud_Carga_m'
-    if tipo_pozo_col:
-        rename_map[tipo_pozo_col] = 'Tipo_Pozo'
-    if az_diseno_col:
-        rename_map[az_diseno_col] = 'Az_Diseno'
-    if incl_diseno_col:
-        rename_map[incl_diseno_col] = 'Incl_Diseno'
-
-    df_work = df_work.rename(columns=rename_map)
-
-    for col in ('X', 'Y', 'Z_collar', 'Incl', 'Az', 'Len',
-                'Burden', 'Esp', 'Diam_mm', 'Taco_m',
-                'Retardo_ms', 'Carga_Fondo_kg', 'Carga_Columna_kg',
-                'Longitud_Carga_m', 'Az_Diseno', 'Incl_Diseno'):
-        if col in df_work.columns:
-            df_work[col] = pd.to_numeric(df_work[col], errors='coerce')
-    for col in ('Secuencia', 'Fila'):
-        if col in df_work.columns:
-            df_work[col] = pd.to_numeric(df_work[col], errors='coerce').astype('Int64')
-
-    df_work['Z_collar'] = df_work['Z_collar'] + BENCH_HEIGHT
-
-    df_work = df_work.dropna(subset=['X', 'Y', 'Z_collar', 'Incl', 'Az', 'Len'])
-    df_work = df_work[df_work['Len'] > 0]
-
-    incl_rad = np.radians(df_work['Incl'].values.astype(float))
-    az_rad = np.radians(df_work['Az'].values.astype(float))
-    length = df_work['Len'].values.astype(float)
-
-    dz = -length * np.cos(incl_rad)
-    dx = length * np.sin(incl_rad) * np.sin(az_rad)
-    dy = length * np.sin(incl_rad) * np.cos(az_rad)
-
-    df_work['X_toe'] = df_work['X'] + dx
-    df_work['Y_toe'] = df_work['Y'] + dy
-    df_work['Z_toe'] = df_work['Z_collar'] + dz
-
-    x_collar = df_work['X'].values.astype(float)
-    y_collar = df_work['Y'].values.astype(float)
-    z_collar = df_work['Z_collar'].values.astype(float)
-    x_toe = df_work['X_toe'].values.astype(float)
-    y_toe = df_work['Y_toe'].values.astype(float)
-    z_toe = df_work['Z_toe'].values.astype(float)
-
-    n = len(df_work)
-    x_lines = np.empty(n * 3, dtype=object)
-    y_lines = np.empty(n * 3, dtype=object)
-    z_lines = np.empty(n * 3, dtype=object)
-
-    for i in range(n):
-        j = i * 3
-        x_lines[j] = x_collar[i]
-        x_lines[j + 1] = x_toe[i]
-        x_lines[j + 2] = None
-        y_lines[j] = y_collar[i]
-        y_lines[j + 1] = y_toe[i]
-        y_lines[j + 2] = None
-        z_lines[j] = z_collar[i]
-        z_lines[j + 1] = z_toe[i]
-        z_lines[j + 2] = None
-
-    return df_work, x_lines, y_lines, z_lines
+    _compute_hole_toes(df_work)
+    return df_work, *_build_scatter_lines(df_work)
 
 
 def proyectar_pozos_en_seccion(

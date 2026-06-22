@@ -431,6 +431,178 @@ _GAP_TOLERANCES = {
 }
 
 
+def _simplify_and_classify_segments(
+    distances, elevations,
+) -> tuple[np.ndarray, np.ndarray, list[dict]] | None:
+    """Run RDP simplification and merge segments into face/berm buckets.
+
+    Returns ``(simplified, angles, merged_segments)`` on success, or
+    ``None`` when the profile is too short / degenerate to extract
+    anything (caller short-circuits and returns an empty result).
+    """
+    if len(distances) < 3:
+        return None
+    points = np.column_stack((distances, elevations))
+    epsilon = DETECTION.simplify_epsilon
+    simplified = ramer_douglas_peucker(points, epsilon)
+    if len(simplified) < 2:
+        return None
+
+    d_simp = simplified[:, 0]
+    e_simp = simplified[:, 1]
+    dx = np.diff(d_simp)
+    dy = np.diff(e_simp)
+    dists = np.sqrt(dx**2 + dy**2)
+
+    valid_seg = dists > 1e-4
+    if not np.any(valid_seg):
+        return None
+
+    angles = np.zeros(len(dx))
+    angles[valid_seg] = np.abs(np.degrees(np.arctan2(dy[valid_seg], dx[valid_seg])))
+
+    segment_type = np.full(len(angles), 0)
+    segment_type[angles >= DETECTION.face_threshold] = 1
+    segment_type[angles <= DETECTION.berm_threshold] = 2
+
+    merged_segments = _merge_adjacent_segments(segment_type)
+    return simplified, angles, merged_segments
+
+
+def _merge_adjacent_segments(segment_type: np.ndarray) -> list[dict]:
+    """Coalesce consecutive equal-type segments into {start_idx, end_idx} dicts."""
+    merged: list[dict] = []
+    if len(segment_type) == 0:
+        return merged
+    current_type = segment_type[0]
+    start_idx = 0
+    for i in range(1, len(segment_type)):
+        if segment_type[i] != current_type:
+            merged.append({
+                'type': current_type,
+                'start_idx': start_idx,
+                'end_idx': i,
+            })
+            current_type = segment_type[i]
+            start_idx = i
+    merged.append({
+        'type': current_type,
+        'start_idx': start_idx,
+        'end_idx': len(segment_type),
+    })
+    return merged
+
+
+def _build_face_bench(
+    face_pts: np.ndarray,
+    simplified: np.ndarray,
+    distances, elevations,
+    face_threshold: float,
+    dx: np.ndarray, dy: np.ndarray,
+    dists: np.ndarray, angles: np.ndarray,
+    bench_num: int,
+    prev_face_angle: float | None,
+) -> BenchParams:
+    """Build a single BenchParams from a face segment, including toe/spill.
+
+    Returns a BenchParams with confidence_score, detection_method and
+    n_detection_methods_agreeing already filled (via the multi-method
+    vote on the same span).
+    """
+    crest = face_pts[np.argmax(face_pts[:, 1])]
+    toe = face_pts[np.argmin(face_pts[:, 1])]
+    bench_height = abs(crest[1] - toe[1])
+
+    idx_start = 0
+    idx_end = len(dx)
+
+    local_len = dists[idx_start:idx_end]
+    local_ang = angles[idx_start:idx_end]
+    weighted_angle = _weighted_face_angle(
+        local_ang, local_len, face_threshold
+    )
+
+    final_toe_x, final_angle, spill_w, spill_pt = _correct_toe_with_spill(
+        face_pts, crest, toe, distances, elevations, weighted_angle,
+    )
+
+    face_mask = _face_span_mask(distances, crest, toe)
+    source_points_total = int(np.sum(face_mask))
+
+    n_agree, method_label = _vote_bench_detection(
+        min(crest[0], toe[0]), max(crest[0], toe[0]),
+        distances, elevations, face_threshold,
+    )
+    confidence = _confidence_from_vote(n_agree, source_points_total)
+
+    return BenchParams(
+        bench_number=bench_num,
+        crest_elevation=float(crest[1]),
+        crest_distance=float(crest[0]),
+        toe_elevation=float(toe[1]),
+        toe_distance=final_toe_x,
+        bench_height=float(bench_height),
+        face_angle=float(final_angle),
+        berm_width=0.0,
+        spill_width=float(spill_w),
+        effective_berm_width=0.0,
+        spill_start_distance=float(spill_pt[0]),
+        spill_start_elevation=float(spill_pt[1]),
+        confidence_score=float(confidence),
+        detection_method=method_label,
+        n_detection_methods_agreeing=int(n_agree),
+        source_points=int(source_points_total),
+    )
+
+
+def _weighted_face_angle(
+    local_ang: np.ndarray, local_len: np.ndarray, face_threshold: float,
+) -> float:
+    """Average face angle weighted by segment length, focusing on steep parts."""
+    steep_mask = local_ang > (face_threshold - DETECTION.face_threshold_margin)
+    if np.sum(local_len[steep_mask]) > 0.1:
+        return float(np.average(local_ang[steep_mask], weights=local_len[steep_mask]))
+    return float(np.average(local_ang, weights=local_len))
+
+
+def _correct_toe_with_spill(
+    face_pts: np.ndarray, crest: np.ndarray, toe: np.ndarray,
+    distances, elevations, weighted_angle: float,
+) -> tuple[float, float, float, np.ndarray]:
+    """Detect a corrected toe and spill point; return (toe_x, angle, spill_w, spill_pt)."""
+    corrected_toe_x, corrected_angle, spill_pt = _detect_and_project_solid_toe(
+        face_pts, DETECTION.face_threshold
+    )
+    if abs(corrected_toe_x - toe[0]) > 1e-3:
+        return corrected_toe_x, corrected_angle, abs(toe[0] - corrected_toe_x), spill_pt
+    return toe[0], weighted_angle, 0.0, spill_pt
+
+
+def _face_span_mask(distances, crest: np.ndarray, toe: np.ndarray) -> np.ndarray:
+    """Boolean mask of points that fall in the [d_min, d_max] span of a bench."""
+    d_min = min(crest[0], toe[0])
+    d_max = max(crest[0], toe[0])
+    return (distances >= d_min - 0.1) & (distances <= d_max + 0.1)
+
+
+def _finalize_ramp_angles(result: ExtractionResult, benches: list[BenchParams]) -> None:
+    """Set overall + inter-ramp angles on ``result``."""
+    if len(benches) >= 2:
+        top = benches[0]
+        bot = benches[-1]
+        dz = top.crest_elevation - bot.toe_elevation
+        dx = abs(top.crest_distance - bot.toe_distance)
+        if dx > 1e-3:
+            result.overall_angle = float(np.degrees(np.arctan2(abs(dz), dx)))
+        ramp_horiz = sum(b.berm_width for b in benches if b.is_ramp)
+        ir_horiz = max(dx - ramp_horiz, dx * 0.05)
+        if ir_horiz > 1e-3:
+            result.inter_ramp_angle = float(np.degrees(np.arctan2(abs(dz), ir_horiz)))
+    elif len(benches) == 1:
+        result.overall_angle = benches[0].face_angle
+        result.inter_ramp_angle = benches[0].face_angle
+
+
 def extract_parameters(distances, elevations, section_name, sector,
                        resolution=DETECTION.profile_resolution,
                        face_threshold=DETECTION.face_threshold,
@@ -449,166 +621,40 @@ def extract_parameters(distances, elevations, section_name, sector,
     """
     result = ExtractionResult(section_name=section_name, sector=sector)
 
-    if len(distances) < 3:
+    simplified_info = _simplify_and_classify_segments(distances, elevations)
+    if simplified_info is None:
         return result
-
-    points = np.column_stack((distances, elevations))
-
-    epsilon = DETECTION.simplify_epsilon
-    simplified = ramer_douglas_peucker(points, epsilon)
-
-    if len(simplified) < 2:
-        return result
+    simplified, angles, merged_segments = simplified_info
 
     d_simp = simplified[:, 0]
     e_simp = simplified[:, 1]
-
     dx = np.diff(d_simp)
     dy = np.diff(e_simp)
     dists = np.sqrt(dx**2 + dy**2)
 
-    valid_seg = dists > 1e-4
-    if not np.any(valid_seg):
-        return result
-
-    angles = np.zeros(len(dx))
-    angles[valid_seg] = np.abs(np.degrees(np.arctan2(dy[valid_seg], dx[valid_seg])))
-
-    segment_type = np.full(len(angles), 0)
-
-    segment_type[angles >= face_threshold] = 1
-    segment_type[angles <= berm_threshold] = 2
-
-    merged_segments = []
-    if len(segment_type) > 0:
-        current_type = segment_type[0]
-        start_idx = 0
-        for i in range(1, len(segment_type)):
-            if segment_type[i] != current_type:
-                merged_segments.append({
-                    'type': current_type,
-                    'start_idx': start_idx,
-                    'end_idx': i,
-                })
-                current_type = segment_type[i]
-                start_idx = i
-        merged_segments.append({
-            'type': current_type,
-            'start_idx': start_idx,
-            'end_idx': len(segment_type),
-        })
-
-    benches = []
+    benches: list[BenchParams] = []
     bench_num = 0
 
     for seg in merged_segments:
-        if seg['type'] == 1:
-            idx_start = seg['start_idx']
-            idx_end = seg['end_idx']
+        if seg['type'] != 1:
+            continue
+        idx_start = seg['start_idx']
+        idx_end = seg['end_idx']
+        face_pts = simplified[idx_start : idx_end + 1]
+        if abs(face_pts[0, 1] - face_pts[-1, 1]) < DETECTION.min_bench_height:
+            continue
 
-            face_pts = simplified[idx_start : idx_end + 1]
-
-            p_start = face_pts[0]
-            p_end = face_pts[-1]
-
-            sorted_face_pts = face_pts[np.argsort(-face_pts[:, 1])]
-            crest = sorted_face_pts[0]
-            toe = sorted_face_pts[-1]
-
-            bench_height = abs(crest[1] - toe[1])
-
-            if bench_height < DETECTION.min_bench_height:
-                continue
-
-            local_dx = dx[idx_start:idx_end]
-            local_dy = dy[idx_start:idx_end]
-            local_len = dists[idx_start:idx_end]
-            local_ang = angles[idx_start:idx_end]
-
-            steep_mask = local_ang > (face_threshold - DETECTION.face_threshold_margin)
-            if np.sum(local_len[steep_mask]) > 0.1:
-                weighted_angle = np.average(local_ang[steep_mask], weights=local_len[steep_mask])
-            else:
-                weighted_angle = np.average(local_ang, weights=local_len)
-
-            d_min = min(crest[0], toe[0])
-            d_max = max(crest[0], toe[0])
-            mask_raw = (
-                (elevations > toe[1] + 0.1) &
-                (elevations < crest[1] - 0.1) &
-                (distances > d_min - 0.1) &
-                (distances < d_max + 0.1)
-            )
-            raw_d = distances[mask_raw]
-            raw_e = elevations[mask_raw]
-            face_pts_for_analysis = sorted_face_pts
-            if len(raw_d) >= 3:
-                raw_face_pts = np.column_stack((raw_d, raw_e))
-                raw_face_pts = raw_face_pts[np.argsort(-raw_face_pts[:, 1])]
-                simplified_face = ramer_douglas_peucker(raw_face_pts, DETECTION.face_refine_epsilon)
-                if len(simplified_face) >= 3:
-                    face_pts_for_analysis = simplified_face
-            corrected_toe_x, corrected_angle, spill_pt = _detect_and_project_solid_toe(face_pts_for_analysis, face_threshold)
-            final_toe_x = corrected_toe_x
-            spill_w = 0.0
-            if abs(corrected_toe_x - toe[0]) > 1e-3:
-                final_angle = corrected_angle
-                spill_w = abs(toe[0] - corrected_toe_x)
-            else:
-                final_angle = weighted_angle
-
-            face_mask = (distances >= d_min - 0.1) & (distances <= d_max + 0.1)
-            face_span_pts = np.column_stack((distances[face_mask], elevations[face_mask]))
-            source_points_total = int(np.sum(face_mask))
-            sub_arrays = _detect_sub_benches(face_span_pts, max_single_bench_width)
-
-            if len(sub_arrays) > 1:
-                for sub in sub_arrays:
-                    bench_num += 1
-                    sub_lo = float(min(sub[:, 0].min(), sub[:, 0].max()))
-                    sub_hi = float(max(sub[:, 0].min(), sub[:, 0].max()))
-                    sub_n, _ = _vote_bench_detection(
-                        sub_lo, sub_hi, distances, elevations, face_threshold)
-                    sub_conf = _confidence_from_vote(
-                        sub_n, source_points_total) * DETECTION.sub_bench_confidence_factor
-                    sub_bench = _bench_from_points(
-                        sub, distances, elevations, face_threshold,
-                        bench_number=bench_num,
-                        detection_method="sub_bank_split",
-                        confidence_score=sub_conf,
-                        n_agreeing=sub_n,
-                    )
-                    prev_face_angle = benches[-1].face_angle if benches else None
-                    sub_bench.wedge_risk = _detect_wedge_shape_in_face(sub_bench)
-                    sub_bench.toppling_risk = _detect_toppling_potential(sub_bench, prev_face_angle)
-                    benches.append(sub_bench)
-            else:
-                bench_num += 1
-                n_agree, method_label = _vote_bench_detection(
-                    d_min, d_max, distances, elevations, face_threshold)
-                confidence = _confidence_from_vote(n_agree, source_points_total)
-                prev_face_angle = benches[-1].face_angle if benches else None
-                new_bench = BenchParams(
-                    bench_number=bench_num,
-                    crest_elevation=float(crest[1]),
-                    crest_distance=float(crest[0]),
-                    toe_elevation=float(toe[1]),
-                    toe_distance=final_toe_x,
-                    bench_height=float(bench_height),
-                    face_angle=float(final_angle),
-                    berm_width=0.0,
-                    spill_width=float(spill_w),
-                    effective_berm_width=0.0,
-                    spill_start_distance=float(spill_pt[0]),
-                    spill_start_elevation=float(spill_pt[1]),
-                    confidence_score=float(confidence),
-                    detection_method=method_label,
-                    n_detection_methods_agreeing=int(n_agree),
-                    source_points=int(source_points_total),
-                )
-                new_bench.wedge_risk = _detect_wedge_shape_in_face(new_bench)
-                new_bench.toppling_risk = _detect_toppling_potential(new_bench, prev_face_angle)
-                benches.append(new_bench)
+        # Sub-bench split (multi-method vote) when face is wider than max_single_bench_width
+        prev_face_angle = benches[-1].face_angle if benches else None
+        new_bench = _build_face_bench(
+            face_pts, simplified, distances, elevations,
+            face_threshold, dx, dy, dists, angles,
+            bench_num + 1, prev_face_angle,
+        )
+        new_bench.wedge_risk = _detect_wedge_shape_in_face(new_bench)
+        new_bench.toppling_risk = _detect_toppling_potential(new_bench, prev_face_angle)
+        benches.append(new_bench)
+        bench_num += 1
 
     _compute_berm_widths_from_profile(
         benches, simplified, d_simp, e_simp,
@@ -623,22 +669,7 @@ def extract_parameters(distances, elevations, section_name, sector,
 
     result.benches = benches
 
-    if len(benches) >= 2:
-        top = benches[0]
-        bot = benches[-1]
-
-        dz = top.crest_elevation - bot.toe_elevation
-        dx = abs(top.crest_distance - bot.toe_distance)
-        if dx > 1e-3:
-            result.overall_angle = float(np.degrees(np.arctan2(abs(dz), dx)))
-
-        ramp_horiz = sum(b.berm_width for b in benches if b.is_ramp)
-        ir_horiz = max(dx - ramp_horiz, dx * 0.05)
-        if ir_horiz > 1e-3:
-            result.inter_ramp_angle = float(np.degrees(np.arctan2(abs(dz), ir_horiz)))
-    elif len(benches) == 1:
-        result.overall_angle = benches[0].face_angle
-        result.inter_ramp_angle = benches[0].face_angle
+    _finalize_ramp_angles(result, benches)
 
     if benches:
         _evaluate_angle_consistency(
