@@ -64,7 +64,29 @@ const demoData: DemoData = {
       benches_topo: [],
     },
   ],
-  comparisons: [],
+  comparisons: [
+    {
+      sector: 'N',
+      section: 'S-01',
+      bench_num: 1,
+      type: 'MATCH' as const,
+      level: 'Banco 1',
+      height_design: 15,
+      height_real: 14.8,
+      height_dev: 0.2,
+      height_status: 'CUMPLE',
+      angle_design: 60,
+      angle_real: 59,
+      angle_dev: 1,
+      angle_status: 'CUMPLE',
+      berm_design: 10,
+      berm_real: 9.5,
+      berm_min: 8,
+      berm_status: 'CUMPLE',
+      delta_crest: 0.1,
+      delta_toe: 0.2,
+    },
+  ],
 };
 
 function StatusProbe() {
@@ -144,6 +166,41 @@ describe('TryDemoButton — demo process-status cache', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('probe')).toHaveTextContent('complete');
+    });
+  });
+
+  it('writes demo sections to the sections cache after click', async () => {
+    mockDemoFetch();
+    const user = userEvent.setup();
+    renderWith(<TryDemoButton />, qc);
+
+    await user.click(screen.getByRole('button'));
+
+    await waitFor(() => {
+      const sections = qc.getQueryData(['sections', true, '__demo_design__']);
+      expect(sections).toEqual([
+        expect.objectContaining({ name: 'S-01', sector: 'N', azimuth: 90 }),
+      ]);
+    });
+  });
+
+  it('writes demo comparisons to the results cache after click', async () => {
+    mockDemoFetch();
+    const user = userEvent.setup();
+    renderWith(<TryDemoButton />, qc);
+
+    await user.click(screen.getByRole('button'));
+
+    await waitFor(() => {
+      const results = qc.getQueryData([
+        'results',
+        undefined,
+        true,
+        '__demo_design__',
+      ]);
+      expect(results).toEqual([
+        expect.objectContaining({ section: 'S-01', type: 'MATCH' }),
+      ]);
     });
   });
 });

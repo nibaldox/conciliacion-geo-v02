@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import client from './client';
-import { useSession, DEMO_MESH_IDS } from '../stores/session';
+import { useSession, DEMO_MESH_IDS, type DemoData } from '../stores/session';
 import type {
   MeshInfo,
   UploadResponse,
@@ -255,6 +255,37 @@ export function setDemoProcessStatus(
     completed_sections: total,
     n_results: summary?.n_comparisons ?? 0,
   });
+}
+
+export function setDemoSectionsCache(
+  qc: QueryClient,
+  demoData: DemoData,
+): void {
+  const { demoMode, designMeshId } = useSession.getState();
+  const sections: SectionResponse[] = demoData.sections.map((s, i) => ({
+    id: String(i),
+    name: s.section_name,
+    origin: s.origin as [number, number],
+    azimuth: s.azimuth,
+    length: 400,
+    sector: s.sector,
+  }));
+  qc.setQueryData<SectionResponse[]>(
+    ['sections', demoMode, designMeshId],
+    sections,
+  );
+}
+
+export function setDemoComparisonsCache(
+  qc: QueryClient,
+  demoData: DemoData,
+): void {
+  const { demoMode, designMeshId } = useSession.getState();
+  if (!demoData.comparisons) return;
+  qc.setQueryData<ComparisonResult[]>(
+    ['results', undefined, demoMode, designMeshId],
+    demoData.comparisons,
+  );
 }
 
 export function useProfile(sectionId: string | null) {

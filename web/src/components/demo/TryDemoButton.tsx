@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from '../../stores/session';
-import { setDemoProcessStatus } from '../../api/hooks';
+import { setDemoProcessStatus, setDemoSectionsCache, setDemoComparisonsCache } from '../../api/hooks';
 import { Button } from '../ui/Button';
 
 /**
@@ -19,7 +19,10 @@ export function TryDemoButton() {
   const handleClick = async () => {
     await loadDemo();
     const { demoData } = useSession.getState();
-    if (demoData) setDemoProcessStatus(qc, demoData.summary);
+    if (!demoData) return;
+    setDemoProcessStatus(qc, demoData.summary);
+    setDemoSectionsCache(qc, demoData);
+    setDemoComparisonsCache(qc, demoData);
   };
 
   return (
