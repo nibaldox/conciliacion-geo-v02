@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.database import init_db, cleanup_old_sessions
 from api.middleware import install_health_endpoints, install_middleware
+from api.middleware_auth import install_api_key_auth
 from api.middleware_ratelimit import install_rate_limiter
 from api.routers import ai, meshes, sections, process, export, settings
 from core.config import DEFAULTS, DEPLOY
@@ -198,6 +199,10 @@ app.include_router(process.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
+
+# Auth must be installed AFTER routers so it wraps them in the middleware
+# stack (Starlette uses LIFO ordering: last add_middleware runs first).
+install_api_key_auth(app)
 
 
 # ---------------------------------------------------------------------------

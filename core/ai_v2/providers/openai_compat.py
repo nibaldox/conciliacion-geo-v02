@@ -53,12 +53,13 @@ class OpenAICompatibleProvider(BaseProvider):
         max_tokens: int,
         timeout_s: float,
     ):
-        from core.ai_v2.models import AIResponseChunk
+        from core.ai_v2.models import AIResponseChunk, AIUsage
 
         response = await self._client.chat.completions.create(
             model=model,
             messages=messages,
             stream=True,
+            stream_options={"include_usage": True},
             temperature=temperature,
             max_tokens=max_tokens,
             timeout=timeout_s,
@@ -71,6 +72,17 @@ class OpenAICompatibleProvider(BaseProvider):
                     chunk_index=chunk_index,
                 )
                 chunk_index += 1
+            elif chunk.usage is not None:
+                yield AIResponseChunk(
+                    content="",
+                    chunk_index=chunk_index,
+                    usage=AIUsage(
+                        prompt_tokens=chunk.usage.prompt_tokens or 0,
+                        completion_tokens=chunk.usage.completion_tokens or 0,
+                        total_tokens=chunk.usage.total_tokens or 0,
+                        is_synthetic=False,
+                    ),
+                )
 
     async def list_models(self) -> list[str]:
         try:

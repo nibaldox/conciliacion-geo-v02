@@ -76,6 +76,7 @@ async def stream_report(
     ]
     accumulated: list[str] = []
     chunk_index = 0
+    real_usage: AIUsage | None = None
 
     async for chunk in provider.stream(
         messages,
@@ -84,9 +85,12 @@ async def stream_report(
         max_tokens=max_tokens,
         timeout_s=timeout_s,
     ):
-        accumulated.append(chunk.content)
-        yield AIResponseChunk(content=chunk.content, chunk_index=chunk_index)
-        chunk_index += 1
+        if chunk.usage is not None and not chunk.usage.is_synthetic:
+            real_usage = chunk.usage
+        if chunk.content:
+            accumulated.append(chunk.content)
+            yield AIResponseChunk(content=chunk.content, chunk_index=chunk_index)
+            chunk_index += 1
 
     duration_ms = (time.monotonic() - start) * 1000
 
@@ -94,22 +98,28 @@ async def stream_report(
         await cache.put(cache_key, accumulated)
 
     if enable_usage_tracking:
-        # Word-count fallback: some providers don't return real usage
-        # in streaming mode. Mark the result as synthetic so the UI
-        # can show "(estimated)" next to the counts.
-        word_count = sum(len(c.split()) for c in accumulated)
-        yield AIResponseChunk(
-            content="",
-            finish_reason="stop",
-            usage=AIUsage(
-                prompt_tokens=0,
-                completion_tokens=word_count,
-                total_tokens=word_count,
-                duration_ms=duration_ms,
-                is_synthetic=True,
-            ),
-            chunk_index=chunk_index + 1,
-        )
+        if real_usage is not None:
+            real_usage.duration_ms = duration_ms
+            yield AIResponseChunk(
+                content="",
+                finish_reason="stop",
+                usage=real_usage,
+                chunk_index=chunk_index + 1,
+            )
+        else:
+            word_count = sum(len(c.split()) for c in accumulated)
+            yield AIResponseChunk(
+                content="",
+                finish_reason="stop",
+                usage=AIUsage(
+                    prompt_tokens=0,
+                    completion_tokens=word_count,
+                    total_tokens=word_count,
+                    duration_ms=duration_ms,
+                    is_synthetic=True,
+                ),
+                chunk_index=chunk_index + 1,
+            )
 
 
 def _default_provider(request: AIRequest) -> "BaseProvider":
