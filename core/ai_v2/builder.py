@@ -2,6 +2,41 @@
 from __future__ import annotations
 
 from core.ai_v2.prompts import load_prompt_template, render_prompt
+from core.ai_v2.sanitization import (
+    looks_like_instruction,
+    sanitize_metadata_value,
+    wrap_metadata_block,
+)
+from core.compliance_status import (
+    STATUS_CUMPLE,
+    STATUS_EXTRA,
+    STATUS_FUERA,
+    STATUS_MISSING,
+    STATUS_NO_CUMPLE,
+)
+
+
+_LOG_INJECTION_DETECTED = False
+
+
+def _log_injection_if_detected(key: str, raw: object, sanitized: str) -> None:
+    """Log (once per process) when a metadata field contains injection hints.
+
+    We log to stderr to keep streamlit/console parity. Not used to
+    block — the wrapper sanitization already neutralizes the content.
+    """
+    global _LOG_INJECTION_DETECTED
+    if _LOG_INJECTION_DETECTED:
+        return
+    if not looks_like_instruction(sanitize_metadata_value(raw)):
+        return
+    _LOG_INJECTION_DETECTED = True
+    import sys
+    print(
+        f"[ai_v2.sanitization] Possible prompt-injection in metadata['{key}'] "
+        f"(sanitized from {len(str(raw))} to {len(sanitized)} chars).",
+        file=sys.stderr,
+    )
 from core.config import STABILITY
 from core.param_extractor import BenchParams
 from core.stability_analysis import (
@@ -44,7 +79,7 @@ def _compute_verdict(results: list[dict]) -> str:
     n_no_cumple_total = sum(
         1 for r in results
         for k in ("height_status", "angle_status", "berm_status")
-        if r.get(k) == "NO CUMPLE"
+        if r.get(k) == STATUS_NO_CUMPLE
     )
 
     if match_only and (avg_score is None or avg_score >= 70) and n_no_cumple_total == 0:
@@ -114,10 +149,10 @@ def _render_compliance_table(results: list[dict]) -> str:
     rows = ["| Parámetro | CUMPLE | FUERA | NO CUMPLE |", "|---|---|---|---|"]
     for param in ("height", "angle", "berm"):
         status_key = f"{param}_status"
-        cumple = sum(1 for r in results if r.get(status_key) == "CUMPLE")
-        fuera = sum(1 for r in results if r.get(status_key) == "FUERA DE TOLERANCIA")
+        cumple = sum(1 for r in results if r.get(status_key) == STATUS_CUMPLE)
+        fuera = sum(1 for r in results if r.get(status_key) == STATUS_FUERA)
         no_cumple = sum(
-            1 for r in results if r.get(status_key) == "NO CUMPLE"
+            1 for r in results if r.get(status_key) == STATUS_NO_CUMPLE
         )
         rows.append(f"| {param.upper()} | {cumple} | {fuera} | {no_cumple} |")
     return "\n".join(rows)
@@ -127,9 +162,9 @@ def _format_bench(r: dict) -> str:
     """Render bench_num with a human-readable type tag (Idea from brainstorm)."""
     btype = r.get("type")
     num = r.get("bench_num")
-    if btype == "EXTRA":
+    if btype == STATUS_EXTRA:
         return "EXTRA (sin diseño)"
-    if btype == "MISSING":
+    if btype == STATUS_MISSING:
         return f"FALTA (cota {r.get('level', '?')})"
     return str(num) if num is not None else "?"
 
@@ -426,17 +461,17 @@ def _render_action_plan(results: list[dict], blast_trend: dict | None) -> str:
                 ))
 
         # Compliance rows.
-        if r.get("berm_status") == "NO CUMPLE":
+        if r.get("berm_status") == STATUS_NO_CUMPLE:
             signals.append((
                 _SEV_HIGH,
                 f"berma fuera de norma en banco {bench_id}",
             ))
-        if r.get("angle_status") == "NO CUMPLE":
+        if r.get("angle_status") == STATUS_NO_CUMPLE:
             signals.append((
                 _SEV_HIGH,
                 f"ángulo excedido en banco {bench_id}",
             ))
-        if r.get("height_status") == "NO CUMPLE":
+        if r.get("height_status") == STATUS_NO_CUMPLE:
             signals.append((
                 _SEV_HIGH,
                 f"altura fuera de norma en banco {bench_id}",
@@ -518,16 +553,37 @@ def build_analysis_prompt(
     seccion: str = "global",
     banco: str = "N/A",
 ) -> tuple[str, str]:
-    """Build the (system_prompt, user_prompt) tuple from raw data."""
+    """Build the (system_prompt, user_prompt) tuple from raw data.
+
+    User-controlled metadata (project_name, seccion, banco, fecha_informe)
+    is sanitized and wrapped in a delimited block before being injected
+    into the user prompt. The system prompt instructs the LLM to treat
+    that block as data, not as instructions (Sprint 0 D1).
+    """
     system = load_prompt_template("system_role.md")
     user_template = load_prompt_template("executive_summary.md")
 
+    raw_metadata = {
+        "project_name": project_name,
+        "fecha_informe": fecha_informe,
+        "seccion": seccion,
+        "banco": banco,
+    }
+    sanitized_metadata: dict[str, str] = {}
+    for k, v in raw_metadata.items():
+        clean = sanitize_metadata_value(v)
+        _log_injection_if_detected(k, v, clean)
+        sanitized_metadata[k] = clean
+
+    metadata_block = wrap_metadata_block(sanitized_metadata)
+
     user = render_prompt(
         user_template,
-        project_name=project_name,
-        fecha_informe=fecha_informe,
-        seccion=seccion,
-        banco=banco,
+        project_name=sanitized_metadata["project_name"],
+        fecha_informe=sanitized_metadata["fecha_informe"],
+        seccion=sanitized_metadata["seccion"],
+        banco=sanitized_metadata["banco"],
+        metadatos_del_usuario=metadata_block,
         verdict_global=_compute_verdict(results),
         criterios_tolerancia=_render_tolerances(settings),
         tabla_cumplimiento=_render_compliance_table(results),

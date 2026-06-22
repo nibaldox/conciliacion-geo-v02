@@ -1,5 +1,10 @@
-"""Export comparison results to formatted Excel workbook."""
+"""Export comparison results to formatted Excel workbook.
 
+All public write functions in this module are wrapped with try/except
+and raise ``ExcelWriterError`` on failure. Callers (api/routers/export,
+ui/tabs/export) can rely on a single exception type for error handling.
+See docs/BARRIDO_2026-06-21.md issue D2.
+"""
 from typing import List, Dict, Any, Optional
 
 import openpyxl
@@ -9,6 +14,15 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import Cell
+
+
+class ExcelWriterError(Exception):
+    """Raised when the Excel export fails for any reason.
+
+    Wraps the original exception via `raise ... from e` so callers
+    can inspect the cause while presenting a clean domain error to
+    end users. See docs/BARRIDO_2026-06-21.md issue D2.
+    """
 
 from core.blast_correlation import (
     compute_blast_geotech_correlation,
@@ -374,22 +388,34 @@ def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
                    output_path: str, project_info: Optional[Dict[str, str]] = None,
                    df_pozos: Optional[Any] = None,
                    sections: Optional[List[Any]] = None) -> None:
-    """Export comparison results to a formatted Excel workbook."""
+    """Export comparison results to a formatted Excel workbook.
+
+    Raises:
+        ExcelWriterError: if any sub-step of the export fails. The
+            original exception is preserved via ``__cause__``.
+    """
     if project_info is None:
         project_info = {}
+    try:
+        wb = openpyxl.Workbook()
 
-    wb = openpyxl.Workbook()
+        _write_summary_sheet(wb, comparisons, tolerances, project_info)
+        _write_sector_summary(wb, comparisons) # New Executive Summary
+        _write_bench_sheet(wb, comparisons)
+        _write_interramp_sheet(wb, params_design, params_topo)
+        _write_dashboard_sheet(wb, comparisons)
 
-    _write_summary_sheet(wb, comparisons, tolerances, project_info)
-    _write_sector_summary(wb, comparisons) # New Executive Summary
-    _write_bench_sheet(wb, comparisons)
-    _write_interramp_sheet(wb, params_design, params_topo)
-    _write_dashboard_sheet(wb, comparisons)
+        if df_pozos is not None and not df_pozos.empty:
+            _write_tronadura_sheet(wb, df_pozos, comparisons, sections)
 
-    if df_pozos is not None and not df_pozos.empty:
-        _write_tronadura_sheet(wb, df_pozos, comparisons, sections)
-
-    wb.save(output_path)
+        wb.save(output_path)
+    except ExcelWriterError:
+        raise
+    except Exception as exc:
+        raise ExcelWriterError(
+            f"export_results falló al escribir {output_path}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
 
 
 def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: List[Dict[str, Any]], sections: Optional[List[Any]] = None) -> None:

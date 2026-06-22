@@ -19,6 +19,7 @@ from core.compliance_status import (
     STATUS_EXTRA,
     STATUS_FALTA_BANCO,
     STATUS_FUERA,
+    STATUS_MISSING,
     STATUS_NO_CONSTRUIDO,
     STATUS_NO_CUMPLE,
     STATUS_RAMPA_OK,
@@ -62,17 +63,19 @@ class TestAllStatuses:
         defined = {
             STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE,
             STATUS_NO_CONSTRUIDO, STATUS_FALTA_BANCO, STATUS_EXTRA,
+            STATUS_MISSING,
             STATUS_BANCO_ADICIONAL, STATUS_RAMPA_OK,
         }
         assert defined == set(ALL_STATUSES)
 
-    def test_has_eight_statuses(self):
-        assert len(ALL_STATUSES) == 8
+    def test_has_nine_statuses(self):
+        assert len(ALL_STATUSES) == 9
 
     def test_statuses_are_unique(self):
         assert len(ALL_STATUSES) == len({
             STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE,
             STATUS_NO_CONSTRUIDO, STATUS_FALTA_BANCO, STATUS_EXTRA,
+            STATUS_MISSING,
             STATUS_BANCO_ADICIONAL, STATUS_RAMPA_OK,
         })
 

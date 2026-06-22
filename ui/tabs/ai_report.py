@@ -25,6 +25,7 @@ from core.ai_v2.providers import (
     ProviderType,
 )
 from core.ai_v2.service import stream_report
+from ui.filters import apply_comparison_filters
 
 
 PROVIDER_LABELS: dict[str, str] = {
@@ -221,21 +222,8 @@ def _apply_table_filters(
         "section": list(sel_sections),
         "bench": list(sel_benches),
     }
-    if not any(active.values()):
-        return comparisons, active
-
-    out: list[dict] = []
-    for r in comparisons:
-        if sel_sectors and r.get("sector") not in sel_sectors:
-            continue
-        if sel_levels and r.get("level") not in sel_levels:
-            continue
-        if sel_sections and r.get("section") not in sel_sections:
-            continue
-        if sel_benches and r.get("bench_num") not in sel_benches:
-            continue
-        out.append(r)
-    return out, active
+    filtered = apply_comparison_filters(comparisons, active)
+    return filtered, active
 
 
 def _filters_summary(active: dict[str, list]) -> str:

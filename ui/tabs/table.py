@@ -1,9 +1,10 @@
 """
 Results tab: detailed compliance table with sorting and filtering.
 """
-import pandas as pd
 import streamlit as st
+import pandas as pd
 
+from ui.filters import apply_comparison_filters
 from ui.filter_cache import _ensure_filter_values
 
 
@@ -43,7 +44,13 @@ def render_tab_table() -> None:
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
+def _render_filter_widgets() -> dict[str, list]:
+    """Render the Excel-style filter multiselects and return active filter set.
+
+    Pure UI helper (streamlit-coupled). The actual filtering is done
+    by ui.filters.apply_comparison_filters to keep a single source of
+    truth shared with the AI agent tab.
+    """
     with st.expander("🔎 Filtros (Excel-style)", expanded=False):
         cols_filter = st.columns(4)
         fv = _ensure_filter_values()
@@ -56,16 +63,20 @@ def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
             "Filtrar por Sección:", fv['sections'], default=[], key="table_filter_section")
         sel_benches = cols_filter[3].multiselect(
             "Filtrar por Banco:", fv['benches'], default=[], key="table_filter_bench")
+    return {
+        "sector": list(sel_sectors),
+        "level": list(sel_levels),
+        "section": list(sel_sections),
+        "bench": list(sel_benches),
+    }
 
-    if sel_sectors:
-        df = df[df['sector'].isin(sel_sectors)]
-    if sel_levels:
-        df = df[df['level'].isin(sel_levels)]
-    if sel_sections:
-        df = df[df['section'].isin(sel_sections)]
-    if sel_benches:
-        df = df[df['bench_num'].isin(sel_benches)]
-    return df
+
+def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
+    active = _render_filter_widgets()
+    filtered_dicts = apply_comparison_filters(
+        df.to_dict(orient="records"), active
+    )
+    return pd.DataFrame(filtered_dicts) if filtered_dicts else df.iloc[0:0] 
 
 
 def _apply_sorting(df: pd.DataFrame, sort_option: str) -> pd.DataFrame:
