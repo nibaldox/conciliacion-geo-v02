@@ -866,11 +866,11 @@ def _render_pf_recommendations(
             )
             if not df_recs.empty:
                 st.dataframe(df_recs, use_container_width=True, height=300)
-                for _, row in df_recs.iterrows():
-                    if row['feasibility'] == 'APPLICABLE':
-                        st.success(f"**{row['group_value']}**: {row['message']}")
-                    elif row['feasibility'] == 'CAUTION':
-                        st.warning(f"**{row['group_value']}**: {row['message']}")
+                for row in df_recs.itertuples(index=False):
+                    if row.feasibility == 'APPLICABLE':
+                        st.success(f"**{row.group_value}**: {row.message}")
+                    elif row.feasibility == 'CAUTION':
+                        st.warning(f"**{row.group_value}**: {row.message}")
             else:
                 st.info("No hay datos suficientes para recomendaciones por sector.")
         else:

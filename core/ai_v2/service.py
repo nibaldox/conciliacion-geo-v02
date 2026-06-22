@@ -94,14 +94,19 @@ async def stream_report(
         await cache.put(cache_key, accumulated)
 
     if enable_usage_tracking:
+        # Word-count fallback: some providers don't return real usage
+        # in streaming mode. Mark the result as synthetic so the UI
+        # can show "(estimated)" next to the counts.
+        word_count = sum(len(c.split()) for c in accumulated)
         yield AIResponseChunk(
             content="",
             finish_reason="stop",
             usage=AIUsage(
                 prompt_tokens=0,
-                completion_tokens=sum(len(c.split()) for c in accumulated),
-                total_tokens=sum(len(c.split()) for c in accumulated),
+                completion_tokens=word_count,
+                total_tokens=word_count,
                 duration_ms=duration_ms,
+                is_synthetic=True,
             ),
             chunk_index=chunk_index + 1,
         )

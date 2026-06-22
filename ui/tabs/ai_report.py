@@ -89,12 +89,14 @@ def _format_usage_line(
         cost_str = "$0.0000 (local)"
     else:
         cost_str = f"${_estimate_cost(provider_name, usage):.4f}"
+    # Mark estimated counts so the user knows not to bill against them.
+    suffix = " (estimado)" if usage.is_synthetic else ""
     return (
         f"⏱️ {elapsed_s:.2f}s · "
         f"Tokens: {usage.prompt_tokens:,} in / "
         f"{usage.completion_tokens:,} out / "
         f"{usage.total_tokens:,} total · "
-        f"{tps:.1f} tok/s · 💰 {cost_str}"
+        f"{tps:.1f} tok/s · 💰 {cost_str}{suffix}"
     )
 
 

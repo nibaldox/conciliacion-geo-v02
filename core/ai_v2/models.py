@@ -25,6 +25,12 @@ class AIUsage(BaseModel):
 
     All numeric fields default to zero so partial reports (for example,
     when a provider omits ``prompt_tokens``) still validate.
+
+    ``is_synthetic`` is True when ``completion_tokens`` and
+    ``total_tokens`` were estimated from the response text (e.g.
+    word-count) rather than reported by the provider. The UI uses
+    this flag to display a "(estimated)" hint next to the token
+    counts so users know not to bill against them.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -32,6 +38,7 @@ class AIUsage(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    is_synthetic: bool = False
     duration_ms: float = 0.0
     cost_usd: float | None = None
 

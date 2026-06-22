@@ -1,3 +1,5 @@
+"""Polyline segmentation and breakline detection helpers."""
+
 import numpy as np
 import trimesh
 import networkx as nx

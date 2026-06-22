@@ -1,3 +1,4 @@
+"""Word report generation: section plots, pie charts, and DOCX assembly."""
 
 import io
 import matplotlib
@@ -150,11 +151,13 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
             tolerance=blast_tolerance,
         )
         if not projected.empty:
-            for _, row in projected.iterrows():
-                d_c = row['dist_along']
-                d_t = row['dist_along_toe'] if 'dist_along_toe' in row else d_c
-                z_c = row['Z_collar']
-                z_t = row['Z_toe']
+            has_toe = "dist_along_toe" in projected.columns
+            # Use itertuples for ~10x speedup over iterrows.
+            for row in projected.itertuples(index=False):
+                d_c = row.dist_along
+                d_t = row.dist_along_toe if has_toe else d_c
+                z_c = row.Z_collar
+                z_t = row.Z_toe
                 ax.plot([d_c, d_t], [z_c, z_t], color='orange', linestyle='-', linewidth=1.5, alpha=0.5, zorder=3)
                 ax.scatter(d_c, z_c, color='darkorange', s=15, zorder=4)
 

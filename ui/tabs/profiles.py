@@ -550,19 +550,25 @@ def _add_blast_holes(fig, section, tolerance: float) -> None:
     x_holes, y_holes = [], []
     colors = []
 
-    for _, row in projected.iterrows():
-        d_c = row['dist_along']
-        d_t = row['dist_along_toe'] if 'dist_along_toe' in row else d_c
-        z_c = row['Z_collar']
-        z_t = row['Z_toe']
+    has_toe = "dist_along_toe" in projected.columns
+    has_kg = kg_col is not None
+    # Use itertuples for ~10x speedup over iterrows on large projected
+    # DataFrames (e.g. 1000+ blast holes per section).
+    for row in projected.itertuples(index=False):
+        d_c = row.dist_along
+        d_t = row.dist_along_toe if has_toe else d_c
+        z_c = row.Z_collar
+        z_t = row.Z_toe
 
         x_holes.extend([d_c, d_t, None])
         y_holes.extend([z_c, z_t, None])
 
-        if kg_col and pd.notna(row[kg_col]):
-            colors.append(row[kg_col])
-        else:
-            colors.append(0)
+        if has_kg:
+            kg_val = getattr(row, kg_col, None)
+            if pd.notna(kg_val):
+                colors.append(kg_val)
+                continue
+        colors.append(0)
 
     fig.add_trace(go.Scatter(
         x=x_holes, y=y_holes,
