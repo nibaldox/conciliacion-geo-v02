@@ -401,6 +401,19 @@
     "language": "Toggle language",
     "press_esc": "Press Esc to close."
   },
+  "ai_reporter": {
+    "title": "AI Reporter",
+    "pending": "Coming soon — integration with the core/ai_v2 backend is pending.",
+    "how_it_works": "How it works",
+    "feature_sanitization": "Prompt sanitization against injection from user metadata",
+    "feature_streaming": "Streaming responses with token metrics",
+    "feature_structured": "Structured output (verdict, metrics, recommendations)",
+    "feature_tokens": "Usage tracking with real provider token propagation",
+    "backend_status": "Backend status",
+    "health_ok": "AI service available",
+    "health_unavailable": "AI service unavailable",
+    "health_pending": "Checking..."
+  },
   "profileView": {
     "header": {
       "eyebrow": "SECTION ANALYSIS",

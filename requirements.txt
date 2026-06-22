@@ -2,6 +2,7 @@ trimesh
 fast_simplification
 numpy
 scipy
+networkx>=3.0
 shapely
 openpyxl
 streamlit

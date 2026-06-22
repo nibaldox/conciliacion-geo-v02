@@ -401,6 +401,19 @@
     "language": "Cambiar idioma",
     "press_esc": "Presione Esc para cerrar."
   },
+  "ai_reporter": {
+    "title": "AI Reporter",
+    "pending": "Próximamente — la integración con el backend core/ai_v2 está pendiente.",
+    "how_it_works": "Cómo funciona",
+    "feature_sanitization": "Sanitización de prompt contra inyección desde metadata del usuario",
+    "feature_streaming": "Respuestas en streaming con métricas de tokens",
+    "feature_structured": "Output estructurado (veredicto, métricas, recomendaciones)",
+    "feature_tokens": "Tracking de usage con propagación de tokens reales del provider",
+    "backend_status": "Estado del backend",
+    "health_ok": "AI service disponible",
+    "health_unavailable": "AI service no disponible",
+    "health_pending": "Verificando..."
+  },
   "profileView": {
     "header": {
       "eyebrow": "ANÁLISIS DE SECCIÓN",

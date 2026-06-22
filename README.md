@@ -97,6 +97,15 @@ uvicorn api.main:app --reload --port 8000
 cd web && npm install && npm run dev    # → http://localhost:5173
 ```
 
+> **Troubleshooting (Linux):** Si `npm run dev` falla con
+> `Cannot find module '@rollup/rollup-linux-x64-gnu'`, ejecuta
+> `npm install @rollup/rollup-linux-x64-gnu@^4.34.0 --save-dev`.
+> Rollup es nativo, necesita el binario específico para tu plataforma.
+> Ver `package.json#optionalDependencies` para todas las plataformas
+> soportadas.
+
+```
+
 ### 2. Streamlit (the maintainer uses this daily) — `app.py`
 
 Single-file Streamlit app, no separate backend. **Not touched by
