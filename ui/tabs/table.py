@@ -21,22 +21,12 @@ def render_tab_table() -> None:
     df = _apply_filters(df)
     df = _apply_sorting(df, sort_option)
 
-    display_cols = {
-        'sector': 'Sector', 'section': 'Sección', 'bench_num': 'Banco',
-        'level': 'Nivel', 'height_design': 'H. Diseño', 'height_real': 'H. Real',
-        'height_dev': 'Desv. H', 'height_status': 'Cumpl. H',
-        'angle_design': 'Á. Diseño', 'angle_real': 'Á. Real',
-        'angle_dev': 'Desv. Á', 'angle_status': 'Cumpl. Á',
-        'berm_design': 'B. Diseño', 'berm_real': 'B. Real',
-        'berm_min': 'B. Mínima', 'berm_status': 'Cumpl. B',
-        'spill_width': 'B. Derrame', 'effective_berm': 'B. Efectiva',
-        'delta_crest': 'Δ Cresta', 'delta_toe': 'Δ Pata',
-    }
-    cols_to_keep = [c for c in df.columns if c in display_cols]
-    df_display = df[cols_to_keep].rename(columns=display_cols)
+    from ui.labels import DISPLAY_COLUMNS, highlight_status, select_display_columns
+    cols_to_keep = select_display_columns(list(df.columns))
+    df_display = df[cols_to_keep].rename(columns=DISPLAY_COLUMNS)
     df_display = _format_numeric(df_display)
     styled = df_display.style.map(
-        _highlight_status, subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
+        highlight_status, subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
     st.dataframe(styled, use_container_width=True, height=400)
 
 

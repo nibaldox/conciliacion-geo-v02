@@ -2,7 +2,9 @@
 MiniMax, GLM, Grok — anything that exposes an OpenAI-style /v1 endpoint."""
 from __future__ import annotations
 
-from openai import AsyncOpenAI
+import httpx
+
+from openai import APIConnectionError, APIError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from core.ai_v2.providers.base import BaseProvider
@@ -74,12 +76,12 @@ class OpenAICompatibleProvider(BaseProvider):
         try:
             models = await self._client.models.list()
             return [m.id for m in models.data]
-        except Exception:
+        except (APIConnectionError, APIError, httpx.HTTPError, OSError, ValueError):
             return []
 
     async def health_check(self) -> bool:
         try:
             await self._client.models.list()
             return True
-        except Exception:
+        except (APIConnectionError, APIError, httpx.HTTPError, OSError, ValueError):
             return False

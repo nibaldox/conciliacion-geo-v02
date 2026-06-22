@@ -50,7 +50,9 @@ def cut_mesh_with_section(mesh: trimesh.Trimesh, section: SectionLine) -> Option
         lines = trimesh.intersections.mesh_plane(
             mesh, plane_normal, plane_origin
         )
-    except Exception:
+    except (ValueError, np.linalg.LinAlgError, AttributeError):
+        # trimesh raises ValueError for malformed planes and numpy for
+        # degenerate geometry. AttributeError covers bad mesh objects.
         return None
 
     if lines is None or len(lines) == 0:

@@ -26,6 +26,11 @@ from core.ai_v2.providers import (
 )
 from core.ai_v2.service import stream_report
 from ui.filters import apply_comparison_filters
+from ui.state_keys import (
+    StateKey,
+    ai_v2_key_for,
+    ai_v2_key_input_for,
+)
 
 
 PROVIDER_LABELS: dict[str, str] = {
@@ -133,7 +138,7 @@ def _resolve_api_key(ptype: ProviderType) -> str:
     env_val = os.environ.get(env_var, "")
     if env_val:
         return env_val
-    return st.session_state.get(f"ai_v2_key_{ptype.value}", "")
+    return st.session_state.get(ai_v2_key_for(ptype.value), "")
 
 
 def _render_settings() -> tuple[ProviderType, str, AIConfig, OpenAICompatibleProvider]:
@@ -144,30 +149,30 @@ def _render_settings() -> tuple[ProviderType, str, AIConfig, OpenAICompatiblePro
         options=[p.value for p in ProviderType],
         index=0,
         format_func=lambda n: PROVIDER_LABELS.get(n or "", n or ""),
-        key="ai_v2_provider",
+        key=StateKey.AI_V2_PROVIDER,
     )
     ptype = ProviderType(provider_name)
     default_model = ProviderRegistry.get_default_model(ptype)
     model = cols[1].text_input(
-        "Modelo", value=default_model, key="ai_v2_model"
+        "Modelo", value=default_model, key=StateKey.AI_V2_MODEL
     )
     temperature = cols[2].slider(
-        "Temperatura", 0.0, 2.0, 0.3, 0.05, key="ai_v2_temperature"
+        "Temperatura", 0.0, 2.0, 0.3, 0.05, key=StateKey.AI_V2_TEMPERATURE
     )
 
     if ptype.value in PROVIDERS_NEEDING_KEY:
-        st.session_state.setdefault(f"ai_v2_key_{ptype.value}", "")
+        st.session_state.setdefault(ai_v2_key_for(ptype.value), "")
         api_key = st.text_input(
             f"🔑 {PROVIDER_ENV_VAR[ptype.value]}",
-            value=st.session_state[f"ai_v2_key_{ptype.value}"],
+            value=st.session_state[ai_v2_key_for(ptype.value)],
             type="password",
-            key=f"ai_v2_key_input_{ptype.value}",
+            key=ai_v2_key_input_for(ptype.value),
             help=(
                 f"Puedes dejar vacío si ya configuraste la variable "
                 f"de entorno {PROVIDER_ENV_VAR[ptype.value]} en tu shell."
             ),
         )
-        st.session_state[f"ai_v2_key_{ptype.value}"] = api_key
+        st.session_state[ai_v2_key_for(ptype.value)] = api_key
         if not _resolve_api_key(ptype):
             st.warning(
                 f"⚠️ No se detectó API key para {ptype.value}. "
@@ -178,14 +183,14 @@ def _render_settings() -> tuple[ProviderType, str, AIConfig, OpenAICompatiblePro
         adv = st.columns(3)
         max_tokens = adv[0].number_input(
             "Max tokens", min_value=64, max_value=16384, value=4096, step=64,
-            key="ai_v2_max_tokens",
+            key=StateKey.AI_V2_MAX_TOKENS,
         )
         timeout_s = adv[1].number_input(
             "Timeout (s)", min_value=5.0, max_value=600.0, value=120.0, step=5.0,
-            key="ai_v2_timeout",
+            key=StateKey.AI_V2_TIMEOUT,
         )
         enable_cache = adv[2].checkbox(
-            "Usar caché", value=False, key="ai_v2_cache",
+            "Usar caché", value=False, key=StateKey.AI_V2_CACHE,
         )
 
     config = AIConfig(
@@ -211,10 +216,10 @@ def _apply_table_filters(
     returns (filtered_list, active_filters_dict). Returns the input list
     untouched if no filter is active.
     """
-    sel_sectors: list = st.session_state.get("table_filter_sector") or []
-    sel_levels: list = st.session_state.get("table_filter_level") or []
-    sel_sections: list = st.session_state.get("table_filter_section") or []
-    sel_benches: list = st.session_state.get("table_filter_bench") or []
+    sel_sectors: list = st.session_state.get(StateKey.TABLE_FILTER_SECTOR) or []
+    sel_levels: list = st.session_state.get(StateKey.TABLE_FILTER_LEVEL) or []
+    sel_sections: list = st.session_state.get(StateKey.TABLE_FILTER_SECTION) or []
+    sel_benches: list = st.session_state.get(StateKey.TABLE_FILTER_BENCH) or []
 
     active = {
         "sector": list(sel_sectors),
@@ -253,7 +258,7 @@ def _compute_blast_trend_metadata() -> dict | None:
 
     df_pozos = st.session_state.get("blast_df_clean")
     sections = st.session_state.get("sections") or []
-    comparisons = st.session_state.get("comparison_results") or []
+    comparisons = st.session_state.get(StateKey.COMPARISON_RESULTS) or []  # noqa: E501
     if df_pozos is None or len(df_pozos) == 0 or not sections:
         return None
 
@@ -351,7 +356,7 @@ def render_tab_ai(config: dict) -> None:
     """Pestaña IA con selector de provider + generación streaming."""
     st.subheader("🤖 Agente IA v2 — Informe Ejecutivo")
 
-    comparisons: list[dict] = st.session_state.get("comparison_results") or []
+    comparisons: list[dict] = st.session_state.get(StateKey.COMPARISON_RESULTS) or []  # noqa: E501
     if not comparisons:
         st.info(
             "Carga STL de diseño + topografía y ejecuta la conciliación "
@@ -386,7 +391,7 @@ def render_tab_ai(config: dict) -> None:
         return
 
     if not st.button(
-        "📝 Generar Informe Ejecutivo", type="primary", key="ai_v2_generate"
+        "📝 Generar Informe Ejecutivo", type="primary", key=StateKey.AI_V2_GENERATE
     ):
         return
 
@@ -406,7 +411,7 @@ def render_tab_ai(config: dict) -> None:
 
     def _post_stream_buttons(report_text: str) -> None:
         """Render copy + download buttons (works for full or partial report)."""
-        st.session_state["ai_v2_full_report"] = report_text
+        st.session_state[StateKey.AI_V2_FULL_REPORT] = report_text
         date_str = datetime.date.today().isoformat()
         project_name = st.session_state.get("project_name", "informe")
         file_name = f"informe_{project_name}_{date_str}.md"

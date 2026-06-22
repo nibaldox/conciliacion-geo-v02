@@ -119,7 +119,8 @@ def export_excel(
         raise
     except Exception as exc:
         logger.exception("Excel export failed")
-        raise HTTPException(500, detail=f"Excel export failed: {exc}")
+        # Surface a sanitized message; the full stack is in server logs.
+        raise HTTPException(500, detail="Excel export failed") from exc
 
 
 # ---------------------------------------------------------------------------

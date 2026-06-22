@@ -61,7 +61,7 @@ if _SENTRY_DSN:
         logger.info("Sentry enabled (dsn host: %s)", _SENTRY_DSN.split("@")[-1])
     except ImportError:
         logger.warning("SENTRY_DSN set but sentry-sdk not installed; pip install sentry-sdk[fastapi]")
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 - best-effort telemetry init
         logger.warning("Failed to init Sentry: %s", exc)
 else:
     logger.info("Sentry disabled (SENTRY_DSN not set)")
