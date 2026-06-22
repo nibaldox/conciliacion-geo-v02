@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import client from './client';
 import { useSession, DEMO_MESH_IDS } from '../stores/session';
 import type {
@@ -240,6 +240,20 @@ export function useProcessStatus() {
       const data = query.state.data;
       return data?.status === 'processing' ? 1000 : false;
     },
+  });
+}
+
+export function setDemoProcessStatus(
+  qc: QueryClient,
+  summary?: { n_sections: number; n_comparisons: number },
+): void {
+  const total = summary?.n_sections ?? 0;
+  qc.setQueryData<ProcessStatus>(['process-status'], {
+    status: 'complete',
+    current_section: null,
+    total_sections: total,
+    completed_sections: total,
+    n_results: summary?.n_comparisons ?? 0,
   });
 }
 

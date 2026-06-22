@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from '../../stores/session';
+import { setDemoProcessStatus } from '../../api/hooks';
 import { Button } from '../ui/Button';
 
 /**
@@ -9,9 +11,16 @@ import { Button } from '../ui/Button';
  */
 export function TryDemoButton() {
   const { demoMode, demoLoading, loadDemo } = useSession();
+  const qc = useQueryClient();
   const { t } = useTranslation();
 
   if (demoMode) return null;  // banner is enough — no need for the button
+
+  const handleClick = async () => {
+    await loadDemo();
+    const { demoData } = useSession.getState();
+    if (demoData) setDemoProcessStatus(qc, demoData.summary);
+  };
 
   return (
     <div
@@ -29,7 +38,7 @@ export function TryDemoButton() {
       <p className="text-xs text-center" style={{ color: 'var(--color-text-muted)' }}>
         {t('demo.try_subtitle')}
       </p>
-      <Button onClick={loadDemo} loading={demoLoading} className="mt-1">
+      <Button onClick={handleClick} loading={demoLoading} className="mt-1">
         {demoLoading ? t('common.loading') : t('demo.try_button')}
       </Button>
     </div>
