@@ -521,19 +521,29 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     az_col = 'Az'
     len_col = 'Len'
 
-    for idx, (_, row) in enumerate(df_pozos.iterrows()):
-        label = str(row[label_col]) if label_col and pd.notna(row[label_col]) else f"P-{idx+1}"
-        x_c = row['X']
-        y_c = row['Y']
-        z_c = row['Z_collar']
-        x_t = row['X_toe']
-        y_t = row['Y_toe']
-        z_t = row['Z_toe']
-        length = row[len_col]
-        incl = row[incl_col]
-        az = row[az_col]
-        kg = row[kg_col] if kg_col and pd.notna(row[kg_col]) else 0.0
-        pas = row['Pasadura']
+    # Use itertuples instead of iterrows: ~10x faster on large DataFrames
+    # because itertuples returns namedtuples, not Series objects.
+    for idx, row in enumerate(df_pozos.itertuples(index=False)):
+        label = (
+            str(getattr(row, label_col, None))
+            if label_col and pd.notna(getattr(row, label_col, None))
+            else f"P-{idx+1}"
+        )
+        x_c = row.X
+        y_c = row.Y
+        z_c = row.Z_collar
+        x_t = row.X_toe
+        y_t = row.Y_toe
+        z_t = row.Z_toe
+        length = getattr(row, len_col, None)
+        incl = row.Incl
+        az = row.Az
+        kg = (
+            getattr(row, kg_col, None)
+            if kg_col and pd.notna(getattr(row, kg_col, None))
+            else 0.0
+        )
+        pas = row.Pasadura
 
         row_vals = [label, x_c, y_c, z_c, x_t, y_t, z_t, length, incl, az, kg, pas]
 

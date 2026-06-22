@@ -1,6 +1,7 @@
 """Mesh loading, decimation, bounds extraction and conversion to plotly."""
 
 import logging
+import os
 
 import trimesh
 import numpy as np
@@ -8,6 +9,85 @@ import plotly.graph_objects as go
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# Default cap for mesh uploads: 200 MB. Past this size trimesh.load
+# is very slow and the file is almost certainly malformed or wrong
+# format.
+DEFAULT_MAX_MESH_SIZE_MB = 200
+
+
+class MeshValidationError(ValueError):
+    """Raised when an uploaded mesh file fails pre-load validation.
+
+    Distinct from the ValueError that trimesh may raise for a
+    malformed mesh, so callers can show a clean "your file is bad"
+    error to the user without stack traces.
+    """
+
+
+def _validate_stl_path(filepath: str, max_size_mb: int = DEFAULT_MAX_MESH_SIZE_MB) -> None:
+    """Validate file path, type, and size before passing to trimesh."""
+    if not filepath:
+        raise MeshValidationError("Ruta de archivo vacía.")
+    if not os.path.exists(filepath):
+        raise MeshValidationError(f"El archivo no existe: {filepath}")
+    if not os.path.isfile(filepath):
+        raise MeshValidationError(f"La ruta no apunta a un archivo: {filepath}")
+    size_bytes = os.path.getsize(filepath)
+    max_bytes = max_size_mb * 1024 * 1024
+    if size_bytes > max_bytes:
+        size_mb = size_bytes / (1024 * 1024)
+        raise MeshValidationError(
+            f"Archivo demasiado grande: {size_mb:.1f} MB "
+            f"(máximo permitido: {max_size_mb} MB). "
+            f"Considera exportar con menos decimales o simplificar el modelo."
+        )
+    if size_bytes == 0:
+        raise MeshValidationError("El archivo está vacío (0 bytes).")
+
+
+def _validate_stl_magic_bytes(filepath: str) -> None:
+    """Check the file starts with a valid STL header.
+
+    ASCII STL starts with "solid" (or "SOLID" for some exporters).
+    Binary STL has an 80-byte preamble + 4-byte triangle count. We
+    check the ASCII prefix as a fast pre-filter; for files that
+    don't start with "solid" we trust the trimesh parser to handle
+    the binary format.
+    """
+    try:
+        with open(filepath, "rb") as fh:
+            head = fh.read(5)
+    except OSError as exc:
+        raise MeshValidationError(f"No se pudo leer el archivo: {exc}") from exc
+    if not head:
+        raise MeshValidationError("El archivo no contiene datos (lectura devolvió 0 bytes).")
+    # 5 == "solid" in ASCII STL. If it doesn't match, we trust trimesh
+    # to determine if it's a valid binary STL (trimesh inspects the
+    # binary header more thoroughly than this check can).
+    # We only reject obvious junk like pure text files, PNG bytes, etc.
+    if head.lower() == b"solid":
+        return
+    # Heuristic: binary STL has 80 bytes of garbage + 4-byte int count.
+    # If the file is very short, it can't be a valid binary STL either.
+    try:
+        size = os.path.getsize(filepath)
+    except OSError:
+        size = 0
+    if size < 84:
+        raise MeshValidationError(
+            "El archivo no parece un STL válido "
+            f"(cabecera inesperada: {head!r}; tamaño {size} bytes)."
+        )
+
+
+def _validate_stl_contents(mesh: trimesh.Trimesh) -> None:
+    """Verify the loaded mesh has actual geometry."""
+    if not hasattr(mesh, "vertices") or not hasattr(mesh, "faces"):
+        raise MeshValidationError("El archivo no contiene una malla 3D válida.")
+    if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+        raise MeshValidationError("La malla está vacía (0 vértices o 0 caras).")
 
 
 def _load_dxf(filepath: str) -> trimesh.Trimesh:
@@ -100,21 +180,35 @@ def load_dxf_polyline(file_path: str) -> np.ndarray:
 
 
 def load_mesh(filepath: str) -> trimesh.Trimesh:
-    """Load a 3D surface mesh from STL, OBJ, PLY, or DXF file."""
+    """Load a 3D surface mesh from STL, OBJ, PLY, or DXF file.
+
+    Raises:
+        MeshValidationError: when the file is missing, too large,
+            empty, or doesn't pass the STL magic-byte check.
+        ValueError: when trimesh can parse the file but the
+            resulting mesh has no usable geometry (legacy path).
+    """
+    is_stl = str(filepath).lower().endswith(('.stl',))
+    if is_stl:
+        _validate_stl_path(filepath)
+        _validate_stl_magic_bytes(filepath)
+
     if str(filepath).lower().endswith('.dxf'):
         mesh = _load_dxf(filepath)
     else:
         mesh = trimesh.load(filepath)
-        
+
     if isinstance(mesh, trimesh.Scene):
         mesh = mesh.dump(concatenate=True)
-        
-    if not hasattr(mesh, 'vertices') or not hasattr(mesh, 'faces'):
-        raise ValueError("El archivo no contiene una malla 3D válida.")
-        
-    if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
-        raise ValueError("La malla está vacía (0 vértices o 0 caras).")
-        
+
+    if is_stl:
+        _validate_stl_contents(mesh)
+    else:
+        if not hasattr(mesh, 'vertices') or not hasattr(mesh, 'faces'):
+            raise ValueError("El archivo no contiene una malla 3D válida.")
+        if len(mesh.vertices) == 0 or len(mesh.faces) == 0:
+            raise ValueError("La malla está vacía (0 vértices o 0 caras).")
+
     return mesh
 
 

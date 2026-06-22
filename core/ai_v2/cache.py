@@ -36,10 +36,31 @@ def _cache_key(prompt: str, provider: str, model: str) -> str:
 
 
 class DiskCache:
-    def __init__(self, cache_dir: str = ".ai_v2_cache", ttl_s: int = 86400) -> None:
+    def __init__(
+        self,
+        cache_dir: str = ".ai_v2_cache",
+        ttl_s: int = 86400,
+        max_files: int | None = 1000,
+    ) -> None:
+        """Disk cache for AI agent v2 responses.
+
+        Parameters
+        ----------
+        cache_dir : str
+            Directory for cache files. Created on init if missing.
+        ttl_s : int
+            Default time-to-live in seconds.
+        max_files : int | None
+            Maximum number of files to keep in the cache. When the
+            directory exceeds this count, the oldest files (by mtime)
+            are removed after each ``put``. Pass ``None`` to disable
+            eviction (unbounded mode). Default 1000 — covers ~1 year
+            of moderate use without touching the disk.
+        """
         self._dir = Path(cache_dir)
         self._dir.mkdir(exist_ok=True)
         self._ttl_s = ttl_s
+        self._max_files = max_files
 
     def _path(self, key: str) -> Path:
         return self._dir / f"{key}.json"
@@ -114,3 +135,38 @@ class DiskCache:
                 except OSError:
                     pass
                 raise
+            if self._max_files is not None:
+                self._enforce_lru_cap()
+
+    def _enforce_lru_cap(self) -> None:
+        """Evict the oldest files (by mtime) until under the cap.
+
+        MUST be called inside ``_CACHE_LOCK`` (caller's responsibility)
+        to prevent racing with concurrent writers that might have just
+        added a new file. Files whose mtime cannot be read (broken
+        symlinks, deleted, etc.) are evicted first.
+        """
+        try:
+            paths = list(self._dir.glob("*.json"))
+        except OSError:
+            return
+        # Defensive: include any .tmp leftovers in the count so they get cleaned up.
+        all_paths = paths + list(self._dir.glob("*.tmp"))
+        if len(all_paths) <= self._max_files:
+            return
+
+        def mtime(p: Path) -> float:
+            try:
+                return p.stat().st_mtime
+            except OSError:
+                return -1.0  # broken paths sort to the front → evicted first
+
+        all_paths.sort(key=mtime)
+        excess = len(all_paths) - self._max_files
+        for p in all_paths[:excess]:
+            try:
+                p.unlink()
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
