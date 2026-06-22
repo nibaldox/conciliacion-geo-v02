@@ -412,7 +412,39 @@
     "backend_status": "Backend status",
     "health_ok": "AI service available",
     "health_unavailable": "AI service unavailable",
-    "health_pending": "Checking..."
+    "health_pending": "Checking...",
+    "ready_badge": "Ready",
+    "form": {
+      "provider_label": "Provider",
+      "model_label": "Model",
+      "notes_label": "Additional context",
+      "notes_placeholder": "Notes, operational context, assumptions…",
+      "generate_button": "Generate report",
+      "generating": "Generating…",
+      "copy_button": "Copy to clipboard"
+    },
+    "empty": {
+      "no_data_title": "No analysis data",
+      "no_data_description": "Load an analysis first or try with sample data."
+    },
+    "error": {
+      "unavailable_title": "AI service unavailable",
+      "unavailable_description": "Could not connect to the core/ai_v2 backend. Please retry later.",
+      "rate_limited": "Service busy, retry in {{seconds}}s",
+      "server_error": "Error generating report",
+      "network_error": "No connection to server"
+    },
+    "report": {
+      "title": "Generated report",
+      "tokens_label": "Tokens: {{prompt}} prompt + {{completion}} completion = {{total}} total",
+      "cached_badge": "served from cache",
+      "estimated_badge": "estimated"
+    },
+    "health": {
+      "ok": "AI service available",
+      "unavailable": "AI service unavailable",
+      "pending": "Checking..."
+    }
   },
   "profileView": {
     "header": {
