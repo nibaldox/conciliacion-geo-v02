@@ -42,6 +42,9 @@ import { type UseCrossLinkStateApi } from '../application';
 import type { SpillBench } from '../domain/mapping';
 import { STATUS_BG_VAR, STATUS_FG_VAR, STATUS_BORDER_VAR, STATUS_ICON } from '../domain/status';
 import { useTheme } from '../../../../stores/theme';
+import { useSession } from '../../../../stores/session';
+import { useBlastHoles } from '../../../../api/hooks';
+import type { BlastHoleOnProfile } from '../../../../api/types';
 
 export interface ProfileChartProps {
   readonly viewModel: ProfileViewModel;
@@ -55,6 +58,19 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
   const { isDark } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
+  // Blast holes: projected markers from the backend. The hook is
+  // enabled only when the user toggles `showBlastHoles` on. Mesh id
+  // comes from the session store (topo = as-built, which is what
+  // blast holes are drilled into). `buildTraces` receives the raw
+  // holes array so it stays a pure, testable function.
+  const topoMeshId = useSession((s) => s.topoMeshId);
+  const blastQuery = useBlastHoles(
+    viewModel.section.id,
+    topoMeshId,
+    filterState.blastTolerance,
+    filterState.showBlastHoles,
+  );
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -71,9 +87,10 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
   }, []);
 
   // ── 1. Build the data array (pure derivation) ─────────────
+  const blastHoles = blastQuery.data?.holes;
   const data = useMemo<Data[]>(
-    () => buildTraces(viewModel, filterState, crossLink, isDark),
-    [viewModel, filterState, crossLink, isDark],
+    () => buildTraces(viewModel, filterState, crossLink, isDark, blastHoles),
+    [viewModel, filterState, crossLink, isDark, blastHoles],
   );
 
   // ── 2. Build the layout (pure, depends on viewModel + theme) ─
@@ -339,6 +356,7 @@ export function buildTraces(
   filterState: FilterState,
   crossLink: UseCrossLinkStateApi,
   isDark: boolean,
+  blastHoles?: readonly BlastHoleOnProfile[],
 ): Data[] {
   const traces: Data[] = [];
 
@@ -397,6 +415,13 @@ export function buildTraces(
 
   // 6. Bench markers — split by status when showSemaphore, else one trace
   traces.push(...buildBenchMarkers(vm.benches, filterState, crossLink));
+
+  // 7. Blast-hole markers — projected pozos de tronadura.
+  //    The caller passes these in from the `useBlastHoles` hook;
+  //    undefined/empty is the no-data case and emits nothing.
+  if (blastHoles && blastHoles.length > 0) {
+    traces.push(buildBlastHolesTrace(blastHoles));
+  }
 
   return traces;
 }
@@ -553,6 +578,39 @@ function buildSpillAreaTraces(
     });
   }
   return traces;
+}
+
+/**
+ * Build a single marker trace holding every projected blast hole.
+ *
+ * One trace (not one per hole) is intentional: Plotly handles
+ * per-point colours via the `marker.color` array, and a single
+ * trace keeps the legend clean and the chart light. Green markers
+ * are within `tolerance` of the section line; red ones are outside.
+ *
+ * `customdata` carries `[burden, spacing]` so the hovertemplate can
+ * show both numbers without bloating `text`.
+ */
+function buildBlastHolesTrace(
+  blastHoles: readonly BlastHoleOnProfile[],
+): Partial<Plotly.PlotData> {
+  return {
+    type: 'scatter',
+    mode: 'markers',
+    name: 'Pozos de tronadura',
+    x: blastHoles.map((h) => h.distance),
+    y: blastHoles.map((h) => h.elevation),
+    marker: {
+      color: blastHoles.map((h) => (h.is_within_tolerance ? '#22c55e' : '#ef4444')),
+      size: 8,
+      symbol: 'diamond',
+    },
+    text: blastHoles.map((h) => `Hole ${h.hole_id}`),
+    hovertemplate:
+      '<b>%{text}</b><br>burden=%{customdata[0]:.2f}m<br>spacing=%{customdata[1]:.2f}m<extra></extra>',
+    customdata: blastHoles.map((h) => [h.burden, h.spacing]),
+    showlegend: true,
+  };
 }
 
 function buildBenchMarkers(

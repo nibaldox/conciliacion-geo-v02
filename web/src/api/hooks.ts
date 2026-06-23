@@ -17,6 +17,7 @@ import type {
   SettingsResponse,
   VerticesResponse,
   ContourData,
+  BlastHolesOnProfileResponse,
 } from './types';
 
 // ─── Demo data helpers ──────────────────────────────────────
@@ -329,6 +330,52 @@ export function useUpdateReconciled() {
       qc.invalidateQueries({ queryKey: ['profile', vars.sectionId] });
       qc.invalidateQueries({ queryKey: ['results'] });
     },
+  });
+}
+
+// ─── Blast holes (per-profile projection) ──────────────────
+
+/**
+ * Fetch the blast-hole markers projected onto a single section profile.
+ *
+ * Wraps `GET /process/profiles/{sectionId}/blast-holes?mesh_id=&tolerance=`.
+ * The hook is gated by `enabled` so callers can tie it to
+ * `filterState.showBlastHoles`; we keep the FilterState type out of this
+ * module to avoid leaking the ProfileView domain into the API layer.
+ *
+ * Demo mode short-circuits to an empty hole list: the precomputed demo
+ * payload has no blast-hole data, so we never hit the (non-existent on
+ * GitHub Pages) backend.
+ *
+ * `staleTime` is 5 min so toggling the filter off/on does not refetch.
+ */
+export function useBlastHoles(
+  sectionId: string | null,
+  meshId: string | null,
+  tolerance: number,
+  enabled: boolean,
+) {
+  const { demoMode, demoData, designMeshId } = useSession();
+  return useQuery({
+    queryKey: ['blast-holes', sectionId, meshId, tolerance, demoMode, designMeshId],
+    queryFn: async () => {
+      if (demoMode && demoData && isDemoMeshId(designMeshId)) {
+        return {
+          section_id: sectionId ?? '',
+          mesh_id: meshId ?? '',
+          tolerance,
+          holes: [],
+        } satisfies BlastHolesOnProfileResponse;
+      }
+      return client
+        .get<BlastHolesOnProfileResponse>(
+          `/process/profiles/${sectionId}/blast-holes`,
+          { params: { mesh_id: meshId ?? '', tolerance } },
+        )
+        .then(r => r.data);
+    },
+    enabled: enabled && sectionId !== null,
+    staleTime: 5 * 60 * 1000,
   });
 }
 
