@@ -424,7 +424,26 @@
       "notes_placeholder": "Notas, contexto operativo, supuestos…",
       "generate_button": "Generar informe",
       "generating": "Generando…",
-      "copy_button": "Copiar al portapapeles"
+      "copy_button": "Copiar al portapapeles",
+      "download_button": "Descargar .md"
+    },
+    "advanced": {
+      "toggle": "Avanzado",
+      "temperature_label": "Temperatura",
+      "max_tokens_label": "Máx. tokens",
+      "timeout_label": "Timeout (s)",
+      "cache_label": "Usar caché"
+    },
+    "filters": {
+      "toggle": "Filtros",
+      "sector_label": "Sector",
+      "section_label": "Sección",
+      "bench_label": "Banco"
+    },
+    "stream": {
+      "label": "Modo de respuesta",
+      "single": "Respuesta única",
+      "stream": "Transmitir token a token"
     },
     "empty": {
       "no_data_title": "Sin datos de análisis",
@@ -440,6 +459,8 @@
     "report": {
       "title": "Informe generado",
       "tokens_label": "Tokens: {{prompt}} prompt + {{completion}} completion = {{total}} total",
+      "tps_label": "{{tps}} tok/s",
+      "cost_label": "Costo estimado ${{cost}}",
       "cached_badge": "served from cache",
       "estimated_badge": "estimado"
     },

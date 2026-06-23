@@ -72,9 +72,20 @@ class AIRequest(BaseModel):
         settings: Optional tolerances / project metadata.
         provider: Lowercase provider name (validated against the registry set).
         model: Provider-specific model identifier (e.g. ``llama3.1:8b``).
+        notes: Optional free-text note from the user (wire parity with the
+            Streamlit tab; currently passed through, not rendered by the
+            builder which is off-limits to this change).
+        context: Optional free-form context dict (parity slot; the builder
+            consumes ``metadata`` for rendered context today).
         stream: If ``True`` (default), yield chunks; else return one chunk.
         use_cache: If ``True`` (default), consult the disk cache when enabled.
         metadata: Free-form per-call data (``user_id``, ``session_id``, ...).
+        max_tokens: Advanced override for the provider ``max_tokens``.
+        temperature: Advanced override for the provider ``temperature`` (0.0-2.0).
+        timeout_s: Advanced override for the provider request ``timeout_s``.
+        filters: Optional active table filters (sector/section/level/bench).
+        blast_trend: Optional blast-trend metadata block merged into the prompt;
+            falls back to ``metadata['blast_trend']`` for backwards compat.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -84,9 +95,16 @@ class AIRequest(BaseModel):
     settings: dict | None = None
     provider: str
     model: str
+    notes: str | None = None
+    context: dict | None = None
     stream: bool = True
     use_cache: bool = True
     metadata: dict = Field(default_factory=dict)
+    max_tokens: int | None = Field(default=None, gt=0)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    timeout_s: float | None = Field(default=None, gt=0)
+    filters: dict | None = None
+    blast_trend: dict | None = None
 
     @field_validator("provider")
     @classmethod

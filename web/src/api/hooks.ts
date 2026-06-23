@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import client from './client';
+import { useCallback, useRef, useState } from 'react';
+import client, { getSessionId } from './client';
 import { useSession, DEMO_MESH_IDS, type DemoData } from '../stores/session';
 import type {
   MeshInfo,
@@ -18,6 +19,9 @@ import type {
   VerticesResponse,
   ContourData,
   BlastHolesOnProfileResponse,
+  AIGenerateRequest,
+  AIResponseChunk,
+  AIUsageMetrics,
 } from './types';
 
 // ─── Demo data helpers ──────────────────────────────────────
@@ -536,6 +540,92 @@ export function useAIModels(provider: string | null) {
     enabled: !!provider,
     staleTime: 60_000,
   });
+}
+
+/** Callbacks delivered by {@link useGenerateAIStream} as the NDJSON stream
+ *  produced by `POST /ai/generate/stream` is parsed. */
+export interface AIStreamCallbacks {
+  onChunk?: (accumulated: string, chunk: AIResponseChunk) => void;
+  onDone?: (fullText: string, usage: AIUsageMetrics | null, cached: boolean) => void;
+  onError?: (err: unknown) => void;
+}
+
+/**
+ * Stream an AI report token-by-token from `POST /ai/generate/stream`.
+ *
+ * Uses the native `fetch` ReadableStream API (axios does not expose a
+ * streaming body reader uniformly). The session ID and base URL mirror the
+ * axios client so auth/routing stay consistent. Errors are thrown in the
+ * same `{ response: { status, data } }` shape `classifyError` expects so
+ * callers can reuse the existing error UI.
+ */
+export function useGenerateAIStream() {
+  const [isPending, setPending] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const stream = useCallback(async (body: AIGenerateRequest, cb: AIStreamCallbacks) => {
+    setPending(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const base = (client.defaults.baseURL || '/api/v1').replace(/\/$/, '');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const sid = getSessionId();
+      if (sid) headers['X-Session-ID'] = sid;
+      const res = await fetch(`${base}/ai/generate/stream`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) {
+        const detail = await res.json().catch(() => ({} as { detail?: string }));
+        throw { response: { status: res.status, data: detail } };
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let full = '';
+      let usage: AIUsageMetrics | null = null;
+      let cached = false;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          const chunk = JSON.parse(trimmed) as AIResponseChunk;
+          if (chunk.cached) cached = true;
+          if (chunk.usage) usage = chunk.usage;
+          if (chunk.content) {
+            full += chunk.content;
+            cb.onChunk?.(full, chunk);
+          }
+          if (chunk.finish_reason === 'error') {
+            throw { response: { status: 502, data: { detail: chunk.content } } };
+          }
+        }
+      }
+      cb.onDone?.(full, usage, cached);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      cb.onError?.(err);
+    } finally {
+      setPending(false);
+      abortRef.current = null;
+    }
+  }, []);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setPending(false);
+  }, []);
+
+  return { stream, cancel, isPending };
 }
 
 

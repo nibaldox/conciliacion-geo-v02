@@ -216,3 +216,54 @@ export interface BlastHolesOnProfileResponse {
   tolerance: number;
   holes: BlastHoleOnProfile[];
 }
+
+// AI reporter (core/ai_v2)
+export interface AIUsageMetrics {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  is_synthetic: boolean;
+  duration_ms?: number;
+  cost_usd?: number | null;
+}
+
+export type AIFinishReason = 'stop' | 'length' | 'error';
+
+export interface AIResponseChunk {
+  content: string;
+  finish_reason: AIFinishReason | null;
+  usage: AIUsageMetrics | null;
+  cached: boolean;
+  chunk_index: number;
+}
+
+export interface AIFilters {
+  sector?: string[];
+  section?: string[];
+  level?: string[];
+  bench?: number[];
+}
+
+export interface AIAdvancedSettings {
+  temperature: number;
+  max_tokens: number;
+  timeout_s: number;
+  use_cache: boolean;
+}
+
+export interface AIGenerateRequest {
+  results: Record<string, unknown>;
+  sections: SectionResponse[] | null;
+  provider: string;
+  model: string;
+  stream: boolean;
+  metadata: Record<string, unknown>;
+  notes?: string;
+  context?: Record<string, unknown>;
+  max_tokens?: number;
+  temperature?: number;
+  timeout_s?: number;
+  use_cache?: boolean;
+  filters?: AIFilters;
+  blast_trend?: Record<string, unknown>;
+}

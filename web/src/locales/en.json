@@ -424,7 +424,26 @@
       "notes_placeholder": "Notes, operational context, assumptions…",
       "generate_button": "Generate report",
       "generating": "Generating…",
-      "copy_button": "Copy to clipboard"
+      "copy_button": "Copy to clipboard",
+      "download_button": "Download .md"
+    },
+    "advanced": {
+      "toggle": "Advanced",
+      "temperature_label": "Temperature",
+      "max_tokens_label": "Max tokens",
+      "timeout_label": "Timeout (s)",
+      "cache_label": "Use cache"
+    },
+    "filters": {
+      "toggle": "Filters",
+      "sector_label": "Sector",
+      "section_label": "Section",
+      "bench_label": "Bench"
+    },
+    "stream": {
+      "label": "Response mode",
+      "single": "Single response",
+      "stream": "Stream token-by-token"
     },
     "empty": {
       "no_data_title": "No analysis data",
@@ -440,6 +459,8 @@
     "report": {
       "title": "Generated report",
       "tokens_label": "Tokens: {{prompt}} prompt + {{completion}} completion = {{total}} total",
+      "tps_label": "{{tps}} tok/s",
+      "cost_label": "Estimated cost ${{cost}}",
       "cached_badge": "served from cache",
       "estimated_badge": "estimated"
     },

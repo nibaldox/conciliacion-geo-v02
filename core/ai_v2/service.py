@@ -42,7 +42,9 @@ async def stream_report(
         enable_usage_tracking = getattr(config, "enable_usage_tracking", True)
 
     provider = provider or _default_provider(request)
-    blast_trend = request.metadata.get("blast_trend") if request.metadata else None
+    blast_trend = request.blast_trend or (
+        request.metadata.get("blast_trend") if request.metadata else None
+    )
     metadata = request.metadata or {}
     system, user = build_analysis_prompt(
         results=request.results.get("comparisons", [])

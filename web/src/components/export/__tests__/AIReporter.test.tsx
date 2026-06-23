@@ -7,9 +7,10 @@ import { I18nextProvider } from 'react-i18next';
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
-const { mockGet, mockPost } = vi.hoisted(() => ({
+const { mockGet, mockPost, mockFetch } = vi.hoisted(() => ({
   mockGet: vi.fn(),
   mockPost: vi.fn(),
+  mockFetch: vi.fn(),
 }));
 
 vi.mock('../../../api/client', () => ({
@@ -18,7 +19,9 @@ vi.mock('../../../api/client', () => ({
     post: (...args: unknown[]) => mockPost(...args),
     put: vi.fn(async () => ({ data: {} })),
     delete: vi.fn(async () => ({ data: {} })),
+    defaults: { baseURL: '/api/v1' },
   },
+  getSessionId: () => null,
 }));
 
 import { AIReporter } from '../AIReporter';
@@ -50,6 +53,25 @@ i18n.use(initReactI18next).init({
             generate_button: 'Generar informe',
             generating: 'Generando...',
             copy_button: 'Copiar al portapapeles',
+            download_button: 'Descargar .md',
+          },
+          advanced: {
+            toggle: 'Avanzado',
+            temperature_label: 'Temperatura',
+            max_tokens_label: 'Máx. tokens',
+            timeout_label: 'Timeout (s)',
+            cache_label: 'Usar caché',
+          },
+          filters: {
+            toggle: 'Filtros',
+            sector_label: 'Sector',
+            section_label: 'Sección',
+            bench_label: 'Banco',
+          },
+          stream: {
+            label: 'Modo de respuesta',
+            single: 'Respuesta única',
+            stream: 'Transmitir token a token',
           },
           empty: {
             no_data_title: 'Sin datos de análisis',
@@ -67,6 +89,8 @@ i18n.use(initReactI18next).init({
             title: 'Informe generado',
             tokens_label:
               'Tokens: {{prompt}} prompt + {{completion}} completion = {{total}} total',
+            tps_label: '{{tps}} tok/s',
+            cost_label: 'Costo estimado ${{cost}}',
             cached_badge: 'served from cache',
             estimated_badge: 'estimado',
           },
@@ -120,11 +144,14 @@ describe('AIReporter', () => {
     });
     mockGet.mockReset();
     mockPost.mockReset();
+    mockFetch.mockReset();
+    vi.stubGlobal('fetch', mockFetch);
     useSession.getState().reset();
   });
 
   afterEach(() => {
     useSession.getState().reset();
+    vi.unstubAllGlobals();
   });
 
   function setupHealthy(options?: { results?: unknown[] }) {
@@ -253,5 +280,134 @@ describe('AIReporter', () => {
         stream: false,
       }),
     );
+  });
+
+  it('renders the advanced section temperature slider when expanded', async () => {
+    setupHealthy();
+
+    renderWith(<AIReporter />, qc);
+
+    await screen.findByTestId('ai-reporter-form');
+    await userEvent.click(screen.getByTestId('ai-advanced').querySelector('button')!);
+    const temperature = await screen.findByTestId('ai-temperature');
+    expect(temperature).toBeInTheDocument();
+    expect((temperature as HTMLInputElement).type).toBe('range');
+  });
+
+  it('uses the streaming endpoint when stream mode is selected', async () => {
+    setupHealthy();
+    function ndjsonBody(chunks: Array<Record<string, unknown>>) {
+      const enc = new TextEncoder();
+      const lines = chunks.map((c) => JSON.stringify(c));
+      return new ReadableStream({
+        start(controller) {
+          lines.forEach((l) => controller.enqueue(enc.encode(l + '\n')));
+          controller.close();
+        },
+      });
+    }
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: ndjsonBody([
+        { content: 'Hola ', finish_reason: null, usage: null, cached: false, chunk_index: 0 },
+        {
+          content: '',
+          finish_reason: 'stop',
+          usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3, is_synthetic: false },
+          cached: false,
+          chunk_index: 1,
+        },
+      ]),
+      json: async () => ({}),
+    } as unknown as Response);
+
+    const user = userEvent.setup();
+    renderWith(<AIReporter />, qc);
+
+    await screen.findByTestId('ai-reporter-form');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generar informe' })).toBeEnabled();
+    });
+    await user.click(screen.getByTestId('ai-stream-toggle-stream'));
+    await user.click(screen.getByRole('button', { name: 'Generar informe' }));
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        '/api/v1/ai/generate/stream',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('ai-reporter-content')).toHaveTextContent('Hola');
+    });
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it('downloads the report as markdown when the download button is clicked', async () => {
+    setupHealthy();
+    mockPost.mockResolvedValueOnce({
+      data: {
+        content: '## Informe\nCumple.',
+        finish_reason: 'stop',
+        usage: null,
+        cached: false,
+        chunk_index: 0,
+      },
+    });
+    const createUrlSpy = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:fake');
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+
+    const user = userEvent.setup();
+    renderWith(<AIReporter />, qc);
+
+    await screen.findByTestId('ai-reporter-form');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generar informe' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: 'Generar informe' }));
+    await screen.findByTestId('ai-reporter-result');
+
+    await user.click(screen.getByTestId('ai-download-md'));
+
+    expect(createUrlSpy).toHaveBeenCalledTimes(1);
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    createUrlSpy.mockRestore();
+    clickSpy.mockRestore();
+  });
+
+  it('shows tokens-per-second in the usage summary after generation', async () => {
+    setupHealthy();
+    mockPost.mockResolvedValueOnce({
+      data: {
+        content: '## Informe\nTexto.',
+        finish_reason: 'stop',
+        usage: {
+          prompt_tokens: 100,
+          completion_tokens: 50,
+          total_tokens: 150,
+          is_synthetic: false,
+        },
+        cached: false,
+        chunk_index: 0,
+      },
+    });
+
+    const user = userEvent.setup();
+    renderWith(<AIReporter />, qc);
+
+    await screen.findByTestId('ai-reporter-form');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generar informe' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: 'Generar informe' }));
+
+    const tps = await screen.findByTestId('ai-reporter-tps');
+    expect(tps).toBeInTheDocument();
+    expect(tps.textContent).toMatch(/tok\/s/);
   });
 });
