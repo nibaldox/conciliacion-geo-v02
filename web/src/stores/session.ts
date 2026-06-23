@@ -78,11 +78,12 @@ interface SessionState {
   designMeshId: string | null;
   topoMeshId: string | null;
 
-  // Filters for results table
+  // Filters for results table and dashboard
   filters: {
     sector: string[];
     section: string[];
     level: string[];
+    bench: number[];
   };
 
   // ── Demo mode ───────────────────────────────────────────
@@ -122,7 +123,7 @@ const initialState = {
   selectedSection: null,
   designMeshId: null,
   topoMeshId: null,
-  filters: { sector: [], section: [], level: [] },
+  filters: { sector: [], section: [], level: [], bench: [] },
   demoMode: false,
   demoData: null,
   demoLoading: false,
@@ -151,7 +152,7 @@ export const useSession = create<SessionState>((set, get) => ({
   setDesignMeshId: (id) => set({ designMeshId: id }),
   setTopoMeshId: (id) => set({ topoMeshId: id }),
   setFilters: (filters) => set((s) => ({ filters: { ...s.filters, ...filters } })),
-  resetFilters: () => set({ filters: { sector: [], section: [], level: [] } }),
+  resetFilters: () => set({ filters: { sector: [], section: [], level: [], bench: [] } }),
 
   loadDemo: async () => {
     // Re-use already-loaded data so clicking twice doesn't refetch.
