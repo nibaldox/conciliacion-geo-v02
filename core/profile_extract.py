@@ -783,13 +783,21 @@ def _build_reconciled_points(
             segment_type="toe",
             source=source,
         ))
+        # Only emit a berm_top corner when the next bench's crest sits at
+        # or above this bench's toe. When the next bench is lower
+        # (over-excavation, irregular slope), emitting berm_top would
+        # make the stair-step descend from the current toe down to the
+        # next crest and hide the real pata del banco. Skipping it lets
+        # the renderer draw a straight oblique toe -> next-crest line,
+        # which matches the expected geometry.
         if not b.is_ramp and idx + 1 < len(benches):
             next_b = benches[idx + 1]
-            pts.append(ReconciledPoint(
-                distance=float(b.toe_distance),
-                elevation=float(next_b.crest_elevation),
-                bench_number=int(b.bench_number),
-                segment_type="berm_top",
-                source=source,
-            ))
+            if next_b.crest_elevation >= b.toe_elevation:
+                pts.append(ReconciledPoint(
+                    distance=float(b.toe_distance),
+                    elevation=float(next_b.crest_elevation),
+                    bench_number=int(b.bench_number),
+                    segment_type="berm_top",
+                    source=source,
+                ))
     return pts

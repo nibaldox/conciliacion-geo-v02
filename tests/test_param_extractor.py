@@ -304,8 +304,16 @@ class TestExtractParameters:
             ),
         ]
         prof = build_reconciled_profile_v2(benches)
-        # Orden topológico: banco 1 → banco 2 (la lista ya viene en orden correcto)
-        assert len(prof.points) == 5
+        # Orden topológico: banco 1 → banco 2 (la lista ya viene en orden correcto).
+        # 4 puntos (no 5): el banco 2 (crest=70) está por debajo del toe del
+        # banco 1 (z=85), así que _build_reconciled_points omite el berm_top
+        # (guard contra descenso) y la polilínea baja en oblicuo toe1→crest2.
+        assert len(prof.points) == 4
+        types = [p.segment_type for p in prof.points]
+        assert types == ["crest", "toe", "crest", "toe"], (
+            f"Secuencia inesperada: {types}"
+        )
+        assert "berm_top" not in types
         # El primer punto debe pertenecer al banco 1 (crest en x=80, z=100)
         assert prof.points[0].bench_number == 1
         assert np.isclose(prof.points[0].distance, 80.0)

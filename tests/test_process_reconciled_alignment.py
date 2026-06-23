@@ -143,7 +143,15 @@ class TestGeometryEquivalence:
         assert list(legacy_e[1::2]) == pytest.approx([p.elevation for p in toe_pts])
 
     def test_v2_emits_extra_berm_top_legacy_does_not(self):
-        benches = _two_well_formed_benches()
+        # Ascending pair (next crest >= current toe) so a berm_top corner IS
+        # expected. The shared _two_well_formed_benches() fixture is a
+        # descending wall, for which _build_reconciled_points now correctly
+        # skips berm_top (guard against descent) — so we build a local
+        # ascending pair here to keep testing the "v2 emits berm_top" contract.
+        benches = [
+            _bench(1, 10.0, 100.0, 15.0, 85.0),
+            _bench(2, 25.0, 88.0, 30.0, 70.0),
+        ]
         legacy_d, _ = build_reconciled_profile(benches)
         rich = build_reconciled_profile_v2(benches, source="topo")
 
