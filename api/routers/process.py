@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 import trimesh
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, HTTPException, Request
@@ -36,7 +37,8 @@ from core.param_extractor import (
     ReconciledPoint,
     build_reconciled_profile_v2,
 )
-from core.config import DETECTION, TOLERANCES as DEFAULT_TOLERANCES
+from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
 logger = logging.getLogger(__name__)
 
@@ -588,3 +590,198 @@ def update_reconciled(
     except Exception as exc:
         logger.exception("Update reconciled failed")
         raise HTTPException(500, detail=f"Update reconciled failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Blast-hole helpers + GET /process/profiles/{section_id}/blast-holes
+# ---------------------------------------------------------------------------
+
+
+def _load_session_blast_holes(session_id: str) -> Optional[pd.DataFrame]:
+    """Load the session's blast holes as a DataFrame.
+
+    Holes are stored in the session settings dict under the ``"blast_holes"``
+    key (a list of plain dicts). This key is populated by the blast-upload
+    flow (gap G11 in ``docs/UI_PARITY_AUDIT.md``); until that flow lands the
+    endpoint returns an empty hole list.
+
+    Returns ``None`` when the key is absent, empty, or malformed; otherwise a
+    DataFrame whose columns include at least ``X`` and ``Y``.
+    """
+    settings = db.get_settings(session_id) or {}
+    raw = settings.get("blast_holes")
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        df = pd.DataFrame(raw)
+    except Exception:
+        return None
+    if not {"X", "Y"}.issubset(df.columns):
+        return None
+    return df
+
+
+def _projected_to_holes(
+    projected: pd.DataFrame,
+    tolerance: float,
+) -> List[schemas.BlastHoleOnProfile]:
+    """Map a projected blast-hole DataFrame to ``BlastHoleOnProfile`` schemas.
+
+    ``projected`` is the output of
+    :func:`core.calculo_tronadura.proyectar_pozos_en_seccion`: each row carries
+    ``dist_along`` (along-section distance), ``dist_perp`` (perpendicular
+    distance), and the original hole columns (``Z_collar``, ``Burden``, ``Esp``
+    …) when present.
+
+    ``spacing`` falls back to the nearest-neighbour collar distance when the
+    ``Esp`` column is missing. ``burden`` defaults to 0 when absent.
+    """
+    if projected is None or projected.empty:
+        return []
+
+    cols = set(projected.columns)
+    has_hole_id = "hole_id" in cols
+    has_burden = "Burden" in cols
+    has_esp = "Esp" in cols
+    has_z_collar = "Z_collar" in cols
+
+    spacing_fallback: Optional[List[float]] = None
+    if not has_esp and len(projected) > 1:
+        coords = projected[["X", "Y"]].to_numpy(dtype=float)
+        spacing_fallback = []
+        for i in range(len(coords)):
+            best = float("inf")
+            for j in range(len(coords)):
+                if i == j:
+                    continue
+                d = float(np.hypot(coords[i, 0] - coords[j, 0],
+                                   coords[i, 1] - coords[j, 1]))
+                if d < best:
+                    best = d
+            spacing_fallback.append(best)
+
+    out: List[schemas.BlastHoleOnProfile] = []
+    for i, row in enumerate(projected.itertuples(index=False)):
+        d_perp = float(getattr(row, "dist_perp", 0.0))
+
+        if has_burden:
+            burden_raw = getattr(row, "Burden", 0.0)
+            burden = float(burden_raw) if pd.notna(burden_raw) else 0.0
+        else:
+            burden = 0.0
+
+        if has_esp:
+            esp_raw = getattr(row, "Esp", None)
+            spacing = float(esp_raw) if esp_raw is not None and pd.notna(esp_raw) else 0.0
+        elif spacing_fallback is not None:
+            spacing = spacing_fallback[i]
+        else:
+            spacing = 0.0
+
+        if has_z_collar:
+            z_raw = getattr(row, "Z_collar", 0.0)
+            elevation = float(z_raw) if pd.notna(z_raw) else 0.0
+        else:
+            elevation = 0.0
+
+        hole_id = str(getattr(row, "hole_id", i)) if has_hole_id else str(i)
+
+        out.append(schemas.BlastHoleOnProfile(
+            hole_id=hole_id,
+            distance=round(float(getattr(row, "dist_along", 0.0)), 3),
+            elevation=round(elevation, 3),
+            burden=round(burden, 3),
+            spacing=round(spacing, 3),
+            is_within_tolerance=bool(d_perp <= tolerance + 1e-9),
+        ))
+    return out
+
+
+@router.get("/profiles/{section_id}/blast-holes")
+def get_blast_holes(
+    request: Request,
+    section_id: int,
+    mesh_id: str = "",
+    tolerance: float = 2.0,
+):
+    """Project the session's blast holes onto a section profile.
+
+    Wraps :func:`core.calculo_tronadura.proyectar_pozos_en_seccion` — the same
+    primitive used by the Streamlit reference (``ui/tabs/profiles.py``) — to
+    project each 3D blast hole onto the section's 2D plane and emit a marker
+    per hole.
+
+    The primitive is called with ``DEFAULTS.blast_correlation_radius_m`` as the
+    perpendicular inclusion radius so that holes within AND beyond the design
+    tolerance are returned. ``is_within_tolerance`` is then derived per hole by
+    comparing its ``dist_perp`` against the requested ``tolerance``.
+
+    Blast holes are read from the session settings dict under the
+    ``"blast_holes"`` key (populated by the blast-upload flow, gap G11). When
+    the key is absent, the section has no holes, or ``section_id`` is out of
+    range, the endpoint returns an empty hole list — never 404, per spec.
+
+    Path deviation: mounted under ``/process/profiles/...`` (not
+    ``/sections/...``) because only ``api/routers/process.py`` is in scope for
+    this change and the process router already owns section-scoped profile
+    endpoints. Full path: ``GET /api/v1/process/profiles/{section_id}/blast-holes``.
+
+    Parameters
+    ----------
+    section_id : int
+        Index into the session's sections list (same convention as
+        ``GET /process/profiles/{section_id}``).
+    mesh_id : str
+        Design mesh identifier, echoed back in the response. Not used for the
+        projection (blast-hole projection is pure geometry on holes + section).
+    tolerance : float
+        Design tolerance in metres (default 2.0). Holes whose perpendicular
+        distance to the section exceeds this are flagged
+        ``is_within_tolerance=False``.
+    """
+    try:
+        session_id = db.get_or_create_session(request.state.session_id)
+
+        sections_raw = db.get_sections(session_id)
+        if section_id < 0 or section_id >= len(sections_raw):
+            return schemas.BlastHolesOnProfileResponse(
+                section_id="",
+                mesh_id=mesh_id,
+                tolerance=tolerance,
+                holes=[],
+            )
+
+        sec = _section_from_dict(sections_raw[section_id])
+
+        df_holes = _load_session_blast_holes(session_id)
+        if df_holes is None or df_holes.empty:
+            return schemas.BlastHolesOnProfileResponse(
+                section_id=sec.name,
+                mesh_id=mesh_id,
+                tolerance=tolerance,
+                holes=[],
+            )
+
+        inclusion_radius = max(
+            float(tolerance),
+            float(DEFAULTS.blast_correlation_radius_m),
+        )
+        projected = proyectar_pozos_en_seccion(
+            df_holes,
+            origin=sec.origin,
+            azimuth=sec.azimuth,
+            length=sec.length,
+            tolerance=inclusion_radius,
+        )
+        holes = _projected_to_holes(projected, float(tolerance))
+        return schemas.BlastHolesOnProfileResponse(
+            section_id=sec.name,
+            mesh_id=mesh_id,
+            tolerance=tolerance,
+            holes=holes,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Get blast holes failed")
+        raise HTTPException(500, detail=f"Get blast holes failed: {exc}")

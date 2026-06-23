@@ -200,3 +200,19 @@ export interface ContourData {
   interval: number;
   lines: ContourLine[];
 }
+
+export interface BlastHoleOnProfile {
+  hole_id: string;
+  distance: number;
+  elevation: number;
+  burden: number;
+  spacing: number;
+  is_within_tolerance: boolean;
+}
+
+export interface BlastHolesOnProfileResponse {
+  section_id: string;
+  mesh_id: string;
+  tolerance: number;
+  holes: BlastHoleOnProfile[];
+}

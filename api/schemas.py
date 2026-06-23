@@ -171,3 +171,19 @@ class ContourResponse(BaseModel):
     elevation_max: float
     interval: float
     lines: List[ContourLine]
+
+
+class BlastHoleOnProfile(BaseModel):
+    hole_id: str
+    distance: float
+    elevation: float
+    burden: float
+    spacing: float
+    is_within_tolerance: bool
+
+
+class BlastHolesOnProfileResponse(BaseModel):
+    section_id: str
+    mesh_id: str
+    tolerance: float
+    holes: List[BlastHoleOnProfile]
