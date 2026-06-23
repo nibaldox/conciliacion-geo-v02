@@ -39,6 +39,7 @@ import {
 import type { Bench, ProfileLine, ProfileViewModel, ProfilePoint } from '../domain/types';
 import { type FilterState } from '../domain/filters';
 import { type UseCrossLinkStateApi } from '../application';
+import type { SpillBench } from '../domain/mapping';
 import { STATUS_BG_VAR, STATUS_FG_VAR, STATUS_BORDER_VAR, STATUS_ICON } from '../domain/status';
 import { useTheme } from '../../../../stores/theme';
 
@@ -389,6 +390,11 @@ export function buildTraces(
     }
   }
 
+  // 5. Spill areas — filled rectangles per bench with spill data
+  if (filterState.showSpillAreas) {
+    traces.push(...buildSpillAreaTraces(vm.benches));
+  }
+
   // 6. Bench markers — split by status when showSemaphore, else one trace
   traces.push(...buildBenchMarkers(vm.benches, filterState, crossLink));
 
@@ -514,6 +520,39 @@ function buildAreaFills(
       hoverinfo: 'skip',
     }
   ];
+}
+
+function buildSpillAreaTraces(
+  benches: readonly Bench[],
+): Partial<Plotly.PlotData>[] {
+  const traces: Partial<Plotly.PlotData>[] = [];
+  for (const bench of benches) {
+    // mapping.ts guarantees the spill fields at runtime via SpillBench;
+    // the cast is safe and degrades to "skip" for fixtures without them.
+    const sb = bench as SpillBench;
+    const width = sb.spillWidth;
+    const startD = sb.spillStartDistance;
+    const startE = sb.spillStartElevation;
+    if (width == null || startD == null || startE == null) continue;
+    if (!Number.isFinite(width) || width <= 0) continue;
+    if (!Number.isFinite(startD) || !Number.isFinite(startE)) continue;
+    const endD = startD + width;
+    const toeEl = bench.toeElevation;
+    traces.push({
+      type: 'scatter',
+      mode: 'lines',
+      name: 'Derrame',
+      x: [startD, endD, endD, startD],
+      y: [startE, startE, toeEl, toeEl],
+      fill: 'toself',
+      fillcolor: 'rgba(255, 100, 100, 0.3)',
+      line: { color: 'rgba(255, 100, 100, 0.6)', width: 1 },
+      hovertext: `Spill bench ${bench.benchNumber}`,
+      hoverinfo: 'skip',
+      showlegend: false,
+    });
+  }
+  return traces;
 }
 
 function buildBenchMarkers(
