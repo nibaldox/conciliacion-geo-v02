@@ -287,7 +287,10 @@
     "word": "Exportar Word",
     "dxf": "Exportar DXF",
     "images": "Exportar Imágenes",
-    "error": "Error al exportar. Verifica que existan resultados procesados."
+    "error": "Error al exportar. Verifica que existan resultados procesados.",
+    "filter_summary_prefix": "La exportación respeta la vista actual:",
+    "blast_tolerance_label": "tolerancia tronadura",
+    "all_benches": "todos los bancos"
   },
   "ai": {
     "title": "Configuración del Modelo IA",

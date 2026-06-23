@@ -5,7 +5,10 @@ import {
   useExportWord,
   useExportDxf,
   useExportImages,
+  type ExportFilters,
+  type ExportProjectInfo,
 } from '../../api/hooks';
+import { useSession } from '../../stores/session';
 import { Button } from '../ui/Button';
 import { IconDashboard, IconReport, IconDesign, IconImage } from '../ui/Icons';
 
@@ -16,8 +19,31 @@ interface ExportForm {
   phase: string;
 }
 
+interface ProfileFilterSnapshot {
+  showReconciledDesign?: boolean;
+  showReconciledTopo?: boolean;
+  showSpillAreas?: boolean;
+  showBlastHoles?: boolean;
+  blastTolerance?: number;
+}
+
+const PROFILE_FILTERS_STORAGE_KEY = 'profileView.filters';
+
+function readProfileFilters(): ProfileFilterSnapshot {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(PROFILE_FILTERS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as ProfileFilterSnapshot;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export function ExportPanel() {
   const { t } = useTranslation();
+  const { filters: sessionFilters } = useSession();
   const exportExcel = useExportExcel();
   const exportWord = useExportWord();
   const exportDxf = useExportDxf();
@@ -34,11 +60,30 @@ export function ExportPanel() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const profileFilters = readProfileFilters();
+  const selectedBenchNumbers = sessionFilters.bench;
+
+  const exportFilters: ExportFilters = {
+    showReconciledDesign: profileFilters.showReconciledDesign ?? true,
+    showReconciledTopo: profileFilters.showReconciledTopo ?? true,
+    showSpillAreas: profileFilters.showSpillAreas ?? true,
+    showBlastHoles: profileFilters.showBlastHoles ?? true,
+    blastTolerance: profileFilters.blastTolerance ?? 2,
+    selectedBenchNumbers,
+  };
+
   const hasProjectInfo = form.project.trim() !== '';
 
-  const projectParams = hasProjectInfo
-    ? { project: form.project, author: form.author, operation: form.operation, phase: form.phase }
-    : undefined;
+  const baseParams: ExportProjectInfo = { filters: exportFilters };
+  if (hasProjectInfo) {
+    baseParams.project = form.project;
+    baseParams.author = form.author;
+    baseParams.operation = form.operation;
+    baseParams.phase = form.phase;
+  }
+
+  const benchCount = selectedBenchNumbers.length;
+  const isBenchFilterActive = benchCount > 0;
 
   const isAnyExporting =
     exportExcel.isPending ||
@@ -116,14 +161,14 @@ export function ExportPanel() {
           icon={<IconDashboard className="w-6 h-6" />}
           loading={exportExcel.isPending}
           disabled={isAnyExporting}
-          onClick={() => exportExcel.mutate(projectParams)}
+          onClick={() => exportExcel.mutate(baseParams)}
         />
         <ExportButton
           label={t('export.word')}
           icon={<IconReport className="w-6 h-6" />}
           loading={exportWord.isPending}
           disabled={isAnyExporting}
-          onClick={() => exportWord.mutate(projectParams)}
+          onClick={() => exportWord.mutate(baseParams)}
         />
         <ExportButton
           label={t('export.dxf')}
@@ -139,6 +184,22 @@ export function ExportPanel() {
           disabled={isAnyExporting}
           onClick={() => exportImages.mutate()}
         />
+      </div>
+
+      <div
+        data-testid="export-filter-summary"
+        className="text-[11px] leading-relaxed px-1"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        {t('export.filter_summary_prefix')}{' '}
+        <strong data-testid="export-filter-bench-count" style={{ color: 'var(--color-text-secondary)' }}>
+          {isBenchFilterActive ? benchCount : t('export.all_benches')}
+        </strong>
+        {' · '}
+        {t('export.blast_tolerance_label')}{' '}
+        <strong data-testid="export-filter-blast-tolerance" style={{ color: 'var(--color-text-secondary)' }}>
+          {exportFilters.blastTolerance}m
+        </strong>
       </div>
 
       {/* Error feedback */}

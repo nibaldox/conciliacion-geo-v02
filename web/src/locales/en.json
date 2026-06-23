@@ -287,7 +287,10 @@
     "word": "Export Word",
     "dxf": "Export DXF",
     "images": "Export Images",
-    "error": "Export failed. Check that processed results exist."
+    "error": "Export failed. Check that processed results exist.",
+    "filter_summary_prefix": "Export reflects current view:",
+    "blast_tolerance_label": "blast tolerance",
+    "all_benches": "all benches"
   },
   "ai": {
     "title": "AI Model Configuration",

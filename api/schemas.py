@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
@@ -140,6 +140,17 @@ class ExportRequest(BaseModel):
     author: str = ""
     operation: str = ""
     phase: str = ""
+
+
+class ExportFilters(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    show_reconciled_design: bool = Field(default=True, alias="showReconciledDesign")
+    show_reconciled_topo: bool = Field(default=True, alias="showReconciledTopo")
+    show_spill_areas: bool = Field(default=True, alias="showSpillAreas")
+    show_blast_holes: bool = Field(default=True, alias="showBlastHoles")
+    blast_tolerance: float = Field(default=2.0, alias="blastTolerance")
+    selected_bench_numbers: List[int] = Field(default_factory=list, alias="selectedBenchNumbers")
 
 
 class SettingsResponse(BaseModel):

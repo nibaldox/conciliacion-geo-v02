@@ -404,10 +404,38 @@ export function useResults(section?: string) {
 
 // ─── Export ────────────────────────────────────────────────
 
+export interface ExportFilters {
+  showReconciledDesign: boolean;
+  showReconciledTopo: boolean;
+  showSpillAreas: boolean;
+  showBlastHoles: boolean;
+  blastTolerance: number;
+  selectedBenchNumbers: number[];
+}
+
+export interface ExportProjectInfo {
+  project?: string;
+  author?: string;
+  operation?: string;
+  phase?: string;
+  filters?: ExportFilters;
+}
+
+function buildExportQuery(params?: ExportProjectInfo): Record<string, string> {
+  const query: Record<string, string> = {};
+  if (!params) return query;
+  if (params.project) query.project = params.project;
+  if (params.author) query.author = params.author;
+  if (params.operation) query.operation = params.operation;
+  if (params.phase) query.phase = params.phase;
+  if (params.filters) query.filters = JSON.stringify(params.filters);
+  return query;
+}
+
 export function useExportExcel() {
   return useMutation({
-    mutationFn: (params?: { project?: string; author?: string; operation?: string; phase?: string }) =>
-      client.get('/export/excel', { params, responseType: 'blob' }).then(r => {
+    mutationFn: (params?: ExportProjectInfo) =>
+      client.get('/export/excel', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
         const url = URL.createObjectURL(r.data);
         const a = document.createElement('a');
         a.href = url;
@@ -420,8 +448,8 @@ export function useExportExcel() {
 
 export function useExportWord() {
   return useMutation({
-    mutationFn: (params?: { project?: string; author?: string; operation?: string; phase?: string }) =>
-      client.get('/export/word', { params, responseType: 'blob' }).then(r => {
+    mutationFn: (params?: ExportProjectInfo) =>
+      client.get('/export/word', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
         const url = URL.createObjectURL(r.data);
         const a = document.createElement('a');
         a.href = url;

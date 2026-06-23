@@ -24,6 +24,7 @@ from api.routers.process import (
     _dict_to_bench,
     _extraction_to_dict,
 )
+from api.schemas import ExportFilters
 from core import (
     build_reconciled_profile,
 )
@@ -34,6 +35,67 @@ from core.param_extractor import ExtractionResult
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+_SPILL_BENCH_FIELDS = (
+    "spill_width",
+    "effective_berm_width",
+    "spill_start_distance",
+    "spill_start_elevation",
+)
+
+
+def _parse_filters(raw: Optional[str]) -> ExportFilters:
+    if not raw:
+        return ExportFilters()
+    try:
+        data = __import__("json").loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, f"Invalid filters JSON: {exc}") from exc
+    try:
+        return ExportFilters.model_validate(data)
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid filter values: {exc}") from exc
+
+
+def _filter_comparisons(
+    comparisons: List[Dict[str, Any]],
+    filters: ExportFilters,
+) -> List[Dict[str, Any]]:
+    selected = filters.selected_bench_numbers
+    if not selected:
+        return comparisons
+    allowed = set(selected)
+    return [c for c in comparisons if c.get("bench_num") in allowed]
+
+
+def _apply_bench_filters(
+    params_list: List[ExtractionResult],
+    filters: ExportFilters,
+) -> List[ExtractionResult]:
+    selected = filters.selected_bench_numbers
+    allowed = set(selected) if selected else None
+    for params in params_list:
+        if allowed is not None:
+            params.benches = [b for b in params.benches if b.bench_number in allowed]
+        if not filters.show_spill_areas:
+            for bench in params.benches:
+                for field_name in _SPILL_BENCH_FIELDS:
+                    if hasattr(bench, field_name):
+                        setattr(bench, field_name, 0.0)
+    return params_list
+
+
+def _filters_header(filters: ExportFilters) -> Dict[str, str]:
+    summary = {
+        "selected_bench_numbers": filters.selected_bench_numbers,
+        "show_spill_areas": filters.show_spill_areas,
+        "show_blast_holes": filters.show_blast_holes,
+        "blast_tolerance": filters.blast_tolerance,
+        "show_reconciled_design": filters.show_reconciled_design,
+        "show_reconciled_topo": filters.show_reconciled_topo,
+    }
+    return {"X-Export-Filters-Applied": __import__("json").dumps(summary)}
 
 
 # ---------------------------------------------------------------------------
@@ -48,14 +110,23 @@ def export_excel(
     author: Optional[str] = Query(None),
     operation: Optional[str] = Query(None),
     phase: Optional[str] = Query(None),
+    filters: Optional[str] = Query(
+        None,
+        description="JSON-encoded ExportFilters (camelCase keys). "
+        "When omitted, all benches and default toggles apply.",
+    ),
 ):
     """Export comparison results to a formatted Excel workbook."""
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
+        export_filters = _parse_filters(filters)
+
         results = db.get_results(session_id)
         if not results:
             raise HTTPException(400, "No results to export — run the pipeline first")
+
+        results = _filter_comparisons(results, export_filters)
 
         settings = db.get_settings(session_id) or {}
         tolerances = settings.get("tolerances", {})
@@ -99,6 +170,9 @@ def export_excel(
             else:
                 params_topo.append(ExtractionResult(section_name=sec_name, sector=sector))
 
+        params_design = _apply_bench_filters(params_design, export_filters)
+        params_topo = _apply_bench_filters(params_topo, export_filters)
+
         project_info = {
             "project": project or "",
             "author": author or "",
@@ -114,6 +188,7 @@ def export_excel(
             tmp,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename="Conciliacion_Geotecnica.xlsx",
+            headers=_filters_header(export_filters),
         )
     except HTTPException:
         raise
@@ -135,14 +210,22 @@ def export_word(
     author: Optional[str] = Query(None),
     operation: Optional[str] = Query(None),
     phase: Optional[str] = Query(None),
+    filters: Optional[str] = Query(
+        None,
+        description="JSON-encoded ExportFilters (camelCase keys).",
+    ),
 ):
     """Export a full Word report with summary tables and section plots."""
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
+        export_filters = _parse_filters(filters)
+
         results = db.get_results(session_id)
         if not results:
             raise HTTPException(400, "No results to export — run the pipeline first")
+
+        results = _filter_comparisons(results, export_filters)
 
         sections_raw = db.get_sections(session_id)
         mesh_design = _load_mesh_from_db(session_id, "design")
@@ -186,6 +269,8 @@ def export_word(
                 overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
             )
 
+            p_design, p_topo = _apply_bench_filters([p_design, p_topo], export_filters)
+
             all_data.append(
                 {
                     "section_name": sec.name,
@@ -218,6 +303,7 @@ def export_word(
             tmp,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename="Informe_Conciliacion.docx",
+            headers=_filters_header(export_filters),
         )
     except HTTPException:
         raise
