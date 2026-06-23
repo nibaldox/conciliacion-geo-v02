@@ -11,6 +11,7 @@ Endpoints:
 import os
 import logging
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +28,7 @@ from core import (
     cut_both_surfaces,
     extract_parameters,
     compare_design_vs_asbuilt,
+    build_reconciled_profile,
 )
 from core.param_extractor import (
     BenchParams,
@@ -152,6 +154,26 @@ def _reconciled_profile_to_dict(prof) -> dict:
         "distances": prof.distances.tolist() if len(prof.distances) > 0 else [],
         "elevations": prof.elevations.tolist() if len(prof.elevations) > 0 else [],
         "segments": [_reconciled_point_to_dict(p) for p in prof.points],
+    }
+
+
+def _legacy_reconciled_to_dict(benches) -> dict:
+    """Streamlit-equivalent reconciled polyline as flat ``(distances, elevations)``
+    arrays.
+
+    Calls the legacy ``build_reconciled_profile`` path (the exact builder
+    used by ``ui/step3_analysis.py``) so the Web UI can render the same
+    crest/toe polyline that Streamlit draws. The ``DeprecationWarning`` is
+    expected here by design and silenced, since the legacy shape is being
+    produced deliberately for cross-UI parity (see docs/UI_PARITY_AUDIT.md,
+    Causa 2).
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        distances, elevations = build_reconciled_profile(benches)
+    return {
+        "distances": distances.tolist(),
+        "elevations": elevations.tolist(),
     }
 
 
@@ -428,6 +450,7 @@ def get_profile(request: Request, section_id: int):
                     benches_d, source="design", profile=profile_d_arg,
                 )
                 result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
+                result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(benches_d)
 
         topo_extraction = db.get_extraction(session_id, sec.name, "topo")
         if topo_extraction:
@@ -437,6 +460,7 @@ def get_profile(request: Request, section_id: int):
                     benches_t, source="topo", profile=profile_t_arg,
                 )
                 result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
+                result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(benches_t)
                 result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
 
         return result

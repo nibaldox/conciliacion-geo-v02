@@ -100,6 +100,8 @@ class ProfileData(BaseModel):
     topo: Optional[Dict[str, List[float]]] = None
     reconciled_design: Optional[Dict[str, List[float]]] = None
     reconciled_topo: Optional[Dict[str, List[float]]] = None
+    reconciled_design_legacy: Optional[Dict[str, List[float]]] = None
+    reconciled_topo_legacy: Optional[Dict[str, List[float]]] = None
     benches_topo: Optional[List[BenchParamsSchema]] = None
 
 

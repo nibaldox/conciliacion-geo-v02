@@ -127,6 +127,8 @@ export interface ProfileData {
   topo?: { distances: number[]; elevations: number[] } | null;
   reconciled_design?: { distances: number[]; elevations: number[] } | null;
   reconciled_topo?: { distances: number[]; elevations: number[] } | null;
+  reconciled_design_legacy?: { distances: number[]; elevations: number[] } | null;
+  reconciled_topo_legacy?: { distances: number[]; elevations: number[] } | null;
   benches_topo?: BenchParams[] | null;
 }
 
