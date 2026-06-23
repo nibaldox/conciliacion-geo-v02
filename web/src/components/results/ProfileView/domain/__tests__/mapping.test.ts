@@ -104,8 +104,8 @@ describe('toProfileLines', () => {
   it('emits reconciled lines when present', () => {
     const lines = toProfileLines(
       makeProfile({
-        reconciled_design: { distances: [0, 10], elevations: [100, 90] },
-        reconciled_topo: { distances: [0, 10], elevations: [100, 90] },
+        reconciled_design_legacy: { distances: [0, 10], elevations: [100, 90] },
+        reconciled_topo_legacy: { distances: [0, 10], elevations: [100, 90] },
       }),
     );
     expect(lines.map((l) => l.kind).sort()).toEqual([

@@ -59,9 +59,9 @@ export function toProfileLines(dto: ProfileDataDto): readonly ProfileLine[] {
   if (d.length > 0) lines.push({ kind: 'design', points: d });
   const t = toPoints(dto.topo ?? null);
   if (t.length > 0) lines.push({ kind: 'topo', points: t });
-  const rd = toPoints(dto.reconciled_design ?? null);
+  const rd = toPoints(dto.reconciled_design_legacy ?? null);
   if (rd.length > 0) lines.push({ kind: 'reconciled_design', points: rd });
-  const rt = toPoints(dto.reconciled_topo ?? null);
+  const rt = toPoints(dto.reconciled_topo_legacy ?? null);
   if (rt.length > 0) lines.push({ kind: 'reconciled_topo', points: rt });
   return lines;
 }
