@@ -367,7 +367,21 @@ export function buildTraces(
     traces.push(buildGroundFill(topo, isDark));
   }
 
-  // 4. Reconciled topo — solid amber line (no dashed reconciled design)
+  // 4. Reconciled lines — dashed royalblue design + solid amber topo
+  if (filterState.showReconciledDesign) {
+    const rd = vm.lines.find((l) => l.kind === 'reconciled_design');
+    if (rd && rd.points.length > 0) {
+      traces.push(
+        buildPolyline(rd, 'Diseño (reconciliado)', {
+          color: 'royalblue',
+          width: 2,
+          dash: 'dash',
+          shape: 'linear',
+        }),
+      );
+    }
+  }
+
   if (filterState.showReconciledTopo) {
     const rt = vm.lines.find((l) => l.kind === 'reconciled_topo');
     if (rt && rt.points.length > 0) {
