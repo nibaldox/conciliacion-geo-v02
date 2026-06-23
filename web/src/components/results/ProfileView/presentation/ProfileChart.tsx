@@ -102,42 +102,13 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
     // without wasting viewport on whitespace.
     const { xRange, yRange } = computeAxisRanges(viewModel, height);
 
-    // Replicate Streamlit annotations: Crest labels (B1, B2) with arrows,
-    // and Berm width labels (B2=17.3m) above the horizontal berms.
-    const annotations: any[] = [];
-    if (filterState.showReconciledTopo) {
-      for (const bench of viewModel.benches) {
-        // Crest annotation (B1 with arrow)
-        const crestColor = resolveCssVar(STATUS_FG_VAR[bench.status], '#ef4444');
-        annotations.push({
-          x: bench.crestDistance,
-          y: bench.crestElevation,
-          text: `B${bench.benchNumber}`,
-          showarrow: true,
-          arrowhead: 2,
-          arrowsize: 1,
-          arrowwidth: 1.5,
-          arrowcolor: 'var(--color-text-muted, #9ca3af)',
-          ax: -10,
-          ay: -25,
-          font: { size: 10, color: crestColor },
-        });
-
-        // Berm width annotation
-        if (bench.bermWidth != null && bench.bermWidth > 0) {
-          const dir = Math.sign(bench.toeDistance - bench.crestDistance) || 1;
-          const bermCenter = bench.toeDistance + (bench.bermWidth / 2) * dir;
-          annotations.push({
-            x: bermCenter,
-            y: bench.toeElevation,
-            text: `B${bench.benchNumber}=${bench.bermWidth.toFixed(1)}m`,
-            showarrow: false,
-            yshift: 10,
-            font: { size: 10, color: '#f59e0b' },
-          });
-        }
-      }
-    }
+    // G08: toe annotations (B1', B2', ...) and berm shape indicators
+    // (dashed horizontal lines at each bench's toe elevation) are gated
+    // by the existing `showReconciledTopo` toggle — they only make
+    // sense when looking at the reconciled profile. Both helpers are
+    // pure so they're independently testable.
+    const annotations = buildAnnotations(viewModel, filterState.showReconciledTopo);
+    const shapes = filterState.showReconciledTopo ? buildBermShapes(viewModel) : [];
 
     return {
       ...base,
@@ -146,6 +117,7 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
       title: undefined,
       autosize: true,
       annotations,
+      shapes,
       yaxis: {
         ...(base.yaxis as Partial<Layout['yaxis']>),
         scaleanchor: 'x',
@@ -424,6 +396,71 @@ export function buildTraces(
   }
 
   return traces;
+}
+
+// ─── Pure: bench annotations + berm shapes (G08) ────────────
+
+/**
+ * Build Plotly layout shapes for berms — the horizontal dashed
+ * segments that connect each bench's toe to the next bench's crest,
+ * drawn at the toe elevation of the originating bench. Mirrors the
+ * dashed berm indicators in `ui/tabs/profiles.py::_add_berm_width_indicators`.
+ *
+ * Returns N-1 shapes for N benches (the last bench has no successor,
+ * so no berm can be drawn from it). Pure: same `vm` → same output.
+ *
+ * Exported for unit testing.
+ */
+export function buildBermShapes(
+  vm: ProfileViewModel,
+): Partial<Plotly.Shape>[] {
+  const shapes: Partial<Plotly.Shape>[] = [];
+  const benches = vm.benches;
+  for (let i = 0; i < benches.length - 1; i++) {
+    const bench = benches[i]!;
+    const next = benches[i + 1]!;
+    shapes.push({
+      type: 'line',
+      x0: bench.toeDistance,
+      x1: next.crestDistance,
+      y0: bench.toeElevation,
+      y1: bench.toeElevation,
+      line: { color: '#888', width: 2, dash: 'dot' },
+    });
+  }
+  return shapes;
+}
+
+/**
+ * Build Plotly annotations for bench toe labels (`B1'`, `B2'`, ...).
+ *
+ * The prime distinguishes toe labels from crest labels — the bench
+ * marker trace already renders each bench number as `B{n}` text at
+ * the crest, so the toe annotation uses `B{n}'` to mark the pie (toe)
+ * without colliding with the crest label. Mirrors Streamlit's `Pa{n}`
+ * toe annotations in `ui/tabs/profiles.py`.
+ *
+ * Returns one annotation per bench when `showAnnotations` is true,
+ * otherwise an empty array. Pure: same inputs → same output.
+ *
+ * Exported for unit testing.
+ */
+export function buildAnnotations(
+  vm: ProfileViewModel,
+  showAnnotations: boolean,
+): Partial<Plotly.Annotations>[] {
+  if (!showAnnotations) return [];
+  const annotations: Partial<Plotly.Annotations>[] = [];
+  for (const bench of vm.benches) {
+    annotations.push({
+      x: bench.toeDistance,
+      y: bench.toeElevation,
+      text: `B${bench.benchNumber}'`,
+      showarrow: false,
+      font: { size: 10, color: '#888' },
+    });
+  }
+  return annotations;
 }
 
 function buildPolyline(
