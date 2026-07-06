@@ -64,7 +64,7 @@ describe('buildTraces — reconciled_design', () => {
     ]);
     const traces = buildTraces(vm, makeFilterState(), stubCrossLink, false);
 
-    const trace = findTrace(traces, 'Diseño (reconciliado)');
+    const trace = findTrace(traces as unknown as readonly NamedTrace[], 'Diseño (reconciliado)');
     expect(trace).toBeDefined();
     expect(trace?.line?.color).toBe('royalblue');
     expect(trace?.line?.dash).toBe('dash');
@@ -81,7 +81,7 @@ describe('buildTraces — reconciled_design', () => {
       false,
     );
 
-    const trace = findTrace(traces, 'Diseño (reconciliado)');
+    const trace = findTrace(traces as unknown as readonly NamedTrace[], 'Diseño (reconciliado)');
     expect(trace).toBeUndefined();
   });
 
@@ -91,7 +91,7 @@ describe('buildTraces — reconciled_design', () => {
     ]);
     const traces = buildTraces(vm, makeFilterState(), stubCrossLink, false);
 
-    const trace = findTrace(traces, 'Diseño (reconciliado)');
+    const trace = findTrace(traces as unknown as readonly NamedTrace[], 'Diseño (reconciliado)');
     expect(trace).toBeUndefined();
   });
 
@@ -102,7 +102,7 @@ describe('buildTraces — reconciled_design', () => {
     ]);
     const traces = buildTraces(vm, makeFilterState(), stubCrossLink, false);
 
-    const topo = findTrace(traces, 'Topografía (reconciliada)');
+    const topo = findTrace(traces as unknown as readonly NamedTrace[], 'Topografía (reconciliada)');
     expect(topo).toBeDefined();
     expect(topo?.line?.color).toBe('#f59e0b');
     expect(topo?.line?.dash).toBeUndefined();

@@ -419,7 +419,7 @@ export function Dashboard() {
                 nbinsx: 15,
                 marker: { color: '#3b82f6' },
               },
-            ] as Data[]}
+            ] as unknown as Data[]}
             layout={{
               height: 300,
               margin: { l: 50, r: 20, t: 20, b: 40 },

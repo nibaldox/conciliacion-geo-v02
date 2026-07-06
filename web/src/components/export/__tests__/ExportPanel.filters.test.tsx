@@ -39,7 +39,7 @@ function setProfileFilters(snapshot: Record<string, unknown>): void {
 }
 
 function lastGetCallArgs(): { url: string; config: { params: Record<string, string> } } {
-  const last = mockGet.mock.calls.at(-1);
+  const last = mockGet.mock.calls[mockGet.mock.calls.length - 1];
   if (!last) throw new Error('client.get was never called');
   return { url: last[0] as string, config: last[1] as { params: Record<string, string> } };
 }

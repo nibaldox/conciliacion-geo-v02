@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { toProfileLines } from '../mapping';
-import type { ProfileDataDto } from '../types';
+import type { ProfileDataDto, ProfileLine } from '../types';
 
 // ─── Fixtures ───────────────────────────────────────────────
 
@@ -21,7 +21,7 @@ function makeProfile(overrides: Partial<ProfileDataDto> = {}): ProfileDataDto {
   };
 }
 
-function findLine(lines: readonly { kind: string }[], kind: string) {
+function findLine(lines: readonly ProfileLine[], kind: string) {
   return lines.find((l) => l.kind === kind);
 }
 

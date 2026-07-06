@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeStatusCountsBySector, filterByBench } from '../Dashboard';
-import type { ComparisonResult } from '../../../../api/types';
+import type { ComparisonResult } from '../../../api/types';
 
 function makeRow(overrides: Partial<ComparisonResult> = {}): ComparisonResult {
   return {
