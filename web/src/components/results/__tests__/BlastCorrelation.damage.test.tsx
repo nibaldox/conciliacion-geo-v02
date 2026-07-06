@@ -102,6 +102,7 @@ vi.mock('../../../api/hooks', () => ({
   useBlastCorrelation: vi.fn(),
   useBlastDamageModel: vi.fn(),
   useSettings: vi.fn(() => ({ data: undefined })),
+  useSections: vi.fn(() => ({ data: [] })),
   useUpdateSettings: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
 }));
 
@@ -158,6 +159,8 @@ function makeRow(name: string): BlastCorrelationRow {
     pf_g_per_ton_net_avg: 88.0,
     energy_total_mj: 9000,
     n_pf_valid: 2,
+    sector: 'Principal',
+    rock_density_used: 2.7,
   };
 }
 

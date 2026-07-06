@@ -388,9 +388,9 @@ class TestBackwardsCompat:
         assert len(t) == 4
         assert t == ("S1", 5, 1000.0, 0.5)
 
-        # as_signed_tuple retorna 14 elementos con defaults
+        # as_signed_tuple retorna 16 elementos con defaults
         signed = row.as_signed_tuple()
-        assert len(signed) == 14
+        assert len(signed) == 16
         assert signed[0] == "S1"
         assert signed[1] == 5
         assert signed[2] == 1000.0
@@ -406,6 +406,8 @@ class TestBackwardsCompat:
         assert signed[11] == 0.0  # pf_g_per_ton_net_avg
         assert signed[12] == 0.0  # energy_total_mj
         assert signed[13] == 0    # n_pf_valid
+        assert signed[14] == ""   # sector (default empty)
+        assert signed[15] == 0.0  # rock_density_used (default 0)
 
     def test_explosive_energy_handles_unknown_types_gracefully(self):
         """EXPLOSIVE.energy_mj_per_kg nunca lanza; retorna fallback para tipos desconocidos."""

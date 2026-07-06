@@ -103,11 +103,14 @@ export interface Tolerances {
  * `BlastSettingsSchema` (`api/schemas.py`) and the `core.config.BlastDefaults`
  * singleton. `rock_density_tm3` (ρ, ton/m³) drives the per-mass powder factor
  * (`pf_g_per_ton`); `height_fallback_m` is the vertical height used when the
- * real hole geometry is missing.
+ * real hole geometry is missing. `sector_density` is an optional `{sector: rho}`
+ * map keyed by the section's `sector` (geotechnical domain); a section whose
+ * sector is present uses that ρ instead of the global `rock_density_tm3`.
  */
 export interface BlastSettings {
   rock_density_tm3: number;
   height_fallback_m: number;
+  sector_density?: Record<string, number>;
 }
 
 export interface BenchParams {
@@ -265,6 +268,10 @@ export interface BlastCorrelationRow {
   pf_g_per_ton_net_avg: number;
   energy_total_mj: number;
   n_pf_valid: number;
+  /** Geotechnical-domain label echoed from the section's `sector`. */
+  sector: string;
+  /** Effective ρ (ton/m³) applied for this row (per-sector override or global). */
+  rock_density_used: number;
 }
 
 export interface BlastCorrelationResponse {

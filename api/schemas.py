@@ -75,10 +75,16 @@ class BlastSettingsSchema(BaseModel):
     (``pf_g_per_ton``). Defaults match :class:`core.config.BlastDefaults`.
     ``height_fallback_m`` — vertical height used when the real hole
     geometry (``longitud_real`` / ``Inclinacion_real``) is missing.
+    ``sector_density`` — optional ``{sector: rho}`` map keyed by the
+    section's ``sector`` (geotechnical domain). A section whose sector is
+    present uses that ρ instead of the global ``rock_density_tm3``;
+    sectors not in the map keep the global fallback. Empty dict (default)
+    means every sector uses the global ρ.
     """
 
     rock_density_tm3: float = Field(default=2.7, ge=0.0, le=20.0, examples=[2.7])
     height_fallback_m: float = Field(default=15.0, ge=0.0, le=100.0, examples=[15.0])
+    sector_density: Dict[str, float] = Field(default_factory=dict)
 
 
 class BenchParamsSchema(BaseModel):
@@ -234,6 +240,10 @@ class BlastCorrelationRowSchema(BaseModel):
     Mirrors :class:`core.blast_correlation.BlastCorrelationRow`. Numeric metrics
     default to ``0.0`` so empty / no-data sections serialise cleanly. Floats are
     rounded to 3 decimals at the mapping site (matching ``BlastHoleOnProfile``).
+    ``sector`` echoes the section's geotechnical-domain label
+    (:class:`SectionLine.sector`) so the UI can group rows without re-joining.
+    ``rock_density_used`` is the effective ρ (ton/m³) applied for this row —
+    the per-sector override when present, otherwise the global ``rock_density_tm3``.
     """
 
     section_name: str
@@ -250,6 +260,8 @@ class BlastCorrelationRowSchema(BaseModel):
     pf_g_per_ton_net_avg: float = 0.0
     energy_total_mj: float = 0.0
     n_pf_valid: int = 0
+    sector: str = ""
+    rock_density_used: float = 0.0
 
 
 class BlastCorrelationResponse(BaseModel):

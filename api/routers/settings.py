@@ -6,9 +6,10 @@ Endpoints:
     PUT  /settings   Update process and tolerance settings
 """
 
+import math
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 import api.database as db
 import api.schemas as schemas
@@ -67,6 +68,7 @@ def _get_default_settings() -> dict:
         "blast": {
             "rock_density_tm3": BLAST.rock_density_tm3,
             "height_fallback_m": BLAST.height_fallback_m,
+            "sector_density": {},
         },
     }
 
@@ -148,7 +150,19 @@ def update_settings(request: Request, body: schemas.SettingsUpdate):
     if "blast" in body_dict and body_dict["blast"] is not None:
         if "blast" not in existing:
             existing["blast"] = {}
-        existing["blast"].update(body_dict["blast"])
+        # Reject non-positive sector densities up front: a ρ of 0/negative
+        # would divide-by-zero inside compute_powder_factor. Keep the merge
+        # wholesale (the web sends the full map on apply).
+        incoming_blast = body_dict["blast"]
+        if isinstance(incoming_blast.get("sector_density"), dict):
+            for _sector, _rho in incoming_blast["sector_density"].items():
+                try:
+                    rho_val = float(_rho)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"Invalid density for sector '{_sector}'")
+                if not math.isfinite(rho_val) or rho_val <= 0:
+                    raise HTTPException(400, f"Density for sector '{_sector}' must be positive")
+        existing["blast"].update(incoming_blast)
 
     db.save_settings(session_id, existing)
 

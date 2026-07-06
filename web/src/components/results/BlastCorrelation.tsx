@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import Plot from 'react-plotly.js';
 import type { Data, Layout, Config } from 'plotly.js';
-import { useBlastCorrelation, useBlastDamageModel, useSettings, useUpdateSettings } from '../../api/hooks';
+import { useBlastCorrelation, useBlastDamageModel, useSections, useSettings, useUpdateSettings } from '../../api/hooks';
 import type {
   BlastCorrelationRow,
   BlastDamagePoint,
@@ -42,6 +42,12 @@ export function formatPowderFactor(value: number | null | undefined): string {
 
 /** Format an over/under-break length in metres with 2 decimals. */
 export function formatBreakMeters(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return value.toFixed(2);
+}
+
+/** Format the effective rock density (ρ, ton/m³) with 2 decimals (e.g. "2.70"). */
+export function formatDensityShort(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—';
   return value.toFixed(2);
 }
@@ -221,6 +227,9 @@ export function BlastCorrelation() {
               <th className="text-left font-mono font-semibold uppercase tracking-wider px-3 py-2">
                 {t('blast.col_section', { defaultValue: 'Sección' })}
               </th>
+              <th className="text-left font-mono font-semibold uppercase tracking-wider px-3 py-2">
+                {t('blast.col_sector', { defaultValue: 'Sector' })}
+              </th>
               <th className="text-right font-mono font-semibold uppercase tracking-wider px-3 py-2">
                 {t('blast.col_wells', { defaultValue: 'Pozos' })}
               </th>
@@ -269,6 +278,24 @@ export function BlastCorrelation() {
                   style={{ color: 'var(--color-text-primary)' }}
                 >
                   {row.section_name}
+                </td>
+                <td
+                  className="px-3 py-2 font-mono"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {row.sector ? (
+                    <span>
+                      {row.sector}
+                      <span
+                        className="ml-1 text-[10px] opacity-70"
+                        data-testid={`row-sector-rho-${row.section_name}`}
+                      >
+                        ({formatDensityShort(row.rock_density_used)})
+                      </span>
+                    </span>
+                  ) : (
+                    <span style={{ color: 'var(--color-text-muted)' }}>—</span>
+                  )}
                 </td>
                 <td
                   className="px-3 py-2 text-right tabular-nums"
@@ -469,10 +496,27 @@ export function BlastDensityControl() {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { data: settings } = useSettings();
+  const { data: sectionsData } = useSections();
   const updateSettings = useUpdateSettings();
 
   const [density, setDensity] = useState<number>(BLAST_DEFAULTS.rock_density_tm3);
   const [height, setHeight] = useState<number>(BLAST_DEFAULTS.height_fallback_m);
+  // Per-sector ρ overrides. Local edits are staged here and committed on
+  // "Aplicar" alongside the global density / height. ``sectorDensity`` is a
+  // sparse map: a sector present in the map overrides the global ρ for that
+  // sector; absent sectors fall back to the global ``rock_density_tm3``.
+  const [sectorDensity, setSectorDensity] = useState<Record<string, number>>({});
+
+  // Distinct sectors present across the session's sections. The editor lists
+  // one ρ input per sector so the user can tune each geotechnical domain.
+  // An empty list (all sections carry sector="") renders a hint instead.
+  const sectors = Array.from(
+    new Set(
+      (sectionsData ?? [])
+        .map((s) => s.sector)
+        .filter((sec) => typeof sec === 'string' && sec.trim() !== ''),
+    ),
+  ).sort();
 
   // Resync local state whenever the settings query data changes.
   useEffect(() => {
@@ -480,6 +524,17 @@ export function BlastDensityControl() {
     if (b) {
       setDensity(Number(b.rock_density_tm3 ?? BLAST_DEFAULTS.rock_density_tm3));
       setHeight(Number(b.height_fallback_m ?? BLAST_DEFAULTS.height_fallback_m));
+      // Merge stored sector densities into local state without dropping any
+      // sector the user is actively editing. Stored values win on reload.
+      const stored = b.sector_density ?? {};
+      setSectorDensity((prev) => {
+        const merged: Record<string, number> = {};
+        for (const sec of Object.keys({ ...prev, ...stored })) {
+          const sv = Number(stored[sec]);
+          merged[sec] = Number.isFinite(sv) ? sv : Number(prev[sec]);
+        }
+        return merged;
+      });
     }
   }, [settings]);
 
@@ -487,20 +542,29 @@ export function BlastDensityControl() {
     !Number.isFinite(density) ||
     !Number.isFinite(height) ||
     density <= 0 ||
-    height <= 0;
+    height <= 0 ||
+    // Every sector override must be a positive finite number when present.
+    Object.values(sectorDensity).some(
+      (v) => !Number.isFinite(v) || v <= 0,
+    );
 
   const handleApply = () => {
     if (invalid) return;
     // Send only the blast block — the PUT router merges it into stored
     // settings without touching process/tolerances (exclude_unset merge).
+    // ``sector_density`` is sent in full (the router overwrites the stored
+    // map wholesale, which is the intended apply semantics).
     updateSettings.mutate({
       blast: {
         rock_density_tm3: density,
         height_fallback_m: height,
+        sector_density: { ...sectorDensity },
       },
     });
-    // Refetch the correlation table so pf_g_per_ton recomputes with ρ.
+    // Refetch the correlation table + damage model so pf_g_per_ton and the
+    // OLS fit recompute with the new per-sector ρ.
     qc.invalidateQueries({ queryKey: ['blast-correlation'] });
+    qc.invalidateQueries({ queryKey: ['blast-damage-model'] });
   };
 
   const inputStyle: React.CSSProperties = {
@@ -510,6 +574,8 @@ export function BlastDensityControl() {
   };
   const inputCls =
     'w-24 px-2 py-1 border rounded-md text-xs outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono';
+  const sectorInputCls =
+    'w-20 px-2 py-1 border rounded-md text-xs outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono';
 
   return (
     <div
@@ -587,7 +653,7 @@ export function BlastDensityControl() {
         </span>
       )}
       <p
-        className="text-xs leading-relaxed"
+        className="text-xs leading-relaxed basis-full"
         style={{ color: 'var(--color-text-muted)' }}
       >
         {t('blast.density_help', {
@@ -595,6 +661,79 @@ export function BlastDensityControl() {
             'Ajusta el factor de carga (g/ton) por sección. Valor por defecto: 2,7 ton/m³.',
         })}
       </p>
+      {/* Per-sector ρ editor */}
+      <div
+        className="flex flex-col gap-2 basis-full pt-2 border-t"
+        style={{ borderColor: 'var(--color-border)' }}
+        data-testid="blast-sector-density-editor"
+      >
+        <p
+          className="text-xs font-semibold"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          {t('blast.sector_density_title', { defaultValue: 'Densidad por sector' })}
+        </p>
+        {sectors.length === 0 ? (
+          <p
+            className="text-xs"
+            style={{ color: 'var(--color-text-muted)' }}
+            data-testid="blast-sector-density-empty"
+          >
+            {t('blast.sector_density_empty', {
+              defaultValue:
+                'Asigne un sector a cada sección para definir una densidad específica.',
+            })}
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {sectors.map((sec) => (
+              <div key={sec} className="flex flex-col gap-1">
+                <label
+                  htmlFor={`blast-sector-rho-${sec}`}
+                  className="text-xs font-mono"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {sec}
+                </label>
+                <input
+                  id={`blast-sector-rho-${sec}`}
+                  type="number"
+                  inputMode="decimal"
+                  step="0.1"
+                  min="0"
+                  placeholder={String(density)}
+                  value={sectorDensity[sec] ?? ''}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSectorDensity((prev) => {
+                      const next = { ...prev };
+                      if (v === '') {
+                        delete next[sec];
+                      } else {
+                        const num = Number(v);
+                        if (Number.isFinite(num)) next[sec] = num;
+                      }
+                      return next;
+                    });
+                  }}
+                  className={sectorInputCls}
+                  style={inputStyle}
+                  data-testid={`blast-sector-rho-${sec}`}
+                />
+              </div>
+            ))}
+            <p
+              className="text-xs leading-relaxed self-center"
+              style={{ color: 'var(--color-text-muted)' }}
+            >
+              {t('blast.sector_density_help', {
+                defaultValue:
+                  'Vacío = usar densidad global. Cada sector anula la densidad solo en sus secciones.',
+              })}
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

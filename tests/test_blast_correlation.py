@@ -148,9 +148,10 @@ class TestBlastCorrelationRowBackwardsCompat:
             pf_vol_avg_kgm3=0.45, pf_area_avg_kgm2=2.1,
             pf_g_per_ton_avg=120.0, energy_total_mj=400.0, n_pf_valid=3,
             pf_g_per_ton_net_avg=130.0,
+            sector="Principal", rock_density_used=3.1,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 14
+        assert len(signed) == 16
         assert signed[4] == 0.7 and signed[5] == -0.4
         assert signed[6] == 2 and signed[7] == 1
         assert signed[8] == 0.45
@@ -159,6 +160,8 @@ class TestBlastCorrelationRowBackwardsCompat:
         assert signed[11] == 130.0  # pf_g_per_ton_net_avg
         assert signed[12] == 400.0
         assert signed[13] == 3
+        assert signed[14] == "Principal"  # sector
+        assert signed[15] == 3.1  # rock_density_used
 
     def test_new_fields_default_to_zero(self):
         row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
@@ -340,15 +343,18 @@ class TestBlastCorrelationRowPF:
             pf_vol_avg_kgm3=0.42, pf_area_avg_kgm2=2.5,
             pf_g_per_ton_avg=110.0, energy_total_mj=900.0, n_pf_valid=5,
             pf_g_per_ton_net_avg=115.0,
+            sector="Norte", rock_density_used=2.9,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 14
+        assert len(signed) == 16
         assert signed[8] == 0.42
         assert signed[9] == 2.5
         assert signed[10] == 110.0
         assert signed[11] == 115.0  # pf_g_per_ton_net_avg
         assert signed[12] == 900.0
         assert signed[13] == 5
+        assert signed[14] == "Norte"  # sector
+        assert signed[15] == 2.9  # rock_density_used
 
     def test_correlation_function_populates_pf(self):
         """compute_blast_geotech_correlation should fill PF fields when data allows."""

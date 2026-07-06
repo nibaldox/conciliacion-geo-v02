@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -49,7 +49,15 @@ def _coerce_finite(value) -> float:
 
 @dataclass
 class BlastCorrelationRow:
-    """One row of blast-vs-geotech correlation for a single section."""
+    """One row of blast-vs-geotech correlation for a single section.
+
+    ``sector`` mirrors ``SectionLine.sector`` so consumers can group rows by
+    geotechnical domain without re-joining the section list. ``rock_density_used``
+    is the effective ρ (ton/m³) actually applied when computing this row's
+    per-mass powder factor (``pf_g_per_ton_avg`` / ``pf_g_per_ton_net_avg``):
+    a per-sector override from ``sector_density`` when present, otherwise the
+    caller's global ``rock_density_tm3`` or the ``BLAST`` singleton default.
+    """
     section_name: str
     num_wells: int
     total_kg: float
@@ -64,6 +72,8 @@ class BlastCorrelationRow:
     pf_g_per_ton_net_avg: float = 0.0
     energy_total_mj: float = 0.0
     n_pf_valid: int = 0
+    sector: str = ""
+    rock_density_used: float = 0.0
 
     def as_tuple(self) -> tuple:
         return (self.section_name, self.num_wells, self.total_kg, self.mean_abs_deviation)
@@ -84,6 +94,8 @@ class BlastCorrelationRow:
             self.pf_g_per_ton_net_avg,
             self.energy_total_mj,
             self.n_pf_valid,
+            self.sector,
+            self.rock_density_used,
         )
 
 
@@ -529,6 +541,7 @@ def compute_blast_geotech_correlation(
     tolerance: Optional[float] = None,
     rock_density_tm3: Optional[float] = None,
     height_fallback_m: Optional[float] = None,
+    sector_density: Optional[Dict[str, float]] = None,
 ) -> List[BlastCorrelationRow]:
     """Return one BlastCorrelationRow per section.
 
@@ -548,6 +561,13 @@ def compute_blast_geotech_correlation(
         :func:`compute_powder_factor`. ``None`` defers to the
         ``BLAST`` singleton defaults (2.7 ton/m³, 15.0 m), preserving
         the original behaviour.
+        ``sector_density`` — optional ``{sector: rho}`` map keyed by
+        :class:`SectionLine.sector` (the geotechnical domain label). When
+        a section's ``sector`` is present in the map, that ρ overrides
+        the caller's global ``rock_density_tm3`` for that section only;
+        sectors not in the map (or an empty/``None`` map) keep falling
+        back to the global ρ. The effective ρ actually applied is
+        recorded on the row as ``rock_density_used`` for transparency.
 
     Note: `total_kg` is the **raw** mass of explosive accumulated per
     section. For correlation analysis prefer `pf_vol_avg_kgm3`, which
@@ -567,6 +587,17 @@ def compute_blast_geotech_correlation(
     rows: List[BlastCorrelationRow] = []
     for sec in sections:
         sec_name = getattr(sec, "name", str(sec))
+        sec_sector = getattr(sec, "sector", "") or ""
+        # Per-sector ρ override: a section whose sector is in the
+        # ``sector_density`` map uses that ρ; others keep the caller's
+        # global ``rock_density_tm3`` (which itself falls back to the
+        # ``BLAST`` singleton inside compute_powder_factor when None).
+        sec_rho = (
+            sector_density.get(sec_sector)
+            if sector_density and sec_sector
+            else None
+        )
+
         if dev_col and not df_comp.empty and sec_name in df_comp["section"].unique():
             mean_dev = float(df_comp.loc[df_comp["section"] == sec_name, dev_col].abs().mean())
         else:
@@ -604,9 +635,15 @@ def compute_blast_geotech_correlation(
                 total_kg = 0.0
             pf_agg = aggregate_powder_factor_by_group(
                 df_pozos, 'section_name', sec_name, proj_labeled,
-                rock_density_tm3=rock_density_tm3,
+                rock_density_tm3=sec_rho if sec_rho is not None else rock_density_tm3,
                 height_fallback_m=height_fallback_m,
             )
+        # Effective ρ applied for this row, for transparency. When a
+        # sector-specific ρ was used, record it; otherwise surface the
+        # caller's global value (or the BLAST default when both are None).
+        eff_rho = sec_rho if sec_rho is not None else (
+            rock_density_tm3 if rock_density_tm3 is not None else BLAST.rock_density_tm3
+        )
         rows.append(
             BlastCorrelationRow(
                 section_name=sec_name,
@@ -623,6 +660,8 @@ def compute_blast_geotech_correlation(
                 pf_g_per_ton_net_avg=_coerce_finite(pf_agg.get("pf_g_per_ton_net_avg")),
                 energy_total_mj=_coerce_finite(pf_agg.get("energy_total_mj")),
                 n_pf_valid=int(pf_agg.get("n_pf_valid") or 0),
+                sector=sec_sector,
+                rock_density_used=_coerce_finite(eff_rho),
             )
         )
     return rows

@@ -223,6 +223,7 @@ def test_get_settings_includes_blast_defaults(client):
     assert blast == {
         "rock_density_tm3": BLAST.rock_density_tm3,
         "height_fallback_m": BLAST.height_fallback_m,
+        "sector_density": {},
     }
 
 
@@ -238,6 +239,7 @@ def test_put_settings_blast_persists_and_is_returned(client):
     assert resp.json()["settings"]["blast"] == {
         "rock_density_tm3": 3.1,
         "height_fallback_m": 14.0,
+        "sector_density": {},
     }
 
     # A subsequent GET must echo the persisted values (deep-merged over defaults).
@@ -246,6 +248,7 @@ def test_put_settings_blast_persists_and_is_returned(client):
     assert get_resp.json()["blast"] == {
         "rock_density_tm3": 3.1,
         "height_fallback_m": 14.0,
+        "sector_density": {},
     }
 
 
@@ -265,6 +268,91 @@ def test_put_settings_blast_partial_update_preserves_other_keys(client):
     blast = client.get("/api/v1/settings", headers=headers).json()["blast"]
     assert blast["rock_density_tm3"] == 3.2
     assert blast["height_fallback_m"] == 13.0  # preserved
+
+
+# ---------------------------------------------------------------------------
+# 3b. Per-sector density (sector_density map)
+# ---------------------------------------------------------------------------
+
+
+def test_put_settings_sector_density_persists(client):
+    """PUT {blast:{sector_density:{"S":3.0}}} persists and round-trips."""
+    headers = {"x-session-id": db.create_session()}
+    resp = client.put(
+        "/api/v1/settings",
+        headers=headers,
+        json={"blast": {"sector_density": {"S": 3.0, "N": 2.85}}},
+    )
+    assert resp.status_code == 200
+    blast = resp.json()["settings"]["blast"]
+    assert blast["sector_density"] == {"S": 3.0, "N": 2.85}
+
+    get_resp = client.get("/api/v1/settings", headers=headers)
+    assert get_resp.json()["blast"]["sector_density"] == {"S": 3.0, "N": 2.85}
+
+
+def test_put_settings_rejects_non_positive_sector_density(client):
+    """A non-positive ρ for a sector must be rejected with HTTP 400."""
+    headers = {"x-session-id": db.create_session()}
+    resp = client.put(
+        "/api/v1/settings",
+        headers=headers,
+        json={"blast": {"sector_density": {"S": 0.0}}},
+    )
+    assert resp.status_code == 400
+
+
+def test_compute_correlation_applies_per_sector_density():
+    """A section whose sector is in sector_density uses that ρ.
+
+    Two sections with the same geometry but different sectors must produce
+    different ``pf_g_per_ton_avg`` when only one sector is overridden.
+    The overridden row also surfaces its ρ via ``rock_density_used``.
+    """
+    df = pd.DataFrame([
+        {"X": 0.0, "Y": 10.0, "longitud_real": 12.0, "Inclinacion_real": 0.0,
+         "Burden": 3.0, "Esp": 4.0, "Kilos_Cargados_real": 200.0},
+        {"X": 0.0, "Y": 14.0, "longitud_real": 12.0, "Inclinacion_real": 0.0,
+         "Burden": 3.0, "Esp": 4.0, "Kilos_Cargados_real": 200.0},
+    ])
+    sec_a = type(
+        "Sec", (),
+        {"name": "S-A", "origin": np.array([0.0, 0.0]), "azimuth": 0.0,
+         "length": 200.0, "sector": "Principal"},
+    )()
+    sec_b = type(
+        "Sec", (),
+        {"name": "S-B", "origin": np.array([0.0, 0.0]), "azimuth": 0.0,
+         "length": 200.0, "sector": "Norte"},
+    )()
+    comps = [
+        {"section": "S-A", "delta_crest": 0.3},
+        {"section": "S-B", "delta_crest": 0.3},
+    ]
+
+    rows = compute_blast_geotech_correlation(
+        df, [sec_a, sec_b], comps,
+        sector_density={"Principal": 3.0},
+    )
+    assert len(rows) == 2
+    by_name = {r.section_name: r for r in rows}
+    pf_principal = by_name["S-A"].pf_g_per_ton_avg
+    pf_norte = by_name["S-B"].pf_g_per_ton_avg
+
+    # Both must be positive.
+    assert pf_principal > 0 and pf_norte > 0
+    # The overridden sector uses ρ=3.0, the other keeps the BLAST default (2.7).
+    # PF ∝ 1/ρ → pf_principal / pf_norte == 2.7 / 3.0.
+    assert pf_principal / pf_norte == pytest.approx(
+        BLAST.rock_density_tm3 / 3.0, rel=1e-6
+    )
+    # Transparency fields populated.
+    assert by_name["S-A"].sector == "Principal"
+    assert by_name["S-A"].rock_density_used == pytest.approx(3.0, rel=1e-9)
+    assert by_name["S-B"].sector == "Norte"
+    assert by_name["S-B"].rock_density_used == pytest.approx(
+        BLAST.rock_density_tm3, rel=1e-9
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -306,3 +394,66 @@ def test_blast_correlation_endpoint_reflects_session_density(client):
     # Higher ρ → lower PF, ratio == 2.7/3.0.
     assert pf_after == pytest.approx(pf_base * BLAST.rock_density_tm3 / 3.0, rel=1e-3)
     assert pf_after < pf_base
+
+
+# ---------------------------------------------------------------------------
+# 5. Endpoint reflects a per-sector ρ override
+# ---------------------------------------------------------------------------
+
+
+def test_blast_correlation_endpoint_reflects_sector_density(client):
+    """Two sections with different sectors → per-sector ρ splits their PF."""
+    headers = {"x-session-id": db.create_session()}
+    db.save_sections(
+        headers["x-session-id"],
+        [
+            _section_dict(name="S-A", sector="Principal"),
+            _section_dict(name="S-B", origin=(50.0, 0.0), sector="Norte"),
+        ],
+    )
+    db.save_settings(headers["x-session-id"], {
+        "blast_holes": [
+            _hole("H001", x=0.0, y=10.0, kg=180.0, burden=3.0, esp=4.0, length=12.0),
+            _hole("H002", x=50.0, y=10.0, kg=180.0, burden=3.0, esp=4.0, length=12.0),
+        ],
+    })
+    db.save_results(
+        headers["x-session-id"],
+        [
+            {"section": "S-A", "delta_crest": 0.3},
+            {"section": "S-B", "delta_crest": 0.3},
+        ],
+    )
+
+    # Baseline: both sectors use the global ρ → equal PF.
+    base = client.get("/api/v1/process/blast-correlation", headers=headers).json()
+    base_by_name = {r["section_name"]: r for r in base["rows"]}
+    pf_a_base = base_by_name["S-A"]["pf_g_per_ton_avg"]
+    pf_b_base = base_by_name["S-B"]["pf_g_per_ton_avg"]
+    assert pf_a_base == pytest.approx(pf_b_base, rel=1e-6)
+
+    # Override only the "Principal" sector.
+    client.put(
+        "/api/v1/settings",
+        headers=headers,
+        json={"blast": {"sector_density": {"Principal": 3.0}}},
+    )
+
+    after = client.get("/api/v1/process/blast-correlation", headers=headers).json()
+    after_by_name = {r["section_name"]: r for r in after["rows"]}
+    pf_a_after = after_by_name["S-A"]["pf_g_per_ton_avg"]
+    pf_b_after = after_by_name["S-B"]["pf_g_per_ton_avg"]
+
+    # Principal section: PF scales by 2.7/3.0.
+    assert pf_a_after == pytest.approx(
+        pf_a_base * BLAST.rock_density_tm3 / 3.0, rel=1e-3
+    )
+    # Norte section: unchanged (not in the map → global ρ).
+    assert pf_b_after == pytest.approx(pf_b_base, rel=1e-6)
+    # Transparency fields surface on the response.
+    assert after_by_name["S-A"]["sector"] == "Principal"
+    assert after_by_name["S-A"]["rock_density_used"] == pytest.approx(3.0, rel=1e-3)
+    assert after_by_name["S-B"]["sector"] == "Norte"
+    assert after_by_name["S-B"]["rock_density_used"] == pytest.approx(
+        BLAST.rock_density_tm3, rel=1e-3
+    )

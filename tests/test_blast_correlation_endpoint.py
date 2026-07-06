@@ -185,6 +185,7 @@ def test_response_schema_is_correct(client):
         "avg_over_break", "avg_under_break", "n_over", "n_under",
         "pf_vol_avg_kgm3", "pf_area_avg_kgm2", "pf_g_per_ton_avg",
         "pf_g_per_ton_net_avg", "energy_total_mj", "n_pf_valid",
+        "sector", "rock_density_used",
     }
 
 

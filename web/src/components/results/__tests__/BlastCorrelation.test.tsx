@@ -47,7 +47,7 @@ describe('BlastCorrelation formatting helpers', () => {
 // ─── Type-shape sanity (guards against backend drift) ───────
 
 describe('BlastCorrelationRow type mapping', () => {
-  it('matches the 14-field backend BlastCorrelationRowSchema', () => {
+  it('matches the 16-field backend BlastCorrelationRowSchema', () => {
     const row: BlastCorrelationRow = {
       section_name: 'S-001',
       num_wells: 12,
@@ -63,6 +63,8 @@ describe('BlastCorrelationRow type mapping', () => {
       pf_g_per_ton_net_avg: 88.6,
       energy_total_mj: 24500,
       n_pf_valid: 10,
+      sector: 'Principal',
+      rock_density_used: 2.7,
     };
     // Touch every field so a missing/renamed key fails compilation.
     expect(row.section_name).toBe('S-001');
@@ -79,7 +81,9 @@ describe('BlastCorrelationRow type mapping', () => {
     expect(row.pf_g_per_ton_net_avg).toBe(88.6);
     expect(row.energy_total_mj).toBe(24500);
     expect(row.n_pf_valid).toBe(10);
-    expect(Object.keys(row)).toHaveLength(14);
+    expect(row.sector).toBe('Principal');
+    expect(row.rock_density_used).toBe(2.7);
+    expect(Object.keys(row)).toHaveLength(16);
   });
 });
 
@@ -93,6 +97,7 @@ vi.mock('../../../api/hooks', () => ({
     error: null,
   })),
   useSettings: vi.fn(() => ({ data: undefined })),
+  useSections: vi.fn(() => ({ data: [] })),
   useUpdateSettings: vi.fn(() => ({
     mutate: vi.fn(),
     isPending: false,
@@ -168,6 +173,8 @@ describe('<BlastCorrelation /> empty-rows state', () => {
       pf_g_per_ton_net_avg: 45.0,
       energy_total_mj: 9000,
       n_pf_valid: 4,
+      sector: 'Principal',
+      rock_density_used: 2.7,
     };
     mockHook({
       data: { rows: [row], tolerance: 2.0, n_sections: 1 },

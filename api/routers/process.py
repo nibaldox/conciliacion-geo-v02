@@ -838,6 +838,7 @@ def _resolve_blast_correlation_rows(
     blast = settings.get("blast") or {}
     rock_density_tm3 = blast.get("rock_density_tm3")
     height_fallback_m = blast.get("height_fallback_m")
+    sector_density = blast.get("sector_density")
 
     sections = [_section_from_dict(s) for s in sections_raw]
     rows = compute_blast_geotech_correlation(
@@ -845,6 +846,7 @@ def _resolve_blast_correlation_rows(
         tolerance=tolerance,
         rock_density_tm3=rock_density_tm3,
         height_fallback_m=height_fallback_m,
+        sector_density=sector_density,
     )
     return rows, sections_raw, resolved_tolerance
 
@@ -915,6 +917,8 @@ def get_blast_correlation(
                 pf_g_per_ton_net_avg=_safe_float(r.pf_g_per_ton_net_avg),
                 energy_total_mj=_safe_float(r.energy_total_mj),
                 n_pf_valid=int(r.n_pf_valid),
+                sector=str(getattr(r, "sector", "") or ""),
+                rock_density_used=_safe_float(getattr(r, "rock_density_used", 0.0)),
             )
             for r in rows
         ]
