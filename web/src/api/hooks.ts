@@ -21,6 +21,7 @@ import type {
   ContourData,
   BlastHolesOnProfileResponse,
   BlastCorrelationResponse,
+  BlastDamageModelResponse,
   AIGenerateRequest,
   AIResponseChunk,
   AIUsageMetrics,
@@ -434,6 +435,37 @@ export function useBlastCorrelation() {
       }
       return client
         .get<BlastCorrelationResponse>('/process/blast-correlation')
+        .then((r) => r.data);
+    },
+  });
+}
+
+/**
+ * Fetch the fitted PF↔damage regression model from
+ * `GET /process/blast-correlation/damage-model`. Returns the scatter
+ * points (one per section: PF g/ton, overbreak m) and the OLS fit summary
+ * (or null when the fitter reported INSUFFICIENT confidence). The endpoint
+ * always returns HTTP 200 — empty case is `{ points: [], fit: null }`.
+ *
+ * Demo mode short-circuits to an empty payload, mirroring `useBlastCorrelation`
+ * (the demo bundle has no blast data, and the backend is not reachable on
+ * GitHub Pages).
+ */
+export function useBlastDamageModel() {
+  const { demoMode, demoData, designMeshId } = useSession();
+  return useQuery<BlastDamageModelResponse>({
+    queryKey: ['blast-damage-model', demoMode, designMeshId],
+    queryFn: async () => {
+      if (demoMode && demoData && isDemoMeshId(designMeshId)) {
+        return {
+          points: [],
+          fit: null,
+          x_metric: 'pf_g_per_ton',
+          y_metric: 'over_break',
+        } satisfies BlastDamageModelResponse;
+      }
+      return client
+        .get<BlastDamageModelResponse>('/process/blast-correlation/damage-model')
         .then((r) => r.data);
     },
   });

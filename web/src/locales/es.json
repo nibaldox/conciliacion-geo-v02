@@ -214,7 +214,11 @@
     "height_fallback": "Altura fallback (m)",
     "apply": "Aplicar",
     "apply_aria": "Aplicar densidad de roca y altura fallback",
-    "density_help": "Ajusta el factor de carga (g/ton) por sección. Valor por defecto: 2,7 ton/m³."
+    "density_help": "Ajusta el factor de carga (g/ton) por sección. Valor por defecto: 2,7 ton/m³.",
+    "damage_title": "Factor de carga vs Sobre-excavación",
+    "damage_x_axis": "Factor de carga (g/ton)",
+    "damage_y_axis": "Over-break (m)",
+    "damage_insufficient": "Insuficientes secciones para ajustar el modelo (mínimo 5)."
   },
   "section_list": {
     "loading": "Cargando secciones...",

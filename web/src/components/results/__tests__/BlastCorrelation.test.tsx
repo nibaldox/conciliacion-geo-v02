@@ -87,6 +87,11 @@ describe('BlastCorrelationRow type mapping', () => {
 
 vi.mock('../../../api/hooks', () => ({
   useBlastCorrelation: vi.fn(),
+  useBlastDamageModel: vi.fn(() => ({
+    data: { points: [], fit: null, x_metric: 'pf_g_per_ton', y_metric: 'over_break' },
+    isLoading: false,
+    error: null,
+  })),
   useSettings: vi.fn(() => ({ data: undefined })),
   useUpdateSettings: vi.fn(() => ({
     mutate: vi.fn(),

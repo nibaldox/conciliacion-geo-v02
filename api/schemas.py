@@ -263,3 +263,53 @@ class BlastCorrelationResponse(BaseModel):
     rows: List[BlastCorrelationRowSchema] = Field(default_factory=list)
     tolerance: Optional[float] = None
     n_sections: int = 0
+
+
+class BlastDamagePointSchema(BaseModel):
+    """One scatter point (section) for the PF↔damage chart.
+
+    ``pf_g_per_ton`` is the per-mass powder factor (the highlighted g/ton
+    metric surfaced by ``BlastCorrelationRowSchema``). ``over_break`` is the
+    mean overbreak (m) for that section.
+    """
+
+    section_name: str
+    pf_g_per_ton: float = 0.0
+    over_break: float = 0.0
+
+
+class BlastDamageModelFitSchema(BaseModel):
+    """Fitted OLS regression ``damage = beta0 + beta1 * PF`` summary.
+
+    ``confidence`` is one of ``'HIGH'`` / ``'MEDIUM'`` / ``'LOW'`` /
+    ``'INSUFFICIENT'``. The full fit dict from
+    :func:`core.blast_model.fit_powder_factor_damage_model` also carries
+    ``std_err_beta1`` / ``mean_pf`` / ``is_significant``; we surface the
+    fields the web chart actually renders.
+    """
+
+    beta0: float = 0.0
+    beta1: float = 0.0
+    r_squared: float = 0.0
+    p_value: float = 0.0
+    n: int = 0
+    confidence: str = "INSUFFICIENT"
+    ci_beta1_low: float = 0.0
+    ci_beta1_high: float = 0.0
+
+
+class BlastDamageModelResponse(BaseModel):
+    """Response envelope for ``GET /process/blast-correlation/damage-model``.
+
+    ``points`` carries one entry per section (PF, overbreak). ``fit`` is the
+    OLS regression summary, or ``None`` when the fitter returned
+    ``confidence='INSUFFICIENT'`` / fewer than ``min_samples`` valid points.
+    ``x_metric`` / ``y_metric`` echo the metrics plotted so the frontend does
+    not hardcode the axis meaning. Empty case: ``points=[]``, ``fit=None``,
+    HTTP 200 (never 500) — mirrors :class:`BlastCorrelationResponse`.
+    """
+
+    points: List[BlastDamagePointSchema] = Field(default_factory=list)
+    fit: Optional[BlastDamageModelFitSchema] = None
+    x_metric: str = "pf_g_per_ton"
+    y_metric: str = "over_break"

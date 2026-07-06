@@ -40,6 +40,7 @@ from core.param_extractor import (
 )
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.blast_correlation import compute_blast_geotech_correlation
+from core.blast_model import fit_powder_factor_damage_model
 from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
 logger = logging.getLogger(__name__)
@@ -802,6 +803,52 @@ def get_blast_holes(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_blast_correlation_rows(
+    session_id: str,
+    tolerance: Optional[float],
+):
+    """Resolve the session's ``BlastCorrelationRow`` list.
+
+    Shared by ``GET /process/blast-correlation`` and the damage-model
+    endpoint so both walk the identical data flow (holes → sections →
+    comparisons → :func:`compute_blast_geotech_correlation`) and surface
+    identical numbers. Returns ``(rows, sections_raw, resolved_tolerance)``
+    where ``rows`` is an empty list whenever any prerequisite is missing
+    (no holes / no sections / no comparisons), matching the graceful-empty
+    contract of the blast-correlation endpoint.
+    """
+    sections_raw = db.get_sections(session_id)
+    df_holes = _load_session_blast_holes(session_id)
+    comparisons = db.get_results(session_id)
+
+    resolved_tolerance = (
+        float(tolerance) if tolerance is not None
+        else float(DEFAULTS.blast_correlation_radius_m)
+    )
+
+    if (
+        df_holes is None
+        or df_holes.empty
+        or not sections_raw
+        or not comparisons
+    ):
+        return [], sections_raw, resolved_tolerance
+
+    settings = db.get_settings(session_id) or {}
+    blast = settings.get("blast") or {}
+    rock_density_tm3 = blast.get("rock_density_tm3")
+    height_fallback_m = blast.get("height_fallback_m")
+
+    sections = [_section_from_dict(s) for s in sections_raw]
+    rows = compute_blast_geotech_correlation(
+        df_holes, sections, comparisons,
+        tolerance=tolerance,
+        rock_density_tm3=rock_density_tm3,
+        height_fallback_m=height_fallback_m,
+    )
+    return rows, sections_raw, resolved_tolerance
+
+
 @router.get("/blast-correlation")
 def get_blast_correlation(
     request: Request,
@@ -848,40 +895,8 @@ def get_blast_correlation(
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
-        sections_raw = db.get_sections(session_id)
-        df_holes = _load_session_blast_holes(session_id)
-        comparisons = db.get_results(session_id)
-
-        resolved_tolerance = (
-            float(tolerance) if tolerance is not None
-            else float(DEFAULTS.blast_correlation_radius_m)
-        )
-
-        if (
-            df_holes is None
-            or df_holes.empty
-            or not sections_raw
-            or not comparisons
-        ):
-            return schemas.BlastCorrelationResponse(
-                rows=[],
-                tolerance=resolved_tolerance,
-                n_sections=len(sections_raw) if sections_raw else 0,
-            )
-
-        # Per-session blast tunables (rock density ρ + height fallback).
-        # None → core primitive uses BLAST singleton defaults.
-        settings = db.get_settings(session_id) or {}
-        blast = settings.get("blast") or {}
-        rock_density_tm3 = blast.get("rock_density_tm3")
-        height_fallback_m = blast.get("height_fallback_m")
-
-        sections = [_section_from_dict(s) for s in sections_raw]
-        rows = compute_blast_geotech_correlation(
-            df_holes, sections, comparisons,
-            tolerance=tolerance,
-            rock_density_tm3=rock_density_tm3,
-            height_fallback_m=height_fallback_m,
+        rows, sections_raw, resolved_tolerance = _resolve_blast_correlation_rows(
+            session_id, tolerance
         )
 
         schema_rows = [
@@ -914,3 +929,104 @@ def get_blast_correlation(
     except Exception as exc:
         logger.exception("Get blast correlation failed")
         raise HTTPException(500, detail=f"Get blast correlation failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /process/blast-correlation/damage-model
+# ---------------------------------------------------------------------------
+
+
+@router.get("/blast-correlation/damage-model")
+def get_blast_correlation_damage_model(
+    request: Request,
+    tolerance: Optional[float] = None,
+):
+    """OLS fit of mean overbreak against the per-mass powder factor.
+
+    Completes G13 visual parity with the Streamlit reference: the
+    Streamlit tab draws a PF↔damage scatter with a fitted OLS line; this
+    endpoint feeds the web equivalent. The fit reuses
+    :func:`core.blast_model.fit_powder_factor_damage_model` (the same OLS
+    primitive Streamlit uses) so the two UIs agree to the last decimal.
+
+    Data flow reuses :func:`_resolve_blast_correlation_rows` (the helper that
+    powers ``GET /process/blast-correlation``), so ``pf_g_per_ton`` and
+    ``over_break`` are read off the same ``BlastCorrelationRow`` objects the
+    table renders. Rows whose powder factor is zero/NaN are dropped before
+    fitting — the fitter itself also masks non-finite / non-positive PF, but
+    we skip them up front so the emitted ``points`` list matches the samples
+    the fit consumed.
+
+    Under-sample behaviour: :func:`fit_powder_factor_damage_model` returns a
+    ``confidence='INSUFFICIENT'`` result (zeroed scalars, ``n`` = number of
+    valid samples) when fewer than ``min_samples=5`` points survive. We
+    translate that into ``fit=None`` so the frontend renders the scatter
+    alone with an "insufficient samples" caption. Any other confidence
+    (HIGH / MEDIUM / LOW) is surfaced as a populated :class:`BlastDamageModelFitSchema`.
+
+    Empty case (no holes / no sections / no comparisons): ``points=[]`` and
+    ``fit=None`` with HTTP 200 — mirrors :func:`get_blast_correlation`. NaN
+    safety: every numeric field flows through :func:`_safe_float` so NaN
+    never reaches the JSON payload.
+
+    Parameters
+    ----------
+    tolerance : float | None
+        Perpendicular inclusion radius (m) around each section axis.
+        Forwarded to :func:`_resolve_blast_correlation_rows`.
+    """
+    try:
+        session_id = db.get_or_create_session(request.state.session_id)
+        rows, _sections_raw, _tol = _resolve_blast_correlation_rows(
+            session_id, tolerance
+        )
+
+        # Build the (PF, overbreak) sample, dropping zero/NaN PF rows so the
+        # emitted points match the samples the fitter consumes.
+        points: List[schemas.BlastDamagePointSchema] = []
+        pf_values_list: List[float] = []
+        dmg_values_list: List[float] = []
+        for r in rows:
+            pf = float(r.pf_g_per_ton_avg)
+            over = float(r.avg_over_break)
+            if not math.isfinite(pf) or not math.isfinite(over):
+                continue
+            if pf <= 0.0:
+                continue
+            points.append(schemas.BlastDamagePointSchema(
+                section_name=str(r.section_name),
+                pf_g_per_ton=_safe_float(pf),
+                over_break=_safe_float(over),
+            ))
+            pf_values_list.append(pf)
+            dmg_values_list.append(over)
+
+        fit_schema: Optional[schemas.BlastDamageModelFitSchema] = None
+        if pf_values_list:
+            pf_arr = np.asarray(pf_values_list, dtype=float)
+            dmg_arr = np.asarray(dmg_values_list, dtype=float)
+            model = fit_powder_factor_damage_model(pf_arr, dmg_arr)
+            confidence = str(model.get("confidence", "INSUFFICIENT"))
+            if confidence != "INSUFFICIENT":
+                fit_schema = schemas.BlastDamageModelFitSchema(
+                    beta0=_safe_float(model.get("beta0", 0.0)),
+                    beta1=_safe_float(model.get("beta1", 0.0)),
+                    r_squared=_safe_float(model.get("r_squared", 0.0)),
+                    p_value=_safe_float(model.get("p_value", float("nan"))),
+                    n=int(model.get("n", 0)),
+                    confidence=confidence,
+                    ci_beta1_low=_safe_float(model.get("ci_beta1_low", 0.0)),
+                    ci_beta1_high=_safe_float(model.get("ci_beta1_high", 0.0)),
+                )
+
+        return schemas.BlastDamageModelResponse(
+            points=points,
+            fit=fit_schema,
+            x_metric="pf_g_per_ton",
+            y_metric="over_break",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Get blast damage model failed")
+        raise HTTPException(500, detail=f"Get blast damage model failed: {exc}")

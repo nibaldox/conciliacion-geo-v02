@@ -214,7 +214,11 @@
     "height_fallback": "Height fallback (m)",
     "apply": "Apply",
     "apply_aria": "Apply rock density and height fallback",
-    "density_help": "Adjusts the powder factor (g/ton) per section. Default value: 2.7 ton/m³."
+    "density_help": "Adjusts the powder factor (g/ton) per section. Default value: 2.7 ton/m³.",
+    "damage_title": "Powder factor vs Over-break",
+    "damage_x_axis": "Powder factor (g/ton)",
+    "damage_y_axis": "Over-break (m)",
+    "damage_insufficient": "Insufficient sections to fit the model (minimum 5)."
   },
   "section_list": {
     "loading": "Loading sections...",

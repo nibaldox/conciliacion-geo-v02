@@ -273,6 +273,41 @@ export interface BlastCorrelationResponse {
   n_sections: number;
 }
 
+// Blast PF↔damage regression model
+//
+// Mirrors the backend `BlastDamageModelResponse` returned by
+// `GET /api/v1/process/blast-correlation/damage-model`. `fit` is null
+// when the fitter reports INSUFFICIENT confidence (fewer than min_samples
+// valid points, or the fit failed).
+
+export interface BlastDamagePoint {
+  section_name: string;
+  /** Per-mass powder factor (g/ton) — the x-axis metric. */
+  pf_g_per_ton: number;
+  /** Mean overbreak (m) for the section — the y-axis metric. */
+  over_break: number;
+}
+
+export type BlastDamageConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT';
+
+export interface BlastDamageModelFit {
+  beta0: number;
+  beta1: number;
+  r_squared: number;
+  p_value: number;
+  n: number;
+  confidence: BlastDamageConfidence;
+  ci_beta1_low: number;
+  ci_beta1_high: number;
+}
+
+export interface BlastDamageModelResponse {
+  points: BlastDamagePoint[];
+  fit: BlastDamageModelFit | null;
+  x_metric: string;
+  y_metric: string;
+}
+
 // AI reporter (core/ai_v2)
 export interface AIUsageMetrics {
   prompt_tokens: number;
