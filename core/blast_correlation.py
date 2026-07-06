@@ -26,8 +26,8 @@ from core.compliance_status import (
     STATUS_NO_CUMPLE,
     STATUS_RAMPA_OK,
 )
-from core.config import DEFAULTS, EXPLOSIVE, RAMP
-from core.blast_metrics import enrich_blast_dataframe
+from core.config import BLAST, DEFAULTS, EXPLOSIVE, RAMP
+from core.blast_metrics import ROCK_DENSITY_DEFAULT_TM3, enrich_blast_dataframe
 
 
 @dataclass
@@ -43,6 +43,7 @@ class BlastCorrelationRow:
     n_under: int = 0
     pf_vol_avg_kgm3: float = 0.0
     pf_area_avg_kgm2: float = 0.0
+    pf_g_per_ton_avg: float = 0.0
     energy_total_mj: float = 0.0
     n_pf_valid: int = 0
 
@@ -61,6 +62,7 @@ class BlastCorrelationRow:
             self.n_under,
             self.pf_vol_avg_kgm3,
             self.pf_area_avg_kgm2,
+            self.pf_g_per_ton_avg,
             self.energy_total_mj,
             self.n_pf_valid,
         )
@@ -94,13 +96,31 @@ def _knn_spacing(df_group: pd.DataFrame, k: int = 4) -> tuple:
     return series.copy(), series.copy()
 
 
+_LENGTH_CANDIDATES = ('longitud_real', 'Len', 'Longitud', 'Length', 'Profundidad')
+_INCLINATION_CANDIDATES = ('Inclinacion_real', 'Incl', 'Inclinacion', 'Inclination')
+
+
 def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
     """Compute powder factor for each blast-hole row.
 
-    Powder factor (PF) = energy per unit volume of rock broken:
-        PF_vol [kg/m³] = Kilos / (Burden × Espaciamiento × Altura_banco)
-        PF_area [kg/m²] = Kilos / (Burden × Espaciamiento)
-        energy_mj     = Kilos × energy_mj_per_kg(Tipo_Explosivo)
+    Powder factor (PF) = explosive mass normalised by the amount of rock
+    broken, expressed in three complementary forms:
+        PF_vol   [kg/m³]  = Kilos / (Burden × Espaciamiento × Altura_banco)
+        PF_area  [kg/m²]  = Kilos / (Burden × Espaciamiento)
+        energy_mj         = Kilos × energy_mj_per_kg(Tipo_Explosivo)
+
+    Per-mass powder factor (grams of explosive per ton of rock):
+        H_real           = longitud_real × cos(radians(Inclinacion_real))
+        PF_g_per_ton     = (Kilos × 1000) / (Burden × Esp × H_real × ρ_roca)
+
+    ``H_real`` is the per-hole vertical height derived from the real hole
+    geometry. ``Inclinacion_real`` is the deviation FROM VERTICAL in
+    degrees (0° = vertical, matching ``core.calculo_tronadura`` where the
+    toe vertical offset is ``-length × cos(incl)``); the vertical height
+    therefore uses ``cos``, not ``sin``. When ``longitud_real`` or
+    ``Inclinacion_real`` is missing/invalid, ``H_real`` falls back to
+    ``BLAST.height_fallback_m``. ``ρ_roca`` is read from
+    ``BLAST.rock_density_tm3`` (ton/m³).
 
     If Burden/Espaciamiento columns are missing, estimate them from the
     median nearest-neighbour distance (k=4) among the collars in the
@@ -109,9 +129,11 @@ def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
     Returns a copy of df_pozos with new columns:
         pf_vol_kgm3: float or NaN
         pf_area_kgm2: float or NaN
+        pf_g_per_ton: float or NaN
         energy_mj: float (always computed if Kilos + Tipo_Explosivo available)
         burden_est_m: float (resolved Burden)
         esp_est_m: float (resolved Espaciamiento)
+        height_real_m: float (per-hole vertical height used for pf_g_per_ton)
         Plus the derived metrics from :func:`enrich_blast_dataframe`
         (``stemming_ratio``, ``subdrilling_ratio``,
         ``spacing_burden_ratio``, ``kg_per_meter``,
@@ -172,6 +194,27 @@ def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
     pf_area = np.where(denom_area > 0, kilos / denom_area, np.nan)
     out['pf_area_kgm2'] = pd.Series(pf_area, index=out.index)
 
+    length_col = first_present_column(out, _LENGTH_CANDIDATES)
+    incl_col = first_present_column(out, _INCLINATION_CANDIDATES)
+    length_vals = (
+        pd.to_numeric(out[length_col], errors='coerce') if length_col
+        else pd.Series([np.nan] * len(out), index=out.index)
+    )
+    incl_vals = (
+        pd.to_numeric(out[incl_col], errors='coerce') if incl_col
+        else pd.Series([np.nan] * len(out), index=out.index)
+    )
+
+    height_real = pd.Series(float(BLAST.height_fallback_m), index=out.index)
+    valid_h = length_vals.notna() & incl_vals.notna() & (length_vals > 0) & (incl_vals >= 0)
+    height_real.loc[valid_h] = length_vals[valid_h] * np.cos(np.radians(incl_vals[valid_h]))
+    out['height_real_m'] = height_real
+
+    rho_rock = float(BLAST.rock_density_tm3)
+    denom_gt = burden_est * esp_est * height_real * rho_rock
+    pf_gt = np.where(denom_gt > 0, (kilos * 1000.0) / denom_gt, np.nan)
+    out['pf_g_per_ton'] = pd.Series(pf_gt, index=out.index)
+
     if 'Tipo_Explosivo' in out.columns:
         mj_per_kg = out['Tipo_Explosivo'].apply(EXPLOSIVE.energy_mj_per_kg)
     else:
@@ -205,6 +248,8 @@ def aggregate_powder_factor_by_group(
         pf_vol_avg: float or NaN  (kg/m³, mean)
         pf_area_avg: float or NaN (kg/m², mean)
         pf_vol_weighted: float or NaN (weighted by Kilos)
+        pf_g_per_ton_avg: float or NaN (g/ton, mean)
+        pf_g_per_ton_weighted: float or NaN (g/ton, weighted by Kilos)
         energy_total_mj: float
         kg_total: float
         n_wells: int
@@ -214,6 +259,8 @@ def aggregate_powder_factor_by_group(
         "pf_vol_avg": np.nan,
         "pf_area_avg": np.nan,
         "pf_vol_weighted": np.nan,
+        "pf_g_per_ton_avg": np.nan,
+        "pf_g_per_ton_weighted": np.nan,
         "energy_total_mj": 0.0,
         "kg_total": 0.0,
         "n_wells": 0,
@@ -241,6 +288,7 @@ def aggregate_powder_factor_by_group(
     pf_enriched = compute_powder_factor(sub)
     pf_vol = pd.to_numeric(pf_enriched.get('pf_vol_kgm3'), errors='coerce') if 'pf_vol_kgm3' in pf_enriched else pd.Series(dtype=float)
     pf_area = pd.to_numeric(pf_enriched.get('pf_area_kgm2'), errors='coerce') if 'pf_area_kgm2' in pf_enriched else pd.Series(dtype=float)
+    pf_gt = pd.to_numeric(pf_enriched.get('pf_g_per_ton'), errors='coerce') if 'pf_g_per_ton' in pf_enriched else pd.Series(dtype=float)
     energy = pd.to_numeric(pf_enriched.get('energy_mj'), errors='coerce') if 'energy_mj' in pf_enriched else pd.Series(dtype=float)
 
     valid_pf = pf_vol.dropna()
@@ -255,6 +303,15 @@ def aggregate_powder_factor_by_group(
         wsum = float(weights.sum())
         if wsum > 0:
             out["pf_vol_weighted"] = float((valid_pf * weights).sum() / wsum)
+
+    valid_gt = pf_gt.dropna()
+    out["pf_g_per_ton_avg"] = float(valid_gt.mean()) if not valid_gt.empty else float('nan')
+
+    if kg_col and not valid_gt.empty:
+        weights_gt = pf_enriched.loc[valid_gt.index, kg_col].fillna(0)
+        wsum_gt = float(weights_gt.sum())
+        if wsum_gt > 0:
+            out["pf_g_per_ton_weighted"] = float((valid_gt * weights_gt).sum() / wsum_gt)
 
     out["energy_total_mj"] = float(energy.fillna(0).sum()) if not energy.empty else 0.0
 
@@ -420,6 +477,7 @@ def compute_blast_geotech_correlation(
             pf_agg = {
                 "pf_vol_avg": float('nan'),
                 "pf_area_avg": float('nan'),
+                "pf_g_per_ton_avg": float('nan'),
                 "energy_total_mj": 0.0,
                 "n_pf_valid": 0,
             }
@@ -444,6 +502,7 @@ def compute_blast_geotech_correlation(
                 n_under=signed["n_under"],
                 pf_vol_avg_kgm3=float(pf_agg.get("pf_vol_avg") or 0.0),
                 pf_area_avg_kgm2=float(pf_agg.get("pf_area_avg") or 0.0),
+                pf_g_per_ton_avg=float(pf_agg.get("pf_g_per_ton_avg") or 0.0),
                 energy_total_mj=float(pf_agg.get("energy_total_mj") or 0.0),
                 n_pf_valid=int(pf_agg.get("n_pf_valid") or 0),
             )

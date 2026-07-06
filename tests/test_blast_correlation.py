@@ -145,16 +145,18 @@ class TestBlastCorrelationRowBackwardsCompat:
         row = BlastCorrelationRow(
             "S1", 3, 1000.0, 0.5,
             avg_over_break=0.7, avg_under_break=-0.4, n_over=2, n_under=1,
-            pf_vol_avg_kgm3=0.45, pf_area_avg_kgm2=2.1, energy_total_mj=400.0, n_pf_valid=3,
+            pf_vol_avg_kgm3=0.45, pf_area_avg_kgm2=2.1,
+            pf_g_per_ton_avg=120.0, energy_total_mj=400.0, n_pf_valid=3,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 12
+        assert len(signed) == 13
         assert signed[4] == 0.7 and signed[5] == -0.4
         assert signed[6] == 2 and signed[7] == 1
         assert signed[8] == 0.45
         assert signed[9] == 2.1
-        assert signed[10] == 400.0
-        assert signed[11] == 3
+        assert signed[10] == 120.0
+        assert signed[11] == 400.0
+        assert signed[12] == 3
 
     def test_new_fields_default_to_zero(self):
         row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
@@ -333,14 +335,16 @@ class TestBlastCorrelationRowPF:
     def test_as_signed_tuple_includes_pf(self):
         row = BlastCorrelationRow(
             "S1", 5, 1500.0, 0.8,
-            pf_vol_avg_kgm3=0.42, pf_area_avg_kgm2=2.5, energy_total_mj=900.0, n_pf_valid=5,
+            pf_vol_avg_kgm3=0.42, pf_area_avg_kgm2=2.5,
+            pf_g_per_ton_avg=110.0, energy_total_mj=900.0, n_pf_valid=5,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 12
+        assert len(signed) == 13
         assert signed[8] == 0.42
         assert signed[9] == 2.5
-        assert signed[10] == 900.0
-        assert signed[11] == 5
+        assert signed[10] == 110.0
+        assert signed[11] == 900.0
+        assert signed[12] == 5
 
     def test_correlation_function_populates_pf(self):
         """compute_blast_geotech_correlation should fill PF fields when data allows."""
@@ -537,3 +541,107 @@ class TestBlastModel:
         )
         assert energy.shape == (3,)
         assert (energy > 0).all()
+
+
+class TestComputePowderFactorGPerTon:
+    """pf_g_per_ton = (Kilos × 1000) / (Burden × Esp × H_real × rho)."""
+
+    def test_known_value_vertical_hole(self):
+        """kg=100, B=4, S=5, vertical hole len=15, rho=2.7.
+
+        H_real = 15 * cos(0) = 15
+        pf_g_per_ton = 100000 / (4 * 5 * 15 * 2.7) = 123.456790...
+        """
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": 100.0,
+            "Burden": 4.0,
+            "Esp": 5.0,
+            "longitud_real": 15.0,
+            "Inclinacion_real": 0.0,
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        assert out["pf_g_per_ton"].iloc[0] == pytest.approx(123.45679012, rel=1e-6)
+        assert out["height_real_m"].iloc[0] == pytest.approx(15.0)
+
+    def test_height_from_inclined_hole(self):
+        """Inclined hole: H_real = 16 * cos(radians(20))."""
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": 100.0,
+            "Burden": 4.0,
+            "Esp": 5.0,
+            "longitud_real": 16.0,
+            "Inclinacion_real": 20.0,
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        expected_h = 16.0 * np.cos(np.radians(20.0))
+        assert out["height_real_m"].iloc[0] == pytest.approx(expected_h)
+        expected_pf = 100000.0 / (4.0 * 5.0 * expected_h * 2.7)
+        assert out["pf_g_per_ton"].iloc[0] == pytest.approx(expected_pf, rel=1e-6)
+
+    def test_fallback_when_longitud_missing(self):
+        """When longitud_real is NaN, height falls back to BLAST.height_fallback_m."""
+        from core.config import BLAST
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": 100.0,
+            "Burden": 4.0,
+            "Esp": 5.0,
+            "longitud_real": np.nan,
+            "Inclinacion_real": 0.0,
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        assert out["height_real_m"].iloc[0] == pytest.approx(BLAST.height_fallback_m)
+        expected = 100000.0 / (4.0 * 5.0 * BLAST.height_fallback_m * BLAST.rock_density_tm3)
+        assert out["pf_g_per_ton"].iloc[0] == pytest.approx(expected, rel=1e-6)
+
+    def test_nan_propagation_when_kilos_missing(self):
+        """Missing kg -> pf_g_per_ton is NaN even if geometry is valid."""
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": np.nan,
+            "Burden": 4.0,
+            "Esp": 5.0,
+            "longitud_real": 15.0,
+            "Inclinacion_real": 0.0,
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        assert pd.isna(out["pf_g_per_ton"].iloc[0])
+
+    def test_existing_pf_columns_unchanged(self):
+        """pf_vol_kgm3 / pf_area_kgm2 still computed with bench height, not H_real."""
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": 300.0,
+            "Burden": 5.0,
+            "Esp": 6.0,
+            "longitud_real": 12.0,
+            "Inclinacion_real": 0.0,
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        assert out["pf_vol_kgm3"].iloc[0] == pytest.approx(0.6667, abs=1e-3)
+        assert out["pf_area_kgm2"].iloc[0] == pytest.approx(10.0, abs=1e-6)
+
+    def test_pf_g_per_ton_in_aggregate(self):
+        """aggregate_powder_factor_by_group exposes pf_g_per_ton_avg."""
+        df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
+        processed = procesar_pozos(df)[0]
+        out = compute_powder_factor(processed)
+        from core.calculo_tronadura import proyectar_pozos_en_seccion
+        proj = proyectar_pozos_en_seccion(
+            processed, origin=np.array([0.0, 0.0]), azimuth=90.0,
+            length=200.0, tolerance=50.0,
+        )
+        proj_labeled = proj.copy()
+        proj_labeled["section_name"] = "S1"
+        agg = aggregate_powder_factor_by_group(out, "section_name", "S1", proj_labeled)
+        assert "pf_g_per_ton_avg" in agg
+        assert "pf_g_per_ton_weighted" in agg
+        assert not pd.isna(agg["pf_g_per_ton_avg"])
+        assert agg["pf_g_per_ton_avg"] > 0

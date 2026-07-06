@@ -214,6 +214,23 @@ class StabilityDefaults:
 
 
 @dataclass(frozen=True)
+class BlastDefaults:
+    """Rock-mass and blast-hole defaults for explosive-charge metrics.
+
+    ``rock_density_tm3`` is the in-situ rock bulk density (ton/m^3) used to
+    convert broken volume into broken mass for the per-mass powder factor
+    (``pf_g_per_ton``). It defaults to the canonical medium-rock value
+    shared with :mod:`core.blast_metrics`.
+
+    ``height_fallback_m`` is the per-hole vertical height used when the
+    real hole geometry (``longitud_real`` / ``Inclinacion_real``) is
+    missing or invalid.
+    """
+    rock_density_tm3: float = 2.7
+    height_fallback_m: float = 15.0
+
+
+@dataclass(frozen=True)
 class SectorDeviationDefaults:
     """Phase 21 — per-sector overbreak / underbreak reconciliation thresholds.
 
@@ -247,3 +264,4 @@ POWDER_FACTOR = PowderFactor()
 ADVISOR = BlastAdvisorDefaults()
 STABILITY = StabilityDefaults()
 SECTOR_DEVIATION = SectorDeviationDefaults()
+BLAST = BlastDefaults()
