@@ -170,6 +170,9 @@ export function BlastCorrelation() {
                 {t('blast.col_pf_g_per_ton', { defaultValue: 'Factor de carga (g/ton)' })}
               </th>
               <th className="text-right font-mono font-semibold uppercase tracking-wider px-3 py-2">
+                {t('blast.col_pf_g_per_ton_net', { defaultValue: 'PF s/pasadura (g/ton)' })}
+              </th>
+              <th className="text-right font-mono font-semibold uppercase tracking-wider px-3 py-2">
                 {t('blast.col_pf_vol', { defaultValue: 'PF vol. (kg/m³)' })}
               </th>
               <th className="text-right font-mono font-semibold uppercase tracking-wider px-3 py-2">
@@ -220,6 +223,13 @@ export function BlastCorrelation() {
                   }}
                 >
                   {formatGramsPerTon(row.pf_g_per_ton_avg)}
+                </td>
+                {/* Additive net metric (bench height excluding sub-drill) */}
+                <td
+                  className="px-3 py-2 text-right tabular-nums"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
+                  {formatGramsPerTon(row.pf_g_per_ton_net_avg)}
                 </td>
                 <td
                   className="px-3 py-2 text-right tabular-nums"

@@ -47,7 +47,7 @@ describe('BlastCorrelation formatting helpers', () => {
 // ─── Type-shape sanity (guards against backend drift) ───────
 
 describe('BlastCorrelationRow type mapping', () => {
-  it('matches the 13-field backend BlastCorrelationRowSchema', () => {
+  it('matches the 14-field backend BlastCorrelationRowSchema', () => {
     const row: BlastCorrelationRow = {
       section_name: 'S-001',
       num_wells: 12,
@@ -60,6 +60,7 @@ describe('BlastCorrelationRow type mapping', () => {
       pf_vol_avg_kgm3: 0.92,
       pf_area_avg_kgm2: 2.31,
       pf_g_per_ton_avg: 82.4,
+      pf_g_per_ton_net_avg: 88.6,
       energy_total_mj: 24500,
       n_pf_valid: 10,
     };
@@ -75,9 +76,10 @@ describe('BlastCorrelationRow type mapping', () => {
     expect(row.pf_vol_avg_kgm3).toBe(0.92);
     expect(row.pf_area_avg_kgm2).toBe(2.31);
     expect(row.pf_g_per_ton_avg).toBe(82.4);
+    expect(row.pf_g_per_ton_net_avg).toBe(88.6);
     expect(row.energy_total_mj).toBe(24500);
     expect(row.n_pf_valid).toBe(10);
-    expect(Object.keys(row)).toHaveLength(13);
+    expect(Object.keys(row)).toHaveLength(14);
   });
 });
 
@@ -158,6 +160,7 @@ describe('<BlastCorrelation /> empty-rows state', () => {
       pf_vol_avg_kgm3: 0.8,
       pf_area_avg_kgm2: 1.5,
       pf_g_per_ton_avg: 42.5,
+      pf_g_per_ton_net_avg: 45.0,
       energy_total_mj: 9000,
       n_pf_valid: 4,
     };

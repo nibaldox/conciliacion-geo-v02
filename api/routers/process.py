@@ -897,6 +897,7 @@ def get_blast_correlation(
                 pf_vol_avg_kgm3=_safe_float(r.pf_vol_avg_kgm3),
                 pf_area_avg_kgm2=_safe_float(r.pf_area_avg_kgm2),
                 pf_g_per_ton_avg=_safe_float(r.pf_g_per_ton_avg),
+                pf_g_per_ton_net_avg=_safe_float(r.pf_g_per_ton_net_avg),
                 energy_total_mj=_safe_float(r.energy_total_mj),
                 n_pf_valid=int(r.n_pf_valid),
             )

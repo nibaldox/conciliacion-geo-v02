@@ -61,6 +61,7 @@ class BlastCorrelationRow:
     pf_vol_avg_kgm3: float = 0.0
     pf_area_avg_kgm2: float = 0.0
     pf_g_per_ton_avg: float = 0.0
+    pf_g_per_ton_net_avg: float = 0.0
     energy_total_mj: float = 0.0
     n_pf_valid: int = 0
 
@@ -80,6 +81,7 @@ class BlastCorrelationRow:
             self.pf_vol_avg_kgm3,
             self.pf_area_avg_kgm2,
             self.pf_g_per_ton_avg,
+            self.pf_g_per_ton_net_avg,
             self.energy_total_mj,
             self.n_pf_valid,
         )
@@ -133,12 +135,29 @@ def compute_powder_factor(
     Per-mass powder factor (grams of explosive per ton of rock):
         H_real           = longitud_real × cos(radians(Inclinacion_real))
         PF_g_per_ton     = (Kilos × 1000) / (Burden × Esp × H_real × ρ_roca)
+        pasadura         = (Z_collar - bench_height) - Z_toe
+        H_net            = H_real - pasadura   (bench height EXCLUDING sub-drill)
+        PF_g_per_ton_net = (Kilos × 1000) / (Burden × Esp × H_net × ρ_roca)
 
     ``H_real`` is the per-hole vertical height derived from the real hole
     geometry. ``Inclinacion_real`` is the deviation FROM VERTICAL in
     degrees (0° = vertical, matching ``core.calculo_tronadura`` where the
     toe vertical offset is ``-length × cos(incl)``); the vertical height
     therefore uses ``cos``, not ``sin``.
+
+    ``H_net`` is the vertical hole extent WITHIN the bench (collar to
+    floor), i.e. the design bench height excluding the sub-drill ("sin
+    pasadura"). The ``pasadura`` term reuses :func:`_pasadura` with
+    ``bench_height = height_fallback_m`` (the configured bench height,
+    currently 15 m). When ``Z_collar`` / ``Z_toe`` are missing or the
+    resulting pasadura is NaN / negative / non-finite, pasadura falls
+    back to 0 so ``H_net = H_real`` (the net metric gracefully equals the
+    full metric when sub-drill is unknown). ``H_net`` is clamped to NaN
+    when non-positive to avoid spurious negative powder factors. In the
+    ENAEX dataset ``Z_collar = Nombre_Banco + 15``, so ``H_net ≈ 15 m``
+    for every hole — ``pf_g_per_ton_net`` is therefore the design-bench-
+    normalised powder factor, complementary to the primary
+    ``pf_g_per_ton``.
 
     Per-session overrides:
         ``rock_density_tm3`` — in-situ rock bulk density (ton/m³) used as
@@ -157,10 +176,13 @@ def compute_powder_factor(
         pf_vol_kgm3: float or NaN
         pf_area_kgm2: float or NaN
         pf_g_per_ton: float or NaN
+        pf_g_per_ton_net: float or NaN (g/ton, bench height excluding sub-drill)
         energy_mj: float (always computed if Kilos + Tipo_Explosivo available)
         burden_est_m: float (resolved Burden)
         esp_est_m: float (resolved Espaciamiento)
         height_real_m: float (per-hole vertical height used for pf_g_per_ton)
+        height_net_m: float (per-hole vertical height excluding sub-drill, used
+            for pf_g_per_ton_net; equals height_real_m when sub-drill unknown)
         Plus the derived metrics from :func:`enrich_blast_dataframe`
         (``stemming_ratio``, ``subdrilling_ratio``,
         ``spacing_burden_ratio``, ``kg_per_meter``,
@@ -245,6 +267,30 @@ def compute_powder_factor(
     pf_gt = np.where(denom_gt > 0, (kilos * 1000.0) / denom_gt, np.nan)
     out['pf_g_per_ton'] = pd.Series(pf_gt, index=out.index)
 
+    # Per-mass powder factor normalised by the bench height EXCLUDING sub-drill
+    # ("sin pasadura"). H_net is the vertical hole extent WITHIN the bench
+    # (collar to floor), i.e. the design bench height minus the sub-drill. In
+    # the ENAEX dataset ``Z_collar = Nombre_Banco + 15``, so H_net ≈ 15 m (the
+    # design bench height) for all holes — this metric is therefore the
+    # design-bench-normalised powder factor, complementary to the primary
+    # ``pf_g_per_ton`` which uses the full real hole length.
+    bench_h_for_pasadura = float(
+        BLAST.height_fallback_m if height_fallback_m is None else height_fallback_m
+    )
+    height_net = height_real.copy()
+    pasadura_valid = pd.Series(False, index=out.index)
+    if {'Z_collar', 'Z_toe'}.issubset(out.columns):
+        pasadura_raw = pd.to_numeric(_pasadura(out, bench_h_for_pasadura), errors='coerce')
+        valid_pas = pasadura_raw.notna() & (pasadura_raw >= 0) & np.isfinite(pasadura_raw)
+        pasadura_valid = valid_pas.fillna(False)
+        height_net = height_real - pasadura_raw.where(pasadura_valid, 0.0).fillna(0.0)
+    height_net = height_net.where(height_net > 0, np.nan)
+    out['height_net_m'] = height_net
+
+    denom_gt_net = burden_est * esp_est * height_net * rho_rock
+    pf_gt_net = np.where(denom_gt_net > 0, (kilos * 1000.0) / denom_gt_net, np.nan)
+    out['pf_g_per_ton_net'] = pd.Series(pf_gt_net, index=out.index)
+
     if 'Tipo_Explosivo' in out.columns:
         mj_per_kg = out['Tipo_Explosivo'].apply(EXPLOSIVE.energy_mj_per_kg)
     else:
@@ -288,6 +334,8 @@ def aggregate_powder_factor_by_group(
         pf_vol_weighted: float or NaN (weighted by Kilos)
         pf_g_per_ton_avg: float or NaN (g/ton, mean)
         pf_g_per_ton_weighted: float or NaN (g/ton, weighted by Kilos)
+        pf_g_per_ton_net_avg: float or NaN (g/ton, mean, bench height excl. sub-drill)
+        pf_g_per_ton_net_weighted: float or NaN (g/ton, weighted by Kilos)
         energy_total_mj: float
         kg_total: float
         n_wells: int
@@ -299,6 +347,8 @@ def aggregate_powder_factor_by_group(
         "pf_vol_weighted": np.nan,
         "pf_g_per_ton_avg": np.nan,
         "pf_g_per_ton_weighted": np.nan,
+        "pf_g_per_ton_net_avg": np.nan,
+        "pf_g_per_ton_net_weighted": np.nan,
         "energy_total_mj": 0.0,
         "kg_total": 0.0,
         "n_wells": 0,
@@ -331,6 +381,7 @@ def aggregate_powder_factor_by_group(
     pf_vol = pd.to_numeric(pf_enriched.get('pf_vol_kgm3'), errors='coerce') if 'pf_vol_kgm3' in pf_enriched else pd.Series(dtype=float)
     pf_area = pd.to_numeric(pf_enriched.get('pf_area_kgm2'), errors='coerce') if 'pf_area_kgm2' in pf_enriched else pd.Series(dtype=float)
     pf_gt = pd.to_numeric(pf_enriched.get('pf_g_per_ton'), errors='coerce') if 'pf_g_per_ton' in pf_enriched else pd.Series(dtype=float)
+    pf_gt_net = pd.to_numeric(pf_enriched.get('pf_g_per_ton_net'), errors='coerce') if 'pf_g_per_ton_net' in pf_enriched else pd.Series(dtype=float)
     energy = pd.to_numeric(pf_enriched.get('energy_mj'), errors='coerce') if 'energy_mj' in pf_enriched else pd.Series(dtype=float)
 
     valid_pf = pf_vol.dropna()
@@ -354,6 +405,17 @@ def aggregate_powder_factor_by_group(
         wsum_gt = float(weights_gt.sum())
         if wsum_gt > 0:
             out["pf_g_per_ton_weighted"] = float((valid_gt * weights_gt).sum() / wsum_gt)
+
+    valid_gt_net = pf_gt_net.dropna()
+    out["pf_g_per_ton_net_avg"] = float(valid_gt_net.mean()) if not valid_gt_net.empty else float('nan')
+
+    if kg_col and not valid_gt_net.empty:
+        weights_gt_net = pf_enriched.loc[valid_gt_net.index, kg_col].fillna(0)
+        wsum_gt_net = float(weights_gt_net.sum())
+        if wsum_gt_net > 0:
+            out["pf_g_per_ton_net_weighted"] = float(
+                (valid_gt_net * weights_gt_net).sum() / wsum_gt_net
+            )
 
     out["energy_total_mj"] = float(energy.fillna(0).sum()) if not energy.empty else 0.0
 
@@ -530,6 +592,7 @@ def compute_blast_geotech_correlation(
                 "pf_vol_avg": float('nan'),
                 "pf_area_avg": float('nan'),
                 "pf_g_per_ton_avg": float('nan'),
+                "pf_g_per_ton_net_avg": float('nan'),
                 "energy_total_mj": 0.0,
                 "n_pf_valid": 0,
             }
@@ -557,6 +620,7 @@ def compute_blast_geotech_correlation(
                 pf_vol_avg_kgm3=_coerce_finite(pf_agg.get("pf_vol_avg")),
                 pf_area_avg_kgm2=_coerce_finite(pf_agg.get("pf_area_avg")),
                 pf_g_per_ton_avg=_coerce_finite(pf_agg.get("pf_g_per_ton_avg")),
+                pf_g_per_ton_net_avg=_coerce_finite(pf_agg.get("pf_g_per_ton_net_avg")),
                 energy_total_mj=_coerce_finite(pf_agg.get("energy_total_mj")),
                 n_pf_valid=int(pf_agg.get("n_pf_valid") or 0),
             )

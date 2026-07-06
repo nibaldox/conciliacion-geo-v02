@@ -203,6 +203,7 @@
     "col_wells": "Wells",
     "col_total_kg": "Total charge",
     "col_pf_g_per_ton": "Powder factor (g/ton)",
+    "col_pf_g_per_ton_net": "PF w/o subdrill (g/ton)",
     "col_pf_vol": "PF vol. (kg/m³)",
     "col_pf_area": "PF area (kg/m²)",
     "col_energy": "Energy (MJ)",

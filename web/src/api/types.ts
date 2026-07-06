@@ -261,6 +261,8 @@ export interface BlastCorrelationRow {
   pf_area_avg_kgm2: number;
   /** Highlighted primary metric (g/ton). */
   pf_g_per_ton_avg: number;
+  /** Additive metric: powder factor using bench height excluding sub-drill ("sin pasadura"). */
+  pf_g_per_ton_net_avg: number;
   energy_total_mj: number;
   n_pf_valid: number;
 }

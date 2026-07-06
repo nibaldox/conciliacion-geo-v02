@@ -184,7 +184,7 @@ def test_response_schema_is_correct(client):
         "section_name", "num_wells", "total_kg", "mean_abs_deviation",
         "avg_over_break", "avg_under_break", "n_over", "n_under",
         "pf_vol_avg_kgm3", "pf_area_avg_kgm2", "pf_g_per_ton_avg",
-        "energy_total_mj", "n_pf_valid",
+        "pf_g_per_ton_net_avg", "energy_total_mj", "n_pf_valid",
     }
 
 

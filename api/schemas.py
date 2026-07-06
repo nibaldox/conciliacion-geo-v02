@@ -247,6 +247,7 @@ class BlastCorrelationRowSchema(BaseModel):
     pf_vol_avg_kgm3: float = 0.0
     pf_area_avg_kgm2: float = 0.0
     pf_g_per_ton_avg: float = 0.0
+    pf_g_per_ton_net_avg: float = 0.0
     energy_total_mj: float = 0.0
     n_pf_valid: int = 0
 

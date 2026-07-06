@@ -147,16 +147,18 @@ class TestBlastCorrelationRowBackwardsCompat:
             avg_over_break=0.7, avg_under_break=-0.4, n_over=2, n_under=1,
             pf_vol_avg_kgm3=0.45, pf_area_avg_kgm2=2.1,
             pf_g_per_ton_avg=120.0, energy_total_mj=400.0, n_pf_valid=3,
+            pf_g_per_ton_net_avg=130.0,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 13
+        assert len(signed) == 14
         assert signed[4] == 0.7 and signed[5] == -0.4
         assert signed[6] == 2 and signed[7] == 1
         assert signed[8] == 0.45
         assert signed[9] == 2.1
         assert signed[10] == 120.0
-        assert signed[11] == 400.0
-        assert signed[12] == 3
+        assert signed[11] == 130.0  # pf_g_per_ton_net_avg
+        assert signed[12] == 400.0
+        assert signed[13] == 3
 
     def test_new_fields_default_to_zero(self):
         row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
@@ -337,14 +339,16 @@ class TestBlastCorrelationRowPF:
             "S1", 5, 1500.0, 0.8,
             pf_vol_avg_kgm3=0.42, pf_area_avg_kgm2=2.5,
             pf_g_per_ton_avg=110.0, energy_total_mj=900.0, n_pf_valid=5,
+            pf_g_per_ton_net_avg=115.0,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 13
+        assert len(signed) == 14
         assert signed[8] == 0.42
         assert signed[9] == 2.5
         assert signed[10] == 110.0
-        assert signed[11] == 900.0
-        assert signed[12] == 5
+        assert signed[11] == 115.0  # pf_g_per_ton_net_avg
+        assert signed[12] == 900.0
+        assert signed[13] == 5
 
     def test_correlation_function_populates_pf(self):
         """compute_blast_geotech_correlation should fill PF fields when data allows."""
@@ -645,3 +649,96 @@ class TestComputePowderFactorGPerTon:
         assert "pf_g_per_ton_weighted" in agg
         assert not pd.isna(agg["pf_g_per_ton_avg"])
         assert agg["pf_g_per_ton_avg"] > 0
+
+
+class TestComputePowderFactorGPerTonNet:
+    """pf_g_per_ton_net = (Kilos × 1000) / (Burden × Esp × H_net × rho).
+
+    H_net = H_real - pasadura, where pasadura = (Z_collar - bench_height) - Z_toe.
+    The pasadura term reuses the existing ``_pasadura`` helper with
+    ``bench_height = height_fallback_m`` (the configured bench height, 15 m).
+    When Z_collar/Z_toe are missing, pasadura = 0 → H_net = H_real (graceful
+    fallback). H_net is clamped to NaN when non-positive.
+    """
+
+    def test_known_value_with_pasadura(self):
+        """kg=100, B=4, S=5, vertical hole len=18, rho=2.7.
+
+        pasadura = (1015 - 15) - 997 = 3
+        H_net = 18 - 3 = 15
+        pf_g_per_ton_net = 100000 / (4 × 5 × 15 × 2.7) = 123.456790...
+        (primary pf_g_per_ton uses H_real=18 → 103.08...)
+        """
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": 100.0,
+            "Burden": 4.0,
+            "Esp": 5.0,
+            "longitud_real": 18.0,
+            "Inclinacion_real": 0.0,
+            "Z_collar": 1015.0,
+            "Z_toe": 997.0,
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        assert out["height_real_m"].iloc[0] == pytest.approx(18.0)
+        assert out["height_net_m"].iloc[0] == pytest.approx(15.0)
+        # Primary PF unchanged: uses H_real=18
+        assert out["pf_g_per_ton"].iloc[0] == pytest.approx(100000.0 / (4.0 * 5.0 * 18.0 * 2.7), rel=1e-6)
+        # Net PF: uses H_net=15
+        assert out["pf_g_per_ton_net"].iloc[0] == pytest.approx(100000.0 / (4.0 * 5.0 * 15.0 * 2.7), rel=1e-6)
+
+    def test_fallback_equals_full_when_collar_toe_missing(self):
+        """No Z_collar/Z_toe → pasadura = 0 → pf_g_per_ton_net == pf_g_per_ton."""
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": 100.0,
+            "Burden": 4.0,
+            "Esp": 5.0,
+            "longitud_real": 15.0,
+            "Inclinacion_real": 0.0,
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        assert out["height_net_m"].iloc[0] == pytest.approx(out["height_real_m"].iloc[0])
+        assert out["pf_g_per_ton_net"].iloc[0] == pytest.approx(out["pf_g_per_ton"].iloc[0])
+
+    def test_negative_pasadura_falls_back_to_zero(self):
+        """If pasadura computes negative (Z_toe below floor), treat as 0.
+
+        Z_collar=1015, bench=15 → floor=1000; Z_toe=1001 → pasadura = -1
+        (toe is above floor, not sub-drill) → clamp to 0 → H_net = H_real.
+        """
+        df = pd.DataFrame([{
+            "Kilos_Cargados_real": 100.0,
+            "Burden": 4.0,
+            "Esp": 5.0,
+            "longitud_real": 15.0,
+            "Inclinacion_real": 0.0,
+            "Z_collar": 1015.0,
+            "Z_toe": 1001.0,  # pasadura = (1015-15) - 1001 = -1 → clamped to 0
+            "Nombre_Malla_Original": "M1",
+            "Tipo_Explosivo": "ANFO",
+        }])
+        out = compute_powder_factor(df)
+        assert out["height_net_m"].iloc[0] == pytest.approx(15.0)
+        assert out["pf_g_per_ton_net"].iloc[0] == pytest.approx(out["pf_g_per_ton"].iloc[0])
+
+    def test_pf_g_per_ton_net_in_aggregate(self):
+        """aggregate_powder_factor_by_group exposes pf_g_per_ton_net_avg."""
+        df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
+        processed = procesar_pozos(df)[0]
+        out = compute_powder_factor(processed)
+        from core.calculo_tronadura import proyectar_pozos_en_seccion
+        proj = proyectar_pozos_en_seccion(
+            processed, origin=np.array([0.0, 0.0]), azimuth=90.0,
+            length=200.0, tolerance=50.0,
+        )
+        proj_labeled = proj.copy()
+        proj_labeled["section_name"] = "S1"
+        agg = aggregate_powder_factor_by_group(out, "section_name", "S1", proj_labeled)
+        assert "pf_g_per_ton_net_avg" in agg
+        assert "pf_g_per_ton_net_weighted" in agg
+        # procesar_pozos derives Z_collar/Z_toe, so net is finite and > 0.
+        assert not pd.isna(agg["pf_g_per_ton_net_avg"])
+        assert agg["pf_g_per_ton_net_avg"] > 0

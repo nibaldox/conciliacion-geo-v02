@@ -203,6 +203,7 @@
     "col_wells": "Pozos",
     "col_total_kg": "Carga total",
     "col_pf_g_per_ton": "Factor de carga (g/ton)",
+    "col_pf_g_per_ton_net": "PF s/pasadura (g/ton)",
     "col_pf_vol": "PF vol. (kg/m³)",
     "col_pf_area": "PF área (kg/m²)",
     "col_energy": "Energía (MJ)",
