@@ -117,7 +117,11 @@ _LENGTH_CANDIDATES = ('longitud_real', 'Len', 'Longitud', 'Length', 'Profundidad
 _INCLINATION_CANDIDATES = ('Inclinacion_real', 'Incl', 'Inclinacion', 'Inclination')
 
 
-def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
+def compute_powder_factor(
+    df_pozos: pd.DataFrame,
+    rock_density_tm3: Optional[float] = None,
+    height_fallback_m: Optional[float] = None,
+) -> pd.DataFrame:
     """Compute powder factor for each blast-hole row.
 
     Powder factor (PF) = explosive mass normalised by the amount of rock
@@ -134,10 +138,16 @@ def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
     geometry. ``Inclinacion_real`` is the deviation FROM VERTICAL in
     degrees (0° = vertical, matching ``core.calculo_tronadura`` where the
     toe vertical offset is ``-length × cos(incl)``); the vertical height
-    therefore uses ``cos``, not ``sin``. When ``longitud_real`` or
-    ``Inclinacion_real`` is missing/invalid, ``H_real`` falls back to
-    ``BLAST.height_fallback_m``. ``ρ_roca`` is read from
-    ``BLAST.rock_density_tm3`` (ton/m³).
+    therefore uses ``cos``, not ``sin``.
+
+    Per-session overrides:
+        ``rock_density_tm3`` — in-situ rock bulk density (ton/m³) used as
+        ``ρ_roca`` in ``PF_g_per_ton``. ``None`` (default) falls back to
+        ``BLAST.rock_density_tm3`` (2.7 ton/m³), preserving the original
+        behaviour.
+        ``height_fallback_m`` — vertical height used when ``longitud_real``
+        or ``Inclinacion_real`` is missing/invalid. ``None`` (default)
+        falls back to ``BLAST.height_fallback_m`` (15.0 m).
 
     If Burden/Espaciamiento columns are missing, estimate them from the
     median nearest-neighbour distance (k=4) among the collars in the
@@ -222,12 +232,15 @@ def compute_powder_factor(df_pozos: pd.DataFrame) -> pd.DataFrame:
         else pd.Series([np.nan] * len(out), index=out.index)
     )
 
-    height_real = pd.Series(float(BLAST.height_fallback_m), index=out.index)
+    height_real = pd.Series(
+        float(BLAST.height_fallback_m if height_fallback_m is None else height_fallback_m),
+        index=out.index,
+    )
     valid_h = length_vals.notna() & incl_vals.notna() & (length_vals > 0) & (incl_vals >= 0)
     height_real.loc[valid_h] = length_vals[valid_h] * np.cos(np.radians(incl_vals[valid_h]))
     out['height_real_m'] = height_real
 
-    rho_rock = float(BLAST.rock_density_tm3)
+    rho_rock = float(BLAST.rock_density_tm3 if rock_density_tm3 is None else rock_density_tm3)
     denom_gt = burden_est * esp_est * height_real * rho_rock
     pf_gt = np.where(denom_gt > 0, (kilos * 1000.0) / denom_gt, np.nan)
     out['pf_g_per_ton'] = pd.Series(pf_gt, index=out.index)
@@ -251,6 +264,8 @@ def aggregate_powder_factor_by_group(
     group_by: str,
     group_value: str,
     projected_pozos: pd.DataFrame,
+    rock_density_tm3: Optional[float] = None,
+    height_fallback_m: Optional[float] = None,
 ) -> dict:
     """Aggregate powder factor metrics for a group of wells.
 
@@ -260,6 +275,12 @@ def aggregate_powder_factor_by_group(
     group_by : column to filter on (e.g. 'section_name', 'level', 'malla').
     group_value : value of that column to keep.
     projected_pozos : DataFrame with rows considered for the aggregation.
+    rock_density_tm3 : optional per-session rock density override (ton/m³).
+        ``None`` defers to ``BLAST.rock_density_tm3`` inside
+        :func:`compute_powder_factor`.
+    height_fallback_m : optional per-session height fallback override (m).
+        ``None`` defers to ``BLAST.height_fallback_m`` inside
+        :func:`compute_powder_factor`.
 
     Returns dict with:
         pf_vol_avg: float or NaN  (kg/m³, mean)
@@ -302,7 +323,11 @@ def aggregate_powder_factor_by_group(
     kg_total = float(sub[kg_col].fillna(0).sum()) if kg_col else 0.0
     out["kg_total"] = kg_total
 
-    pf_enriched = compute_powder_factor(sub)
+    pf_enriched = compute_powder_factor(
+        sub,
+        rock_density_tm3=rock_density_tm3,
+        height_fallback_m=height_fallback_m,
+    )
     pf_vol = pd.to_numeric(pf_enriched.get('pf_vol_kgm3'), errors='coerce') if 'pf_vol_kgm3' in pf_enriched else pd.Series(dtype=float)
     pf_area = pd.to_numeric(pf_enriched.get('pf_area_kgm2'), errors='coerce') if 'pf_area_kgm2' in pf_enriched else pd.Series(dtype=float)
     pf_gt = pd.to_numeric(pf_enriched.get('pf_g_per_ton'), errors='coerce') if 'pf_g_per_ton' in pf_enriched else pd.Series(dtype=float)
@@ -440,6 +465,8 @@ def compute_blast_geotech_correlation(
     sections: List[Any],
     comparisons: List[dict],
     tolerance: Optional[float] = None,
+    rock_density_tm3: Optional[float] = None,
+    height_fallback_m: Optional[float] = None,
 ) -> List[BlastCorrelationRow]:
     """Return one BlastCorrelationRow per section.
 
@@ -451,6 +478,14 @@ def compute_blast_geotech_correlation(
     The returned rows also include powder-factor aggregates (PF_vol
     kg/m³, PF_area kg/m², total energy MJ, count of valid PF samples)
     computed from the projected holes via `compute_powder_factor`.
+
+    Per-session overrides:
+        ``rock_density_tm3`` / ``height_fallback_m`` — optional rock
+        density (ton/m³) and height fallback (m) forwarded to
+        :func:`aggregate_powder_factor_by_group` and ultimately
+        :func:`compute_powder_factor`. ``None`` defers to the
+        ``BLAST`` singleton defaults (2.7 ton/m³, 15.0 m), preserving
+        the original behaviour.
 
     Note: `total_kg` is the **raw** mass of explosive accumulated per
     section. For correlation analysis prefer `pf_vol_avg_kgm3`, which
@@ -506,6 +541,8 @@ def compute_blast_geotech_correlation(
                 total_kg = 0.0
             pf_agg = aggregate_powder_factor_by_group(
                 df_pozos, 'section_name', sec_name, proj_labeled,
+                rock_density_tm3=rock_density_tm3,
+                height_fallback_m=height_fallback_m,
             )
         rows.append(
             BlastCorrelationRow(

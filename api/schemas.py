@@ -67,6 +67,20 @@ class TolerancesSchema(BaseModel):
     overall_angle: Dict[str, float] = Field(default={"neg": 2.0, "pos": 2.0})
 
 
+class BlastSettingsSchema(BaseModel):
+    """Per-session drill & blast tunables.
+
+    ``rock_density_tm3`` — in-situ rock bulk density (ton/m³) used to
+    convert broken volume into broken mass for the per-mass powder factor
+    (``pf_g_per_ton``). Defaults match :class:`core.config.BlastDefaults`.
+    ``height_fallback_m`` — vertical height used when the real hole
+    geometry (``longitud_real`` / ``Inclinacion_real``) is missing.
+    """
+
+    rock_density_tm3: float = Field(default=2.7, ge=0.0, le=20.0, examples=[2.7])
+    height_fallback_m: float = Field(default=15.0, ge=0.0, le=100.0, examples=[15.0])
+
+
 class BenchParamsSchema(BaseModel):
     bench_number: int
     crest_elevation: float
@@ -156,6 +170,20 @@ class ExportFilters(BaseModel):
 class SettingsResponse(BaseModel):
     process: ProcessSettings
     tolerances: TolerancesSchema
+    blast: Optional[BlastSettingsSchema] = None
+
+
+class SettingsUpdate(BaseModel):
+    """Partial-update body for ``PUT /settings``.
+
+    All fields are optional so a caller can PATCH a single block (e.g.
+    ``{"blast": {"rock_density_tm3": 3.0}}``) without resending the others.
+    The router merges only the blocks actually present in the body.
+    """
+
+    process: Optional[ProcessSettings] = None
+    tolerances: Optional[TolerancesSchema] = None
+    blast: Optional[BlastSettingsSchema] = None
 
 
 class MessageResponse(BaseModel):

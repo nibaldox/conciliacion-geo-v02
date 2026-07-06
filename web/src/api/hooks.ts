@@ -16,6 +16,7 @@ import type {
   Tolerances,
   BenchParams,
   SettingsResponse,
+  SettingsUpdate,
   VerticesResponse,
   ContourData,
   BlastHolesOnProfileResponse,
@@ -536,7 +537,10 @@ export function useSettings() {
 export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (settings: SettingsResponse) =>
+    // Accepts a full SettingsResponse or a partial SettingsUpdate so callers
+    // can PATCH a single block (e.g. `{ blast: {...} }`) without resending
+    // the others — the router merges only the blocks actually present.
+    mutationFn: (settings: SettingsUpdate) =>
       client.put('/settings', settings).then(r => r.data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
   });

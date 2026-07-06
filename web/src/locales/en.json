@@ -207,7 +207,13 @@
     "col_pf_area": "PF area (kg/m²)",
     "col_energy": "Energy (MJ)",
     "col_over_break": "Over-break (m)",
-    "col_under_break": "Under-break (m)"
+    "col_under_break": "Under-break (m)",
+    "settings_title": "Blast parameters",
+    "rock_density": "Rock density (ton/m³)",
+    "height_fallback": "Height fallback (m)",
+    "apply": "Apply",
+    "apply_aria": "Apply rock density and height fallback",
+    "density_help": "Adjusts the powder factor (g/ton) per section. Default value: 2.7 ton/m³."
   },
   "section_list": {
     "loading": "Loading sections...",

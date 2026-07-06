@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useBlastCorrelation } from '../../api/hooks';
+import { useQueryClient } from '@tanstack/react-query';
+import { useBlastCorrelation, useSettings, useUpdateSettings } from '../../api/hooks';
 import type { BlastCorrelationRow } from '../../api/types';
 
 // ─── Pure formatting helpers (exported for testing) ─────────
@@ -47,6 +49,12 @@ export function formatBreakMeters(value: number | null | undefined): string {
  * `pf_g_per_ton_avg` (g/ton) column is visually emphasized as the
  * primary KPI. Empty / loading / error states mirror sibling
  * results components.
+ *
+ * A small controls panel (`BlastDensityControl`) at the top lets the
+ * user tune the per-session rock density (ρ, ton/m³) and height
+ * fallback (m). On "Aplicar" the values are PUT to `/settings` under
+ * the `blast` block and the `['blast-correlation', ...]` query is
+ * invalidated so the table refetches with the new ρ.
  */
 export function BlastCorrelation() {
   const { t } = useTranslation();
@@ -103,6 +111,7 @@ export function BlastCorrelation() {
 
   return (
     <div className="space-y-4">
+      <BlastDensityControl />
       {/* Summary header */}
       <div
         className="flex items-center justify-between border-b pb-3 shrink-0"
@@ -247,6 +256,157 @@ export function BlastCorrelation() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ─── Per-session blast density / height control ─────────────
+//
+// Renders a compact control panel that lets the user override the
+// session's rock density (ρ, ton/m³) and height fallback (m). Both
+// values feed the per-mass powder factor (pf_g_per_ton). On "Aplicar"
+// the values are PUT to /settings under the `blast` block, then the
+// ['blast-correlation', ...] query is invalidated so the table above
+// refetches with the new ρ.
+//
+// The inputs are initialised from the current settings (useSettings)
+// and resync whenever the settings query data changes (e.g. after a
+// successful PUT or an external update). We do NOT PUT on every
+// keystroke — only when the user clicks "Aplicar", matching the
+// Sidebar's explicit-save pattern for process settings.
+
+const BLAST_DEFAULTS = { rock_density_tm3: 2.7, height_fallback_m: 15.0 };
+
+export function BlastDensityControl() {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const { data: settings } = useSettings();
+  const updateSettings = useUpdateSettings();
+
+  const [density, setDensity] = useState<number>(BLAST_DEFAULTS.rock_density_tm3);
+  const [height, setHeight] = useState<number>(BLAST_DEFAULTS.height_fallback_m);
+
+  // Resync local state whenever the settings query data changes.
+  useEffect(() => {
+    const b = settings?.blast;
+    if (b) {
+      setDensity(Number(b.rock_density_tm3 ?? BLAST_DEFAULTS.rock_density_tm3));
+      setHeight(Number(b.height_fallback_m ?? BLAST_DEFAULTS.height_fallback_m));
+    }
+  }, [settings]);
+
+  const invalid =
+    !Number.isFinite(density) ||
+    !Number.isFinite(height) ||
+    density <= 0 ||
+    height <= 0;
+
+  const handleApply = () => {
+    if (invalid) return;
+    // Send only the blast block — the PUT router merges it into stored
+    // settings without touching process/tolerances (exclude_unset merge).
+    updateSettings.mutate({
+      blast: {
+        rock_density_tm3: density,
+        height_fallback_m: height,
+      },
+    });
+    // Refetch the correlation table so pf_g_per_ton recomputes with ρ.
+    qc.invalidateQueries({ queryKey: ['blast-correlation'] });
+  };
+
+  const inputStyle: React.CSSProperties = {
+    backgroundColor: 'var(--color-surface)',
+    borderColor: 'var(--color-border)',
+    color: 'var(--color-text-primary)',
+  };
+  const inputCls =
+    'w-24 px-2 py-1 border rounded-md text-xs outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono';
+
+  return (
+    <div
+      className="flex flex-wrap items-end gap-3 rounded-lg border p-3 shrink-0"
+      style={{
+        borderColor: 'var(--color-border)',
+        backgroundColor: 'var(--color-surface-muted)',
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="blast-rock-density"
+          className="text-xs font-medium"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          {t('blast.rock_density', { defaultValue: 'Densidad de roca (ton/m³)' })}
+        </label>
+        <input
+          id="blast-rock-density"
+          type="number"
+          inputMode="decimal"
+          step="0.1"
+          min="0"
+          value={density}
+          onChange={(e) => setDensity(Number(e.target.value))}
+          className={inputCls}
+          style={inputStyle}
+          data-testid="blast-rock-density"
+        />
+      </div>
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="blast-height-fallback"
+          className="text-xs font-medium"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          {t('blast.height_fallback', { defaultValue: 'Altura fallback (m)' })}
+        </label>
+        <input
+          id="blast-height-fallback"
+          type="number"
+          inputMode="decimal"
+          step="0.5"
+          min="0"
+          value={height}
+          onChange={(e) => setHeight(Number(e.target.value))}
+          className={inputCls}
+          style={inputStyle}
+          data-testid="blast-height-fallback"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={handleApply}
+        disabled={updateSettings.isPending || invalid}
+        className="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50"
+        style={{
+          backgroundColor: 'var(--color-accent, #f97316)',
+          color: 'white',
+        }}
+        aria-label={t('blast.apply_aria', { defaultValue: 'Aplicar' })}
+        data-testid="blast-apply-btn"
+      >
+        {updateSettings.isPending
+          ? t('common.loading', { defaultValue: 'Cargando…' })
+          : t('blast.apply', { defaultValue: 'Aplicar' })}
+      </button>
+      {updateSettings.isError && (
+        <span
+          className="text-xs"
+          style={{ color: 'var(--color-danger, #ef4444)' }}
+          data-testid="blast-settings-error"
+        >
+          {t('blast.error', { defaultValue: 'Error al cargar los datos' })}
+        </span>
+      )}
+      <p
+        className="text-xs leading-relaxed"
+        style={{ color: 'var(--color-text-muted)' }}
+      >
+        {t('blast.density_help', {
+          defaultValue:
+            'Ajusta el factor de carga (g/ton) por sección. Valor por defecto: 2,7 ton/m³.',
+        })}
+      </p>
     </div>
   );
 }

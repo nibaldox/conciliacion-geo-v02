@@ -98,6 +98,18 @@ export interface Tolerances {
   overall_angle: Record<string, number>;
 }
 
+/**
+ * Per-session drill & blast tunables. Mirrors the backend
+ * `BlastSettingsSchema` (`api/schemas.py`) and the `core.config.BlastDefaults`
+ * singleton. `rock_density_tm3` (ρ, ton/m³) drives the per-mass powder factor
+ * (`pf_g_per_ton`); `height_fallback_m` is the vertical height used when the
+ * real hole geometry is missing.
+ */
+export interface BlastSettings {
+  rock_density_tm3: number;
+  height_fallback_m: number;
+}
+
 export interface BenchParams {
   bench_number: number;
   crest_elevation: number;
@@ -174,6 +186,18 @@ export interface ExportRequest {
 export interface SettingsResponse {
   process: ProcessSettings;
   tolerances: Tolerances;
+  /** Per-session drill & blast tunables (rock density ρ, height fallback). */
+  blast?: BlastSettings;
+}
+
+/**
+ * Partial-update body for `PUT /settings`. All blocks optional so a caller
+ * can PATCH a single block (e.g. `{ blast: {...} }`) without resending others.
+ */
+export interface SettingsUpdate {
+  process?: ProcessSettings;
+  tolerances?: Tolerances;
+  blast?: BlastSettings;
 }
 
 export interface MessageResponse {

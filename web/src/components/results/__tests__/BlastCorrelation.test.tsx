@@ -85,7 +85,22 @@ describe('BlastCorrelationRow type mapping', () => {
 
 vi.mock('../../../api/hooks', () => ({
   useBlastCorrelation: vi.fn(),
+  useSettings: vi.fn(() => ({ data: undefined })),
+  useUpdateSettings: vi.fn(() => ({
+    mutate: vi.fn(),
+    isPending: false,
+  })),
 }));
+
+vi.mock('@tanstack/react-query', async () => {
+  const actual = await vi.importActual<typeof import('@tanstack/react-query')>('@tanstack/react-query');
+  return {
+    ...actual,
+    useQueryClient: vi.fn(() => ({
+      invalidateQueries: vi.fn(),
+    })),
+  };
+});
 
 // Pull the mocked hook out so we can drive its return value per test.
 // Top-level dynamic import keeps the module graph after vi.mock hoisting.

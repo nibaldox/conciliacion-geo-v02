@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request
 
 import api.database as db
 import api.schemas as schemas
-from core.config import DETECTION, TOLERANCES as DEFAULT_TOLERANCES
+from core.config import BLAST, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -64,6 +64,10 @@ def _get_default_settings() -> dict:
                 else DEFAULT_TOLERANCES.overall_angle["pos"],
             },
         },
+        "blast": {
+            "rock_density_tm3": BLAST.rock_density_tm3,
+            "height_fallback_m": BLAST.height_fallback_m,
+        },
     }
 
 
@@ -107,20 +111,29 @@ def get_settings(request: Request):
 
 
 @router.put("")
-def update_settings(request: Request, body: schemas.SettingsResponse):
+def update_settings(request: Request, body: schemas.SettingsUpdate):
     """
-    Update process and tolerance settings.
+    Update process, tolerance, and blast settings.
 
     Accepts partial updates — only keys present in the body are changed;
-    other settings retain their current values.
+    other settings retain their current values. The ``blast`` block carries
+    per-session drill & blast tunables (rock density ρ, height fallback)
+    that drive the per-mass powder factor on ``GET /process/blast-correlation``.
     """
     session_id = db.get_or_create_session(request.state.session_id)
 
     # Get existing settings or defaults
     existing = db.get_settings(session_id) or _get_default_settings()
 
-    # Merge incoming body into existing settings
-    body_dict = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+    # Merge incoming body into existing settings. ``exclude_unset=True``
+    # keeps only fields the client actually sent, so a partial PUT (e.g.
+    # ``{blast: {rock_density_tm3}}``) does not clobber previously stored
+    # sibling keys with Pydantic schema defaults.
+    body_dict = (
+        body.model_dump(exclude_unset=True)
+        if hasattr(body, "model_dump")
+        else body.dict(exclude_unset=True)
+    )
 
     if "process" in body_dict and body_dict["process"] is not None:
         if "process" not in existing:
@@ -131,6 +144,11 @@ def update_settings(request: Request, body: schemas.SettingsResponse):
         if "tolerances" not in existing:
             existing["tolerances"] = {}
         existing["tolerances"].update(body_dict["tolerances"])
+
+    if "blast" in body_dict and body_dict["blast"] is not None:
+        if "blast" not in existing:
+            existing["blast"] = {}
+        existing["blast"].update(body_dict["blast"])
 
     db.save_settings(session_id, existing)
 

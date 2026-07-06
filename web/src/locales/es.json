@@ -207,7 +207,13 @@
     "col_pf_area": "PF área (kg/m²)",
     "col_energy": "Energía (MJ)",
     "col_over_break": "Over-break (m)",
-    "col_under_break": "Under-break (m)"
+    "col_under_break": "Under-break (m)",
+    "settings_title": "Parámetros de tronadura",
+    "rock_density": "Densidad de roca (ton/m³)",
+    "height_fallback": "Altura fallback (m)",
+    "apply": "Aplicar",
+    "apply_aria": "Aplicar densidad de roca y altura fallback",
+    "density_help": "Ajusta el factor de carga (g/ton) por sección. Valor por defecto: 2,7 ton/m³."
   },
   "section_list": {
     "loading": "Cargando secciones...",

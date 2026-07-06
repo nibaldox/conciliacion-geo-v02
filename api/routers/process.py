@@ -832,6 +832,12 @@ def get_blast_correlation(
     endpoint returns ``BlastCorrelationResponse(rows=[])`` with HTTP 200 — it
     never raises 404/500 on empty input.
 
+    Per-session overrides: the session's ``blast.rock_density_tm3`` and
+    ``blast.height_fallback_m`` settings (managed via ``PUT /settings``) are
+    forwarded to :func:`compute_blast_geotech_correlation`. When unset the
+    core primitive falls back to the ``BLAST`` singleton defaults
+    (2.7 ton/m³, 15.0 m).
+
     Parameters
     ----------
     tolerance : float | None
@@ -863,9 +869,19 @@ def get_blast_correlation(
                 n_sections=len(sections_raw) if sections_raw else 0,
             )
 
+        # Per-session blast tunables (rock density ρ + height fallback).
+        # None → core primitive uses BLAST singleton defaults.
+        settings = db.get_settings(session_id) or {}
+        blast = settings.get("blast") or {}
+        rock_density_tm3 = blast.get("rock_density_tm3")
+        height_fallback_m = blast.get("height_fallback_m")
+
         sections = [_section_from_dict(s) for s in sections_raw]
         rows = compute_blast_geotech_correlation(
-            df_holes, sections, comparisons, tolerance=tolerance,
+            df_holes, sections, comparisons,
+            tolerance=tolerance,
+            rock_density_tm3=rock_density_tm3,
+            height_fallback_m=height_fallback_m,
         )
 
         schema_rows = [
