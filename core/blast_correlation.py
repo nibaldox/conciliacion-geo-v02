@@ -8,6 +8,7 @@ two output formats stay in sync.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, List, Optional
 
@@ -28,6 +29,22 @@ from core.compliance_status import (
 )
 from core.config import BLAST, DEFAULTS, EXPLOSIVE, RAMP
 from core.blast_metrics import ROCK_DENSITY_DEFAULT_TM3, enrich_blast_dataframe
+
+
+def _coerce_finite(value) -> float:
+    """Coerce a powder-factor aggregate value to a finite float.
+
+    ``aggregate_powder_factor_by_group`` legitimately returns ``float('nan')``
+    for PF keys when projected holes exist but lack valid geometry. Since
+    ``nan or 0.0`` evaluates to ``nan`` (NaN is truthy), a plain ``float(... or 0.0)``
+    leaks NaN through to JSON serialisation and crashes the endpoint. Map any
+    non-finite or missing value to ``0.0``; ``n_pf_valid==0`` already conveys
+    "no valid PF samples".
+    """
+    if value is None:
+        return 0.0
+    f = float(value)
+    return f if math.isfinite(f) else 0.0
 
 
 @dataclass
@@ -500,10 +517,10 @@ def compute_blast_geotech_correlation(
                 avg_under_break=signed["avg_under"],
                 n_over=signed["n_over"],
                 n_under=signed["n_under"],
-                pf_vol_avg_kgm3=float(pf_agg.get("pf_vol_avg") or 0.0),
-                pf_area_avg_kgm2=float(pf_agg.get("pf_area_avg") or 0.0),
-                pf_g_per_ton_avg=float(pf_agg.get("pf_g_per_ton_avg") or 0.0),
-                energy_total_mj=float(pf_agg.get("energy_total_mj") or 0.0),
+                pf_vol_avg_kgm3=_coerce_finite(pf_agg.get("pf_vol_avg")),
+                pf_area_avg_kgm2=_coerce_finite(pf_agg.get("pf_area_avg")),
+                pf_g_per_ton_avg=_coerce_finite(pf_agg.get("pf_g_per_ton_avg")),
+                energy_total_mj=_coerce_finite(pf_agg.get("energy_total_mj")),
                 n_pf_valid=int(pf_agg.get("n_pf_valid") or 0),
             )
         )

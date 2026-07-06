@@ -198,3 +198,39 @@ class BlastHolesOnProfileResponse(BaseModel):
     mesh_id: str
     tolerance: float
     holes: List[BlastHoleOnProfile]
+
+
+class BlastCorrelationRowSchema(BaseModel):
+    """One row of blast↔geotech correlation for a single section.
+
+    Mirrors :class:`core.blast_correlation.BlastCorrelationRow`. Numeric metrics
+    default to ``0.0`` so empty / no-data sections serialise cleanly. Floats are
+    rounded to 3 decimals at the mapping site (matching ``BlastHoleOnProfile``).
+    """
+
+    section_name: str
+    num_wells: int = 0
+    total_kg: float = 0.0
+    mean_abs_deviation: float = 0.0
+    avg_over_break: float = 0.0
+    avg_under_break: float = 0.0
+    n_over: int = 0
+    n_under: int = 0
+    pf_vol_avg_kgm3: float = 0.0
+    pf_area_avg_kgm2: float = 0.0
+    pf_g_per_ton_avg: float = 0.0
+    energy_total_mj: float = 0.0
+    n_pf_valid: int = 0
+
+
+class BlastCorrelationResponse(BaseModel):
+    """Response envelope for ``GET /process/blast-correlation``.
+
+    ``rows`` is empty (never an error) when the session has no blast holes, no
+    sections, or no comparison results. ``tolerance`` echoes the inclusion
+    radius used (``None`` → core default ``DEFAULTS.blast_correlation_radius_m``).
+    """
+
+    rows: List[BlastCorrelationRowSchema] = Field(default_factory=list)
+    tolerance: Optional[float] = None
+    n_sections: int = 0

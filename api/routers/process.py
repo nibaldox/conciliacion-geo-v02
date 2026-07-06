@@ -8,6 +8,7 @@ Endpoints:
     PUT  /results/{section_id}/reconciled  Update benches after drag & drop
 """
 
+import math
 import os
 import logging
 import tempfile
@@ -38,6 +39,7 @@ from core.param_extractor import (
     build_reconciled_profile_v2,
 )
 from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.blast_correlation import compute_blast_geotech_correlation
 from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,14 @@ router = APIRouter(prefix="/process", tags=["process"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _safe_float(value, ndigits: int = 3) -> float:
+    """Coerce to a JSON-safe rounded float; NaN/None -> 0.0."""
+    if value is None:
+        return 0.0
+    f = float(value)
+    return round(f, ndigits) if math.isfinite(f) else 0.0
 
 
 def _load_mesh_from_db(session_id: str, mesh_type: str) -> trimesh.Trimesh:
@@ -785,3 +795,105 @@ def get_blast_holes(
     except Exception as exc:
         logger.exception("Get blast holes failed")
         raise HTTPException(500, detail=f"Get blast holes failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /process/blast-correlation
+# ---------------------------------------------------------------------------
+
+
+@router.get("/blast-correlation")
+def get_blast_correlation(
+    request: Request,
+    tolerance: Optional[float] = None,
+):
+    """Per-section blast↔geotech correlation summary, including powder factor.
+
+    Wraps :func:`core.blast_correlation.compute_blast_geotech_correlation` — the
+    same primitive used by the Streamlit reference and the Excel/Word writers —
+    so the web frontend, CLI and reports all consume identical numbers.
+
+    Data flow (all primitives reused, none duplicated):
+        session   = db.get_or_create_session(request.state.session_id)
+        sections  = [_section_from_dict(s) for s in db.get_sections(session_id)]
+        df_holes  = _load_session_blast_holes(session_id)        # or None
+        comparisons = db.get_results(session_id)                 # List[Dict]
+        rows      = compute_blast_geotech_correlation(
+                        df_holes, sections, comparisons, tolerance)
+
+    Each returned row carries the full set of powder-factor metrics surfaced by
+    the underlying primitive: ``pf_vol_avg_kgm3`` (kg/m³), ``pf_area_avg_kgm2``
+    (kg/m²), ``pf_g_per_ton_avg`` (g/ton — the per-mass PF) and
+    ``energy_total_mj`` (total explosive energy), alongside the geotech
+    deviation aggregates (``mean_abs_deviation``, ``avg_over_break`` …).
+
+    Empty-case behaviour (matches the blast-holes endpoint philosophy): when the
+    session has no blast holes, no sections, or no comparison results, the
+    endpoint returns ``BlastCorrelationResponse(rows=[])`` with HTTP 200 — it
+    never raises 404/500 on empty input.
+
+    Parameters
+    ----------
+    tolerance : float | None
+        Perpendicular inclusion radius in metres around each section axis.
+        ``None`` (default) defers to ``DEFAULTS.blast_correlation_radius_m``
+        inside the core primitive.
+    """
+    try:
+        session_id = db.get_or_create_session(request.state.session_id)
+
+        sections_raw = db.get_sections(session_id)
+        df_holes = _load_session_blast_holes(session_id)
+        comparisons = db.get_results(session_id)
+
+        resolved_tolerance = (
+            float(tolerance) if tolerance is not None
+            else float(DEFAULTS.blast_correlation_radius_m)
+        )
+
+        if (
+            df_holes is None
+            or df_holes.empty
+            or not sections_raw
+            or not comparisons
+        ):
+            return schemas.BlastCorrelationResponse(
+                rows=[],
+                tolerance=resolved_tolerance,
+                n_sections=len(sections_raw) if sections_raw else 0,
+            )
+
+        sections = [_section_from_dict(s) for s in sections_raw]
+        rows = compute_blast_geotech_correlation(
+            df_holes, sections, comparisons, tolerance=tolerance,
+        )
+
+        schema_rows = [
+            schemas.BlastCorrelationRowSchema(
+                section_name=r.section_name,
+                num_wells=int(r.num_wells),
+                total_kg=_safe_float(r.total_kg),
+                mean_abs_deviation=_safe_float(r.mean_abs_deviation),
+                avg_over_break=_safe_float(r.avg_over_break),
+                avg_under_break=_safe_float(r.avg_under_break),
+                n_over=int(r.n_over),
+                n_under=int(r.n_under),
+                pf_vol_avg_kgm3=_safe_float(r.pf_vol_avg_kgm3),
+                pf_area_avg_kgm2=_safe_float(r.pf_area_avg_kgm2),
+                pf_g_per_ton_avg=_safe_float(r.pf_g_per_ton_avg),
+                energy_total_mj=_safe_float(r.energy_total_mj),
+                n_pf_valid=int(r.n_pf_valid),
+            )
+            for r in rows
+        ]
+
+        return schemas.BlastCorrelationResponse(
+            rows=schema_rows,
+            tolerance=resolved_tolerance,
+            n_sections=len(sections_raw),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Get blast correlation failed")
+        raise HTTPException(500, detail=f"Get blast correlation failed: {exc}")
