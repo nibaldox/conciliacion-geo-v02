@@ -63,7 +63,7 @@ interface SessionState {
   currentStep: number;
 
   // Workspace views and layout state
-  activeWorkspaceView: '3d' | 'profiles' | 'dashboard' | 'export-ai';
+  activeWorkspaceView: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai';
   sidebarCollapsed: boolean;
 
   // Click handler for placing sections in 3D View
@@ -98,7 +98,7 @@ interface SessionState {
   setStep: (step: number) => void;
   nextStep: () => void;
   prevStep: () => void;
-  setActiveWorkspaceView: (view: '3d' | 'profiles' | 'dashboard' | 'export-ai') => void;
+  setActiveWorkspaceView: (view: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai') => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setMapClickHandler: (handler: ((x: number, y: number, curveId?: string, pointIndex?: number) => void) | null) => void;
   setSelectedCurveId: (id: string | null) => void;

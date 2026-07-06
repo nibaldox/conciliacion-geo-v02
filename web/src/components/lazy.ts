@@ -24,6 +24,10 @@ export const LazyDashboard = lazy(() =>
   import('./results/Dashboard').then(m => ({ default: m.Dashboard }))
 );
 
+export const LazyBlastCorrelation = lazy(() =>
+  import('./results/BlastCorrelation').then(m => ({ default: m.BlastCorrelation }))
+);
+
 export const LazyBenchEditor = lazy(() =>
   import('./analysis/BenchEditor').then(m => ({ default: m.BenchEditor }))
 );

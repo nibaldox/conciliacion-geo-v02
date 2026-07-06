@@ -217,6 +217,36 @@ export interface BlastHolesOnProfileResponse {
   holes: BlastHoleOnProfile[];
 }
 
+// Blast correlation (per-section powder-factor metrics)
+//
+// Mirrors the backend `BlastCorrelationRowSchema` returned by
+// `GET /api/v1/process/blast-correlation`. Field names are kept in
+// snake_case to match the JSON wire format, consistent with the rest
+// of the types in this file (e.g. BlastHolesOnProfileResponse).
+
+export interface BlastCorrelationRow {
+  section_name: string;
+  num_wells: number;
+  total_kg: number;
+  mean_abs_deviation: number;
+  avg_over_break: number;
+  avg_under_break: number;
+  n_over: number;
+  n_under: number;
+  pf_vol_avg_kgm3: number;
+  pf_area_avg_kgm2: number;
+  /** Highlighted primary metric (g/ton). */
+  pf_g_per_ton_avg: number;
+  energy_total_mj: number;
+  n_pf_valid: number;
+}
+
+export interface BlastCorrelationResponse {
+  rows: BlastCorrelationRow[];
+  tolerance: number | null;
+  n_sections: number;
+}
+
 // AI reporter (core/ai_v2)
 export interface AIUsageMetrics {
   prompt_tokens: number;

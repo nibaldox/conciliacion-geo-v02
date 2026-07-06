@@ -146,6 +146,7 @@
     "tab_profiles": "Profiles",
     "tab_table": "Table",
     "tab_dashboard": "Dashboard",
+    "tab_blast": "Blast",
     "tab_bench_editor": "Benches",
     "tab_export": "Export",
     "tab_ai": "AI Report",
@@ -189,6 +190,24 @@
     "col_berm_real": "Actual Berm (m)",
     "col_berm_min": "Min (m)",
     "col_berm_status": "Status"
+  },
+  "blast": {
+    "loading": "Loading blast data…",
+    "error": "Failed to load blast data.",
+    "empty_title": "No blast data",
+    "empty_desc": "Load a wells/blast file and run the analysis to see the powder factor per section.",
+    "summary_title": "Blast Correlation",
+    "n_sections_one": "{{count}} section",
+    "n_sections_other": "{{count}} sections",
+    "col_section": "Section",
+    "col_wells": "Wells",
+    "col_total_kg": "Total charge",
+    "col_pf_g_per_ton": "Powder factor (g/ton)",
+    "col_pf_vol": "PF vol. (kg/m³)",
+    "col_pf_area": "PF area (kg/m²)",
+    "col_energy": "Energy (MJ)",
+    "col_over_break": "Over-break (m)",
+    "col_under_break": "Under-break (m)"
   },
   "section_list": {
     "loading": "Loading sections...",

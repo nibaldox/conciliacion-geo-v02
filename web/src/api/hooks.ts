@@ -19,6 +19,7 @@ import type {
   VerticesResponse,
   ContourData,
   BlastHolesOnProfileResponse,
+  BlastCorrelationResponse,
   AIGenerateRequest,
   AIResponseChunk,
   AIUsageMetrics,
@@ -402,6 +403,37 @@ export function useResults(section?: string) {
           params: section ? { section } : {},
         })
         .then(r => r.data);
+    },
+  });
+}
+
+// ─── Blast correlation (per-section powder factor) ─────────
+
+/**
+ * Fetch per-section blast/powder-factor metrics from
+ * `GET /process/blast-correlation`. The endpoint returns an empty
+ * `{ rows: [] }` (HTTP 200) when the session has no wells loaded, so
+ * callers must handle the empty-rows case in the UI.
+ *
+ * Demo mode short-circuits to an empty payload: the precomputed demo
+ * bundle has no blast data, so we never hit the (non-existent on
+ * GitHub Pages) backend. Mirrors the `useBlastHoles` demo guard.
+ */
+export function useBlastCorrelation() {
+  const { demoMode, demoData, designMeshId } = useSession();
+  return useQuery<BlastCorrelationResponse>({
+    queryKey: ['blast-correlation', demoMode, designMeshId],
+    queryFn: async () => {
+      if (demoMode && demoData && isDemoMeshId(designMeshId)) {
+        return {
+          rows: [],
+          tolerance: null,
+          n_sections: demoData.sections.length,
+        } satisfies BlastCorrelationResponse;
+      }
+      return client
+        .get<BlastCorrelationResponse>('/process/blast-correlation')
+        .then((r) => r.data);
     },
   });
 }

@@ -14,6 +14,7 @@ import {
   LazyMesh3DViewer,
   LazyResultsTable,
   LazyDashboard,
+  LazyBlastCorrelation,
   LazyAIReporter,
 } from './components/lazy';
 import { ProfileView } from './components/results/ProfileView';
@@ -150,7 +151,7 @@ function WorkspaceRouter() {
   }
 
   // 2. Sections prerequisite check
-  if (bothUploaded && !hasSections && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'export-ai')) {
+  if (bothUploaded && !hasSections && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
     return (
       <WarningState
         icon="📏"
@@ -161,7 +162,7 @@ function WorkspaceRouter() {
   }
 
   // 3. Process completion check
-  if (bothUploaded && hasSections && !isComplete && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'export-ai')) {
+  if (bothUploaded && hasSections && !isComplete && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
     return (
       <WarningState
         icon="⚡"
@@ -191,6 +192,14 @@ function WorkspaceRouter() {
             <div className="p-4 overflow-x-auto">
               <LazyResultsTable />
             </div>
+          </div>
+        </div>
+      );
+    case 'blast':
+      return (
+        <div className="h-full flex flex-col gap-6 overflow-y-auto pr-1">
+          <div className="shrink-0">
+            <LazyBlastCorrelation />
           </div>
         </div>
       );
@@ -243,7 +252,8 @@ function App() {
     if (target === '1') setActiveWorkspaceView('3d');
     if (target === '2') setActiveWorkspaceView('profiles');
     if (target === '3') setActiveWorkspaceView('dashboard');
-    if (target === '4') setActiveWorkspaceView('export-ai');
+    if (target === '4') setActiveWorkspaceView('blast');
+    if (target === '5') setActiveWorkspaceView('export-ai');
   });
 
   // Apply dark class to root element

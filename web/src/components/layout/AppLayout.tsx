@@ -38,6 +38,8 @@ export function AppLayout({ children }: AppLayoutProps) {
         return t('step4.tab_profiles', { defaultValue: 'Perfiles de Sección' });
       case 'dashboard':
         return t('step4.tab_dashboard', { defaultValue: 'Dashboard de Resultados' });
+      case 'blast':
+        return t('step4.tab_blast', { defaultValue: 'Correlación de Tronadura' });
       case 'export-ai':
         return t('step4.tab_export', { defaultValue: 'Exportación y Reportes IA' });
       default:

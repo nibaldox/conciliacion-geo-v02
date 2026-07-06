@@ -146,6 +146,7 @@
     "tab_profiles": "Perfiles",
     "tab_table": "Tabla",
     "tab_dashboard": "Dashboard",
+    "tab_blast": "Tronadura",
     "tab_bench_editor": "Bancos",
     "tab_export": "Exportar",
     "tab_ai": "Informe IA",
@@ -189,6 +190,24 @@
     "col_berm_real": "Berma R. (m)",
     "col_berm_min": "Mín. (m)",
     "col_berm_status": "Estado"
+  },
+  "blast": {
+    "loading": "Cargando datos de tronadura…",
+    "error": "Error al cargar los datos de tronadura.",
+    "empty_title": "Sin datos de tronadura",
+    "empty_desc": "Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.",
+    "summary_title": "Correlación de Tronadura",
+    "n_sections_one": "{{count}} sección",
+    "n_sections_other": "{{count}} secciones",
+    "col_section": "Sección",
+    "col_wells": "Pozos",
+    "col_total_kg": "Carga total",
+    "col_pf_g_per_ton": "Factor de carga (g/ton)",
+    "col_pf_vol": "PF vol. (kg/m³)",
+    "col_pf_area": "PF área (kg/m²)",
+    "col_energy": "Energía (MJ)",
+    "col_over_break": "Over-break (m)",
+    "col_under_break": "Under-break (m)"
   },
   "section_list": {
     "loading": "Cargando secciones...",

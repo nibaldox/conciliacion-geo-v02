@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { Tooltip } from '../ui/Tooltip';
-import { Icon3D, IconProfiles, IconDashboard, IconExport } from '../ui/Icons';
+import { Icon3D, IconProfiles, IconDashboard, IconLightning, IconExport } from '../ui/Icons';
 
 
 export function ViewsToolbar() {
@@ -32,6 +32,12 @@ export function ViewsToolbar() {
       icon: <IconDashboard className="w-5 h-5" />,
       labelKey: 'step4.tab_dashboard',
       descriptionKey: 'step4.tab_dashboard',
+    },
+    {
+      key: 'blast',
+      icon: <IconLightning className="w-5 h-5" />,
+      labelKey: 'step4.tab_blast',
+      descriptionKey: 'step4.tab_blast',
     },
     {
       key: 'export-ai',
