@@ -2,7 +2,7 @@
 
 Builds the same correlation rows two ways:
   pre  = inline loop in ui/modulo_tronadura.py (verbatim from L417-463)
-  post = project_powder_factor_per_section from ui/_blast_correlation_shared
+  post = project_powder_factor_per_section from ui/blast_analysis
 
 Asserts the rows + the Plotly scatter figure structure (data, layout
 titles, axis ranges, trace colors, mode) match. Run this script before
@@ -22,7 +22,7 @@ from core.blast_correlation import aggregate_powder_factor_by_group, compute_pow
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.config import DEFAULTS
 
-from ui._blast_correlation_shared import (
+from ui.blast_analysis import (
     build_pf_deviation_scatter,
     project_powder_factor_per_section,
 )

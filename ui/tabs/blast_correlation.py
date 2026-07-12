@@ -26,7 +26,7 @@ from core.blast_model import (
 from core.config import ADVISOR, DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
-from ui._blast_correlation_shared import project_powder_factor_per_section
+from ui.blast_analysis import project_powder_factor_per_section
 from ui.filter_cache import _ensure_filter_values
 from ui.tabs.export import _get_profile_pair
 try:
