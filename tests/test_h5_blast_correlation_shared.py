@@ -259,7 +259,8 @@ def _trace_payload(fig):
     return payload
 
 
-def main():
+def test_h5_pre_post_byte_identical():
+    """H5 extraction: rows + scatter must match the pre-refactor inline loop."""
     df, sections, comparison = _synthetic()
 
     pre = _pre_refactor(df, sections, comparison)
@@ -307,4 +308,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_h5_pre_post_byte_identical()

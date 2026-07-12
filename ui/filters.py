@@ -90,23 +90,44 @@ def _as_list(value) -> list:
     return [value]
 
 
-def _collect_active_filters_from_session_state() -> dict[str, list]:
+def collect_active_filters_from_session_state(
+    prefix: str = "table_filter",
+) -> dict[str, list]:
     """Build the 4-key active-filter dict from the multiselect session_state
-    widgets populated by ``ui/tabs/table.py`` and ``ui/tabs/dashboard.py``.
+    widgets identified by ``prefix``.
 
-    Returns ``{"sector", "level", "section", "bench"}`` mapped to lists of
-    selected values. Empty / missing widgets become empty lists — they
-    mean "no filter on this field". This is the single source of truth so
-    export, dashboard, AI tab, and table all consume the same active set.
+    Parameters
+    ----------
+    prefix
+        The session_state key prefix used by the calling tab's filter
+        widgets. ``"table_filter"`` (default) is shared by the table,
+        export, and AI tabs; ``"dash_filter"`` is used by the dashboard
+        tab (independent widget set because Streamlit forbids duplicate
+        widget keys across fragments).
+
+    Returns
+    -------
+    dict
+        ``{"sector", "level", "section", "bench"}`` mapped to lists of
+        selected values. Empty / missing widgets become empty lists —
+        they mean "no filter on this field".
+
+    Notes
+    -----
+    This is the single source of truth for the filter *logic*: every tab
+    delegates here instead of reimplementing the ``.isin()`` loop. The
+    filter *state* is per-tab (dashboard keeps its own widget keys so it
+    can render inside its own ``@st.fragment`` without colliding with the
+    table tab's keys).
     """
     import streamlit as st
 
     return {
-        "sector": list(st.session_state.get("table_filter_sector") or []),
-        "level": list(st.session_state.get("table_filter_level") or []),
-        "section": list(st.session_state.get("table_filter_section") or []),
-        "bench": list(st.session_state.get("table_filter_bench") or []),
+        "sector": list(st.session_state.get(f"{prefix}_sector") or []),
+        "level": list(st.session_state.get(f"{prefix}_level") or []),
+        "section": list(st.session_state.get(f"{prefix}_section") or []),
+        "bench": list(st.session_state.get(f"{prefix}_bench") or []),
     }
 
 
-__all__ = ["apply_comparison_filters", "filters_summary", "_collect_active_filters_from_session_state"]
+__all__ = ["apply_comparison_filters", "filters_summary", "collect_active_filters_from_session_state"]

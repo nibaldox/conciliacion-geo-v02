@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from ui.filter_cache import _ensure_filter_values
-from ui.filters import apply_comparison_filters
+from ui.filters import apply_comparison_filters, collect_active_filters_from_session_state
 
 
 def render_tab_dashboard(config: dict) -> None:
@@ -27,12 +27,7 @@ def render_tab_dashboard(config: dict) -> None:
         cols_filter[3].multiselect(
             "Filtrar por Banco:", fv['benches'], default=[], key="dash_filter_bench")
 
-    active = {
-        "sector": list(st.session_state.get("dash_filter_sector") or []),
-        "level": list(st.session_state.get("dash_filter_level") or []),
-        "section": list(st.session_state.get("dash_filter_section") or []),
-        "bench": list(st.session_state.get("dash_filter_bench") or []),
-    }
+    active = collect_active_filters_from_session_state(prefix="dash_filter")
     filtered_results = apply_comparison_filters(list(results), active)
 
     if not filtered_results:

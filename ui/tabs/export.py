@@ -53,11 +53,11 @@ def _get_filtered_comparisons() -> list:
     if not comps:
         return []
 
-    from ui.filters import _collect_active_filters_from_session_state
+    from ui.filters import collect_active_filters_from_session_state
     from ui.filters import apply_comparison_filters
 
     return apply_comparison_filters(
-        list(comps), _collect_active_filters_from_session_state()
+        list(comps), collect_active_filters_from_session_state()
     )
 
 

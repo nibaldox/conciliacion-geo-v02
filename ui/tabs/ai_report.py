@@ -233,13 +233,13 @@ def _apply_table_filters(
 ) -> tuple[list[dict], dict[str, list]]:
     """Apply the same filters as ui/tabs/table.py to the comparisons list.
 
-    Delegates to ui.filters._collect_active_filters_from_session_state +
-    apply_comparison_filters so the AI tab, dashboard, and export share
-    one source of truth.
+    Delegates to ui.filters.collect_active_filters_from_session_state +
+    apply_comparison_filters so the AI tab shares one filter-logic source
+    of truth with the table and export tabs.
     """
-    from ui.filters import _collect_active_filters_from_session_state
+    from ui.filters import collect_active_filters_from_session_state
 
-    active = _collect_active_filters_from_session_state()
+    active = collect_active_filters_from_session_state()
     filtered = apply_comparison_filters(comparisons, active)
     return filtered, active
 

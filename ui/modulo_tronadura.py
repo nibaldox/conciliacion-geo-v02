@@ -8,6 +8,8 @@ Also overlays reference lines (mallas) loaded from the sidebar uploader.
 import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
+
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
