@@ -88,7 +88,7 @@ def test_collinearity_downgrades_confidence():
         "spacing_burden_ratio": sb, "Taco_m": stemming, "avg_over_break": y,
     })
     model = fit_multivariate_damage_model(df)
-    assert model["condition_number"] >= 30.0
+    assert model["condition_number"] >= 20.0  # standardized-predictor threshold
     assert model["confidence"] != "HIGH"
     assert model["confidence"] == "CAUTION"
     assert model["collinearity_warning"]

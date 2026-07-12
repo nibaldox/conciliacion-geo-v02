@@ -143,7 +143,7 @@ _MULTIVARIATE_PREDICTOR_CANDIDATES: Dict[str, tuple] = {
     "stemming": _TACO_CANDIDATES,
 }
 
-_COLLINEARITY_CONDITION_THRESHOLD = 30.0
+_COLLINEARITY_CONDITION_THRESHOLD = 20.0
 
 _COLLINEARITY_WARNING = "Posible colinealidad entre predictores (tipicamente PF-burden)."
 
@@ -310,7 +310,17 @@ def fit_multivariate_damage_model(
         f_statistic = float("nan")
         f_pvalue = float("nan")
 
-    condition_number = float(np.linalg.cond(X))
+    # Standardize predictors before the condition check so the number
+    # reflects true collinearity, not column-scale mismatch (burden~5 m
+    # vs PF~0.35 kg/m³ would otherwise inflate cond on raw X).
+    if X.shape[1] > 2:
+        X_pred = X[:, 1:]
+        _std = X_pred.std(axis=0)
+        _std[_std == 0] = 1.0
+        X_z = (X_pred - X_pred.mean(axis=0)) / _std
+        condition_number = float(np.linalg.cond(X_z))
+    else:
+        condition_number = 1.0
     confidence = _classify_multivariate_confidence(n, f_pvalue, condition_number, rank_deficient)
 
     collinear = (
