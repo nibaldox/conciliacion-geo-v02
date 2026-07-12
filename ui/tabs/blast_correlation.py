@@ -9,6 +9,7 @@ try:
 except ImportError:
     _HAS_STATSMODELS = False
 from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.blast_attribution import attribute_holes_to_benches
 from core.blast_correlation import (
     aggregate_powder_factor_by_group,
     compute_powder_factor,
@@ -337,6 +338,11 @@ def render_tab_blast_correlation(config: dict) -> None:
 
             _render_pasadura_toe_block(blast_df, comparison_results)
             _render_stemming_crest_block(blast_df, comparison_results)
+
+            attribution_results = attribute_holes_to_benches(
+                blast_df, comparison_results, sections, tolerance,
+            )
+            _render_attribution_block(attribution_results)
 
     with tab_mal:
         st.markdown("#### Evaluación de Daño Geotécnico por Malla / Polígono de Tronadura")
@@ -984,6 +990,58 @@ def _render_stemming_crest_block(blast_df: pd.DataFrame, comparison_results: lis
             "asocian a mayor sobre-excavación de cresta. Posible energía baja "
             "/ taco excesivo reteniendo gases."
         )
+
+
+def _render_attribution_block(results: list) -> None:
+    """Per-feature top-N blast hole attribution view (Spanish)."""
+    st.markdown("---")
+    st.subheader("🎯 Atribución por Pozo")
+
+    st.markdown(
+        "Para cada cresta o pata con desviación significativa (|Δ| > 0.5 m) "
+        "se listan los pozos dentro del radio de tolerancia, ordenados por "
+        "**carga / distancia²** (IDW, mismo criterio que la densidad de "
+        "energía del perfil). Permite identificar qué pozo es el "
+        "responsable más probable del sobre-quiebre o la deuda observada."
+    )
+
+    if not results:
+        st.info("Sin desviaciones atribuibles")
+        return
+
+    feature_labels = []
+    label_to_entry = {}
+    for entry in results:
+        feat_es = "Cresta" if entry["feature"] == "crest" else "Pata"
+        delta_m = entry["delta_m"]
+        sign = "+" if delta_m > 0 else ""
+        label = (
+            f"{entry['section']} · Banco {entry['bench_num']} · "
+            f"{feat_es} (Δ {sign}{delta_m:.2f} m)"
+        )
+        feature_labels.append(label)
+        label_to_entry[label] = entry
+
+    selected = st.selectbox(
+        "Seleccionar feature desviado:",
+        feature_labels,
+        key="blast_attr_feature",
+    )
+    entry = label_to_entry[selected]
+
+    df_attr = pd.DataFrame(entry["top_holes"]).rename(columns={
+        "label_pozo": "Pozo",
+        "malla": "Malla",
+        "kg": "Carga (kg)",
+        "distance_m": "Distancia (m)",
+        "contribution_pct": "Contribución (%)",
+    })
+    st.dataframe(df_attr, width="stretch", height=200)
+    st.caption(
+        f"{entry['n_candidates']} pozo(s) candidato(s) dentro del radio · "
+        f"Mostrando top {len(entry['top_holes'])} ordenado por contribución "
+        f"descendente."
+    )
 
 
 def _render_energy_density_along_profile(
