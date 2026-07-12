@@ -25,6 +25,10 @@ from core.blast_metrics import enrich_blast_dataframe
 from core.profile_compliance import compute_sector_deviations
 from core.section_cutter import cut_both_surfaces
 from core.stability_analysis import suggest_face_angle_for_fs
+from ui._blast_correlation_shared import (
+    build_pf_deviation_scatter,
+    project_powder_factor_per_section,
+)
 from ui.ref_lines import add_ref_lines_3d
 from ui.tabs.export import _get_profile_pair
 
@@ -399,167 +403,107 @@ def render_modulo_tronadura() -> None:
                 if not kg_col:
                     st.warning("⚠️ No se encontró columna de Kg de explosivos (`Kilos_Cargados_real`, etc.) para cruzar la energía.")
                 else:
-                    import pandas as pd
-                    df_comp = pd.DataFrame(comparison)
+                        import pandas as pd
+                        df_comp = pd.DataFrame(comparison)
 
-                    if 'delta_crest' not in df_comp.columns:
-                        st.warning("⚠️ No se encontró la columna `delta_crest` (con signo) en la conciliación; no es posible separar sobre-excavación de deuda.")
-                    else:
-                        df_comp_signed = df_comp.dropna(subset=['delta_crest'])
-                        df_comp_signed_over = df_comp_signed[df_comp_signed['delta_crest'] > 0]
-                        df_comp_signed_under = df_comp_signed[df_comp_signed['delta_crest'] < 0]
+                        if 'delta_crest' not in df_comp.columns:
+                            st.warning("⚠️ No se encontró la columna `delta_crest` (con signo) en la conciliación; no es posible separar sobre-excavación de deuda.")
+                        else:
+                            df_comp_signed = df_comp.dropna(subset=['delta_crest'])
+                            df_comp_signed_over = df_comp_signed[df_comp_signed['delta_crest'] > 0]
+                            df_comp_signed_under = df_comp_signed[df_comp_signed['delta_crest'] < 0]
 
-                        sec_over_grouped = df_comp_signed_over.groupby('section')['delta_crest'].mean().reset_index().rename(columns={'delta_crest': 'avg_over_break'})
-                        sec_under_grouped = df_comp_signed_under.groupby('section')['delta_crest'].mean().reset_index().rename(columns={'delta_crest': 'avg_under_break'})
+                            sec_over_grouped = df_comp_signed_over.groupby('section')['delta_crest'].mean()
+                            sec_under_grouped = df_comp_signed_under.groupby('section')['delta_crest'].mean()
 
-                        df_filtered_pf = compute_powder_factor(df_filtered)
+                            df_filtered_pf = compute_powder_factor(df_filtered)
 
-                        corr_data = []
-                        pf_available = False
-                        for sec in sections:
-                            sec_name = sec.name
-                            match_over = sec_over_grouped[sec_over_grouped['section'] == sec_name]
-                            match_under = sec_under_grouped[sec_under_grouped['section'] == sec_name]
-
-                            avg_over_break = float(match_over['avg_over_break'].values[0]) if not match_over.empty else 0.0
-                            avg_under_break = float(match_under['avg_under_break'].values[0]) if not match_under.empty else 0.0
-
-                            proj_wells = proyectar_pozos_en_seccion(
-                                df_filtered,
-                                sec.origin,
-                                sec.azimuth,
-                                sec.length,
+                            kernel_rows = project_powder_factor_per_section(
+                                df_filtered, df_filtered_pf, sections,
+                                kg_col=kg_col,
                                 tolerance=DEFAULTS.blast_correlation_radius_m,
                                 fecha_corte=fecha_corte_str,
                             )
 
-                            if not proj_wells.empty:
-                                total_kg = proj_wells[kg_col].fillna(0).sum()
-                                num_wells = len(proj_wells)
-                                proj_labeled = proj_wells.copy()
-                                proj_labeled['section_name'] = sec_name
-                                pf_row = aggregate_powder_factor_by_group(
-                                    df_filtered_pf, 'section_name', sec_name, proj_labeled,
+                            corr_data = []
+                            pf_available = False
+                            for row in kernel_rows:
+                                sec_name = row['section_name']
+                                avg_over_break = float(sec_over_grouped.get(sec_name, 0.0) or 0.0)
+                                avg_under_break = float(sec_under_grouped.get(sec_name, 0.0) or 0.0)
+                                pf_vol = row['pf_vol_avg_kgm3']
+                                if pf_vol is not None and not (isinstance(pf_vol, float) and np.isnan(pf_vol)):
+                                    pf_available = True
+                                corr_data.append({
+                                    'Sección': sec_name,
+                                    'Kg_Explosivo': row['total_kg'],
+                                    'Pozos_Cercanos': row['num_pozos'],
+                                    'PF_Vol_kgm3': pf_vol,
+                                    'Energía_MJ': row['energy_total_mj'],
+                                    'Sobre-excavación_Media_m': avg_over_break,
+                                    'Deuda/Relleno_Media_m': avg_under_break,
+                                })
+
+                            df_corr = pd.DataFrame(corr_data)
+
+                            if df_corr.empty or df_corr['Kg_Explosivo'].sum() == 0:
+                                st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
+                            else:
+                                st.dataframe(df_corr, use_container_width=True)
+
+                                if pf_available:
+                                    x_col = 'PF_Vol_kgm3'
+                                    x_label = "Powder Factor Volumétrico (kg/m³)"
+                                    x_caption_metric = "powder factor (kg/m³)"
+                                    x_fallback = False
+                                else:
+                                    x_col = 'Kg_Explosivo'
+                                    x_label = "Carga Explosiva Acumulada (Kg) — fallback sin PF"
+                                    x_caption_metric = "carga explosiva"
+                                    x_fallback = True
+
+                                fig_scat = build_pf_deviation_scatter(
+                                    df_corr,
+                                    x_col=x_col,
+                                    x_label=x_label,
+                                    radius_m=DEFAULTS.blast_correlation_radius_m,
+                                    show_ols=True,
                                 )
-                                pf_vol = pf_row.get('pf_vol_avg')
-                                energy_mj = pf_row.get('energy_total_mj', 0.0) or 0.0
-                            else:
-                                total_kg = 0
-                                num_wells = 0
-                                pf_vol = float('nan')
-                                energy_mj = 0.0
+                                st.plotly_chart(fig_scat, use_container_width=True)
+                                if x_fallback:
+                                    st.caption("ℹ️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
-                            if pf_vol is not None and not (isinstance(pf_vol, float) and np.isnan(pf_vol)):
-                                pf_available = True
+                                df_corr_with_over = df_corr[df_corr['Sobre-excavación_Media_m'] > 0]
+                                df_corr_with_under = df_corr[df_corr['Deuda/Relleno_Media_m'] < 0]
 
-                            corr_data.append({
-                                'Sección': sec_name,
-                                'Kg_Explosivo': total_kg,
-                                'Pozos_Cercanos': num_wells,
-                                'PF_Vol_kgm3': pf_vol,
-                                'Energía_MJ': energy_mj,
-                                'Sobre-excavación_Media_m': avg_over_break,
-                                'Deuda/Relleno_Media_m': avg_under_break,
-                            })
+                                r_over = 0.0
+                                r_under = 0.0
+                                if len(df_corr_with_over) > 1:
+                                    xs = pd.to_numeric(df_corr_with_over[x_col], errors='coerce').fillna(0).values.astype(float)
+                                    ys = df_corr_with_over['Sobre-excavación_Media_m'].values.astype(float)
+                                    if np.var(xs) > 0 and np.var(ys) > 0:
+                                        r_over = np.corrcoef(xs, ys)[0, 1]
+                                if len(df_corr_with_under) > 1:
+                                    xs_u = pd.to_numeric(df_corr_with_under[x_col], errors='coerce').fillna(0).values.astype(float)
+                                    ys_u = df_corr_with_under['Deuda/Relleno_Media_m'].values.astype(float)
+                                    if np.var(xs_u) > 0 and np.var(ys_u) > 0:
+                                        r_under = np.corrcoef(xs_u, ys_u)[0, 1]
 
-                        df_corr = pd.DataFrame(corr_data)
+                                if r_over > 0.5:
+                                    st.success(f"📈 **Sobre-excavación — Correlación Fuerte Positiva (r = {r_over:.2f})**: Las secciones con mayor {x_caption_metric} presentan sistemáticamente mayor sobre-quiebre en la cresta. Es consistente con daño por exceso de energía.")
+                                elif r_over > 0.3:
+                                    st.info(f"📈 **Sobre-excavación — Correlación Moderada Positiva (r = {r_over:.2f})**")
+                                else:
+                                    st.info(f"⚖️ **Sobre-excavación — Correlación Débil/Nula (r = {r_over:.2f})**: El sobre-quiebre no parece estar fuertemente ligado de forma directa a la {x_caption_metric} de esta vecindad.")
 
-                        if df_corr.empty or df_corr['Kg_Explosivo'].sum() == 0:
-                            st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
-                        else:
-                            st.dataframe(df_corr, use_container_width=True)
-
-                            if pf_available:
-                                x_col = 'PF_Vol_kgm3'
-                                x_label = "Powder Factor Volumétrico (kg/m³)"
-                                x_caption_metric = "powder factor (kg/m³)"
-                                x_fallback = False
-                            else:
-                                x_col = 'Kg_Explosivo'
-                                x_label = "Carga Explosiva Acumulada (Kg) — fallback sin PF"
-                                x_caption_metric = "carga explosiva"
-                                x_fallback = True
-
-                            fig_scat = go.Figure()
-                            df_corr_with_over = df_corr[df_corr['Sobre-excavación_Media_m'] > 0]
-                            df_corr_with_under = df_corr[df_corr['Deuda/Relleno_Media_m'] < 0]
-
-                            if not df_corr_with_over.empty:
-                                fig_scat.add_trace(go.Scatter(
-                                    x=df_corr_with_over[x_col].values,
-                                    y=df_corr_with_over['Sobre-excavación_Media_m'].values,
-                                    mode='markers+text',
-                                    text=df_corr_with_over['Sección'].values,
-                                    textposition="top center",
-                                    marker=dict(size=11, color='crimson', symbol='circle'),
-                                    name='Sobre-excavación (delta_crest > 0)'
-                                ))
-
-                            if not df_corr_with_under.empty:
-                                fig_scat.add_trace(go.Scatter(
-                                    x=df_corr_with_under[x_col].values,
-                                    y=df_corr_with_under['Deuda/Relleno_Media_m'].values,
-                                    mode='markers+text',
-                                    text=df_corr_with_under['Sección'].values,
-                                    textposition="bottom center",
-                                    marker=dict(size=11, color='steelblue', symbol='diamond'),
-                                    name='Deuda/Relleno (delta_crest < 0)'
-                                ))
-
-                            if not df_corr_with_over.empty and len(df_corr_with_over) > 1:
-                                xs = pd.to_numeric(df_corr_with_over[x_col], errors='coerce').fillna(0).values.astype(float)
-                                ys = df_corr_with_over['Sobre-excavación_Media_m'].values.astype(float)
-                                if np.var(xs) > 0:
-                                    m, b = np.polyfit(xs, ys, 1)
-                                    trend_x = np.array([xs.min(), xs.max()])
-                                    trend_y = m * trend_x + b
-                                    fig_scat.add_trace(go.Scatter(
-                                        x=trend_x, y=trend_y,
-                                        mode='lines',
-                                        line=dict(color='darkred', dash='dash'),
-                                        name=f'Tendencia Sobre-excavación (m={m:.4f})'
-                                    ))
-
-                            fig_scat.update_layout(
-                                title=f"Correlación: {'Powder Factor' if not x_fallback else 'Kg Explosivos'} (r={DEFAULTS.blast_correlation_radius_m:.0f}m) vs Desviación con signo (delta_crest)",
-                                xaxis_title=x_label,
-                                yaxis_title="Desviación Media con signo (m)",
-                                height=450,
-                                margin=dict(l=40, r=20, t=40, b=40),
-                                yaxis=dict(zeroline=True, zerolinecolor='gray', zerolinewidth=1)
-                            )
-                            st.plotly_chart(fig_scat, use_container_width=True)
-                            if x_fallback:
-                                st.caption("ℹ️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
-
-                            r_over = 0.0
-                            r_under = 0.0
-                            if len(df_corr_with_over) > 1:
-                                xs = pd.to_numeric(df_corr_with_over[x_col], errors='coerce').fillna(0).values.astype(float)
-                                ys = df_corr_with_over['Sobre-excavación_Media_m'].values.astype(float)
-                                if np.var(xs) > 0 and np.var(ys) > 0:
-                                    r_over = np.corrcoef(xs, ys)[0, 1]
-                            if len(df_corr_with_under) > 1:
-                                xs_u = pd.to_numeric(df_corr_with_under[x_col], errors='coerce').fillna(0).values.astype(float)
-                                ys_u = df_corr_with_under['Deuda/Relleno_Media_m'].values.astype(float)
-                                if np.var(xs_u) > 0 and np.var(ys_u) > 0:
-                                    r_under = np.corrcoef(xs_u, ys_u)[0, 1]
-
-                            if r_over > 0.5:
-                                st.success(f"📈 **Sobre-excavación — Correlación Fuerte Positiva (r = {r_over:.2f})**: Las secciones con mayor {x_caption_metric} presentan sistemáticamente mayor sobre-quiebre en la cresta. Es consistente con daño por exceso de energía.")
-                            elif r_over > 0.3:
-                                st.info(f"📈 **Sobre-excavación — Correlación Moderada Positiva (r = {r_over:.2f})**")
-                            else:
-                                st.info(f"⚖️ **Sobre-excavación — Correlación Débil/Nula (r = {r_over:.2f})**: El sobre-quiebre no parece estar fuertemente ligado de forma directa a la {x_caption_metric} de esta vecindad.")
-
-                            if df_corr_with_under.empty:
-                                st.caption("Sin datos de deuda (todos delta_crest ≥ 0) para calcular correlación separada.")
-                            elif r_under < -0.5:
-                                st.warning(f"📉 **Deuda/Relleno — Correlación Negativa Fuerte (r = {r_under:.2f})**: Donde hay menos {x_caption_metric} se observa mayor deuda; puede indicar déficit de energía o sub-excavación previa al relevamiento topográfico.")
-                            elif r_under > 0.5:
-                                st.info(f"📈 **Deuda/Relleno — Correlación Positiva (r = {r_under:.2f})**")
-                            else:
-                                st.info(f"⚖️ **Deuda/Relleno — Correlación Débil/Nula (r = {r_under:.2f})**")
+                                if df_corr_with_under.empty:
+                                    st.caption("Sin datos de deuda (todos delta_crest ≥ 0) para calcular correlación separada.")
+                                elif r_under < -0.5:
+                                    st.warning(f"📉 **Deuda/Relleno — Correlación Negativa Fuerte (r = {r_under:.2f})**: Donde hay menos {x_caption_metric} se observa mayor deuda; puede indicar déficit de energía o sub-excavación previa al relevamiento topográfico.")
+                                elif r_under > 0.5:
+                                    st.info(f"📈 **Deuda/Relleno — Correlación Positiva (r = {r_under:.2f})**")
+                                else:
+                                    st.info(f"⚖️ **Deuda/Relleno — Correlación Débil/Nula (r = {r_under:.2f})**")
 
 
 def _read_uploaded(uploaded) -> "pd.DataFrame":

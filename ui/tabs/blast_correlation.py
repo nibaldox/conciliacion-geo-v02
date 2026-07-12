@@ -26,6 +26,7 @@ from core.blast_model import (
 from core.config import ADVISOR, DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
+from ui._blast_correlation_shared import project_powder_factor_per_section
 from ui.filter_cache import _ensure_filter_values
 from ui.tabs.export import _get_profile_pair
 try:
@@ -415,40 +416,30 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
 
         a_over, a_under, _, _, _ = calculate_area_between_profiles(pd_prof, pt_prof)
 
-        proj = proyectar_pozos_en_seccion(
-            blast_df,
-            origin=sec.origin,
-            azimuth=sec.azimuth,
-            length=sec.length,
+        kernel_rows = project_powder_factor_per_section(
+            blast_df, pf_enriched, [sec],
+            kg_col=kg_col,
             tolerance=tolerance,
             fecha_corte=fecha_corte,
         )
-
-        num_pozos = len(proj)
-        total_kg = proj[kg_col].fillna(0).sum() if (kg_col and not proj.empty) else 0.0
+        proj_row = kernel_rows[0]
+        proj = proj_row['projected_df']
 
         signed = compute_signed_deviations(comparison_results or [], sec.name)
-
-        proj_labeled = proj.copy()
-        if not proj_labeled.empty:
-            proj_labeled['section_name'] = sec.name
-        pf_row = aggregate_powder_factor_by_group(
-            pf_enriched, 'section_name', sec.name, proj_labeled,
-        )
 
         data_rows.append({
             'section': sec.name,
             'sector': sec.sector,
-            'num_pozos': num_pozos,
-            'total_kg': total_kg,
+            'num_pozos': proj_row['num_pozos'],
+            'total_kg': proj_row['total_kg'],
             'area_over': a_over,
             'area_under': a_under,
             'avg_over_break': signed['avg_over'],
             'avg_under_break': signed['avg_under'],
-            'pf_vol_avg_kgm3': pf_row.get('pf_vol_avg'),
-            'pf_area_avg_kgm2': pf_row.get('pf_area_avg'),
-            'energy_total_mj': pf_row.get('energy_total_mj', 0.0),
-            'n_pf_valid': pf_row.get('n_pf_valid', 0),
+            'pf_vol_avg_kgm3': proj_row['pf_vol_avg_kgm3'],
+            'pf_area_avg_kgm2': proj_row['pf_area_avg_kgm2'],
+            'energy_total_mj': proj_row['energy_total_mj'],
+            'n_pf_valid': proj_row['n_pf_valid'],
         })
 
     df = pd.DataFrame(data_rows)
