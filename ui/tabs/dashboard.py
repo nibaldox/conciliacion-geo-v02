@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from ui.filter_cache import _ensure_filter_values
+from ui.filters import apply_comparison_filters
 
 
 def render_tab_dashboard(config: dict) -> None:
@@ -13,31 +14,26 @@ def render_tab_dashboard(config: dict) -> None:
     if not results:
         return
 
-    df = pd.DataFrame(results)
-
     with st.expander("🔎 Filtros (Excel-style)", expanded=False):
         cols_filter = st.columns(4)
         fv = _ensure_filter_values()
 
-        sel_sectors = cols_filter[0].multiselect(
+        cols_filter[0].multiselect(
             "Filtrar por Sector:", fv['sectors'], default=[], key="dash_filter_sector")
-        sel_levels = cols_filter[1].multiselect(
+        cols_filter[1].multiselect(
             "Filtrar por Nivel (Cota):", fv['levels'], default=[], key="dash_filter_level")
-        sel_sections = cols_filter[2].multiselect(
+        cols_filter[2].multiselect(
             "Filtrar por Sección:", fv['sections'], default=[], key="dash_filter_section")
-        sel_benches = cols_filter[3].multiselect(
+        cols_filter[3].multiselect(
             "Filtrar por Banco:", fv['benches'], default=[], key="dash_filter_bench")
 
-    if sel_sectors:
-        df = df[df['sector'].isin(sel_sectors)]
-    if sel_levels:
-        df = df[df['level'].isin(sel_levels)]
-    if sel_sections:
-        df = df[df['section'].isin(sel_sections)]
-    if sel_benches:
-        df = df[df['bench_num'].isin(sel_benches)]
-
-    filtered_results = df.to_dict('records')
+    active = {
+        "sector": list(st.session_state.get("dash_filter_sector") or []),
+        "level": list(st.session_state.get("dash_filter_level") or []),
+        "section": list(st.session_state.get("dash_filter_section") or []),
+        "bench": list(st.session_state.get("dash_filter_bench") or []),
+    }
+    filtered_results = apply_comparison_filters(list(results), active)
 
     if not filtered_results:
         st.warning("⚠️ No hay resultados que coincidan con los filtros seleccionados.")
