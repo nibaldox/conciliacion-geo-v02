@@ -8,13 +8,14 @@ helpers; the rest of the pipeline ignores them.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from core.blast_correlation import _pasadura
-from core.blast_metrics import _TACO_CANDIDATES
+from core.blast_metrics import _BURDEN_CANDIDATES, _ESP_CANDIDATES, _TACO_CANDIDATES
 from core.column_utils import first_present_column
 from core.config import DEFAULTS
 
@@ -132,6 +133,223 @@ def fit_powder_factor_damage_model(
         "mean_pf": float(np.mean(pf)),
         "confidence": confidence,
         "is_significant": bool(p_value < 0.05),
+    }
+
+
+_MULTIVARIATE_PREDICTOR_CANDIDATES: Dict[str, tuple] = {
+    "pf_vol": ("pf_vol_kgm3", "pf_vol_avg_kgm3", "PF_vol"),
+    "burden": _BURDEN_CANDIDATES,
+    "spacing_burden_ratio": ("spacing_burden_ratio",),
+    "stemming": _TACO_CANDIDATES,
+}
+
+_COLLINEARITY_CONDITION_THRESHOLD = 30.0
+
+_COLLINEARITY_WARNING = "Posible colinealidad entre predictores (tipicamente PF-burden)."
+
+_MULTIVARIATE_INSUFFICIENT_RESULT: Dict[str, Any] = {
+    "beta0": 0.0,
+    "beta1": 0.0,
+    "coefficients": {},
+    "std_errors": {},
+    "t_stats": {},
+    "p_values": {},
+    "r_squared": 0.0,
+    "r_squared_adj": 0.0,
+    "p_value": float("nan"),
+    "f_statistic": float("nan"),
+    "f_pvalue": float("nan"),
+    "n": 0,
+    "dof": 0,
+    "condition_number": float("nan"),
+    "features_used": [],
+    "feature_means": {},
+    "collinearity_warning": "",
+    "confidence": "INSUFFICIENT",
+    "is_significant": False,
+}
+
+
+def _fresh_multivariate_insufficient(n: int = 0, features_used: Optional[List[str]] = None) -> Dict[str, Any]:
+    result = copy.deepcopy(_MULTIVARIATE_INSUFFICIENT_RESULT)
+    result["n"] = int(n)
+    result["features_used"] = list(features_used) if features_used else []
+    return result
+
+
+def _classify_multivariate_confidence(
+    n: int,
+    f_pvalue: float,
+    condition_number: float,
+    rank_deficient: bool,
+) -> str:
+    base = _classify_confidence(n, float(f_pvalue))
+    collinear = (
+        rank_deficient
+        or not np.isfinite(condition_number)
+        or float(condition_number) >= _COLLINEARITY_CONDITION_THRESHOLD
+    )
+    if collinear and base != "INSUFFICIENT":
+        return "CAUTION"
+    return base
+
+
+def _resolve_multivariate_predictors(df: pd.DataFrame) -> Dict[str, pd.Series]:
+    resolved: Dict[str, pd.Series] = {}
+    for name, candidates in _MULTIVARIATE_PREDICTOR_CANDIDATES.items():
+        col = first_present_column(df, candidates)
+        if col is not None:
+            resolved[name] = pd.to_numeric(df[col], errors="coerce")
+    if "spacing_burden_ratio" not in resolved:
+        b_col = first_present_column(df, _BURDEN_CANDIDATES)
+        s_col = first_present_column(df, _ESP_CANDIDATES)
+        if b_col is not None and s_col is not None:
+            burden = pd.to_numeric(df[b_col], errors="coerce")
+            esp = pd.to_numeric(df[s_col], errors="coerce")
+            resolved["spacing_burden_ratio"] = esp / burden.replace(0.0, np.nan)
+    return resolved
+
+
+def fit_multivariate_damage_model(
+    df: pd.DataFrame,
+    damage_col: str = "avg_over_break",
+    min_samples: int = 12,
+) -> Dict[str, Any]:
+    """Fit multivariate OLS ``damage = beta0 + sum_i beta_i * x_i + epsilon``.
+
+    Predictors are auto-resolved from ``df`` among powder factor, burden,
+    spacing-to-burden ratio and stemming. Inference is derived from the
+    residual covariance using ``numpy.linalg.lstsq`` (no scikit-learn) and
+    ``scipy.stats`` for two-sided t and overall F probabilities.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Per-section table carrying the damage column and predictor columns.
+    damage_col : str
+        Column with mean over-break (signed, metres).
+    min_samples : int
+        Minimum number of complete rows required to fit.
+
+    Returns
+    -------
+    dict
+        Mirrors :func:`fit_powder_factor_damage_model` keys (``beta0``,
+        ``beta1``, ``r_squared``, ``p_value``, ``n``, ``confidence``,
+        ``is_significant``) plus multivariate extras: ``coefficients``,
+        ``std_errors``, ``t_stats``, ``p_values`` (per-predictor dicts),
+        ``r_squared_adj``, ``f_statistic``, ``f_pvalue``, ``dof``,
+        ``condition_number``, ``features_used``, ``feature_means`` and
+        ``collinearity_warning``. Insufficient or malformed input returns
+        the ``confidence='INSUFFICIENT'`` skeleton without raising.
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return _fresh_multivariate_insufficient()
+
+    if damage_col not in df.columns:
+        return _fresh_multivariate_insufficient()
+
+    resolved = _resolve_multivariate_predictors(df)
+    if not resolved:
+        return _fresh_multivariate_insufficient()
+
+    damage = pd.to_numeric(df[damage_col], errors="coerce")
+    frame = pd.DataFrame({"__damage__": damage.to_numpy(dtype=float)})
+    for name, series in resolved.items():
+        frame[name] = np.asarray(series, dtype=float)
+
+    frame = frame.replace([np.inf, -np.inf], np.nan).dropna()
+    n = int(len(frame))
+
+    feature_names: List[str] = [
+        name
+        for name in resolved
+        if name in frame.columns and float(np.var(frame[name].to_numpy(dtype=float))) > 1e-12
+    ]
+
+    if len(feature_names) < 2 or n < min_samples:
+        return _fresh_multivariate_insufficient(n=n, features_used=feature_names)
+
+    y = frame["__damage__"].to_numpy(dtype=float)
+    predictor_cols = [frame[name].to_numpy(dtype=float) for name in feature_names]
+    X = np.column_stack([np.ones(n)] + predictor_cols)
+    p = X.shape[1]
+
+    beta, _residuals, rank, _sv = np.linalg.lstsq(X, y, rcond=None)
+    rank_deficient = bool(rank < p)
+
+    xtx = X.T @ X
+    try:
+        xtx_inv = np.linalg.pinv(xtx) if rank_deficient else np.linalg.inv(xtx)
+    except np.linalg.LinAlgError:
+        xtx_inv = np.linalg.pinv(xtx)
+        rank_deficient = True
+
+    residuals = y - X @ beta
+    dof = max(n - p, 1)
+    sse = float(np.sum(residuals ** 2))
+    sst = float(np.sum((y - float(np.mean(y))) ** 2))
+    sigma2 = sse / dof
+    se = np.sqrt(np.maximum(np.diag(xtx_inv) * sigma2, 0.0))
+
+    from scipy import stats
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_stats = np.where(se > 0.0, beta / se, 0.0)
+    p_values = 2.0 * stats.t.sf(np.abs(t_stats), dof)
+
+    r_squared = 1.0 - sse / sst if sst > 0.0 else 0.0
+    r_squared_adj = 1.0 - (1.0 - r_squared) * (n - 1) / dof if dof > 0 else 0.0
+
+    k = p - 1
+    ssr = sst - sse
+    if k > 0 and sse > 0.0 and dof > 0:
+        f_statistic = (ssr / k) / (sse / dof)
+        f_pvalue = float(stats.f.sf(f_statistic, k, dof))
+    else:
+        f_statistic = float("nan")
+        f_pvalue = float("nan")
+
+    condition_number = float(np.linalg.cond(X))
+    confidence = _classify_multivariate_confidence(n, f_pvalue, condition_number, rank_deficient)
+
+    collinear = (
+        rank_deficient
+        or not np.isfinite(condition_number)
+        or condition_number >= _COLLINEARITY_CONDITION_THRESHOLD
+    )
+    collinearity_warning = _COLLINEARITY_WARNING if collinear else ""
+
+    coefficients = {name: float(beta[i + 1]) for i, name in enumerate(feature_names)}
+    std_errors = {name: float(se[i + 1]) for i, name in enumerate(feature_names)}
+    t_stats_out = {name: float(t_stats[i + 1]) for i, name in enumerate(feature_names)}
+    p_values_out = {name: float(p_values[i + 1]) for i, name in enumerate(feature_names)}
+    feature_means = {
+        name: float(np.mean(predictor_cols[i])) for i, name in enumerate(feature_names)
+    }
+
+    beta1 = coefficients.get("pf_vol", coefficients[feature_names[0]])
+
+    return {
+        "beta0": float(beta[0]),
+        "beta1": float(beta1),
+        "coefficients": coefficients,
+        "std_errors": std_errors,
+        "t_stats": t_stats_out,
+        "p_values": p_values_out,
+        "r_squared": float(r_squared),
+        "r_squared_adj": float(r_squared_adj),
+        "p_value": float(f_pvalue),
+        "f_statistic": float(f_statistic),
+        "f_pvalue": float(f_pvalue),
+        "n": n,
+        "dof": int(dof),
+        "condition_number": condition_number,
+        "features_used": list(feature_names),
+        "feature_means": feature_means,
+        "collinearity_warning": collinearity_warning,
+        "confidence": confidence,
+        "is_significant": bool(np.isfinite(f_pvalue) and f_pvalue < 0.05),
     }
 
 

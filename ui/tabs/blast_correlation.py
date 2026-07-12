@@ -19,6 +19,7 @@ from core.blast_model import (
     compute_energy_density_along_profile,
     compute_pasadura_toe_correlation,
     compute_stemming_crest_correlation,
+    fit_multivariate_damage_model,
     fit_powder_factor_damage_model,
     predict_damage_for_pf,
 )
@@ -41,6 +42,7 @@ try:
     from core.blast_advisor import (
         format_recommendation_text,
         recommend_by_sector,
+        recommend_multivariate,
         recommend_pf_adjustment,
     )
     _HAS_BLAST_ADVISOR = True
@@ -176,6 +178,7 @@ def render_tab_blast_correlation(config: dict) -> None:
 
     model, valid = _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
     _render_pf_recommendations(model, valid, df_filtered_sections)
+    _render_multivariate_model(df_filtered_sections)
 
     if _HAS_TREND_HELPERS:
         _render_temporal_analysis(blast_df, df_filtered_sections)
@@ -904,6 +907,66 @@ def _render_pf_recommendations(
                 st.info("No hay datos suficientes para recomendaciones por sector.")
         else:
             st.info("Columna 'sector' no disponible en los datos.")
+
+
+def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> None:
+    """Multivariate OLS expander: damage ~ PF + burden + S/B + stemming."""
+    st.markdown("---")
+    with st.expander("🧮 Modelo multivariado (PF + burden + stemming)", expanded=False):
+        st.markdown(
+            "Regresión lineal múltiple: "
+            "`Sobre-excavación = β₀ + β_PF·PF + β_B·Burden + β_S/B·(Esp/Burden) + β_T·Taco + ε`. "
+            "Aísla el efecto del burden del efecto del powder factor cuando ambas "
+            "columnas están disponibles en la base de datos de pozos."
+        )
+
+        model = fit_multivariate_damage_model(df_filtered_sections)
+        features = model.get("features_used", [])
+        if model.get("confidence") == "INSUFFICIENT" or len(features) < 2:
+            st.info(
+                "ℹ️ Datos insuficientes para el modelo multivariado: se requieren al menos "
+                "12 secciones con powder factor, burden, espaciamiento/burden y taco válidos."
+            )
+            return
+
+        coef_rows = [
+            {
+                "Predictor": feat,
+                "Coeficiente": round(float(model["coefficients"].get(feat, 0.0)), 4),
+                "Error estándar": round(float(model["std_errors"].get(feat, 0.0)), 4),
+                "p-valor": round(float(model["p_values"].get(feat, float("nan"))), 4),
+            }
+            for feat in features
+        ]
+        st.dataframe(pd.DataFrame(coef_rows), use_container_width=True, height=200)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("R²", f"{model['r_squared']:.3f}")
+        c2.metric("R² ajustado", f"{model['r_squared_adj']:.3f}")
+        c3.metric("p-valor (F)", f"{model['f_pvalue']:.4f}")
+        c4.metric("Confianza", model["confidence"])
+        st.caption(
+            f"n = {model['n']}  |  número de condición = {model['condition_number']:.1f}"
+        )
+
+        if model.get("collinearity_warning"):
+            st.warning(f"⚠️ {model['collinearity_warning']}")
+
+        current_burden = float(model.get("feature_means", {}).get("burden", 0.0))
+        if current_burden <= 0.0:
+            st.info("ℹ️ Burden no disponible; no es posible recomendar un ajuste de burden.")
+            return
+
+        rec = recommend_multivariate(model, current_burden=current_burden)
+        st.markdown(f"### 🎯 Recomendación de Burden (burden actual = {current_burden:.2f} m)")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Burden objetivo", f"{rec['target_burden']:.2f} m")
+        r2.metric("Δ Burden", f"{rec['delta_burden']:+.2f} m")
+        r3.metric("Factibilidad", rec["feasibility"])
+        if rec["feasibility"] == "APPLICABLE":
+            st.success(rec["message"])
+        else:
+            st.warning(rec["message"])
 
 
 def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list) -> None:
