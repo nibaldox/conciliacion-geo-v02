@@ -27,7 +27,7 @@ def render_tab_table() -> None:
     df_display = _format_numeric(df_display)
     styled = df_display.style.map(
         highlight_status, subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
-    st.dataframe(styled, use_container_width=True, height=400)
+    st.dataframe(styled, width="stretch", height=400)
 
 
 # ---------------------------------------------------------------------------

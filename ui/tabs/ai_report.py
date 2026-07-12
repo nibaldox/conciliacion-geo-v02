@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import streamlit as st
-import streamlit.components.v1 as components
+import streamlit.components.v2 as components
 
 from core.ai_v2.config import AIConfig
 from core.ai_v2.models import AIRequest, AIResponseChunk, AIUsage
@@ -100,39 +100,58 @@ def _format_usage_line(
     )
 
 
+_COPY_BTN_HTML = (
+    '<div id="ai_copy_root">'
+    '<button id="ai_copy_btn" type="button" '
+    'style="background:#f63366;color:white;border:none;'
+    'padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.9rem;">'
+    "📋 Copiar al portapapeles"
+    "</button></div>"
+)
+
+_COPY_BTN_JS = (
+    "export default function(component) {\n"
+    "  const { data, parentElement } = component;\n"
+    "  const root = parentElement.querySelector('#ai_copy_root') || parentElement;\n"
+    "  const btn = root.querySelector('#ai_copy_btn');\n"
+    "  if (!btn) return;\n"
+    "  btn.addEventListener('click', async () => {\n"
+    "    const md = (data && data.markdown) ? data.markdown : '';\n"
+    "    try {\n"
+    "      await navigator.clipboard.writeText(md);\n"
+    "      const original = btn.textContent;\n"
+    "      btn.textContent = '✅ Copiado';\n"
+    "      setTimeout(() => { btn.textContent = original; }, 1500);\n"
+    "    } catch (e) {\n"
+    "      const ta = document.createElement('textarea');\n"
+    "      ta.value = md; ta.style.position = 'fixed'; ta.style.opacity = '0';\n"
+    "      document.body.appendChild(ta); ta.select();\n"
+    "      try { document.execCommand('copy'); btn.textContent = '✅ Copiado'; }\n"
+    "      catch (_) { btn.textContent = '❌ Falló'; }\n"
+    "      document.body.removeChild(ta);\n"
+    "      setTimeout(() => { btn.textContent = '📋 Copiar al portapapeles'; }, 1500);\n"
+    "    }\n"
+    "  });\n"
+    "}\n"
+)
+
+_COPY_BTN_COMPONENT = components.component(
+    "ai_copy_button",
+    html=_COPY_BTN_HTML,
+    js=_COPY_BTN_JS,
+    isolate_styles=False,
+)
+
+
+def _html_button(payload: str, key: str | None = None) -> None:
+    """Mount the v2 components button with the markdown body to copy."""
+    _COPY_BTN_COMPONENT(data={"markdown": payload}, key=key, height=42)
+
+
 def _render_copy_button(markdown: str) -> None:
     """Inject a browser-side copy-to-clipboard button via the Clipboard API,
     with a textarea+execCommand fallback for sandboxed iframes."""
-    safe_md = json.dumps(markdown)
-    payload = (
-        '<div style="margin:0;">'
-        '<button id="ai_copy_btn" type="button" '
-        'style="background:#f63366;color:white;border:none;'
-        'padding:6px 12px;border-radius:6px;cursor:pointer;font-size:0.9rem;">'
-        "📋 Copiar al portapapeles"
-        "</button></div>"
-        "<script>(function(){"
-        "const md = " + safe_md + ";"
-        "const btn = document.getElementById('ai_copy_btn');"
-        "btn.addEventListener('click', async () => {"
-        "  try {"
-        "    await navigator.clipboard.writeText(md);"
-        "    const o = btn.textContent;"
-        "    btn.textContent = '✅ Copiado';"
-        "    setTimeout(()=>{btn.textContent=o;}, 1500);"
-        "  } catch(e) {"
-        "    const ta = document.createElement('textarea');"
-        "    ta.value = md; ta.style.position='fixed'; ta.style.opacity='0';"
-        "    document.body.appendChild(ta); ta.select();"
-        "    try { document.execCommand('copy'); btn.textContent='✅ Copiado'; }"
-        "    catch(_) { btn.textContent = '❌ Falló'; }"
-        "    document.body.removeChild(ta);"
-        "    setTimeout(()=>{btn.textContent='📋 Copiar al portapapeles';}, 1500);"
-        "  }"
-        "});"
-        "})();</script>"
-    )
-    components.html(payload, height=42)
+    _html_button(markdown, key=f"ai_copy_btn_{hash(markdown) & 0xffffffff}")
 
 
 def _resolve_api_key(ptype: ProviderType) -> str:

@@ -67,7 +67,7 @@ def render_modulo_tronadura() -> None:
         return
 
     st.subheader("Vista previa del archivo")
-    st.dataframe(df.head(20), use_container_width=True)
+    st.dataframe(df.head(20), width="stretch")
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
     # Clear processed state if file changes
@@ -320,7 +320,7 @@ def render_modulo_tronadura() -> None:
                     )
 
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
-                    st.dataframe(df_filtered, use_container_width=True)
+                    st.dataframe(df_filtered, width="stretch")
 
         with tab_corr:
             df_filtered = df_clean.copy() # Base for correlation
@@ -361,7 +361,7 @@ def render_modulo_tronadura() -> None:
                 height=350,
                 margin=dict(l=40, r=20, t=40, b=40)
             )
-            st.plotly_chart(fig_pas, use_container_width=True)
+            st.plotly_chart(fig_pas, width="stretch")
 
             _render_sector_deviations()
 
@@ -449,7 +449,7 @@ def render_modulo_tronadura() -> None:
                             if df_corr.empty or df_corr['Kg_Explosivo'].sum() == 0:
                                 st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
                             else:
-                                st.dataframe(df_corr, use_container_width=True)
+                                st.dataframe(df_corr, width="stretch")
 
                                 if pf_available:
                                     x_col = 'PF_Vol_kgm3'
@@ -469,7 +469,7 @@ def render_modulo_tronadura() -> None:
                                     radius_m=DEFAULTS.blast_correlation_radius_m,
                                     show_ols=True,
                                 )
-                                st.plotly_chart(fig_scat, use_container_width=True)
+                                st.plotly_chart(fig_scat, width="stretch")
                                 if x_fallback:
                                     st.caption("ℹ️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
@@ -825,7 +825,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     if show_energy_grid:
         st.caption(
@@ -1043,7 +1043,7 @@ def _render_sector_deviations() -> None:
             height=450,
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         )
-        st.plotly_chart(fig_sectors, use_container_width=True)
+        st.plotly_chart(fig_sectors, width="stretch")
 
         rows = []
         for s in sectors:
@@ -1056,7 +1056,7 @@ def _render_sector_deviations() -> None:
                 "Área sobre (m²)": f"{s.area_above_m2:.2f}",
                 "Área deuda (m²)": f"{s.area_below_m2:.2f}",
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch")
 
         _render_face_angle_suggestion()
 

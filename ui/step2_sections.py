@@ -99,7 +99,6 @@ def _render_tab_file() -> None:
         polyline, spacing_file, len_up_file + len_down_file, sector_file,
         design_mesh=auto_mesh, length_up=len_up_file, length_down=len_down_file)
 
-    import os
     file_base, _ = os.path.splitext(coord_file.name)
     for j, sec in enumerate(preview_sections):
         sec.file_name = coord_file.name
@@ -193,7 +192,7 @@ def _render_file_preview(polyline, preview_sections) -> None:
         xaxis_title='Este (m)', yaxis_title='Norte (m)',
         yaxis=dict(scaleanchor='x', scaleratio=1),
         height=500, margin=dict(l=60, r=20, t=30, b=40))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +270,7 @@ def _render_tab_interactive() -> None:
                     if s.name in st.session_state.pending_section_names]
     if pending_secs:
         st.subheader(f"📍 {len(pending_secs)} secciones colocadas")
-        st.dataframe(_sections_to_rows(pending_secs), use_container_width=True)
+        st.dataframe(_sections_to_rows(pending_secs), width="stretch")
 
     cols_btn = st.columns(2)
     if cols_btn[0].button("✅ Aplicar Secciones", type="primary", key="apply_int"):
@@ -330,11 +329,23 @@ def _render_tab_manual() -> None:
                 length_up=len_up, length_down=len_down))
 
     if st.button("✅ Aplicar Secciones Manuales", type="primary"):
-        st.session_state.sections = sections_manual
+        if not st.session_state.get('sections'):
+            st.session_state.sections = []
+        existing_names = {s.name for s in st.session_state.sections}
+        added_count = 0
         for sec in sections_manual:
+            target_name = sec.name
+            if target_name in existing_names:
+                col_idx = 1
+                while f"{target_name}_{col_idx}" in existing_names:
+                    col_idx += 1
+                sec.name = f"{target_name}_{col_idx}"
+            st.session_state.sections.append(sec)
+            existing_names.add(sec.name)
             st.session_state.pending_section_names.add(sec.name)
+            added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
-        st.success(f"✅ {len(sections_manual)} secciones definidas")
+        st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
 # ---------------------------------------------------------------------------
@@ -383,11 +394,23 @@ def _render_tab_auto() -> None:
             for sec in sections_auto:
                 sec.azimuth = compute_local_azimuth(st.session_state.mesh_design, sec.origin)
 
-        st.session_state.sections = sections_auto
+        if not st.session_state.get('sections'):
+            st.session_state.sections = []
+        existing_names = {s.name for s in st.session_state.sections}
+        added_count = 0
         for sec in sections_auto:
+            target_name = sec.name
+            if target_name in existing_names:
+                col_idx = 1
+                while f"{target_name}_{col_idx}" in existing_names:
+                    col_idx += 1
+                sec.name = f"{target_name}_{col_idx}"
+            st.session_state.sections.append(sec)
+            existing_names.add(sec.name)
             st.session_state.pending_section_names.add(sec.name)
+            added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
-        st.success(f"✅ {len(sections_auto)} secciones generadas")
+        st.success(f"✅ {added_count} secciones generadas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
 # ---------------------------------------------------------------------------
@@ -410,10 +433,10 @@ def _sections_to_rows(sections) -> list:
 
 def _render_sections_table() -> None:
     if st.session_state.sections:
-        st.subheader("📋 Secciones Definidas")
+        st.subheader(f"📋 Total acumulado: {len(st.session_state.sections)} secciones")
         cols_tbl = st.columns([5, 1, 1])
         with cols_tbl[0]:
-            st.dataframe(_sections_to_rows(st.session_state.sections), use_container_width=True)
+            st.dataframe(_sections_to_rows(st.session_state.sections), width="stretch")
         with cols_tbl[1]:
             if st.button("🗑️ Limpiar Pendientes", key="clear_pending_btn", type="secondary"):
                 st.session_state.sections = [
