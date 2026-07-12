@@ -22,6 +22,7 @@ from core.blast_correlation import (
     compute_powder_factor,
 )
 from core.blast_metrics import enrich_blast_dataframe
+from core.drill_compliance import compute_drill_compliance
 from core.profile_compliance import compute_sector_deviations
 from core.section_cutter import cut_both_surfaces
 from core.stability_analysis import suggest_face_angle_for_fs
@@ -48,6 +49,11 @@ def render_modulo_tronadura() -> None:
         "Archivo de pozos (CSV o Excel)",
         type=["csv", "xlsx", "xls"],
         key="blast_file",
+    )
+    design_uploaded = st.file_uploader(
+        "Diseño de perforación (CSV, opcional)",
+        type=["csv"],
+        key="blast_design_file",
     )
 
     if uploaded is None:
@@ -109,6 +115,22 @@ def render_modulo_tronadura() -> None:
 
     if st.session_state.get('blast_processed', False):
         df_clean = st.session_state['blast_df_clean']
+
+        if design_uploaded is None:
+            st.info("Sin diseño cargado — omitiendo verificación")
+        else:
+            try:
+                design_df = _read_uploaded(design_uploaded)
+                malla_col = find_df_column(
+                    df_clean, ["Nombre_Malla_Original", "malla"], raise_error=False
+                )
+                compliance = compute_drill_compliance(
+                    design_df, df_clean, group_by=malla_col
+                )
+                _render_drill_compliance_block(compliance)
+            except Exception:
+                logger.exception("Failed to compute drill compliance")
+                st.error("No se pudo analizar el cumplimiento del diseño de perforación.")
 
         tab_3d, tab_corr = st.tabs(["📊 Visualización 3D y Filtros", "🔬 Correlación Geotécnica"])
 
@@ -560,6 +582,24 @@ def render_modulo_tronadura() -> None:
                                 st.info(f"📈 **Deuda/Relleno — Correlación Positiva (r = {r_under:.2f})**")
                             else:
                                 st.info(f"⚖️ **Deuda/Relleno — Correlación Débil/Nula (r = {r_under:.2f})**")
+
+
+def _render_drill_compliance_block(result) -> None:
+    with st.expander("Cumplimiento del diseño de perforación", expanded=True):
+        score = result["compliance_score"]
+        st.metric("Cumplimiento", f"{score * 100:.1f}%" if score is not None else "Sin datos")
+        if not result["per_hole"].empty:
+            st.dataframe(result["per_hole"], use_container_width=True)
+        if result["per_group"] is not None:
+            st.subheader("Cumplimiento por malla")
+            st.dataframe(result["per_group"], use_container_width=True)
+        unmatched = result["unmatched"]
+        if unmatched["design"]:
+            st.warning(f"{len(unmatched['design'])} pozos de diseño sin coincidencia")
+        if unmatched["actual"]:
+            st.warning(f"{len(unmatched['actual'])} pozos perforados sin coincidencia")
+        for message in result["warnings"]:
+            st.info(message)
 
 
 def _read_uploaded(uploaded) -> "pd.DataFrame":
