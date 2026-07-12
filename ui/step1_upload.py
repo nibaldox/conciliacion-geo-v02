@@ -43,6 +43,8 @@ def render_step1(config: dict) -> None:
     if has_meshes:
         st.info("📦 Las superficies ya están cargadas en memoria. Puedes continuar al Paso 2 o subir nuevos archivos para reemplazarlas.")
         if st.button("🧹 Limpiar superficies cargadas", type="secondary"):
+            st.cache_resource.clear()
+            st.cache_data.clear()
             st.session_state.mesh_design = None
             st.session_state.mesh_topo = None
             st.session_state.bounds_design = None

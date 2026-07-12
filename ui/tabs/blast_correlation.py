@@ -11,8 +11,11 @@ except ImportError:
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.blast_correlation import (
     aggregate_powder_factor_by_group,
+    compute_monthly_trend,
     compute_powder_factor,
     compute_signed_deviations,
+    detect_pf_outliers_iqr,
+    split_campaign,
 )
 from core.blast_model import (
     compute_energy_density_along_profile,
@@ -25,15 +28,6 @@ from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
 from ui.filter_cache import _ensure_filter_values
 from ui.tabs.export import _get_profile_pair
-try:
-    from tests.test_ai_service_enrich import (
-        compute_monthly_trend,
-        detect_pf_outliers_iqr,
-        split_campaign,
-    )
-    _HAS_TREND_HELPERS = True
-except ImportError:
-    _HAS_TREND_HELPERS = False
 try:
     from core.blast_advisor import (
         format_recommendation_text,
@@ -174,8 +168,7 @@ def render_tab_blast_correlation(config: dict) -> None:
     model, valid = _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
     _render_pf_recommendations(model, valid, df_filtered_sections)
 
-    if _HAS_TREND_HELPERS:
-        _render_temporal_analysis(blast_df, df_filtered_sections)
+    _render_temporal_analysis(blast_df, df_filtered_sections)
 
     tab_sec, tab_bnc, tab_mal = st.tabs([
         "📐 Análisis por Sección / Perfil",
