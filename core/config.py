@@ -236,6 +236,18 @@ class SectorDeviationDefaults:
     rockmass_cohesion_scale: float = 0.001
 
 
+@dataclass(frozen=True)
+class DrillComplianceDefaults:
+    delta_x_m: float = 0.5
+    delta_y_m: float = 0.5
+    delta_z_m: float = 0.3
+    delta_incl_deg: float = 3.0
+    delta_az_deg: float = 5.0
+    delta_len_m: float = 0.5
+    delta_kg_pct: float = 10.0
+    nearest_radius_m: float = 5.0
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -248,3 +260,4 @@ POWDER_FACTOR = PowderFactor()
 ADVISOR = BlastAdvisorDefaults()
 STABILITY = StabilityDefaults()
 SECTOR_DEVIATION = SectorDeviationDefaults()
+DRILL_COMPLIANCE = DrillComplianceDefaults()
