@@ -48,47 +48,46 @@ def _row_credit(status: Optional[str]) -> float:
     return 0.0
 
 
-def _crest_status(delta_crest: Optional[float], tol: float) -> Optional[str]:
-    if delta_crest is None:
-        return None
-    try:
-        v = float(delta_crest)
-    except (TypeError, ValueError):
-        return None
-    if np_isnan(v):
-        return None
-    a = abs(v)
-    if a <= tol:
-        return STATUS_CUMPLE
-    if a <= 1.5 * tol:
-        return STATUS_FUERA
-    return None
-
-
-def _toe_status(delta_toe: Optional[float], tol: float) -> Optional[str]:
-    if delta_toe is None:
-        return None
-    try:
-        v = float(delta_toe)
-    except (TypeError, ValueError):
-        return None
-    if np_isnan(v):
-        return None
-    a = abs(v)
-    if a <= tol:
-        return STATUS_CUMPLE
-    if a <= 1.5 * tol:
-        return STATUS_FUERA
-    return None
-
-
 def np_isnan(x: float) -> bool:
-    """Local NaN guard (keeps the module free of a numpy import at module load)."""
+    """Local NaN guard (avoids importing numpy at module load)."""
     return x != x
 
 
+def _delta_status(delta: Optional[float], tol: float) -> Optional[str]:
+    """Classify a signed crest/toe deviation into the three-tier model.
+
+    Returns ``STATUS_CUMPLE`` when ``|delta| <= tol``, ``STATUS_FUERA``
+    when ``|delta| <= 1.5 * tol``, otherwise ``None`` (NO CUMPLE /
+    unscored). ``None`` / NaN / non-numeric deltas return ``None``.
+    """
+    if delta is None:
+        return None
+    try:
+        v = float(delta)
+    except (TypeError, ValueError):
+        return None
+    if np_isnan(v):
+        return None
+    a = abs(v)
+    if a <= tol:
+        return STATUS_CUMPLE
+    if a <= 1.5 * tol:
+        return STATUS_FUERA
+    return None
+
+
 def _score_subset(rows: List[dict], crest_tol: float, toe_tol: float) -> Dict[str, Any]:
-    """Score a list of comparison rows. Returns the breakdown shape consumed by callers."""
+    """Score a list of comparison rows.
+
+    Returns the breakdown shape consumed by callers. Note the deliberate
+    divergence between the two metrics: ``score_0_100`` uses partial
+    credit (CUMPLE=1.0, FUERA=0.5) so a row that is merely out of
+    tolerance still contributes; ``breakdown`` counts **strict CUMPLE
+    only** (FUERA rows count as 0). The two answer different questions —
+    "how much of the design was achieved, with partial credit?" vs
+    "how many banks fully comply?" — and callers should not expect them
+    to match when FUERA rows are present.
+    """
     n_total = 0
     n_crest_cumple = 0
     n_toe_cumple = 0
@@ -98,8 +97,8 @@ def _score_subset(rows: List[dict], crest_tol: float, toe_tol: float) -> Dict[st
     for row in rows:
         if not isinstance(row, dict):
             continue
-        crest_st = _crest_status(row.get("delta_crest"), crest_tol)
-        toe_st = _toe_status(row.get("delta_toe"), toe_tol)
+        crest_st = _delta_status(row.get("delta_crest"), crest_tol)
+        toe_st = _delta_status(row.get("delta_toe"), toe_tol)
         berm_st = row.get("berm_status")
 
         crest_credit = _row_credit(crest_st)
@@ -182,7 +181,10 @@ def compute_design_achievement_score(
     -------
     dict
         - ``global``: int 0-100 percentage (weighted average across all rows)
-        - ``breakdown``: ``{crest, toe, berm}`` percentages 0-100
+        - ``breakdown``: ``{crest, toe, berm}`` percentages 0-100. These
+          count **strict CUMPLE only** (FUERA rows do NOT contribute);
+          ``global`` uses partial credit (CUMPLE=1.0, FUERA=0.5), so the
+          two can differ when out-of-tolerance rows are present.
         - ``n_total``: int, rows scored
         - ``n_passing_crest/toe/berm``: int, rows where the status equals
           ``STATUS_CUMPLE``

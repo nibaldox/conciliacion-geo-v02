@@ -29,7 +29,7 @@ class TestComputeStemmingCrestCorrelation:
         res = compute_stemming_crest_correlation(df, comps, bench_height=15.0)
         assert res["n_benches"] == 4
         assert res["r"] < -0.9
-        assert 4215.0 in res["taco_per_bench"]
+        assert 4215.0 in res["stemming_per_bench"]
         assert 4215.0 in res["crest_per_bench"]
         assert "negativa" in res["interpretation"].lower() or "gases" in res["interpretation"].lower()
 

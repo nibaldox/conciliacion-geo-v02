@@ -966,8 +966,8 @@ def _render_stemming_crest_block(blast_df: pd.DataFrame, comparison_results: lis
 
     if st_corr['n_benches'] >= 2:
         st_df = pd.DataFrame({
-            'Nivel (cota)': list(st_corr['taco_per_bench'].keys()),
-            'Taco medio (m)': list(st_corr['taco_per_bench'].values()),
+            'Nivel (cota)': list(st_corr['stemming_per_bench'].keys()),
+            'Taco medio (m)': list(st_corr['stemming_per_bench'].values()),
             'delta_crest (m)': list(st_corr['crest_per_bench'].values()),
         }).sort_values('Nivel (cota)', ascending=False)
         st.dataframe(st_df, width="stretch", height=200)

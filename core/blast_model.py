@@ -366,7 +366,7 @@ def compute_stemming_crest_correlation(
     Returns
     -------
     dict
-        - ``taco_per_bench``: dict[float, float], mean stemming (m) per
+        - ``stemming_per_bench``: dict[float, float], mean stemming (m) per
           floor elevation.
         - ``crest_per_bench``: dict[float, float], mean ``delta_crest``
           (m) per floor elevation, for the matching level.
@@ -380,7 +380,7 @@ def compute_stemming_crest_correlation(
     """
 
     empty = {
-        "taco_per_bench": {},
+        "stemming_per_bench": {},
         "crest_per_bench": {},
         "r": 0.0,
         "p_value": float("nan"),
@@ -407,7 +407,7 @@ def compute_stemming_crest_correlation(
 
     df["_floor"] = (df["Z_collar"] - bench_height).round(0)
 
-    taco_per_bench: Dict[float, float] = (
+    stemming_per_bench: Dict[float, float] = (
         df.groupby("_floor")["_taco"].mean().to_dict()
     )
 
@@ -436,23 +436,23 @@ def compute_stemming_crest_correlation(
 
     paired_taco: List[float] = []
     paired_crest: List[float] = []
-    matched_taco: Dict[float, float] = {}
+    matched_stemming: Dict[float, float] = {}
     matched_crest: Dict[float, float] = {}
-    for level, taco_mean in taco_per_bench.items():
+    for level, stemming_mean in stemming_per_bench.items():
         try:
             level_int = int(round(float(level)))
         except (TypeError, ValueError):
             continue
         if level_int in crest_per_bench_raw:
-            matched_taco[float(level_int)] = float(taco_mean)
+            matched_stemming[float(level_int)] = float(stemming_mean)
             matched_crest[float(level_int)] = float(crest_per_bench_raw[level_int])
-            paired_taco.append(float(taco_mean))
+            paired_taco.append(float(stemming_mean))
             paired_crest.append(float(crest_per_bench_raw[level_int]))
 
     n = len(paired_taco)
     if n < 2:
         return {
-            "taco_per_bench": matched_taco,
+            "stemming_per_bench": matched_stemming,
             "crest_per_bench": matched_crest,
             "r": 0.0,
             "p_value": float("nan"),
@@ -494,7 +494,7 @@ def compute_stemming_crest_correlation(
         )
 
     return {
-        "taco_per_bench": matched_taco,
+        "stemming_per_bench": matched_stemming,
         "crest_per_bench": matched_crest,
         "r": r_val,
         "p_value": p_val,
