@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 
 from core.blast_correlation import _pasadura
+from core.blast_metrics import _TACO_CANDIDATES
+from core.column_utils import first_present_column
 from core.config import DEFAULTS
 
 
@@ -322,6 +324,178 @@ def compute_pasadura_toe_correlation(
     return {
         "pasadura_per_bench": matched_pasadura,
         "toe_per_bench": matched_toe,
+        "r": r_val,
+        "p_value": p_val,
+        "n_benches": n,
+        "interpretation": interpretation,
+    }
+
+
+def compute_stemming_crest_correlation(
+    blast_df: pd.DataFrame,
+    comparisons: List[dict],
+    bench_height: float = 15.0,
+    taco_column: Optional[str] = None,
+) -> dict:
+    """Test the hypothesis ``short stemming -> high |delta_crest|`` per bench.
+
+    Structural twin of :func:`compute_pasadura_toe_correlation`: same return
+    shape, same guards, same lazy ``scipy.stats.pearsonr`` pattern. The
+    stemming (taco) column is auto-resolved via
+    :data:`core.blast_metrics._TACO_CANDIDATES` unless the caller pins it
+    with ``taco_column``.
+
+    Parameters
+    ----------
+    blast_df : pd.DataFrame
+        Processed blast holes (output of :func:`procesar_pozos`) with
+        a stemming column (``Taco_m`` / ``Taco`` / ``Stemming``) and
+        ``Z_collar``.
+    comparisons : list of dict
+        Per-bench reconciliation results. Each item is expected to expose
+        ``level`` (design toe elevation as a string) and ``delta_crest``
+        (m, signed).
+    bench_height : float
+        Bench height (m) used to derive the floor elevation from the
+        collar.
+    taco_column : str, optional
+        Explicit name of the stemming column. When ``None`` the function
+        picks the first present among ``_TACO_CANDIDATES``
+        (``Taco_m``, ``Taco``, ``Stemming``).
+
+    Returns
+    -------
+    dict
+        - ``taco_per_bench``: dict[float, float], mean stemming (m) per
+          floor elevation.
+        - ``crest_per_bench``: dict[float, float], mean ``delta_crest``
+          (m) per floor elevation, for the matching level.
+        - ``r``: float, Pearson correlation between the two per-bench
+          series (``0.0`` when fewer than two paired samples).
+        - ``p_value``: float, two-sided p-value for ``r == 0`` (``nan``
+          when undefined).
+        - ``n_benches``: int, count of paired benches used in the
+          correlation.
+        - ``interpretation``: str, one-sentence read of the result.
+    """
+
+    empty = {
+        "taco_per_bench": {},
+        "crest_per_bench": {},
+        "r": 0.0,
+        "p_value": float("nan"),
+        "n_benches": 0,
+        "interpretation": "Sin datos suficientes para correlacionar stemming y delta_crest.",
+    }
+
+    if (
+        blast_df is None
+        or blast_df.empty
+        or not comparisons
+        or "Z_collar" not in blast_df.columns
+    ):
+        return empty
+
+    resolved_taco = taco_column if taco_column else first_present_column(blast_df, _TACO_CANDIDATES)
+    if resolved_taco is None or resolved_taco not in blast_df.columns:
+        return empty
+
+    df = blast_df.copy()
+    df["_taco"] = pd.to_numeric(df[resolved_taco], errors="coerce")
+    if not df["_taco"].notna().any():
+        return empty
+
+    df["_floor"] = (df["Z_collar"] - bench_height).round(0)
+
+    taco_per_bench: Dict[float, float] = (
+        df.groupby("_floor")["_taco"].mean().to_dict()
+    )
+
+    df_comps = pd.DataFrame(comparisons)
+    if "level" not in df_comps.columns or "delta_crest" not in df_comps.columns:
+        return empty
+
+    df_comps = df_comps.dropna(subset=["level", "delta_crest"])
+    if df_comps.empty:
+        return empty
+
+    def _to_int(v: Any) -> Optional[int]:
+        try:
+            return int(round(float(v)))
+        except (TypeError, ValueError):
+            return None
+
+    df_comps["_level_int"] = df_comps["level"].apply(_to_int)
+    df_comps = df_comps.dropna(subset=["_level_int"])
+    if df_comps.empty:
+        return empty
+
+    crest_per_bench_raw: Dict[int, float] = (
+        df_comps.groupby("_level_int")["delta_crest"].mean().to_dict()
+    )
+
+    paired_taco: List[float] = []
+    paired_crest: List[float] = []
+    matched_taco: Dict[float, float] = {}
+    matched_crest: Dict[float, float] = {}
+    for level, taco_mean in taco_per_bench.items():
+        try:
+            level_int = int(round(float(level)))
+        except (TypeError, ValueError):
+            continue
+        if level_int in crest_per_bench_raw:
+            matched_taco[float(level_int)] = float(taco_mean)
+            matched_crest[float(level_int)] = float(crest_per_bench_raw[level_int])
+            paired_taco.append(float(taco_mean))
+            paired_crest.append(float(crest_per_bench_raw[level_int]))
+
+    n = len(paired_taco)
+    if n < 2:
+        return {
+            "taco_per_bench": matched_taco,
+            "crest_per_bench": matched_crest,
+            "r": 0.0,
+            "p_value": float("nan"),
+            "n_benches": n,
+            "interpretation": (
+                "Solo hay " + str(n) + " banco(s) pareado(s); se necesitan al menos 2."
+            ),
+        }
+
+    taco_arr = np.asarray(paired_taco, dtype=float)
+    crest_arr = np.asarray(paired_crest, dtype=float)
+
+    if float(np.var(taco_arr)) <= 0.0 or float(np.var(crest_arr)) <= 0.0:
+        r_val = 0.0
+        p_val = float("nan")
+    else:
+        from scipy import stats
+
+        r_res = stats.pearsonr(taco_arr, crest_arr)
+        r_val = float(r_res.statistic)
+        p_val = float(r_res.pvalue)
+
+    if r_val < -0.3:
+        interpretation = (
+            f"Correlacion negativa (r={r_val:.2f}): bancos con taco corto "
+            "se asocian a mayor sobre-excavacion de la cresta. "
+            "Consistente con gases venteando hacia arriba (banco soplado)."
+        )
+    elif r_val > 0.3:
+        interpretation = (
+            f"Correlacion positiva (r={r_val:.2f}): taco mayor se asocia "
+            "a mayor sobre-excavacion de la cresta. "
+            "Sugiere energia baja / taco excesivo reteniendo gases."
+        )
+    else:
+        interpretation = (
+            f"Correlacion debil/nula (r={r_val:.2f}): stemming y delta_crest "
+            "no muestran relacion lineal clara con estos datos."
+        )
+
+    return {
+        "taco_per_bench": matched_taco,
+        "crest_per_bench": matched_crest,
         "r": r_val,
         "p_value": p_val,
         "n_benches": n,
