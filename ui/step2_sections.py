@@ -26,11 +26,6 @@ from ui.plots import draw_sections_on_figure
 logger = logging.getLogger(__name__)
 
 
-@st.cache_data(show_spinner=False)
-def _cached_local_azimuth(ox: float, oy: float, mesh_id: int) -> float:
-    return float(compute_local_azimuth(st.session_state.mesh_design, np.array([ox, oy])))
-
-
 def render_step2() -> None:
     """Render Paso 2: section definition."""
     st.header("✂️ Paso 2: Definir Secciones de Corte")
@@ -256,7 +251,7 @@ def _render_tab_interactive() -> None:
                     for s in st.session_state.sections)
                 if not already:
                     origin = np.array([px_val, py_val])
-                    az = (_cached_local_azimuth(float(px_val), float(py_val), id(mesh_d))
+                    az = (compute_local_azimuth(mesh_d, origin)
                           if az_mode == "Auto (pendiente local)" else manual_az_int)
                     pending_secs_n = [s for s in st.session_state.sections
                                       if s.name in st.session_state.pending_section_names]
@@ -321,7 +316,7 @@ def _render_tab_manual() -> None:
             oy = cols2[1].number_input("Origen Y", value=float(cy), format="%.1f", key=f"soy_{i}")
 
             if auto_az_manual:
-                az = _cached_local_azimuth(float(ox), float(oy), id(st.session_state.mesh_design))
+                az = compute_local_azimuth(st.session_state.mesh_design, np.array([ox, oy]))
                 cols2[2].text_input("Azimut (°)", value=f"{az:.1f}", disabled=True, key=f"saz_{i}")
             else:
                 az = cols2[2].number_input("Azimut (°)", value=0.0, min_value=0.0,

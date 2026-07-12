@@ -25,7 +25,7 @@ from core.ai_v2.providers import (
     ProviderType,
 )
 from core.ai_v2.service import stream_report
-from ui.filters import apply_comparison_filters
+from ui.filters import apply_comparison_filters, filters_summary
 from ui.state_keys import (
     StateKey,
     ai_v2_key_for,
@@ -214,36 +214,15 @@ def _apply_table_filters(
 ) -> tuple[list[dict], dict[str, list]]:
     """Apply the same filters as ui/tabs/table.py to the comparisons list.
 
-    Reads st.session_state.table_filter_{sector,level,section,bench} and
-    returns (filtered_list, active_filters_dict). Returns the input list
-    untouched if no filter is active.
+    Delegates to ui.filters._collect_active_filters_from_session_state +
+    apply_comparison_filters so the AI tab, dashboard, and export share
+    one source of truth.
     """
-    sel_sectors: list = st.session_state.get(StateKey.TABLE_FILTER_SECTOR) or []
-    sel_levels: list = st.session_state.get(StateKey.TABLE_FILTER_LEVEL) or []
-    sel_sections: list = st.session_state.get(StateKey.TABLE_FILTER_SECTION) or []
-    sel_benches: list = st.session_state.get(StateKey.TABLE_FILTER_BENCH) or []
+    from ui.filters import _collect_active_filters_from_session_state
 
-    active = {
-        "sector": list(sel_sectors),
-        "level": list(sel_levels),
-        "section": list(sel_sections),
-        "bench": list(sel_benches),
-    }
+    active = _collect_active_filters_from_session_state()
     filtered = apply_comparison_filters(comparisons, active)
     return filtered, active
-
-
-def _filters_summary(active: dict[str, list]) -> str:
-    parts: list[str] = []
-    if active["sector"]:
-        parts.append(f"sector={','.join(map(str, active['sector']))}")
-    if active["section"]:
-        parts.append(f"sección={','.join(map(str, active['section']))}")
-    if active["level"]:
-        parts.append(f"cota={','.join(map(str, active['level']))}")
-    if active["bench"]:
-        parts.append(f"banco={','.join(map(str, active['bench']))}")
-    return "; ".join(parts) if parts else "ninguno"
 
 
 def _compute_blast_trend_metadata() -> dict | None:
@@ -371,7 +350,7 @@ def render_tab_ai(config: dict) -> None:
     filtered, active_filters = _apply_table_filters(comparisons)
     n_total = len(comparisons)
     n_filtered = len(filtered)
-    filters_str = _filters_summary(active_filters)
+    filters_str = filters_summary(active_filters)
 
     if active_filters and n_filtered != n_total:
         st.caption(

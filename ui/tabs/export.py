@@ -52,24 +52,13 @@ def _get_filtered_comparisons() -> list:
     comps = st.session_state.comparison_results
     if not comps:
         return []
-    
-    sel_sectors = st.session_state.get("table_filter_sector", [])
-    sel_levels = st.session_state.get("table_filter_level", [])
-    sel_sections = st.session_state.get("table_filter_section", [])
-    sel_benches = st.session_state.get("table_filter_bench", [])
-    
-    filtered = []
-    for c in comps:
-        if sel_sectors and c.get('sector') not in sel_sectors:
-            continue
-        if sel_levels and c.get('level') not in sel_levels:
-            continue
-        if sel_sections and c.get('section') not in sel_sections:
-            continue
-        if sel_benches and c.get('bench_num') not in sel_benches:
-            continue
-        filtered.append(c)
-    return filtered
+
+    from ui.filters import _collect_active_filters_from_session_state
+    from ui.filters import apply_comparison_filters
+
+    return apply_comparison_filters(
+        list(comps), _collect_active_filters_from_session_state()
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -90,4 +90,23 @@ def _as_list(value) -> list:
     return [value]
 
 
-__all__ = ["apply_comparison_filters", "filters_summary"]
+def _collect_active_filters_from_session_state() -> dict[str, list]:
+    """Build the 4-key active-filter dict from the multiselect session_state
+    widgets populated by ``ui/tabs/table.py`` and ``ui/tabs/dashboard.py``.
+
+    Returns ``{"sector", "level", "section", "bench"}`` mapped to lists of
+    selected values. Empty / missing widgets become empty lists — they
+    mean "no filter on this field". This is the single source of truth so
+    export, dashboard, AI tab, and table all consume the same active set.
+    """
+    import streamlit as st
+
+    return {
+        "sector": list(st.session_state.get("table_filter_sector") or []),
+        "level": list(st.session_state.get("table_filter_level") or []),
+        "section": list(st.session_state.get("table_filter_section") or []),
+        "bench": list(st.session_state.get("table_filter_bench") or []),
+    }
+
+
+__all__ = ["apply_comparison_filters", "filters_summary", "_collect_active_filters_from_session_state"]
