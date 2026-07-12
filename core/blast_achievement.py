@@ -161,8 +161,9 @@ def compute_design_achievement_score(
 
     crest/toe status is derived per row from ``|delta_crest|`` /
     ``|delta_toe|`` against ``crest_tolerance_m`` (default
-    :data:`TOLERANCES.bench_height['pos']`, 1.5 m). berm status is read
-    directly from the row's ``berm_status`` field.
+    :data:`TOLERANCES.crest_toe_deviation['pos']`, 1.0 m — the horizontal
+    overbreak tolerance, NOT the vertical bench-height tolerance). berm
+    status is read directly from the row's ``berm_status`` field.
 
     Parameters
     ----------
@@ -174,8 +175,9 @@ def compute_design_achievement_score(
         join. When provided and non-empty, the function returns
         ``per_malla: {malla: int}`` in addition to ``global``.
     crest_tolerance_m, toe_tolerance_m : float, optional
-        Override knobs for the crest/toe tolerance. Default
-        :data:`TOLERANCES.bench_height['pos']` (1.5 m).
+        Override knobs for the crest/toe horizontal-deviation tolerance.
+        Default :data:`TOLERANCES.crest_toe_deviation['pos']` (1.0 m —
+        blast overbreak tolerance).
 
     Returns
     -------
@@ -205,12 +207,12 @@ def compute_design_achievement_score(
     crest_tol = (
         float(crest_tolerance_m)
         if crest_tolerance_m is not None
-        else float(TOLERANCES.bench_height["pos"])
+        else float(TOLERANCES.crest_toe_deviation["pos"])
     )
     toe_tol = (
         float(toe_tolerance_m)
         if toe_tolerance_m is not None
-        else float(TOLERANCES.bench_height["pos"])
+        else float(TOLERANCES.crest_toe_deviation["pos"])
     )
 
     overall = _score_subset(list(comparisons), crest_tol, toe_tol)
