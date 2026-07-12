@@ -17,9 +17,11 @@ from core.blast_correlation import (
 from core.blast_model import (
     compute_energy_density_along_profile,
     compute_pasadura_toe_correlation,
+    compute_stemming_crest_correlation,
     fit_powder_factor_damage_model,
     predict_damage_for_pf,
 )
+from core.blast_achievement import compute_design_achievement_score
 from core.config import ADVISOR, DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
@@ -334,18 +336,19 @@ def render_tab_blast_correlation(config: dict) -> None:
             st.plotly_chart(fig_bench, use_container_width=True)
 
             _render_pasadura_toe_block(blast_df, comparison_results)
+            _render_stemming_crest_block(blast_df, comparison_results)
 
     with tab_mal:
         st.markdown("#### Evaluación de Daño Geotécnico por Malla / Polígono de Tronadura")
 
-        df_malla_corr = _compute_malla_correlation(sections, blast_df, df_filtered_sections, tolerance, kg_col, malla_col, fecha_corte_str)
+        df_malla_corr, global_score_pct = _compute_malla_correlation(sections, blast_df, df_filtered_sections, tolerance, kg_col, malla_col, fecha_corte_str)
         if df_malla_corr.empty:
             st.info("No se identificaron mallas o polígonos de tronadura válidos en los datos cargados.")
         else:
             if sel_mallas:
                 df_malla_corr = df_malla_corr[df_malla_corr['malla'].isin(sel_mallas)]
 
-            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'avg_overbreak', 'pf_vol_avg_kgm3', 'energy_total_mj']
+            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'avg_overbreak', 'pf_vol_avg_kgm3', 'energy_total_mj', 'score_pct']
             col_list_m = [c for c in col_list_m if c in df_malla_corr.columns]
             display_map_m = {
                 'malla': 'Malla / Polígono',
@@ -358,7 +361,9 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'avg_overbreak': 'Sobre-excavación Media (m)',
                 'pf_vol_avg_kgm3': 'PF Vol. (kg/m³)',
                 'energy_total_mj': 'Energía (MJ)',
+                'score_pct': 'Logro Diseño (%)',
             }
+            st.metric("Logro Diseño Global", f"{global_score_pct}%")
             df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
             st.dataframe(df_m_disp, use_container_width=True, height=300)
 
@@ -593,13 +598,14 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
     return df_b.drop(columns=['sort_level'])
 
 
-def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_col, malla_col, fecha_corte=None) -> pd.DataFrame:
+def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_col, malla_col, fecha_corte=None) -> tuple[pd.DataFrame, int]:
     if not malla_col or malla_col not in blast_df.columns:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0
 
     mallas = blast_df[malla_col].dropna().unique().tolist()
     pf_enriched = compute_powder_factor(blast_df) if not blast_df.empty else blast_df
     malla_stats = []
+    malla_to_section: dict[str, list[str]] = {}
 
     for mal in mallas:
         df_mal_pozos = blast_df[blast_df[malla_col] == mal]
@@ -629,6 +635,8 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
                 if pf_val is not None and not (isinstance(pf_val, float) and np.isnan(pf_val)):
                     pf_pool.append(pf_val)
                 energy_sum += pf_row.get('energy_total_mj', 0.0)
+
+        malla_to_section[str(mal)] = list(intersected_sections)
 
         avg_dev_crest_over = 0.0
         avg_dev_crest_under = 0.0
@@ -680,7 +688,22 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
             'energy_total_mj': energy_sum,
         })
 
-    return pd.DataFrame(malla_stats).reset_index(drop=True)
+    df_out = pd.DataFrame(malla_stats).reset_index(drop=True)
+
+    comparison_results = st.session_state.get('comparison_results', []) or []
+    if comparison_results and not df_out.empty:
+        score = compute_design_achievement_score(
+            comparison_results, malla_to_section=malla_to_section,
+        )
+        df_out['score_pct'] = df_out['malla'].map(
+            score.get('per_malla') or {}
+        ).fillna(0).astype(int)
+        global_score = int(score.get('global', 0))
+    else:
+        df_out['score_pct'] = 0
+        global_score = 0
+
+    return df_out, global_score
 
 
 def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_pf_axis: bool) -> tuple:
@@ -916,6 +939,50 @@ def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list)
         st.info(
             f"📈 Correlación positiva (r = {pas_corr['r']:.2f}): pasaduras largas se "
             "asocian a mayor sobre-excavación del piso. Revisa si hay sobreperforación."
+        )
+
+
+def _render_stemming_crest_block(blast_df: pd.DataFrame, comparison_results: list) -> None:
+    """Per-bench correlation between stemming (taco) and delta_crest."""
+    st.markdown("---")
+    st.subheader("🔗 Stemming → Daño de Cresta (delta_crest)")
+
+    st.markdown(
+        "Agrupa los pozos por cota del piso (`Z_collar - altura_banco`) y "
+        "los empareja con la `delta_crest` de la conciliación geotécnica del "
+        "mismo nivel. Una correlación negativa sugiere tacos cortos están "
+        "asociados a mayor sobre-excavación de la cresta (gases venteando "
+        "hacia arriba / banco soplado)."
+    )
+
+    st_corr = compute_stemming_crest_correlation(
+        blast_df, comparison_results, bench_height=DEFAULTS.blast_default_bench_height,
+    )
+
+    cs1, cs2, cs3 = st.columns(3)
+    cs1.metric("Pearson r", f"{st_corr['r']:.2f}")
+    cs2.metric("n (bancos)", f"{st_corr['n_benches']}")
+    cs3.metric("Interpretación", st_corr['interpretation'])
+
+    if st_corr['n_benches'] >= 2:
+        st_df = pd.DataFrame({
+            'Nivel (cota)': list(st_corr['taco_per_bench'].keys()),
+            'Taco medio (m)': list(st_corr['taco_per_bench'].values()),
+            'delta_crest (m)': list(st_corr['crest_per_bench'].values()),
+        }).sort_values('Nivel (cota)', ascending=False)
+        st.dataframe(st_df, width="stretch", height=200)
+
+    if st_corr['r'] < -0.3:
+        st.warning(
+            f"📉 Correlación negativa (r = {st_corr['r']:.2f}): tacos cortos → "
+            "mayor sobre-excavación de cresta. Gases venteando hacia arriba, "
+            "revisar longitud de taco y retacado."
+        )
+    elif st_corr['r'] > 0.3:
+        st.info(
+            f"📈 Correlación positiva (r = {st_corr['r']:.2f}): tacos largos se "
+            "asocian a mayor sobre-excavación de cresta. Posible energía baja "
+            "/ taco excesivo reteniendo gases."
         )
 
 
