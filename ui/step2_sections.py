@@ -124,6 +124,7 @@ def _render_tab_file() -> None:
             st.session_state.pending_section_names.add(sec.name)
             added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
+        st.session_state.pop('_profile_figs', None)
         st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
@@ -261,6 +262,7 @@ def _render_tab_interactive() -> None:
                         length_up=len_up_int, length_down=len_down_int)
                     st.session_state.sections.append(sec)
                     st.session_state.pending_section_names.add(sec.name)
+                    st.session_state.pop('_profile_figs', None)
     except TypeError:
         st.plotly_chart(fig_plan, key="plan_fallback")
         st.info("Actualiza Streamlit a >= 1.35 para selección interactiva. "
@@ -345,6 +347,7 @@ def _render_tab_manual() -> None:
             st.session_state.pending_section_names.add(sec.name)
             added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
+        st.session_state.pop('_profile_figs', None)
         st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
@@ -410,6 +413,7 @@ def _render_tab_auto() -> None:
             st.session_state.pending_section_names.add(sec.name)
             added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
+        st.session_state.pop('_profile_figs', None)
         st.success(f"✅ {added_count} secciones generadas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 

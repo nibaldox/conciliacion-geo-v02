@@ -8,8 +8,6 @@ Also overlays reference lines (mallas) loaded from the sidebar uploader.
 import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
-
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -266,7 +264,6 @@ def render_modulo_tronadura() -> None:
                             show_topo_mesh = col_m2.checkbox("🟢 Mostrar Topografía Real (As-Built Transparente)", value=False)
 
                 # Reconstruct x_lines, y_lines, z_lines dynamically for filtered set
-                import numpy as np
                 n_filtered = len(df_filtered)
                 filt_x = np.empty(n_filtered * 3, dtype=object)
                 filt_y = np.empty(n_filtered * 3, dtype=object)
@@ -342,8 +339,6 @@ def render_modulo_tronadura() -> None:
             col_p1, col_p2 = st.columns(2)
             col_p1.metric("Pasadura Promedio", f"{p_mean:.2f} m")
             col_p2.metric(f"Pozos en Rango Óptimo ({p_min}m - {p_max}m)", f"{p_pct:.1f}%", f"{p_optimal}/{len(df_filtered)} pozos")
-
-            import numpy as np
             fig_pas = go.Figure(go.Histogram(
                 x=df_filtered['Pasadura'].values,
                 nbinsx=20,
@@ -403,7 +398,6 @@ def render_modulo_tronadura() -> None:
                 if not kg_col:
                     st.warning("⚠️ No se encontró columna de Kg de explosivos (`Kilos_Cargados_real`, etc.) para cruzar la energía.")
                 else:
-                        import pandas as pd
                         df_comp = pd.DataFrame(comparison)
 
                         if 'delta_crest' not in df_comp.columns:
@@ -507,8 +501,6 @@ def render_modulo_tronadura() -> None:
 
 
 def _read_uploaded(uploaded) -> "pd.DataFrame":
-    import pandas as pd
-
     name = uploaded.name.lower()
     if name.endswith((".xlsx", ".xls")):
         return pd.read_excel(io.BytesIO(uploaded.read()))
@@ -565,8 +557,6 @@ def _safe_str(series, default="?"):
 
 def _build_collar_customdata(df, kg_col):
     """Return customdata array for collar hovertemplate enrichment."""
-    import numpy as np
-
     n = len(df)
     if n == 0:
         return np.empty((0, 10), dtype=object)
@@ -625,8 +615,6 @@ def _build_collar_customdata(df, kg_col):
 
 
 def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
-    import numpy as np
-
     fig = go.Figure()
 
     add_ref_lines_3d(fig, z_value=float(df['Z_collar'].max()) + 5)
@@ -854,8 +842,6 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
 
 def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: list[str], label_prefix: str) -> None:
     color_cycle = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
-    import numpy as np
-
     kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
     sub_custom = _build_collar_customdata(df, kg_col)
 

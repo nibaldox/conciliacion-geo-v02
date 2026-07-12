@@ -105,7 +105,7 @@ def add_ref_lines_2d(fig: go.Figure) -> None:
         ))
 
 
-def add_ref_lines_3d(fig: go.Figure, z_value: float = None) -> None:
+def add_ref_lines_3d(fig: go.Figure, z_value: float | None = None) -> None:
     """Add 3D reference line traces to an existing Plotly figure.
 
     If z_value is None, uses the mean Z of each line's bounding box
