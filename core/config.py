@@ -248,6 +248,34 @@ class DrillComplianceDefaults:
     nearest_radius_m: float = 5.0
 
 
+@dataclass(frozen=True)
+class BackbreakDefaults:
+    """Knobs for :mod:`core.backbreak_prediction.predict_backbreak`.
+
+    All defaults are calibrated for typical open-pit hard-rock designs:
+    burden ~ 6 m, spacing ~ 7 m, PF ~ 0.35 kg/m³, bench ~ 15 m.
+
+    The empirical back-break formula mirrors a simple geometric scaling
+    (``empirical_k * burden * (pf / pf_optimal_default_kgm3)``); the
+    Holmberg-Persson cross-check uses a constant ``hp_constant`` scaled by
+    the total charge per hole and is clamped to a plausible range
+    ``[clamp_low_factor_b · B, clamp_high_factor_b · B]``.
+    """
+    empirical_k: float = 0.3
+    hp_constant: float = 0.6
+    pf_optimal_default_kgm3: float = 0.35
+    ci_band_pct: float = 0.15
+    clamp_low_factor_b: float = 0.5
+    clamp_high_factor_b: float = 4.0
+    bench_height_m: float = 15.0
+    default_burden_m: float = 6.0
+    default_spacing_m: float = 7.0
+    default_stemming_m: float = 6.0
+    default_diameter_mm: float = 250.0
+    rock_factor_min: float = 0.7
+    rock_factor_max: float = 1.3
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -261,3 +289,4 @@ ADVISOR = BlastAdvisorDefaults()
 STABILITY = StabilityDefaults()
 SECTOR_DEVIATION = SectorDeviationDefaults()
 DRILL_COMPLIANCE = DrillComplianceDefaults()
+BACKBREAK = BackbreakDefaults()
