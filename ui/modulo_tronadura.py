@@ -15,6 +15,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
+from core.drill_compliance import compute_drill_compliance
+from core.drill_hardness_processor import (
+    enrich_blast_with_hardness,
+    load_drilling_csv,
+)
 from core.geom_utils import find_df_column
 from core.config import DEFAULTS, SECTOR_DEVIATION
 from core.blast_correlation import (
@@ -22,7 +27,6 @@ from core.blast_correlation import (
     compute_powder_factor,
 )
 from core.blast_metrics import enrich_blast_dataframe
-from core.drill_compliance import compute_drill_compliance
 from core.profile_compliance import compute_sector_deviations
 from core.section_cutter import cut_both_surfaces
 from core.stability_analysis import suggest_face_angle_for_fs
@@ -54,6 +58,12 @@ def render_modulo_tronadura() -> None:
         "Diseño de perforación (CSV, opcional)",
         type=["csv"],
         key="blast_design_file",
+    )
+    hardness_uploaded = st.file_uploader(
+        "Reporte de perforación (rig) — CSV opcional",
+        type=["csv"],
+        key="blast_drill_hardness_file",
+        help="CSV con Pozo, Tiempo Inicial/Final, Profundidad, Equipo y coordenadas. Enriquece cada pozo con dureza, índice de dureza y tasa de penetración.",
     )
 
     if uploaded is None:
@@ -99,6 +109,14 @@ def render_modulo_tronadura() -> None:
                     progress.empty()
                     return
             df_clean = enrich_blast_dataframe(df_clean)
+            if hardness_uploaded is not None:
+                try:
+                    hardness_buf = io.BytesIO(hardness_uploaded.getvalue())
+                    hardness_df_clean = load_drilling_csv(hardness_buf)
+                    if not hardness_df_clean.empty:
+                        df_clean = enrich_blast_with_hardness(df_clean, hardness_df_clean)
+                except Exception:
+                    logger.exception("Failed to enrich blast with hardness")
             st.session_state['blast_df_clean'] = df_clean
             st.session_state['blast_x_lines'] = x_lines
             st.session_state['blast_y_lines'] = y_lines
@@ -249,6 +267,12 @@ def render_modulo_tronadura() -> None:
                     diam_col = find_df_column(df_clean, ['Diam_mm', 'Diametro', 'Diameter'], raise_error=False)
                     if diam_col:
                         color_options.append("Diámetro (mm)")
+                    if 'dureza' in df_clean.columns:
+                        color_options.append("Dureza")
+                    if 'indice_dureza' in df_clean.columns:
+                        color_options.append("Índice de Dureza")
+                    if 'tasa_penetracion' in df_clean.columns:
+                        color_options.append("Tasa de Penetración")
                     color_options.extend(["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"])
 
                     color_by = col_v1.selectbox(
@@ -646,6 +670,8 @@ _COLLAR_HOVERTEMPLATE = (
     "Densidad lineal: %{customdata[7]:.1f} kg/m<br>"
     "Inclinación: %{customdata[8]:.1f}°<br>"
     "Azimut: %{customdata[9]:.0f}°<br>"
+    "%{customdata[11]}<br>"
+    "%{customdata[12]}<br>"
     "<extra></extra>"
 )
 
@@ -668,7 +694,7 @@ def _build_collar_customdata(df, kg_col):
 
     n = len(df)
     if n == 0:
-        return np.empty((0, 11), dtype=object)
+        return np.empty((0, 13), dtype=object)
 
     label = (
         _safe_str(df["label_pozo"]).values
@@ -721,7 +747,27 @@ def _build_collar_customdata(df, kg_col):
         else np.zeros(n, dtype=float)
     )
     diam_inch = diam / 25.4
-    return np.column_stack([label, expl, kilos, diam, length, taco, altura, kgpm, incl, az, diam_inch])
+
+    if "dureza" in df.columns:
+        dureza_raw = df["dureza"]
+        dureza_idx = pd.to_numeric(df["indice_dureza"], errors="coerce") if "indice_dureza" in df.columns else pd.Series([np.nan] * n)
+        dureza_strings = np.array([
+            "Dureza: " + ("" if pd.isna(d) else str(d)) + (" (idx " + f"{float(idx):.1f})" if pd.notna(idx) else "")
+            for d, idx in zip(dureza_raw, dureza_idx)
+        ], dtype=object)
+    else:
+        dureza_strings = np.array([""] * n, dtype=object)
+
+    if "tasa_penetracion" in df.columns:
+        tasa = pd.to_numeric(df["tasa_penetracion"], errors="coerce")
+        tasa_strings = np.array([
+            "Tasa perf.: " + (f"{float(t):.2f} m/min" if pd.notna(t) else "—")
+            for t in tasa
+        ], dtype=object)
+    else:
+        tasa_strings = np.array([""] * n, dtype=object)
+
+    return np.column_stack([label, expl, kilos, diam, length, taco, altura, kgpm, incl, az, diam_inch, dureza_strings, tasa_strings])
 
 
 def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
@@ -887,6 +933,16 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         elif color_by == "Diámetro (mm)" and 'Diam_mm' in df.columns:
             colors = df['Diam_mm'].values.astype(float)
             title = "mm"
+        elif color_by == "Dureza" and 'dureza' in df.columns:
+            _dureza_map = {"roca suave": 1, "roca media": 2, "roca dura": 3, "roca muy dura": 4}
+            colors = df['dureza'].map(_dureza_map).fillna(0).astype(float).values
+            title = "Dureza (1-4)"
+        elif color_by == "Índice de Dureza" and 'indice_dureza' in df.columns:
+            colors = pd.to_numeric(df['indice_dureza'], errors='coerce').fillna(0).astype(float).values
+            title = "Índice (0-100)"
+        elif color_by == "Tasa de Penetración" and 'tasa_penetracion' in df.columns:
+            colors = pd.to_numeric(df['tasa_penetracion'], errors='coerce').fillna(0).astype(float).values
+            title = "m/min"
         elif color_by == "Profundidad (m)":
             colors = df['Len'].values
             title = "m (Largo)"
@@ -995,8 +1051,8 @@ def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: li
             line_custom = np.repeat(sub_custom[mask], 3, axis=0)
             collar_custom = sub_custom[mask]
         else:
-            line_custom = np.empty((0, 11))
-            collar_custom = np.empty((0, 11))
+            line_custom = np.empty((0, 13))
+            collar_custom = np.empty((0, 13))
 
         fig.add_trace(go.Scatter3d(
             x=m_x, y=m_y, z=m_z,

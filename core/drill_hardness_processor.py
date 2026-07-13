@@ -4,6 +4,7 @@ Wraps the pure functions in core.drill_hardness with a pandas adapter.
 """
 from __future__ import annotations
 
+import io
 from typing import Any
 
 import numpy as np
@@ -113,24 +114,37 @@ def _classify_rate(row: pd.Series) -> tuple[Any, float | None]:
     return (cat, idx_val)
 
 
-def _safe_read_csv(path: str) -> pd.DataFrame:
+def _safe_read_csv(source) -> pd.DataFrame:
     try:
-        return pd.read_csv(path, engine="python", on_bad_lines="warn")
+        return pd.read_csv(source, engine="python", on_bad_lines="warn")
     except (FileNotFoundError, OSError, ValueError, pd.errors.EmptyDataError):
         return _empty_canonical_df()
 
 
-def load_drilling_csv(file_path: str) -> pd.DataFrame:
+def load_drilling_csv(source) -> pd.DataFrame:
     """Parse a drilling rig CSV and return a normalized DataFrame.
 
+    ``source`` may be a filesystem path or any file-like buffer that
+    :func:`pandas.read_csv` accepts (e.g. ``io.StringIO``,
+    ``io.BytesIO``, or a Streamlit ``UploadedFile`` read into a buffer).
+
     Required canonical columns (lowercase, snake_case):
-    ``pozo``, ``tiempo_inicial``, ``tiempo_final``, ``x``, ``y``.
-    Optional: ``profundidad_m``, ``rig``.
+    ``pozo``, ``x``, ``y``.
+    Optional: ``tiempo_inicial``, ``tiempo_final``, ``profundidad_m``, ``rig``.
 
     Returns an empty canonical-schema DataFrame on read failure.
     Never raises.
     """
-    df = _safe_read_csv(file_path)
+    if hasattr(source, "read"):
+        try:
+            content = source.read()
+            if isinstance(content, bytes):
+                content = content.decode("utf-8", errors="replace")
+            df = _safe_read_csv(io.StringIO(content))
+        except Exception:
+            return _empty_canonical_df()
+    else:
+        df = _safe_read_csv(source)
     if df.empty:
         return _empty_canonical_df()
 
