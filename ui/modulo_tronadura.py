@@ -246,6 +246,9 @@ def render_modulo_tronadura() -> None:
                         color_options.append("Fase")
                     if banco_col:
                         color_options.append("Banco")
+                    diam_col = find_df_column(df_clean, ['Diam_mm', 'Diametro', 'Diameter'], raise_error=False)
+                    if diam_col:
+                        color_options.append("Diámetro (mm)")
                     color_options.extend(["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"])
 
                     color_by = col_v1.selectbox(
@@ -880,6 +883,9 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         if color_by == "Carga Explosiva (Kg)" and kg_col:
             colors = df[kg_col].values.astype(float)
             title = "kg"
+        elif color_by == "Diámetro (mm)" and 'Diam_mm' in df.columns:
+            colors = df['Diam_mm'].values.astype(float)
+            title = "mm"
         elif color_by == "Profundidad (m)":
             colors = df['Len'].values
             title = "m (Largo)"
