@@ -24,7 +24,8 @@ from core.blast_model import (
     predict_damage_for_pf,
 )
 from core.blast_achievement import compute_design_achievement_score
-from core.config import ADVISOR, DEFAULTS
+from core.backbreak_prediction import predict_backbreak
+from core.config import ADVISOR, BACKBREAK, DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
 from ui.filter_cache import _ensure_filter_values
@@ -178,7 +179,8 @@ def render_tab_blast_correlation(config: dict) -> None:
 
     model, valid = _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
     _render_pf_recommendations(model, valid, df_filtered_sections)
-    _render_multivariate_model(df_filtered_sections)
+    mv_model = _render_multivariate_model(df_filtered_sections)
+    _render_backbreak_predictor(df_filtered_sections, mv_model)
 
     if _HAS_TREND_HELPERS:
         _render_temporal_analysis(blast_df, df_filtered_sections)
@@ -909,8 +911,13 @@ def _render_pf_recommendations(
             st.info("Columna 'sector' no disponible en los datos.")
 
 
-def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> None:
-    """Multivariate OLS expander: damage ~ PF + burden + S/B + stemming."""
+def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> dict | None:
+    """Multivariate OLS expander: damage ~ PF + burden + S/B + stemming.
+
+    Returns the fitted model dict (or ``None`` if no model could be fit)
+    so downstream blocks (e.g. the back-break predictor) can reuse it
+    without re-fitting.
+    """
     st.markdown("---")
     with st.expander("🧮 Modelo multivariado (PF + burden + stemming)", expanded=False):
         st.markdown(
@@ -927,7 +934,7 @@ def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> None:
                 "ℹ️ Datos insuficientes para el modelo multivariado: se requieren al menos "
                 "12 secciones con powder factor, burden, espaciamiento/burden y taco válidos."
             )
-            return
+            return model
 
         coef_rows = [
             {
@@ -955,7 +962,7 @@ def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> None:
         current_burden = float(model.get("feature_means", {}).get("burden", 0.0))
         if current_burden <= 0.0:
             st.info("ℹ️ Burden no disponible; no es posible recomendar un ajuste de burden.")
-            return
+            return model
 
         rec = recommend_multivariate(model, current_burden=current_burden)
         st.markdown(f"### 🎯 Recomendación de Burden (burden actual = {current_burden:.2f} m)")
@@ -967,6 +974,104 @@ def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> None:
             st.success(rec["message"])
         else:
             st.warning(rec["message"])
+
+    return model
+
+
+def _render_backbreak_predictor(
+    df_filtered_sections: pd.DataFrame,
+    multivariate_model: dict | None,
+) -> None:
+    """Forward back-break predictor with sliders and a single-shot metric.
+
+    Reuses the fitted multivariate model from the block above when its
+    confidence is sufficient; otherwise falls back to the empirical
+    Holmberg-Persson-aware heuristic.
+    """
+    st.markdown("---")
+    with st.expander("🔮 Predictor de Back-Break", expanded=False):
+        st.markdown(
+            "Estimación prospectiva del back-break esperado para un diseño de "
+            "tronadura propuesto. Si el bloque anterior ajustó un modelo "
+            "multivariado con suficiente confianza, la predicción usa los "
+            "coeficientes calibrados con tus propios datos; de lo contrario "
+            "se aplica la heurística empírica y un cross-check de "
+            "Holmberg-Persson como número de sanity."
+        )
+
+        defaults = BACKBREAK
+
+        col_a, col_b = st.columns(2)
+        burden = col_a.slider(
+            "Burden (m)", min_value=3.0, max_value=12.0,
+            value=defaults.default_burden_m, step=0.1,
+            key="backbreak_burden_slider",
+        )
+        spacing = col_b.slider(
+            "Espaciamiento (m)", min_value=4.0, max_value=14.0,
+            value=defaults.default_spacing_m, step=0.1,
+            key="backbreak_spacing_slider",
+        )
+        col_c, col_d = st.columns(2)
+        pf = col_c.slider(
+            "Powder Factor (kg/m³)", min_value=0.10, max_value=1.20,
+            value=defaults.pf_optimal_default_kgm3, step=0.05,
+            key="backbreak_pf_slider",
+        )
+        stemming = col_d.slider(
+            "Stemming (m)", min_value=1.0, max_value=12.0,
+            value=defaults.default_stemming_m, step=0.1,
+            key="backbreak_stemming_slider",
+        )
+        col_e, _ = st.columns(2)
+        diameter = col_e.slider(
+            "Diámetro (mm)", min_value=100, max_value=400,
+            value=defaults.default_diameter_mm, step=25,
+            key="backbreak_diameter_slider",
+        )
+        rock_factor = st.slider(
+            "Factor de roca",
+            min_value=defaults.rock_factor_min, max_value=defaults.rock_factor_max,
+            value=1.0, step=0.05,
+            key="backbreak_rock_factor_slider",
+            help="Multiplicador por dureza/estructura del macizo (0.7 = blando, 1.3 = muy duro).",
+        )
+
+        model_for_pred = (
+            multivariate_model
+            if isinstance(multivariate_model, dict)
+            and multivariate_model.get("confidence") not in (None, "", "INSUFFICIENT")
+            else None
+        )
+
+        try:
+            pred = predict_backbreak(
+                burden, spacing, pf, stemming, diameter,
+                model=model_for_pred, rock_factor=rock_factor,
+            )
+        except Exception as exc:
+            st.warning(
+                f"No fue posible calcular la predicción ({type(exc).__name__}). "
+                "Revisa que los valores sean numéricos."
+            )
+            return
+
+        m1, m2 = st.columns(2)
+        m1.metric(
+            "Back-break predicho",
+            f"{pred.predicted_m:.2f} m",
+            delta=f"IC 95% [{pred.ci_low_m:.2f}, {pred.ci_high_m:.2f}]",
+        )
+        method_label = (
+            "Modelo multivariado" if pred.method == "multivariate"
+            else "Heurística empírica"
+        )
+        m2.metric("Método", f"{method_label} · confianza {pred.confidence}")
+
+        if pred.notes:
+            with st.expander("Notas y cross-check", expanded=False):
+                for n in pred.notes:
+                    st.caption(f"• {n}")
 
 
 def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list) -> None:
