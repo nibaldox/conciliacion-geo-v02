@@ -249,6 +249,27 @@ class DrillComplianceDefaults:
 
 
 @dataclass(frozen=True)
+class DrillHardnessDefaults:
+    """Knobs for :mod:`core.drill_hardness_processor`.
+
+    - ``radius_m`` — spatial join radius for the cKDTree query.
+    - ``duration_soft_min`` / ``duration_medium_min`` / ``duration_hard_min`` —
+      duration metric cutoffs (minutes).
+    - ``rate_soft_m_min`` / ``rate_medium_m_min`` / ``rate_hard_m_min`` —
+      rate metric cutoffs (m/min).
+    - ``strict_parity`` — reserved for downstream parity guards.
+    """
+    radius_m: float = 2.0
+    duration_soft_min: float = 16.0
+    duration_medium_min: float = 24.0
+    duration_hard_min: float = 40.0
+    rate_soft_m_min: float = 1.0
+    rate_medium_m_min: float = 0.7
+    rate_hard_m_min: float = 0.4
+    strict_parity: bool = True
+
+
+@dataclass(frozen=True)
 class BackbreakDefaults:
     """Knobs for :mod:`core.backbreak_prediction.predict_backbreak`.
 
@@ -289,4 +310,5 @@ ADVISOR = BlastAdvisorDefaults()
 STABILITY = StabilityDefaults()
 SECTOR_DEVIATION = SectorDeviationDefaults()
 DRILL_COMPLIANCE = DrillComplianceDefaults()
+DRILL_HARDNESS = DrillHardnessDefaults()
 BACKBREAK = BackbreakDefaults()
