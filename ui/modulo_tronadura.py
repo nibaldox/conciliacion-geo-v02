@@ -69,7 +69,7 @@ def render_modulo_tronadura() -> None:
         return
 
     st.subheader("Vista previa del archivo")
-    st.dataframe(df.head(20), use_container_width=True)
+    st.dataframe(df.head(20), width="stretch")
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
     # Clear processed state if file changes
@@ -341,7 +341,7 @@ def render_modulo_tronadura() -> None:
                     )
 
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
-                    st.dataframe(df_filtered, use_container_width=True)
+                    st.dataframe(df_filtered, width="stretch")
 
         with tab_corr:
             df_filtered = df_clean.copy() # Base for correlation
@@ -382,7 +382,7 @@ def render_modulo_tronadura() -> None:
                 height=350,
                 margin=dict(l=40, r=20, t=40, b=40)
             )
-            st.plotly_chart(fig_pas, use_container_width=True)
+            st.plotly_chart(fig_pas, width="stretch")
 
             _render_sector_deviations()
 
@@ -492,7 +492,7 @@ def render_modulo_tronadura() -> None:
                         if df_corr.empty or df_corr['Kg_Explosivo'].sum() == 0:
                             st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
                         else:
-                            st.dataframe(df_corr, use_container_width=True)
+                            st.dataframe(df_corr, width="stretch")
 
                             if pf_available:
                                 x_col = 'PF_Vol_kgm3'
@@ -553,7 +553,7 @@ def render_modulo_tronadura() -> None:
                                 margin=dict(l=40, r=20, t=40, b=40),
                                 yaxis=dict(zeroline=True, zerolinecolor='gray', zerolinewidth=1)
                             )
-                            st.plotly_chart(fig_scat, use_container_width=True)
+                            st.plotly_chart(fig_scat, width="stretch")
                             if x_fallback:
                                 st.caption("ℹ️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
@@ -592,10 +592,10 @@ def _render_drill_compliance_block(result) -> None:
         score = result["compliance_score"]
         st.metric("Cumplimiento", f"{score * 100:.1f}%" if score is not None else "Sin datos")
         if not result["per_hole"].empty:
-            st.dataframe(result["per_hole"], use_container_width=True)
+            st.dataframe(result["per_hole"], width="stretch")
         if result["per_group"] is not None:
             st.subheader("Cumplimiento por malla")
-            st.dataframe(result["per_group"], use_container_width=True)
+            st.dataframe(result["per_group"], width="stretch")
         unmatched = result["unmatched"]
         if unmatched["design"]:
             st.warning(f"{len(unmatched['design'])} pozos de diseño sin coincidencia")
@@ -639,7 +639,7 @@ _COLLAR_HOVERTEMPLATE = (
     "<b>📊 Datos del Pozo</b><br>"
     "Explosivo: %{customdata[1]}<br>"
     "Kilos cargados: %{customdata[2]:.0f} kg<br>"
-    "Diámetro: %{customdata[3]:.0f} mm<br>"
+    "Diámetro: %{customdata[3]:.0f} mm / %{customdata[10]:.1f} pulg<br>"
     "Longitud real: %{customdata[4]:.2f} m<br>"
     "Stemming: %{customdata[5]:.2f} m<br>"
     "Altura de carga: %{customdata[6]:.2f} m<br>"
@@ -668,7 +668,7 @@ def _build_collar_customdata(df, kg_col):
 
     n = len(df)
     if n == 0:
-        return np.empty((0, 10), dtype=object)
+        return np.empty((0, 11), dtype=object)
 
     label = (
         _safe_str(df["label_pozo"]).values
@@ -720,7 +720,8 @@ def _build_collar_customdata(df, kg_col):
         if "Az" in df.columns
         else np.zeros(n, dtype=float)
     )
-    return np.column_stack([label, expl, kilos, diam, length, taco, altura, kgpm, incl, az])
+    diam_inch = diam / 25.4
+    return np.column_stack([label, expl, kilos, diam, length, taco, altura, kgpm, incl, az, diam_inch])
 
 
 def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
@@ -927,7 +928,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     if show_energy_grid:
         st.caption(
@@ -994,8 +995,8 @@ def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: li
             line_custom = np.repeat(sub_custom[mask], 3, axis=0)
             collar_custom = sub_custom[mask]
         else:
-            line_custom = np.empty((0, 10))
-            collar_custom = np.empty((0, 10))
+            line_custom = np.empty((0, 11))
+            collar_custom = np.empty((0, 11))
 
         fig.add_trace(go.Scatter3d(
             x=m_x, y=m_y, z=m_z,
@@ -1145,7 +1146,7 @@ def _render_sector_deviations() -> None:
             height=450,
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         )
-        st.plotly_chart(fig_sectors, use_container_width=True)
+        st.plotly_chart(fig_sectors, width="stretch")
 
         rows = []
         for s in sectors:
@@ -1158,7 +1159,7 @@ def _render_sector_deviations() -> None:
                 "Área sobre (m²)": f"{s.area_above_m2:.2f}",
                 "Área deuda (m²)": f"{s.area_below_m2:.2f}",
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch")
 
         _render_face_angle_suggestion()
 

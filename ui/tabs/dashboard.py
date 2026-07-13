@@ -89,7 +89,7 @@ def _render_stacked_bar(results) -> None:
     ])
     fig_bar.update_layout(barmode='stack', title="Cumplimiento por Parámetro",
                           height=350, margin=dict(l=40, r=20, t=40, b=40))
-    st.plotly_chart(fig_bar, use_container_width=True)
+    st.plotly_chart(fig_bar, width="stretch")
 
 
 def _render_deviation_histograms(results, config: dict) -> None:
@@ -103,7 +103,7 @@ def _render_deviation_histograms(results, config: dict) -> None:
                             xaxis_title="Desviación (m)", yaxis_title="Frecuencia")
         fig_h.add_vline(x=-tol['bench_height']['neg'], line_dash="dash", line_color="orange")
         fig_h.add_vline(x=tol['bench_height']['pos'], line_dash="dash", line_color="orange")
-        st.plotly_chart(fig_h, use_container_width=True)
+        st.plotly_chart(fig_h, width="stretch")
 
     with col2:
         devs_a = [r['angle_dev'] for r in results if r['angle_dev'] is not None]
@@ -112,7 +112,7 @@ def _render_deviation_histograms(results, config: dict) -> None:
                             xaxis_title="Desviación (°)", yaxis_title="Frecuencia")
         fig_a.add_vline(x=-tol['face_angle']['neg'], line_dash="dash", line_color="orange")
         fig_a.add_vline(x=tol['face_angle']['pos'], line_dash="dash", line_color="orange")
-        st.plotly_chart(fig_a, use_container_width=True)
+        st.plotly_chart(fig_a, width="stretch")
 
     with col3:
         berm_vals = [r['berm_real'] for r in results
@@ -123,4 +123,4 @@ def _render_deviation_histograms(results, config: dict) -> None:
                                 xaxis_title="Ancho (m)", yaxis_title="Frecuencia")
             fig_b.add_vline(x=config['min_berm_width'], line_dash="dash", line_color="red",
                             annotation_text="Mínimo", annotation_position="top right")
-            st.plotly_chart(fig_b, use_container_width=True)
+            st.plotly_chart(fig_b, width="stretch")

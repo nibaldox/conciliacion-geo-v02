@@ -196,7 +196,7 @@ def _render_3d_view() -> None:
         cached = st.session_state.get('_3d_fig')
         if not cached:
             return
-        st.plotly_chart(cached[1], use_container_width=True)
+        st.plotly_chart(cached[1], width="stretch")
 
 
 def _build_or_get_contour_figure(config: dict) -> None:
@@ -282,4 +282,4 @@ def _render_contour_view(config: dict) -> None:
         cached = st.session_state.get('_contour_fig')
         if not cached:
             return
-        st.plotly_chart(cached[1], use_container_width=True)
+        st.plotly_chart(cached[1], width="stretch")

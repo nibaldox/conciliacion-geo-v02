@@ -211,7 +211,7 @@ def render_tab_blast_correlation(config: dict) -> None:
         }
 
         df_sec_disp = df_filtered_sections[col_list].rename(columns=display_map)
-        st.dataframe(df_sec_disp, use_container_width=True, height=300)
+        st.dataframe(df_sec_disp, width="stretch", height=300)
 
         if len(df_filtered_sections) > 1:
             if use_pf_axis:
@@ -240,7 +240,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 trendline=trendline,
             )
             fig_scatter.update_layout(height=450)
-            st.plotly_chart(fig_scatter, use_container_width=True)
+            st.plotly_chart(fig_scatter, width="stretch")
             if not use_pf_axis:
                 st.caption("⚠️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
@@ -272,7 +272,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'energy_total_mj': 'Energía (MJ)',
             }
             df_b_disp = df_bench_corr[col_list_b].rename(columns=display_map_b)
-            st.dataframe(df_b_disp, use_container_width=True, height=300)
+            st.dataframe(df_b_disp, width="stretch", height=300)
 
             fig_bench = go.Figure()
             fig_bench.add_trace(go.Bar(
@@ -339,7 +339,7 @@ def render_tab_blast_correlation(config: dict) -> None:
             )
             if yaxis3_cfg:
                 fig_bench.update_layout(yaxis3=yaxis3_cfg)
-            st.plotly_chart(fig_bench, use_container_width=True)
+            st.plotly_chart(fig_bench, width="stretch")
 
             _render_pasadura_toe_block(blast_df, comparison_results)
             _render_stemming_crest_block(blast_df, comparison_results)
@@ -376,7 +376,7 @@ def render_tab_blast_correlation(config: dict) -> None:
             }
             st.metric("Logro Diseño Global", f"{global_score_pct}%")
             df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
-            st.dataframe(df_m_disp, use_container_width=True, height=300)
+            st.dataframe(df_m_disp, width="stretch", height=300)
 
             color_axis = 'pf_vol_avg_kgm3' if 'pf_vol_avg_kgm3' in df_malla_corr.columns and df_malla_corr['pf_vol_avg_kgm3'].notna().any() else 'total_kg'
             color_label = 'Powder Factor (kg/m³)' if color_axis == 'pf_vol_avg_kgm3' else 'Carga Explosiva Total (Kg)'
@@ -394,7 +394,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 title='Área de Sobre-excavación Promedio por Malla de Tronadura'
             )
             fig_malla.update_layout(height=450)
-            st.plotly_chart(fig_malla, use_container_width=True)
+            st.plotly_chart(fig_malla, width="stretch")
 
 
 def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, comparison_results, tolerance, fecha_corte=None) -> pd.DataFrame:
@@ -821,7 +821,7 @@ def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_p
             height=450,
             margin=dict(l=40, r=20, t=50, b=40),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         st.markdown("**Escenario: ¿qué pasa si ajusto el PF objetivo?**")
         pf_min = float(min(0.05, pf.min()))
@@ -899,7 +899,7 @@ def _render_pf_recommendations(
                 target_overbreak_m=target_ob,
             )
             if not df_recs.empty:
-                st.dataframe(df_recs, use_container_width=True, height=300)
+                st.dataframe(df_recs, width="stretch", height=300)
                 for row in df_recs.itertuples(index=False):
                     if row.feasibility == 'APPLICABLE':
                         st.success(f"**{row.group_value}**: {row.message}")
@@ -945,7 +945,7 @@ def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> dict | Non
             }
             for feat in features
         ]
-        st.dataframe(pd.DataFrame(coef_rows), use_container_width=True, height=200)
+        st.dataframe(pd.DataFrame(coef_rows), width="stretch", height=200)
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("R²", f"{model['r_squared']:.3f}")
@@ -1102,7 +1102,7 @@ def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list)
             'Pasadura media (m)': list(pas_corr['pasadura_per_bench'].values()),
             'delta_toe (m)': list(pas_corr['toe_per_bench'].values()),
         }).sort_values('Nivel (cota)', ascending=False)
-        st.dataframe(pas_df, use_container_width=True, height=200)
+        st.dataframe(pas_df, width="stretch", height=200)
 
     if pas_corr['r'] < -0.3:
         st.warning(
@@ -1289,7 +1289,7 @@ def _render_energy_density_along_profile(
         margin=dict(l=40, r=40, t=50, b=40),
         legend=dict(x=0.01, y=0.99),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     st.caption(
         f"Energía acumulada por punto, radio de búsqueda = {DEFAULTS.blast_correlation_radius_m:.0f} m, "
         f"z de muestreo = {z_sample:.1f} m."
@@ -1313,7 +1313,7 @@ def _render_temporal_analysis(blast_df, df_filtered_sections):
             trend_slope = trend_df['trend_slope'].iloc[0] if 'trend_slope' in trend_df.columns else np.nan
             if pd.notna(trend_slope):
                 col_t2.metric("Tendencia PF (kg/m³ por mes)", f"{trend_slope:+.4f}")
-            st.dataframe(trend_df, use_container_width=True, height=300)
+            st.dataframe(trend_df, width="stretch", height=300)
             if len(trend_df) >= 2:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
@@ -1330,7 +1330,7 @@ def _render_temporal_analysis(blast_df, df_filtered_sections):
                     yaxis2=dict(title='Sobre-excavación (m)', overlaying='y', side='right'),
                     height=400, margin=dict(l=40, r=40, t=30, b=30),
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             try:
                 outliers = detect_pf_outliers_iqr(blast_df)
             except Exception:
@@ -1341,7 +1341,7 @@ def _render_temporal_analysis(blast_df, df_filtered_sections):
                 )
                 preview_cols = [c for c in ['label_pozo', 'pf_vol_kgm3'] if c in outliers.columns]
                 if preview_cols:
-                    st.dataframe(outliers[preview_cols].head(10), use_container_width=True)
+                    st.dataframe(outliers[preview_cols].head(10), width="stretch")
 
     with st.expander("🔄 Comparativa Pre/Post Campaña", expanded=False):
         campaign_date = st.date_input(
