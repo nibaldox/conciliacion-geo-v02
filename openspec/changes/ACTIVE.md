@@ -6,7 +6,7 @@
 
 | Change | Phase | Slice | Risk | Started | Proposal | Specs | Design | Tasks | Apply | Verify | Archive |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| [blast-design-achievement](./blast-design-achievement/proposal.md) | tasks | Gap 2 + Gap 5 | additive, low | 2026-07-12 | ✅ | ✅ | ✅ | ✅ | — | — |
+| _(No active changes.)_ | | | | | | | | | | | |
 
 ## Conventions
 
