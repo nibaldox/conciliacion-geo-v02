@@ -90,15 +90,19 @@ def build_reconciled_profile(benches, *, source: str = "topo",
 
     Notes
     -----
-    The legacy path (``return_v2=False``) is preserved for one release
-    cycle. New code should use :func:`build_reconciled_profile_v2`
-    which always returns the rich structure.
+    .. deprecated:: 2 release cycles; use ``build_reconciled_profile_v2`` instead.
+
+    The legacy path (``return_v2=False``) is preserved for two release
+    cycles and is scheduled for removal afterwards. New code should use
+    :func:`build_reconciled_profile_v2`, now re-exported from
+    :mod:`core`, which always returns the rich structure.
     """
     if not return_v2:
         warnings.warn(
-            "build_reconciled_profile(return_v2=False) is deprecated: "
-            "use build_reconciled_profile_v2() to receive the rich "
-            "ReconciledProfile with explicit berm segments.",
+            "build_reconciled_profile(return_v2=False) is deprecated and "
+            "scheduled for removal in 2 release cycles. Use "
+            "build_reconciled_profile_v2(benches, source, profile), now "
+            "re-exported from core, instead.",
             DeprecationWarning,
             stacklevel=2,
         )
