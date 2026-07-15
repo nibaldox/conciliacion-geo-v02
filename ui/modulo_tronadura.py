@@ -236,7 +236,7 @@ def render_modulo_tronadura() -> None:
                     all_colorscales = [
                         "Inferno", "Hot", "Viridis", "Plasma", "Magma", "Cividis",
                         "Rainbow", "Jet", "Earth", "YlOrRd", "RdBu", "Spectral",
-                        "Coolwarm", "Electric", "Bluered", "Greens", "Reds", "Blues"
+                        "Balance", "Electric", "Bluered", "Greens", "Reds", "Blues"
                     ]
                     colorscale_disabled = (color_by in ["Mallas de Tronadura (Grid)", "Polígonos Tronados", "Fase", "Banco"])
                     sel_colorscale = col_v2.selectbox(
