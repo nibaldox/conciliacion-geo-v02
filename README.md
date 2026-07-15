@@ -110,9 +110,10 @@ cd web && npm install && npm run dev    # → http://localhost:5173
 
 ### 2. Streamlit (the maintainer uses this daily) — `app.py`
 
-Single-file Streamlit app, no separate backend. **Not touched by
-recent v2 work** — the maintainer uses it for real work and the
-contributing guide explicitly forbids changes here.
+Single-file Streamlit app, no separate backend. The maintainer uses it
+for real work, so it's **protected** (not forbidden): bug fixes and
+additive improvements are welcome, but refactors or changes to existing
+flows need explicit approval. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bash
 pip install -r requirements.txt
@@ -327,9 +328,10 @@ on the frontend).
 We love PRs! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full
 guide. Highlights:
 
-- **Streamlit (`app.py`, `ui/`) is OFF-LIMITS** — the
-  maintainer uses it daily for real work. New work goes in
-  `web/` and `api/`, and must be **additive**.
+- **Streamlit (`app.py`, `ui/`) is protected** — the maintainer
+  uses it daily, so bug fixes and additive improvements are welcome but
+  refactors need explicit approval. New features go in `web/` and `api/`
+  (additive).
 - **`core/` is shared domain logic** — both interfaces depend on
   it. Changes to `core/` are welcome but should preserve the
   public API of the legacy-stable modules in `core/__init__.py`.

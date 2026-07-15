@@ -4,9 +4,12 @@ Thank you for your interest in making this tool better! 🎉
 This is a community project — every PR, issue, and typo fix matters.
 
 > **Heads up**: the user uses the **Streamlit** UI (`app.py`) **daily** for
-> real work. Please do not touch `app.py`, `ui/`, `core/`, or `cli.py`
-> in your PRs. New work goes into `web/` (React frontend) and `api/`
-> (FastAPI backend), and must be **additive** — never breaking.
+> real work, so `app.py`/`ui/` are **protected** (not forbidden). Bug fixes
+> and additive improvements are welcome there — flag them clearly in your PR;
+> refactors or changes to existing flows need explicit maintainer approval.
+> New features go into `web/` (React frontend) and `api/` (FastAPI backend).
+> `core/` changes are welcome but must preserve the public API; coordinate on
+> `cli.py`.
 
 ## 🏗️ Repo layout
 
@@ -21,7 +24,7 @@ web/              ← React 19 + Vite 6 + CesiumJS + Plotly frontend
   src/components/ ← wizard step components (Step1..4) and demo
   src/locales/     ← i18n strings (es.json, en.json)
   src/api/         ← axios client + TanStack Query hooks
-app.py / ui/      ← LEGACY Streamlit UI — do not modify
+app.py / ui/      ← LEGACY Streamlit UI — protected (fixes/additive OK with care)
 tests/            ← pytest suite for core/ and api/
 scripts/          ← one-off generators (e.g. demo data)
 ```

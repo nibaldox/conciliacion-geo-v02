@@ -135,7 +135,7 @@ Env vars: `DATABASE_URL`, `CONCILIACION_DATA_DIR`, `CONCILIACION_CORS_ORIGINS`, 
 
 ## Conventions & hard constraints
 
-- **`app.py` and `ui/` are OFF-LIMITS** — the maintainer uses the Streamlit app daily. `CONTRIBUTING.md` forbids PRs that touch them; such PRs are rejected. New work goes in `web/` and `api/`, additive only.
+- **`app.py` and `ui/` (Streamlit) are PROTECTED, not forbidden** — the maintainer runs this app daily, so changes need care and explicit go-ahead, but improvements are welcome. **Auto-allowed** (no special ceremony): bug fixes that crash the app or produce wrong output, and additive changes that don't alter existing flows. **Explicit approval needed**: refactors or changes to existing behavior. For any change here: verify the daily workflow still works (min. `python -m py_compile`; ideally import/run the affected module), code in English / UI in Spanish, commit deliberately for maintainer review. New features still default to `web/` + `api/` (additive); external PRs touching `app.py`/`ui/` need maintainer sign-off before merge.
 - **Code in English** (vars, funcs, docstrings); **UI in Spanish**. Every web UI string must exist in **both** `web/src/locales/es.json` and `en.json` (ICU plurals `_one`/`_other`).
 - **Import from `core`, never from submodules** for the re-exported public API — except newer helpers (`build_reconciled_profile_v2`, `azimuth_to_direction`, `generate_sections_along_crest`, `compute_local_azimuth`, anything in `core.geom_utils`) which must be imported from the submodule directly. `api/routers/process.py` and `core/report_generator.py` are the canonical examples.
 - **No code comments** unless explicitly requested.
