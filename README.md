@@ -6,7 +6,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6)](https://www.typescriptlang.org)
 [![PWA](https://img.shields.io/badge/PWA-ready-5A29E4)](https://web.dev/progressive-web-apps/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-633%2F633-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-847%20passed-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-95%25%20(v2)-brightgreen)](tests/)
 
 > **Open-source geotechnical reconciliation for open-pit mining.** Compare
@@ -54,10 +54,12 @@ Render.com (free tier) only when you upload your own data.
 - **Excel / Word / DXF exports** — formatted reports ready for engineering review
 
 ### Drill & Blast integration
-- **Powder Factor volumétrico** (kg/m³) con k-NN fallback si no hay burden/espaciamiento
+- **Powder Factor dual** — volumétrico (kg/m³) **y másico (g/ton)** con altura vertical real por pozo (`H = longitud × cos(inclinación)`), k-NN fallback si no hay burden/espaciamiento
+- **PF sin pasadura** (`pf_g_per_ton_net`) — normalizado al banco de diseño, descuenta la sobreperforación bajo el piso
+- **Densidad de roca configurable** — ρ global (t/m³) y **por dominio geotécnico** (sector), con fallback de altura por sesión; recalcula el g/ton en vivo
 - **6 ratios derivados** — stemming/burden, subdrilling/burden, S/B, kg/m, coupling, collar deviation
 - **Catálogo ENAEX** — Pirex-930/920/950/970, Enaline, parser de diámetro `"10 5/8"` → 270 mm
-- **Modelo cuantitativo PF→daño** — β₁, p-valor, R², IC 95%, confianza (HIGH/MEDIUM/LOW)
+- **Modelo cuantitativo PF→daño** — β₁, p-valor, R², IC 95%, confianza (HIGH/MEDIUM/LOW/INSUFFICIENT)
 - **Motor de recomendaciones** — ΔPF objetivo con factibilidad y restricciones operacionales
 - **Heatmap 2D IDW** — densidad de energía integrada en Z, con sliders de resolución y σ
 - **Tendencia temporal** de PF/daño y comparativa pre/post campaña
@@ -185,7 +187,7 @@ For deploy step-by-step see [web/DEPLOY.md](web/DEPLOY.md).
 ## 🧪 Running tests
 
 ```bash
-pytest tests/ -v                             # 633 backend tests, 95% coverage on core/ai_v2/
+pytest tests/ -v                             # 847 backend tests (3 skipped), 95% coverage on core/ai_v2/
 python test_pipeline.py                      # end-to-end pipeline
 cd web && npm run build                      # TypeScript + Vite build
 cd web && npm run lint                       # ESLint
@@ -237,7 +239,8 @@ core/             ← domain logic, imported by BOTH interfaces
   bench_classify.py              (berm width + leading/trailing berm)
   bench_hazards.py               (overhang, rock bridge, wedge, toppling, anisotropy)
   profile_compliance.py          (compare_design_vs_asbuilt, build_reconciled_profile)
-  blast_correlation.py           (Drill & Blast ↔ geotech correlation, signed deviations)
+  calculo_tronadura.py           (coordinate correction X=Lat, Y=Lon; collar/toe geometry; procesar_pozos)
+  blast_correlation.py           (Drill & Blast ↔ geotech correlation, signed deviations, powder factor g/ton)
   blast_metrics.py               (PF, stemming ratio, kg/m, altura de carga, Kuznetsov X₅₀)
   blast_model.py                 (PF→damage regression, pasadura↔toe correlation, IDW profile)
   blast_advisor.py               (recommend_pf_adjustment, validate_recommendation)
@@ -273,7 +276,7 @@ docs/             ← additional documentation
   BLAST_ADVISOR.md               (API reference del motor de recomendaciones)
   CLEAN_CODE_AUDIT.md            (auditoría clean code + clean architecture)
 scripts/          ← one-off generators (demo data, etc.)
-tests/            ← pytest suite for core/ + api/ (633 tests)
+tests/            ← pytest suite for core/ + api/ (847 tests)
 ARCHITECTURE.md   ← architecture overview
 AGENTS.md         ← entry point for AI agents
 CONTRIBUTING.md   ← contribution guide
