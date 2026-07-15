@@ -8,7 +8,7 @@ Geotechnical reconciliation for open-pit mine slopes. Compares 3D **design** vs 
 
 **User**: geotechnical engineer in LatAm open-pit mining (Vulkan, Campbell CR300, IBIS radar, vibrating-wire piezometers). UI is Spanish; communicates in Spanish.
 
-**Stack**: Python 3.10+, trimesh, fast_simplification, numpy/scipy/shapely, FastAPI, Streamlit, openpyxl, python-docx, ezdxf, openai. Web: React 19, Vite 6, TypeScript, Tailwind 4, CesiumJS, Plotly, Zustand, TanStack Query/Table, i18next.
+**Stack**: Python 3.10+, trimesh, fast_simplification, numpy/scipy/shapely, FastAPI, pydantic-settings, Streamlit, openpyxl, python-docx, ezdxf, openai. Web: React 19, Vite 6, TypeScript, Tailwind 4, CesiumJS, Plotly, Zustand, TanStack Query/Table, i18next.
 
 > `AGENTS.md` is a more exhaustive quick-reference (commands + pitfalls). `docs/` holds the deep architecture/audit docs. This file is the Claude Code operating summary — defer to those for detail.
 
@@ -34,7 +34,7 @@ python cli.py --design diseno.stl --topo topo.stl --auto \
 python cli.py --design diseno.stl --topo topo.stl --config ejemplo_secciones.json
 
 # --- Python tests (pytest, pythonpath="." per pyproject.toml) ---
-pytest tests/ -v --tb=short                                              # full suite (~114; count shifts)
+pytest tests/ -v --tb=short                                              # full suite (~630; count shifts)
 pytest tests/test_param_extractor.py                                     # one file
 pytest tests/test_param_extractor.py::TestParamExtractor::test_extract_parameters -v  # one test
 python test_pipeline.py                                                  # synthetic end-to-end
@@ -84,7 +84,7 @@ Three interfaces share one domain engine (`core/`). The engine is the source of 
 4. `compare_design_vs_asbuilt(...)` → three-tier compliance (**CUMPLE** within tol → **FUERA** ≤1.5× tol → **NO CUMPLE** >1.5× tol)
 5. `export_results` / `generate_word_report` / `generate_section_images_zip` → Excel (Resumen, Bancos, Inter-Rampa, Dashboard, Rampas) / Word / DXF / PNG zip
 
-Key modules: `mesh_handler`, `section_cutter`, `param_extractor` (orchestrator + dataclasses), `profile_extract` / `profile_simplify` / `bench_classify` / `profile_compliance` (the reconciliation sub-pipeline), `excel_writer`, `report_generator`, `calculo_tronadura` + `blast_*` (drill & blast), `breaklines`, `geom_utils`, `config`, `ai_v2` (replaces retired `ai_reporter`/`ai_service`).
+Key modules: `mesh_handler`, `section_cutter`, `param_extractor` (orchestrator + dataclasses), `profile_extract` / `profile_simplify` / `bench_classify` / `profile_compliance` (the reconciliation sub-pipeline), `compliance_status` (the CUMPLE/FUERA/NO-CUMPLE string source-of-truth), `geology` (rock-mass / density lookup by geotechnical domain), `stability_analysis` + `alert_system` + `bench_hazards` (slope-stability assessment & per-bench hazard detection), `excel_writer`, `report_generator`, `breaklines`, `geom_utils`, `config`. **Drill & blast**: `calculo_tronadura` (coordinate correction + hole geometry), `blast_correlation` (project holes onto sections), `blast_model` + `blast_metrics` (blast-loading → geotechnical damage / PF-damage correlation), `blast_advisor` (quantitative PF-adjustment recommendations), `explosive_properties` (ENAEX reference data), `column_utils`. **LLM reporting**: the `ai_v2` **package** (`builder`/`service`/`cache`/`config`/`providers`/`sanitization`; `config` uses `pydantic_settings`; replaces retired `ai_reporter`/`ai_service`).
 
 ### Reconciled-profile duality (gotcha)
 
@@ -95,15 +95,15 @@ from core import build_reconciled_profile          # legacy — tuple (distances
 from core.param_extractor import build_reconciled_profile_v2  # rich ReconciledProfile + ReconciledPoint; NOT in core.__init__
 ```
 
-Recent parity work (commits G01–G12) added the rich v2 shape (berm-top corners, ramp flags). The API emits **both** `reconciled_design`/`reconciled_topo` (rich v2) and `reconciled_design_legacy`/`reconciled_topo_legacy` (flat `{distances, elevations}`) so the web `ProfileView` can consume the legacy shape. See `docs/UI_PARITY_AUDIT.md` for the G01–G12 gap tracker.
+Recent parity work (commits G01–G13) added the rich v2 shape (berm-top corners, ramp flags), blast-hole rendering, and the PF-damage correlation chart. The API emits **both** `reconciled_design`/`reconciled_topo` (rich v2) and `reconciled_design_legacy`/`reconciled_topo_legacy` (flat `{distances, elevations}`) so the web `ProfileView` can consume the legacy shape. See `docs/UI_PARITY_AUDIT.md` for the G01–G13 gap tracker.
 
 ### Drill & Blast (Tronadura)
 
-`core/calculo_tronadura.py` corrects coordinates: `X=Latitud_Geo`, `Y=Longitud_Geo`, `Z_collar=Nombre_Banco+15m`; toe from `Inclinacion_real`/`Azimuth_real`/`longitud_real`. `core/blast_correlation.py` + `param_extractor` project blast holes onto cross-sections and classify berms vs ramps. `openblast/` is a vendor-neutral drill-and-blast interchange schema (v1.0.0, 17 mandatory fields) with mappings for ENAEX/Datamine/Surpac.
+`core/calculo_tronadura.py` corrects coordinates: `X=Latitud_Geo`, `Y=Longitud_Geo`, `Z_collar=Nombre_Banco+15m`; toe from `Inclinacion_real`/`Azimuth_real`/`longitud_real`. `core/blast_correlation.py` + `param_extractor` project blast holes onto cross-sections, classify berms vs ramps, and compute **powder factor** `pf_g_per_ton` (plus `pf_g_per_ton_net`, sin pasadura) from real per-hole height × in-situ **rock density** `rho` (ton/m³ — tunable per session via `rock_density_tm3`, overridable per geotechnical sector via `sector_density`; defaults/lookups in `core.geology`). `core/blast_model.py` + `blast_metrics.py` link blast loading to geotechnical damage (the PF-damage correlation, G13); `blast_advisor.py` turns that into quantitative PF-adjustment recommendations; `explosive_properties.py` holds ENAEX reference data; `column_utils.py` resolves vendor column-name variants. `openblast/` is a vendor-neutral drill-and-blast interchange schema (v1.0.0, 17 mandatory fields) with mappings for ENAEX/Datamine/Surpac.
 
 ### API (`api/`, mounted at `/api/v1`)
 
-Session via `X-Session-ID` header (auto-generated if absent, stored in SQLite). Routers: **meshes** (upload/info/vertices/contours/breaklines), **sections** (CRUD + auto/manual/click/from-file/curve), **process** (run pipeline, status, results, `profiles/{id}`, `profiles/{id}/blast-holes`, editable reconciled), **export** (excel/word/dxf/images), **settings** (tolerances + thresholds), **ai** (health/providers/generate/generate-stream — NDJSON streaming). Auth is a stub (`middleware_auth.py`); rate-limit + CORS middlewares exist.
+Session via `X-Session-ID` header (auto-generated if absent, stored in SQLite). Routers: **meshes** (upload/info/vertices/contours/breaklines), **sections** (CRUD + auto/manual/click/from-file/curve), **process** (run pipeline, status, results, `profiles/{id}`, `profiles/{id}/blast-holes`, editable reconciled, `blast-correlation` + `blast-correlation/damage-model`), **export** (excel/word/dxf/images), **settings** (tolerances + thresholds + tunable `rock_density_tm3` / `sector_density` / height fallback), **ai** (health/providers/generate/generate-stream — NDJSON streaming, backed by the `core/ai_v2` package). Auth is a stub (`middleware_auth.py`); rate-limit + CORS middlewares exist.
 
 ### Web frontend (`web/`)
 
@@ -148,7 +148,7 @@ Env vars: `DATABASE_URL`, `CONCILIACION_DATA_DIR`, `CONCILIACION_CORS_ORIGINS`, 
 - `.gitignore` excludes `.stl`, `.xlsx`, `.db`, `data/`, `dist/`, `web/dist/`, `web/node_modules/`, `electron/dist/`, `*.AppImage`. Test meshes and outputs won't commit.
 - Berm detection can produce unrealistic widths (>50 m) on flat areas; partially filtered by `max_berm_width=50`. Ramp detection is partial (width 15–42 m); the "Rampas" Excel sheet may need manual input. Sections near mesh edges can yield incomplete profiles with no warning.
 - Electron portable build is two steps (`pyinstaller conciliacion-api.spec` → electron-builder) and **`VITE_PWA=false` is mandatory** during the web build or the service worker breaks the AppImage.
-- Test-count badge in `README.md` drifts (was 97/97, now ~114); update both badge and count in PRs that add tests.
+- Test-count badge in `README.md` drifts fast (97 → ~114 → ~630+); update both badge and count in PRs that add tests.
 
 ## CI (`.github/workflows/`)
 
@@ -158,7 +158,7 @@ On push to main/develop or PR to main — `ci.yml` runs 4 jobs: backend tests (P
 
 - `AGENTS.md` — exhaustive command + pitfall quick-reference.
 - `ARCHITECTURE.md`, `CONTEXT.md` — system architecture and developer context.
-- `docs/UI_PARITY_AUDIT.md` — Streamlit↔web feature-gap tracker (G01–G12).
+- `docs/UI_PARITY_AUDIT.md` — Streamlit↔web feature-gap tracker (G01–G13).
 - `docs/AI_AGENT_V2_BLUEPRINT.md`, `docs/MIGRATION_AI_V2.md` — LLM reporting system.
 - `docs/BLAST_ADVISOR.md`, `docs/OPENBLAST_DESIGN.md` — drill & blast engine + open format.
 - `docs/SLOPE_STABILITY_AUDIT.md`, `docs/BLAST_DATA_AUDIT.md`, `docs/CLEAN_CODE_AUDIT.md` — domain audit backlogs.
