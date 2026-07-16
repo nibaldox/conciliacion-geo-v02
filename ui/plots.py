@@ -62,6 +62,13 @@ def draw_sections_on_figure(fig: go.Figure, sections, is_3d: bool = False, zref:
 def mesh_to_contour_data(_mesh, grid_size: int = 500):
     """Interpolate mesh vertices onto a regular grid for contour plotting.
 
+    The leading-underscore ``_mesh`` keeps Streamlit from hashing the
+    (unhashable) trimesh object itself; identity is established by the
+    caller's mesh reference. Cache lifecycle is bound to ``mesh_design`` /
+    ``mesh_topo`` in ``st.session_state`` and is invalidated by the
+    "Limpiar superficies cargadas" handler in ``ui/step1_upload.py``
+    (``st.cache_resource.clear()`` + ``st.cache_data.clear()``).
+
     Returns (xi, yi, xi_grid, yi_grid, zi_grid) or (None,)*5 if mesh is None.
     """
     if _mesh is None:

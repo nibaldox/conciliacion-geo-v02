@@ -26,11 +26,6 @@ from ui.plots import draw_sections_on_figure
 logger = logging.getLogger(__name__)
 
 
-@st.cache_data(show_spinner=False)
-def _cached_local_azimuth(ox: float, oy: float, mesh_id: int) -> float:
-    return float(compute_local_azimuth(st.session_state.mesh_design, np.array([ox, oy])))
-
-
 def render_step2() -> None:
     """Render Paso 2: section definition."""
     st.header("✂️ Paso 2: Definir Secciones de Corte")
@@ -104,7 +99,6 @@ def _render_tab_file() -> None:
         polyline, spacing_file, len_up_file + len_down_file, sector_file,
         design_mesh=auto_mesh, length_up=len_up_file, length_down=len_down_file)
 
-    import os
     file_base, _ = os.path.splitext(coord_file.name)
     for j, sec in enumerate(preview_sections):
         sec.file_name = coord_file.name
@@ -130,6 +124,7 @@ def _render_tab_file() -> None:
             st.session_state.pending_section_names.add(sec.name)
             added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
+        st.session_state.pop('_profile_figs', None)
         st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
@@ -256,7 +251,7 @@ def _render_tab_interactive() -> None:
                     for s in st.session_state.sections)
                 if not already:
                     origin = np.array([px_val, py_val])
-                    az = (_cached_local_azimuth(float(px_val), float(py_val), id(mesh_d))
+                    az = (compute_local_azimuth(mesh_d, origin)
                           if az_mode == "Auto (pendiente local)" else manual_az_int)
                     pending_secs_n = [s for s in st.session_state.sections
                                       if s.name in st.session_state.pending_section_names]
@@ -267,6 +262,7 @@ def _render_tab_interactive() -> None:
                         length_up=len_up_int, length_down=len_down_int)
                     st.session_state.sections.append(sec)
                     st.session_state.pending_section_names.add(sec.name)
+                    st.session_state.pop('_profile_figs', None)
     except TypeError:
         st.plotly_chart(fig_plan, key="plan_fallback")
         st.info("Actualiza Streamlit a >= 1.35 para selección interactiva. "
@@ -321,7 +317,7 @@ def _render_tab_manual() -> None:
             oy = cols2[1].number_input("Origen Y", value=float(cy), format="%.1f", key=f"soy_{i}")
 
             if auto_az_manual:
-                az = _cached_local_azimuth(float(ox), float(oy), id(st.session_state.mesh_design))
+                az = compute_local_azimuth(st.session_state.mesh_design, np.array([ox, oy]))
                 cols2[2].text_input("Azimut (°)", value=f"{az:.1f}", disabled=True, key=f"saz_{i}")
             else:
                 az = cols2[2].number_input("Azimut (°)", value=0.0, min_value=0.0,
@@ -335,11 +331,24 @@ def _render_tab_manual() -> None:
                 length_up=len_up, length_down=len_down))
 
     if st.button("✅ Aplicar Secciones Manuales", type="primary"):
-        st.session_state.sections = sections_manual
+        if not st.session_state.get('sections'):
+            st.session_state.sections = []
+        existing_names = {s.name for s in st.session_state.sections}
+        added_count = 0
         for sec in sections_manual:
+            target_name = sec.name
+            if target_name in existing_names:
+                col_idx = 1
+                while f"{target_name}_{col_idx}" in existing_names:
+                    col_idx += 1
+                sec.name = f"{target_name}_{col_idx}"
+            st.session_state.sections.append(sec)
+            existing_names.add(sec.name)
             st.session_state.pending_section_names.add(sec.name)
+            added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
-        st.success(f"✅ {len(sections_manual)} secciones definidas")
+        st.session_state.pop('_profile_figs', None)
+        st.success(f"✅ {added_count} secciones añadidas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
 # ---------------------------------------------------------------------------
@@ -388,11 +397,24 @@ def _render_tab_auto() -> None:
             for sec in sections_auto:
                 sec.azimuth = compute_local_azimuth(st.session_state.mesh_design, sec.origin)
 
-        st.session_state.sections = sections_auto
+        if not st.session_state.get('sections'):
+            st.session_state.sections = []
+        existing_names = {s.name for s in st.session_state.sections}
+        added_count = 0
         for sec in sections_auto:
+            target_name = sec.name
+            if target_name in existing_names:
+                col_idx = 1
+                while f"{target_name}_{col_idx}" in existing_names:
+                    col_idx += 1
+                sec.name = f"{target_name}_{col_idx}"
+            st.session_state.sections.append(sec)
+            existing_names.add(sec.name)
             st.session_state.pending_section_names.add(sec.name)
+            added_count += 1
         st.session_state.step = max(st.session_state.step, 3)
-        st.success(f"✅ {len(sections_auto)} secciones generadas")
+        st.session_state.pop('_profile_figs', None)
+        st.success(f"✅ {added_count} secciones generadas. Total acumulado: {len(st.session_state.sections)} secciones.")
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +437,7 @@ def _sections_to_rows(sections) -> list:
 
 def _render_sections_table() -> None:
     if st.session_state.sections:
-        st.subheader("📋 Secciones Definidas")
+        st.subheader(f"📋 Total acumulado: {len(st.session_state.sections)} secciones")
         cols_tbl = st.columns([5, 1, 1])
         with cols_tbl[0]:
             st.dataframe(_sections_to_rows(st.session_state.sections), width="stretch")

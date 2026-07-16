@@ -12,8 +12,11 @@ from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.blast_attribution import attribute_holes_to_benches
 from core.blast_correlation import (
     aggregate_powder_factor_by_group,
+    compute_monthly_trend,
     compute_powder_factor,
     compute_signed_deviations,
+    detect_pf_outliers_iqr,
+    split_campaign,
 )
 from core.blast_model import (
     compute_energy_density_along_profile,
@@ -28,17 +31,9 @@ from core.backbreak_prediction import predict_backbreak
 from core.config import ADVISOR, BACKBREAK, DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
+from ui.blast_analysis import project_powder_factor_per_section
 from ui.filter_cache import _ensure_filter_values
 from ui.tabs.export import _get_profile_pair
-try:
-    from tests.test_ai_service_enrich import (
-        compute_monthly_trend,
-        detect_pf_outliers_iqr,
-        split_campaign,
-    )
-    _HAS_TREND_HELPERS = True
-except ImportError:
-    _HAS_TREND_HELPERS = False
 try:
     from core.blast_advisor import (
         format_recommendation_text,
@@ -182,8 +177,7 @@ def render_tab_blast_correlation(config: dict) -> None:
     mv_model = _render_multivariate_model(df_filtered_sections)
     _render_backbreak_predictor(df_filtered_sections, mv_model)
 
-    if _HAS_TREND_HELPERS:
-        _render_temporal_analysis(blast_df, df_filtered_sections)
+    _render_temporal_analysis(blast_df, df_filtered_sections)
 
     tab_sec, tab_bnc, tab_mal = st.tabs([
         "📐 Análisis por Sección / Perfil",
@@ -438,40 +432,30 @@ def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, co
 
         a_over, a_under, _, _, _ = calculate_area_between_profiles(pd_prof, pt_prof)
 
-        proj = proyectar_pozos_en_seccion(
-            blast_df,
-            origin=sec.origin,
-            azimuth=sec.azimuth,
-            length=sec.length,
+        kernel_rows = project_powder_factor_per_section(
+            blast_df, pf_enriched, [sec],
+            kg_col=kg_col,
             tolerance=tolerance,
             fecha_corte=fecha_corte,
         )
-
-        num_pozos = len(proj)
-        total_kg = proj[kg_col].fillna(0).sum() if (kg_col and not proj.empty) else 0.0
+        proj_row = kernel_rows[0]
+        proj = proj_row['projected_df']
 
         signed = compute_signed_deviations(comparison_results or [], sec.name)
-
-        proj_labeled = proj.copy()
-        if not proj_labeled.empty:
-            proj_labeled['section_name'] = sec.name
-        pf_row = aggregate_powder_factor_by_group(
-            pf_enriched, 'section_name', sec.name, proj_labeled,
-        )
 
         data_rows.append({
             'section': sec.name,
             'sector': sec.sector,
-            'num_pozos': num_pozos,
-            'total_kg': total_kg,
+            'num_pozos': proj_row['num_pozos'],
+            'total_kg': proj_row['total_kg'],
             'area_over': a_over,
             'area_under': a_under,
             'avg_over_break': signed['avg_over'],
             'avg_under_break': signed['avg_under'],
-            'pf_vol_avg_kgm3': pf_row.get('pf_vol_avg'),
-            'pf_area_avg_kgm2': pf_row.get('pf_area_avg'),
-            'energy_total_mj': pf_row.get('energy_total_mj', 0.0),
-            'n_pf_valid': pf_row.get('n_pf_valid', 0),
+            'pf_vol_avg_kgm3': proj_row['pf_vol_avg_kgm3'],
+            'pf_area_avg_kgm2': proj_row['pf_area_avg_kgm2'],
+            'energy_total_mj': proj_row['energy_total_mj'],
+            'n_pf_valid': proj_row['n_pf_valid'],
         })
 
     df = pd.DataFrame(data_rows)

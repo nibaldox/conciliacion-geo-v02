@@ -30,6 +30,10 @@ from core.blast_metrics import enrich_blast_dataframe
 from core.profile_compliance import compute_sector_deviations
 from core.section_cutter import cut_both_surfaces
 from core.stability_analysis import suggest_face_angle_for_fs
+from ui.blast_analysis import (
+    build_pf_deviation_scatter,
+    project_powder_factor_per_section,
+)
 from ui.ref_lines import add_ref_lines_3d
 from ui.tabs.export import _get_profile_pair
 
@@ -311,7 +315,6 @@ def render_modulo_tronadura() -> None:
                             show_topo_mesh = col_m2.checkbox("🟢 Mostrar Topografía Real (As-Built Transparente)", value=False)
 
                 # Reconstruct x_lines, y_lines, z_lines dynamically for filtered set
-                import numpy as np
                 n_filtered = len(df_filtered)
                 filt_x = np.empty(n_filtered * 3, dtype=object)
                 filt_y = np.empty(n_filtered * 3, dtype=object)
@@ -387,8 +390,6 @@ def render_modulo_tronadura() -> None:
             col_p1, col_p2 = st.columns(2)
             col_p1.metric("Pasadura Promedio", f"{p_mean:.2f} m")
             col_p2.metric(f"Pozos en Rango Óptimo ({p_min}m - {p_max}m)", f"{p_pct:.1f}%", f"{p_optimal}/{len(df_filtered)} pozos")
-
-            import numpy as np
             fig_pas = go.Figure(go.Histogram(
                 x=df_filtered['Pasadura'].values,
                 nbinsx=20,
@@ -448,7 +449,6 @@ def render_modulo_tronadura() -> None:
                 if not kg_col:
                     st.warning("⚠️ No se encontró columna de Kg de explosivos (`Kilos_Cargados_real`, etc.) para cruzar la energía.")
                 else:
-                    import pandas as pd
                     df_comp = pd.DataFrame(comparison)
 
                     if 'delta_crest' not in df_comp.columns:
@@ -458,55 +458,33 @@ def render_modulo_tronadura() -> None:
                         df_comp_signed_over = df_comp_signed[df_comp_signed['delta_crest'] > 0]
                         df_comp_signed_under = df_comp_signed[df_comp_signed['delta_crest'] < 0]
 
-                        sec_over_grouped = df_comp_signed_over.groupby('section')['delta_crest'].mean().reset_index().rename(columns={'delta_crest': 'avg_over_break'})
-                        sec_under_grouped = df_comp_signed_under.groupby('section')['delta_crest'].mean().reset_index().rename(columns={'delta_crest': 'avg_under_break'})
+                        sec_over_grouped = df_comp_signed_over.groupby('section')['delta_crest'].mean()
+                        sec_under_grouped = df_comp_signed_under.groupby('section')['delta_crest'].mean()
 
                         df_filtered_pf = compute_powder_factor(df_filtered)
 
+                        kernel_rows = project_powder_factor_per_section(
+                            df_filtered, df_filtered_pf, sections,
+                            kg_col=kg_col,
+                            tolerance=DEFAULTS.blast_correlation_radius_m,
+                            fecha_corte=fecha_corte_str,
+                        )
+
                         corr_data = []
                         pf_available = False
-                        for sec in sections:
-                            sec_name = sec.name
-                            match_over = sec_over_grouped[sec_over_grouped['section'] == sec_name]
-                            match_under = sec_under_grouped[sec_under_grouped['section'] == sec_name]
-
-                            avg_over_break = float(match_over['avg_over_break'].values[0]) if not match_over.empty else 0.0
-                            avg_under_break = float(match_under['avg_under_break'].values[0]) if not match_under.empty else 0.0
-
-                            proj_wells = proyectar_pozos_en_seccion(
-                                df_filtered,
-                                sec.origin,
-                                sec.azimuth,
-                                sec.length,
-                                tolerance=DEFAULTS.blast_correlation_radius_m,
-                                fecha_corte=fecha_corte_str,
-                            )
-
-                            if not proj_wells.empty:
-                                total_kg = proj_wells[kg_col].fillna(0).sum()
-                                num_wells = len(proj_wells)
-                                proj_labeled = proj_wells.copy()
-                                proj_labeled['section_name'] = sec_name
-                                pf_row = aggregate_powder_factor_by_group(
-                                    df_filtered_pf, 'section_name', sec_name, proj_labeled,
-                                )
-                                pf_vol = pf_row.get('pf_vol_avg')
-                                energy_mj = pf_row.get('energy_total_mj', 0.0) or 0.0
-                            else:
-                                total_kg = 0
-                                num_wells = 0
-                                pf_vol = float('nan')
-                                energy_mj = 0.0
-
+                        for row in kernel_rows:
+                            sec_name = row['section_name']
+                            avg_over_break = float(sec_over_grouped.get(sec_name, 0.0) or 0.0)
+                            avg_under_break = float(sec_under_grouped.get(sec_name, 0.0) or 0.0)
+                            pf_vol = row['pf_vol_avg_kgm3']
                             if pf_vol is not None and not (isinstance(pf_vol, float) and np.isnan(pf_vol)):
                                 pf_available = True
-
                             corr_data.append({
                                 'Sección': sec_name,
-                                'Kg_Explosivo': total_kg,
-                                'Pozos_Cercanos': num_wells,
+                                'Kg_Explosivo': row['total_kg'],
+                                'Pozos_Cercanos': row['num_pozos'],
                                 'PF_Vol_kgm3': pf_vol,
-                                'Energía_MJ': energy_mj,
+                                'Energía_MJ': row['energy_total_mj'],
                                 'Sobre-excavación_Media_m': avg_over_break,
                                 'Deuda/Relleno_Media_m': avg_under_break,
                             })
@@ -529,57 +507,19 @@ def render_modulo_tronadura() -> None:
                                 x_caption_metric = "carga explosiva"
                                 x_fallback = True
 
-                            fig_scat = go.Figure()
-                            df_corr_with_over = df_corr[df_corr['Sobre-excavación_Media_m'] > 0]
-                            df_corr_with_under = df_corr[df_corr['Deuda/Relleno_Media_m'] < 0]
-
-                            if not df_corr_with_over.empty:
-                                fig_scat.add_trace(go.Scatter(
-                                    x=df_corr_with_over[x_col].values,
-                                    y=df_corr_with_over['Sobre-excavación_Media_m'].values,
-                                    mode='markers+text',
-                                    text=df_corr_with_over['Sección'].values,
-                                    textposition="top center",
-                                    marker=dict(size=11, color='crimson', symbol='circle'),
-                                    name='Sobre-excavación (delta_crest > 0)'
-                                ))
-
-                            if not df_corr_with_under.empty:
-                                fig_scat.add_trace(go.Scatter(
-                                    x=df_corr_with_under[x_col].values,
-                                    y=df_corr_with_under['Deuda/Relleno_Media_m'].values,
-                                    mode='markers+text',
-                                    text=df_corr_with_under['Sección'].values,
-                                    textposition="bottom center",
-                                    marker=dict(size=11, color='steelblue', symbol='diamond'),
-                                    name='Deuda/Relleno (delta_crest < 0)'
-                                ))
-
-                            if not df_corr_with_over.empty and len(df_corr_with_over) > 1:
-                                xs = pd.to_numeric(df_corr_with_over[x_col], errors='coerce').fillna(0).values.astype(float)
-                                ys = df_corr_with_over['Sobre-excavación_Media_m'].values.astype(float)
-                                if np.var(xs) > 0:
-                                    m, b = np.polyfit(xs, ys, 1)
-                                    trend_x = np.array([xs.min(), xs.max()])
-                                    trend_y = m * trend_x + b
-                                    fig_scat.add_trace(go.Scatter(
-                                        x=trend_x, y=trend_y,
-                                        mode='lines',
-                                        line=dict(color='darkred', dash='dash'),
-                                        name=f'Tendencia Sobre-excavación (m={m:.4f})'
-                                    ))
-
-                            fig_scat.update_layout(
-                                title=f"Correlación: {'Powder Factor' if not x_fallback else 'Kg Explosivos'} (r={DEFAULTS.blast_correlation_radius_m:.0f}m) vs Desviación con signo (delta_crest)",
-                                xaxis_title=x_label,
-                                yaxis_title="Desviación Media con signo (m)",
-                                height=450,
-                                margin=dict(l=40, r=20, t=40, b=40),
-                                yaxis=dict(zeroline=True, zerolinecolor='gray', zerolinewidth=1)
+                            fig_scat = build_pf_deviation_scatter(
+                                df_corr,
+                                x_col=x_col,
+                                x_label=x_label,
+                                radius_m=DEFAULTS.blast_correlation_radius_m,
+                                show_ols=True,
                             )
                             st.plotly_chart(fig_scat, width="stretch")
                             if x_fallback:
                                 st.caption("ℹ️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
+
+                            df_corr_with_over = df_corr[df_corr['Sobre-excavación_Media_m'] > 0]
+                            df_corr_with_under = df_corr[df_corr['Deuda/Relleno_Media_m'] < 0]
 
                             r_over = 0.0
                             r_under = 0.0
@@ -630,8 +570,6 @@ def _render_drill_compliance_block(result) -> None:
 
 
 def _read_uploaded(uploaded) -> "pd.DataFrame":
-    import pandas as pd
-
     name = uploaded.name.lower()
     if name.endswith((".xlsx", ".xls")):
         return pd.read_excel(io.BytesIO(uploaded.read()))
@@ -690,8 +628,6 @@ def _safe_str(series, default="?"):
 
 def _build_collar_customdata(df, kg_col):
     """Return customdata array for collar hovertemplate enrichment."""
-    import numpy as np
-
     n = len(df)
     if n == 0:
         return np.empty((0, 13), dtype=object)
@@ -771,8 +707,6 @@ def _build_collar_customdata(df, kg_col):
 
 
 def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
-    import numpy as np
-
     fig = go.Figure()
 
     add_ref_lines_3d(fig, z_value=float(df['Z_collar'].max()) + 5)
@@ -1013,8 +947,6 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
 
 def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: list[str], label_prefix: str) -> None:
     color_cycle = ['#636EFA', '#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
-    import numpy as np
-
     kg_col = find_df_column(df, ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'], raise_error=False)
     sub_custom = _build_collar_customdata(df, kg_col)
 

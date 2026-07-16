@@ -670,3 +670,121 @@ def compute_blast_geotech_correlation(
 def classify_berm_as_ramp(berm_width: float) -> bool:
     """Return True when a berm of the given width is most likely a ramp."""
     return RAMP.min_width <= berm_width <= RAMP.max_width
+
+
+def compute_monthly_trend(blast_df: pd.DataFrame, damage_col: str = 'avg_over_break') -> pd.DataFrame:
+    """Aggregate PF and damage by month from a blast DataFrame.
+
+    Requires ``fecha_tronadura`` and ``pf_vol_kgm3``. Returns a frame with
+    columns ``mes`` (YYYY-MM), ``pf_promedio``, ``damage_promedio``,
+    ``n_pozos``, ``trend_slope`` and ``trend_intercept``. The linear trend is
+    fit with ``np.polyfit`` only when at least three months are present.
+    Returns an empty frame when the required columns or valid dates are
+    missing.
+    """
+    if (blast_df is None or blast_df.empty
+            or 'fecha_tronadura' not in blast_df.columns
+            or 'pf_vol_kgm3' not in blast_df.columns):
+        return pd.DataFrame()
+
+    df = blast_df.copy()
+    df['_mes'] = pd.to_datetime(df['fecha_tronadura'], errors='coerce').dt.to_period('M')
+    df = df[df['_mes'].notna()]
+    if df.empty:
+        return pd.DataFrame()
+
+    df['pf_vol_kgm3'] = pd.to_numeric(df['pf_vol_kgm3'], errors='coerce')
+    grouped = df.groupby('_mes')
+    counts = grouped.size()
+    agg = {
+        'pf_promedio': grouped['pf_vol_kgm3'].mean(),
+        'damage_promedio': (grouped[damage_col].mean()
+                            if damage_col in df.columns
+                            else pd.Series(np.nan, index=counts.index)),
+        'n_pozos': counts,
+    }
+    out = pd.DataFrame(agg).reset_index()
+
+    pf_vals = out['pf_promedio'].to_numpy(dtype=float)
+    if len(out) >= 3 and not np.isnan(pf_vals).any():
+        slope, intercept = np.polyfit(np.arange(len(out), dtype=float), pf_vals, 1)
+        out['trend_slope'] = slope
+        out['trend_intercept'] = intercept
+    else:
+        out['trend_slope'] = np.nan
+        out['trend_intercept'] = np.nan
+
+    out['mes'] = out['_mes'].astype(str)
+    out = out[['mes', 'pf_promedio', 'damage_promedio', 'n_pozos',
+               'trend_slope', 'trend_intercept']]
+    return out.sort_values('mes').reset_index(drop=True)
+
+
+def detect_pf_outliers_iqr(blast_df: pd.DataFrame, k: float = 1.5) -> pd.DataFrame:
+    """Return rows whose ``pf_vol_kgm3`` is outside Q1 - k*IQR or Q3 + k*IQR.
+
+    Returns an empty frame when the column is missing, fewer than four valid
+    values exist, or the interquartile range is zero (no spread to flag).
+    """
+    if blast_df is None or blast_df.empty or 'pf_vol_kgm3' not in blast_df.columns:
+        return pd.DataFrame()
+
+    pf = pd.to_numeric(blast_df['pf_vol_kgm3'], errors='coerce')
+    valid = pf.dropna()
+    if len(valid) < 4:
+        return pd.DataFrame()
+
+    q1, q3 = np.quantile(valid.to_numpy(dtype=float), [0.25, 0.75])
+    iqr = q3 - q1
+    if iqr == 0:
+        return pd.DataFrame()
+
+    lower = q1 - k * iqr
+    upper = q3 + k * iqr
+    mask = pf.notna() & ((pf < lower) | (pf > upper))
+    return blast_df.loc[mask].copy()
+
+
+def split_campaign(blast_df: pd.DataFrame, campaign_start_date: str | None) -> dict:
+    """Split blast_df into 'before' and 'after' cohorts by date.
+
+    Returns ``{'before': df, 'after': df, 'has_campaign': bool}``. When
+    ``campaign_start_date`` is None, ``fecha_tronadura`` is missing or the
+    cutoff cannot be parsed, everything is returned under 'before' with
+    ``has_campaign`` set to False.
+    """
+    empty_after = pd.DataFrame()
+    if campaign_start_date is None:
+        before = blast_df if blast_df is not None else pd.DataFrame()
+        return {'before': before, 'after': empty_after, 'has_campaign': False}
+
+    if (blast_df is None or blast_df.empty
+            or 'fecha_tronadura' not in blast_df.columns):
+        before = blast_df if blast_df is not None else pd.DataFrame()
+        return {'before': before, 'after': empty_after, 'has_campaign': False}
+
+    cutoff = pd.to_datetime(campaign_start_date, errors='coerce')
+    if pd.isna(cutoff):
+        return {'before': blast_df, 'after': empty_after, 'has_campaign': False}
+
+    dates = pd.to_datetime(blast_df['fecha_tronadura'], errors='coerce')
+    before_mask = dates <= cutoff
+    after_mask = dates > cutoff
+    return {
+        'before': blast_df.loc[before_mask.fillna(False)].copy(),
+        'after': blast_df.loc[after_mask.fillna(False)].copy(),
+        'has_campaign': True,
+    }
+
+
+__all__ = [
+    "BlastCorrelationRow",
+    "aggregate_powder_factor_by_group",
+    "classify_berm_as_ramp",
+    "compute_blast_geotech_correlation",
+    "compute_monthly_trend",
+    "compute_powder_factor",
+    "compute_signed_deviations",
+    "detect_pf_outliers_iqr",
+    "split_campaign",
+]

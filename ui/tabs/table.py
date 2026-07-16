@@ -96,18 +96,3 @@ def _format_numeric(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].apply(
                 lambda x: f"{x:.2f}" if isinstance(x, (int, float)) and x is not None else x)
     return df
-
-
-def _highlight_status(val: str) -> str:
-    val = str(val)
-    if val == "CUMPLE" or "RAMPA OK" in val:
-        return 'background-color: #C6EFCE; color: #006100'
-    if val == "FUERA DE TOLERANCIA":
-        return 'background-color: #FFEB9C; color: #9C5700'
-    if val == "NO CUMPLE" or "FALTA" in val:
-        return 'background-color: #FFC7CE; color: #9C0006'
-    if val == "NO CONSTRUIDO":
-        return 'background-color: #E0E0E0; color: #555555'
-    if val == "EXTRA" or "ADICIONAL" in val or "RAMPA" in val:
-        return 'background-color: #E6E6FA; color: #4B0082'
-    return ''
