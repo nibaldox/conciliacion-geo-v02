@@ -20,6 +20,10 @@ class StateKey:
     """All session_state key strings, in one place."""
 
     # Shared across the app (no prefix)
+    MESH_DESIGN: Final[str] = "mesh_design"
+    MESH_TOPO: Final[str] = "mesh_topo"
+    BOUNDS_DESIGN: Final[str] = "bounds_design"
+    BOUNDS_TOPO: Final[str] = "bounds_topo"
     COMPARISON_RESULTS: Final[str] = "comparison_results"
     BLAST_DATA: Final[str] = "blast_data"
     BLAST_DF_CLEAN: Final[str] = "blast_df_clean"
@@ -30,6 +34,9 @@ class StateKey:
     PARAMS_TOPO: Final[str] = "params_topo"
     PROJECT_NAME: Final[str] = "project_name"
     ACTIVE_SECTION: Final[str] = "active_section"
+    PENDING_SECTION_NAMES: Final[str] = "pending_section_names"
+    REF_LINE_TRACES: Final[str] = "ref_line_traces"
+    STEP: Final[str] = "step"
 
     # Tabla Detallada filter widgets (Sprint 0 B1)
     TABLE_FILTER_SECTOR: Final[str] = "table_filter_sector"
