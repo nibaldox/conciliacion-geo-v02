@@ -325,3 +325,52 @@ class BlastDamageModelResponse(BaseModel):
     fit: Optional[BlastDamageModelFitSchema] = None
     x_metric: str = "pf_g_per_ton"
     y_metric: str = "over_break"
+
+
+class BlastHoleSummary(BaseModel):
+    """One persisted blast hole as returned by ``GET /api/v1/blast/{id}/holes``.
+
+    Coordinates follow the mining convention (X=East, Y=North, Z=Elevation).
+    ``carga`` maps to the charge density (kg of explosive per metre of hole)
+    when the source CSV includes a kilogram column; ``descarga`` maps to the
+    explosive column length (``altura_carga_m`` = drilled length - stemming).
+    Both fields default to ``0.0`` when the source data does not provide the
+    required columns.
+    """
+
+    hole_id: str
+    x: float
+    y: float
+    z: float
+    carga: float = 0.0
+    descarga: float = 0.0
+    hardness: Optional[str] = None
+    bench: Optional[str] = None
+    length: float = 0.0
+    inclination: float = 0.0
+    azimuth: float = 0.0
+
+
+class BlastHolesResponse(BaseModel):
+    """Response envelope for ``GET /api/v1/blast/{session_id}/holes``."""
+
+    session_id: str
+    holes: List[BlastHoleSummary] = Field(default_factory=list)
+
+
+class BlastUploadResponse(BaseModel):
+    """Response envelope for ``POST /api/v1/blast/upload``.
+
+    Mirrors the upload summary produced by the Streamlit reference flow:
+    hole counts, mean charge metrics, and a hardness category histogram.
+    ``hardness_distribution`` is empty when the uploaded CSV does not contain
+    drilling-hardness data.
+    """
+
+    session_id: str
+    n_holes: int
+    n_rows_loaded: int
+    n_rows_skipped: int
+    carga_mean: float
+    descarga_mean: float
+    hardness_distribution: Dict[str, int] = Field(default_factory=dict)

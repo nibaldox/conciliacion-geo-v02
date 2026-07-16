@@ -437,7 +437,7 @@ def get_extraction(session_id: str, section_name: str, ext_type: str) -> Optiona
     return json.loads(row["data"])
 
 
-def get_all_extractions(session_id: str, ext_type: str) -> List[Dict]:
+def get_all_extractions(session_id: str, ext_type: str) -> List[Tuple[str, Dict]]:
     """Get all cached extractions of a type for a session."""
     conn = get_connection()
     rows = conn.execute(
@@ -446,3 +446,25 @@ def get_all_extractions(session_id: str, ext_type: str) -> List[Dict]:
     ).fetchall()
     conn.close()
     return [(r["section_name"], json.loads(r["data"])) for r in rows]
+
+
+# --- Blast upload operations ---
+
+
+def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
+    """Persist a blast upload result into the session settings.
+
+    Stores the per-hole records under ``blast_holes`` (the key read by the
+    blast-correlation and profile endpoints) and a small upload summary under
+    ``blast_upload_meta``. Both writes are merged into the existing settings
+    dict so other settings blocks are preserved.
+    """
+    settings = get_settings(session_id)
+    settings["blast_holes"] = payload.get("holes", [])
+    settings["blast_upload_meta"] = {
+        "n_holes": payload.get("n_holes", 0),
+        "n_rows_loaded": payload.get("n_rows_loaded", 0),
+        "n_rows_skipped": payload.get("n_rows_skipped", 0),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    save_settings(session_id, settings)
