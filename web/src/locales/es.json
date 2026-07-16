@@ -222,7 +222,13 @@
     "damage_title": "Factor de carga vs Sobre-excavación",
     "damage_x_axis": "Factor de carga (g/ton)",
     "damage_y_axis": "Over-break (m)",
-    "damage_insufficient": "Insuficientes secciones para ajustar el modelo (mínimo 5)."
+    "damage_insufficient": "Insuficientes secciones para ajustar el modelo (mínimo 5).",
+    "histogram_title": "Histograma Carga vs Descarga",
+    "histogram_x_axis": "Carga (kg)",
+    "histogram_y_axis": "Frecuencia",
+    "carga": "Carga",
+    "descarga": "Descarga",
+    "no_data": "Sin datos de histograma"
   },
   "section_list": {
     "loading": "Cargando secciones...",

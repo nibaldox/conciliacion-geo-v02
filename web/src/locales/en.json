@@ -222,7 +222,13 @@
     "damage_title": "Powder factor vs Over-break",
     "damage_x_axis": "Powder factor (g/ton)",
     "damage_y_axis": "Over-break (m)",
-    "damage_insufficient": "Insufficient sections to fit the model (minimum 5)."
+    "damage_insufficient": "Insufficient sections to fit the model (minimum 5).",
+    "histogram_title": "Load vs Discharge Histogram",
+    "histogram_x_axis": "Load (kg)",
+    "histogram_y_axis": "Frequency",
+    "carga": "Load",
+    "descarga": "Discharge",
+    "no_data": "No histogram data"
   },
   "section_list": {
     "loading": "Loading sections...",

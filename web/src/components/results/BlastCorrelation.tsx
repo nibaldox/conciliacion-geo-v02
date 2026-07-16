@@ -114,6 +114,67 @@ export function buildDamageTraces(
   return traces;
 }
 
+// ─── Histogram overlay helpers (G18) ────────────────────────
+
+export interface HistogramBins {
+  carga: number[];
+  descarga: number[];
+  binEdges: number[];
+  binMidpoints: number[];
+  countsCarga: number[];
+  countsDescarga: number[];
+}
+
+function countIntoBins(values: number[], edges: number[]): number[] {
+  const counts: number[] = new Array(Math.max(0, edges.length - 1)).fill(0);
+  for (const v of values) {
+    if (!Number.isFinite(v)) continue;
+    let placed = false;
+    for (let i = 0; i < edges.length - 1; i++) {
+      if (v >= edges[i] && v < edges[i + 1]) {
+        counts[i]++;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed && v === edges[edges.length - 1]) {
+      counts[counts.length - 1]++;
+    }
+  }
+  return counts;
+}
+
+export function buildOverlayHistogram(
+  carga: number[],
+  descarga: number[],
+  binCount: number = 20,
+): HistogramBins {
+  const all = [...carga, ...descarga].filter(Number.isFinite);
+  const min = all.length > 0 ? Math.min(...all) : 0;
+  const max = all.length > 0 ? Math.max(...all) : 0;
+  const range = max === min ? 1 : max - min;
+  const binWidth = range / binCount;
+
+  const binEdges: number[] = [];
+  for (let i = 0; i <= binCount; i++) {
+    binEdges.push(min + i * binWidth);
+  }
+
+  const binMidpoints: number[] = [];
+  for (let i = 0; i < binCount; i++) {
+    binMidpoints.push((binEdges[i] + binEdges[i + 1]) / 2);
+  }
+
+  return {
+    carga,
+    descarga,
+    binEdges,
+    binMidpoints,
+    countsCarga: countIntoBins(carga, binEdges),
+    countsDescarga: countIntoBins(descarga, binEdges),
+  };
+}
+
 // ─── Component ──────────────────────────────────────────────
 
 /**
@@ -135,6 +196,8 @@ export function BlastCorrelation() {
   const { data, isLoading, error } = useBlastCorrelation();
 
   const rows: BlastCorrelationRow[] = data?.rows ?? [];
+  const carga: number[] = data?.carga ?? [];
+  const descarga: number[] = data?.descarga ?? [];
 
   if (isLoading) {
     return (
@@ -364,6 +427,9 @@ export function BlastCorrelation() {
 
       {/* G13 visual: PF↔damage scatter with OLS regression overlay */}
       <BlastDamageChart />
+
+      {/* G18 visual: histogram overlay of charge vs discharge */}
+      <BlastHistogramChart carga={carga} descarga={descarga} />
     </div>
   );
 }
@@ -471,6 +537,83 @@ function BlastDamageChart() {
           })}
         </p>
       )}
+    </div>
+  );
+}
+
+// ─── Histogram overlay chart (G18) ──────────────────────────
+
+function BlastHistogramChart({ carga, descarga }: { carga: number[]; descarga: number[] }) {
+  const { t } = useTranslation();
+  const hasData = carga.length > 0 || descarga.length > 0;
+  if (!hasData) return null;
+
+  const bins = buildOverlayHistogram(carga, descarga, 20);
+  const binSize = bins.binEdges.length > 1 ? bins.binEdges[1] - bins.binEdges[0] : 1;
+  const xbins = {
+    start: bins.binEdges[0],
+    end: bins.binEdges[bins.binEdges.length - 1],
+    size: binSize,
+  };
+
+  return (
+    <div
+      className="glass-panel rounded-xl p-5 space-y-3"
+      data-testid="blast-histogram-chart"
+    >
+      <p
+        className="text-xs font-bold uppercase tracking-wider"
+        style={{ color: 'var(--color-text-secondary)' }}
+      >
+        {t('blast.histogram_title', { defaultValue: 'Carga vs Descarga' })}
+      </p>
+      <Plot
+        data={[
+          {
+            x: carga,
+            type: 'histogram',
+            name: t('blast.carga', { defaultValue: 'Carga' }),
+            marker: { color: '#3b82f6' },
+            opacity: 0.7,
+            xbins,
+          },
+          {
+            x: descarga,
+            type: 'histogram',
+            name: t('blast.descarga', { defaultValue: 'Descarga' }),
+            marker: { color: '#ef4444' },
+            opacity: 0.7,
+            xbins,
+          },
+        ] as Data[]}
+        layout={{
+          height: 340,
+          barmode: 'overlay',
+          margin: { l: 55, r: 20, t: 24, b: 50 },
+          paper_bgcolor: 'rgba(0,0,0,0)',
+          plot_bgcolor: 'rgba(0,0,0,0)',
+          font: { color: 'var(--color-text-secondary)', size: 11 },
+          xaxis: {
+            title: {
+              text: t('blast.histogram_x_axis', { defaultValue: 'Carga (kg)' }),
+              font: { size: 11 },
+            },
+            gridcolor: 'var(--color-border)',
+            zeroline: false,
+          },
+          yaxis: {
+            title: {
+              text: t('blast.histogram_y_axis', { defaultValue: 'Frecuencia' }),
+              font: { size: 11 },
+            },
+            gridcolor: 'var(--color-border)',
+            zeroline: false,
+          },
+          legend: { orientation: 'h', y: -0.22, font: { size: 10 } },
+        } as Partial<Layout>}
+        config={{ displayModeBar: false, responsive: true } as Partial<Config>}
+        style={{ width: '100%' }}
+      />
     </div>
   );
 }

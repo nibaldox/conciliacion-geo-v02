@@ -294,6 +294,8 @@ export interface BlastCorrelationResponse {
   rows: BlastCorrelationRow[];
   tolerance: number | null;
   n_sections: number;
+  carga?: number[];
+  descarga?: number[];
 }
 
 // Blast PF↔damage regression model

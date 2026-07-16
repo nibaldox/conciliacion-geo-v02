@@ -462,6 +462,8 @@ export function useBlastCorrelation() {
           rows: [],
           tolerance: null,
           n_sections: demoData.sections.length,
+          carga: [],
+          descarga: [],
         } satisfies BlastCorrelationResponse;
       }
       return client
