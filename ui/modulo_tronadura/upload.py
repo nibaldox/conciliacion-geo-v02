@@ -14,6 +14,7 @@ from ui.modulo_tronadura.enrichment import (
 from ui.modulo_tronadura.state import (
     get_blast_cached_name,
     get_blast_df,
+    get_blast_processed,
     get_ref_line_traces,
     reset_blast_processed_state,
     set_blast_cached_name,
