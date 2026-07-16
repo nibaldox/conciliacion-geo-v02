@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import Plot from 'react-plotly.js';
 import type { Data, Layout, Config } from 'plotly.js';
 import { useBlastCorrelation, useBlastDamageModel, useSections, useSettings, useUpdateSettings } from '../../api/hooks';
+import { getSessionId } from '../../api/client';
 import { BlastUploader } from './BlastUploader';
+import { BlastHoles3DViewer } from './BlastHoles3DViewer';
 import type {
   BlastCorrelationRow,
   BlastDamagePoint,
@@ -440,6 +442,17 @@ export function BlastCorrelation() {
 
       {/* G18 visual: histogram overlay of charge vs discharge */}
       <BlastHistogramChart carga={carga} descarga={descarga} />
+
+      {/* G11 phase 3: 3D viewer of blast holes */}
+      <Suspense
+        fallback={
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            {t('common.loading', { defaultValue: 'Cargando…' })}
+          </p>
+        }
+      >
+        <BlastHoles3DViewer sessionId={getSessionId()} />
+      </Suspense>
     </div>
   );
 }

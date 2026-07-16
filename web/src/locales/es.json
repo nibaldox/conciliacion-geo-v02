@@ -237,7 +237,16 @@
     "carga_mean": "Carga media: {{value}} kg",
     "descarga_mean": "Descarga media: {{value}} kg",
     "persisted_count": "{{n}} pozos persistidos en sesión",
-    "upload_no_session": "Inicie una sesión para cargar pozos."
+    "upload_no_session": "Inicie una sesión para cargar pozos.",
+    "viewer_title": "Vista 3D de Pozos",
+    "viewer_no_session": "Sin sesión activa",
+    "viewer_loading": "Cargando pozos…",
+    "viewer_error": "Error al cargar pozos: {{error}}",
+    "viewer_empty": "No hay pozos cargados. Cargue un archivo CSV primero.",
+    "hardness_soft": "Blando",
+    "hardness_medium": "Medio",
+    "hardness_hard": "Duro",
+    "hardness_unknown": "Sin clasificar"
   },
   "section_list": {
     "loading": "Cargando secciones...",

@@ -237,7 +237,16 @@
     "carga_mean": "Mean charge: {{value}} kg",
     "descarga_mean": "Mean discharge: {{value}} kg",
     "persisted_count": "{{n}} holes persisted in session",
-    "upload_no_session": "Start a session to upload holes."
+    "upload_no_session": "Start a session to upload holes.",
+    "viewer_title": "3D Well View",
+    "viewer_no_session": "No active session",
+    "viewer_loading": "Loading holes…",
+    "viewer_error": "Error loading holes: {{error}}",
+    "viewer_empty": "No holes loaded. Upload a CSV file first.",
+    "hardness_soft": "Soft",
+    "hardness_medium": "Medium",
+    "hardness_hard": "Hard",
+    "hardness_unknown": "Unclassified"
   },
   "section_list": {
     "loading": "Loading sections...",
