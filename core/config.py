@@ -29,6 +29,7 @@ class Tolerances:
     berm_width: Dict[str, float] = field(default_factory=lambda: {'min': 6.0})
     inter_ramp_angle: Dict[str, float] = field(default_factory=lambda: {'neg': 3.0, 'pos': 2.0})
     overall_angle: Dict[str, float] = field(default_factory=lambda: {'neg': 2.0, 'pos': 2.0})
+    crest_toe_deviation: Dict[str, float] = field(default_factory=lambda: {'neg': 1.0, 'pos': 1.0})
 
 
 @dataclass(frozen=True)
@@ -252,6 +253,67 @@ class SectorDeviationDefaults:
     rockmass_cohesion_scale: float = 0.001
 
 
+@dataclass(frozen=True)
+class DrillComplianceDefaults:
+    delta_x_m: float = 0.5
+    delta_y_m: float = 0.5
+    delta_z_m: float = 0.3
+    delta_incl_deg: float = 3.0
+    delta_az_deg: float = 5.0
+    delta_len_m: float = 0.5
+    delta_kg_pct: float = 10.0
+    nearest_radius_m: float = 5.0
+
+
+@dataclass(frozen=True)
+class DrillHardnessDefaults:
+    """Knobs for :mod:`core.drill_hardness_processor`.
+
+    - ``radius_m`` — spatial join radius for the cKDTree query.
+    - ``duration_soft_min`` / ``duration_medium_min`` / ``duration_hard_min`` —
+      duration metric cutoffs (minutes).
+    - ``rate_soft_m_min`` / ``rate_medium_m_min`` / ``rate_hard_m_min`` —
+      rate metric cutoffs (m/min).
+    - ``strict_parity`` — reserved for downstream parity guards.
+    """
+    radius_m: float = 2.0
+    duration_soft_min: float = 16.0
+    duration_medium_min: float = 24.0
+    duration_hard_min: float = 40.0
+    rate_soft_m_min: float = 1.0
+    rate_medium_m_min: float = 0.7
+    rate_hard_m_min: float = 0.4
+    strict_parity: bool = True
+
+
+@dataclass(frozen=True)
+class BackbreakDefaults:
+    """Knobs for :mod:`core.backbreak_prediction.predict_backbreak`.
+
+    All defaults are calibrated for typical open-pit hard-rock designs:
+    burden ~ 6 m, spacing ~ 7 m, PF ~ 0.35 kg/m³, bench ~ 15 m.
+
+    The empirical back-break formula mirrors a simple geometric scaling
+    (``empirical_k * burden * (pf / pf_optimal_default_kgm3)``); the
+    Holmberg-Persson cross-check uses a constant ``hp_constant`` scaled by
+    the total charge per hole and is clamped to a plausible range
+    ``[clamp_low_factor_b · B, clamp_high_factor_b · B]``.
+    """
+    empirical_k: float = 0.3
+    hp_constant: float = 0.6
+    pf_optimal_default_kgm3: float = 0.35
+    ci_band_pct: float = 0.15
+    clamp_low_factor_b: float = 0.5
+    clamp_high_factor_b: float = 4.0
+    bench_height_m: float = 15.0
+    default_burden_m: float = 6.0
+    default_spacing_m: float = 7.0
+    default_stemming_m: float = 6.0
+    default_diameter_mm: float = 250.0
+    rock_factor_min: float = 0.7
+    rock_factor_max: float = 1.3
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -265,3 +327,6 @@ ADVISOR = BlastAdvisorDefaults()
 STABILITY = StabilityDefaults()
 SECTOR_DEVIATION = SectorDeviationDefaults()
 BLAST = BlastDefaults()
+DRILL_COMPLIANCE = DrillComplianceDefaults()
+DRILL_HARDNESS = DrillHardnessDefaults()
+BACKBREAK = BackbreakDefaults()

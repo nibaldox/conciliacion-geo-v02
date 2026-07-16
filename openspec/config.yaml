@@ -1,0 +1,111 @@
+# OpenSpec Configuration — conciliacion-geo-v02
+
+schema: spec-driven
+
+context: |
+  Tech stack: Python 3.10+ (backend: FastAPI + Streamlit legacy), React 19 + Vite 6 + TypeScript strict (frontend), CesiumJS + Plotly + Zustand + TanStack Query/Table.
+  Package manager: uv (uv.lock present, pyproject.toml + setuptools build). Frontend: npm (web/package-lock.json).
+  Architecture: Three interfaces (Streamlit legacy / FastAPI / Electron portable) share `core/` domain. New work goes to `api/` + `web/` (additive only).
+  Testing: pytest (~772 collected) for backend, vitest for frontend (100% coverage on ProfileView/domain), Playwright for E2E.
+  Off-limits: `app.py`, `ui/`, `cli.py`, `core/__init__.py` legacy re-exports (additive only inside core/).
+  Style: Conventional commits, no AI attribution. Code (English), UI (Spanish).
+
+project:
+  name: conciliacion-geo-v02
+  type: hybrid-monolith
+  detected_at: 2026-07-10
+
+testing:
+  strict_tdd: false
+  rationale: Project follows test-after workflow per CONTRIBUTING.md. No pre-commit hooks or RED-GREEN-REFACTOR markers detected. CI runs pytest + frontend build + docker-compose smoke (NOT vitest/E2E). Domain layer enforces 100% coverage as a substitute for strict TDD.
+
+  backend:
+    runner: pytest
+    framework: pytest
+    command: "pytest tests/ -v --tb=short"
+    exclude: ["tests/test_openblast.py"]  # optional dep — fails at collection if openblast pkg missing
+    coverage:
+      tool: pytest-cov
+      available: false  # not configured in pyproject.toml; .coverage file present locally
+      command: null
+    layers:
+      unit: true
+      integration: true   # httpx + FastAPI TestClient
+      e2e: true           # python test_pipeline.py synthetic end-to-end
+    pipeline_smoke: "python test_pipeline.py"
+
+  frontend:
+    runner: vitest
+    framework: vitest@4.1.8 + @testing-library/react
+    command: "npm run test"
+    env: jsdom
+    coverage:
+      tool: "@vitest/coverage-v8"
+      available: true
+      scope: src/components/results/ProfileView/domain/**
+      thresholds:
+        statements: 100
+        branches: 100
+        functions: 100
+        lines: 100
+      command: "npm run test:domain"
+    layers:
+      unit: true
+      component: true     # @testing-library/react
+      e2e: true           # @playwright/test, requires API :8000 + web :5173
+
+  system_deps:
+    - libspatialindex-dev   # apt; rtree / AABB operations on large meshes
+
+  quality:
+    python:
+      linter: null       # none configured (no ruff/flake8/black)
+      formatter: null    # none configured
+      type_checker: null # none configured
+    typescript:
+      linter: npm run lint  # eslint .  (BROKEN: no eslint dep, no config)
+      type_checker: "npx tsc --noEmit"
+      formatter: null
+      tsconfig_strict: true
+
+rules:
+  proposal:
+    - Include rollback plan for any change touching core/, app.py, ui/, or cli.py.
+    - State the legacy-stable API surface affected and how `core/__init__.py` re-exports stay intact.
+  specs:
+    - Use Given/When/Then for scenarios.
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY).
+    - When the delta touches core/, include a "legacy API compatibility" section.
+  design:
+    - Include sequence diagrams for any cross-interface flow (api ↔ core ↔ web).
+    - Document any trade-off between Streamlit (`app.py`) and FastAPI (`api/`) entry points.
+    - State whether a change is additive-only (default expectation) or breaking.
+  tasks:
+    - Group by phase (backend / frontend / docs / ci).
+    - Keep tasks completable in one session.
+    - Mark test-first tasks as optional unless strict_tdd flips to true.
+  apply:
+    tdd: false
+    test_command: "pytest tests/ -v --tb=short"
+    frontend_test_command: "npm --prefix web run test"
+    frontend_typecheck_command: "npx --prefix web tsc --noEmit"
+  verify:
+    test_command: "pytest tests/ -v --tb=short"
+    frontend_test_command: "npm --prefix web run test"
+    frontend_typecheck_command: "npx --prefix web tsc --noEmit"
+    frontend_build_command: "npm --prefix web run build"
+    pipeline_smoke_command: "python test_pipeline.py"
+    coverage_threshold: 0  # only enforced on ProfileView/domain via vitest; not enforced for backend
+  archive:
+    - Warn before merging destructive deltas.
+    - Preserve legacy re-exports in core/__init__.py unless the change explicitly retires them.
+
+off_limits:
+  - path: app.py
+    reason: Streamlit legacy UI used daily by maintainer; PRs touching it are rejected.
+  - path: ui/
+    reason: Streamlit legacy UI directory; off-limits per CONTRIBUTING.md.
+  - path: cli.py
+    reason: Off-limits per CONTRIBUTING.md (legacy CLI used in production).
+  - path: core/__init__.py
+    reason: Re-exports legacy stable public API; changes must remain backward-compatible.

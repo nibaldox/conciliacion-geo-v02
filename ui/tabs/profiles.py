@@ -111,7 +111,7 @@ def render_tab_profiles(config: dict) -> None:
                         show_sector_areas=show_sector_areas)
                     fig_cache[i] = (cache_key, fig)
                 with cols[col_idx]:
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width="stretch")
                     if show_sector_areas:
                         with st.expander("🎯 Sugerencia de ángulo de cara (FS objetivo)", expanded=False):
                             col_fs1, col_fs2, col_fs3 = st.columns(3)

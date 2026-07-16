@@ -12,11 +12,14 @@ The supporting helpers live in sibling modules:
 :mod:`core.bench_hazards`.
 """
 
+import json
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import List, Literal, Tuple
 
 import numpy as np
+import pandas as pd
 
 try:
     from scipy.signal import savgol_filter as _savgol_filter
@@ -86,6 +89,181 @@ class ReconciledProfile:
     distances: np.ndarray
     elevations: np.ndarray
     points: List[ReconciledPoint] = field(default_factory=list)
+
+    def summary(self, benches=None) -> dict:
+        """Return a flat, JSON-safe summary of the reconciled profile.
+
+        Always populates ``n_benches``, ``n_ramps``, ``height_range_m``,
+        and ``source`` from ``self.points``. Hazard counters
+        (``n_overhangs``, ``n_wedge_risks``, ``n_toppling_risks``,
+        ``n_consensus_benches``) and aggregate metrics
+        (``total_berm_width_m``, ``avg_face_angle_deg``,
+        ``max_overhang_m``) are enriched from the optional ``benches``
+        list of :class:`BenchParams` when supplied.
+
+        When ``benches`` is ``None`` (or omitted), the aggregate metrics
+        default to safe no-data values: hazard counts to ``0``,
+        ``n_consensus_benches`` equals ``n_benches``,
+        ``total_berm_width_m`` and ``max_overhang_m`` to ``0.0``, and
+        ``avg_face_angle_deg`` to ``None``. This keeps the dict
+        JSON-serializable (including strict mode ``json.dumps(...,
+        allow_nan=False)``) without leaking numpy scalars or dataclasses.
+        """
+        n_benches = len({int(p.bench_number) for p in self.points})
+        n_ramps = sum(1 for p in self.points if p.segment_type == "ramp")
+
+        elevations_f = [float(p.elevation) for p in self.points]
+        if elevations_f:
+            height_range = (min(elevations_f), max(elevations_f))
+        else:
+            height_range = (0, 0)
+
+        source = str(self.points[0].source) if self.points else "topo"
+
+        if benches is None:
+            return {
+                "n_benches": int(n_benches),
+                "n_ramps": int(n_ramps),
+                "n_overhangs": 0,
+                "n_wedge_risks": 0,
+                "n_toppling_risks": 0,
+                "n_consensus_benches": int(n_benches),
+                "height_range_m": (float(height_range[0]), float(height_range[1])),
+                "total_berm_width_m": 0.0,
+                "avg_face_angle_deg": None,
+                "max_overhang_m": 0.0,
+                "source": source,
+            }
+
+        benches_list = list(benches)
+        n_overhangs = sum(1 for b in benches_list if float(b.overhang_m) > 0.0)
+        n_wedge = sum(1 for b in benches_list if bool(b.wedge_risk))
+        n_topple = sum(1 for b in benches_list if bool(b.toppling_risk))
+        n_consensus = sum(
+            1 for b in benches_list
+            if int(b.n_detection_methods_agreeing) >= 2
+        )
+        total_berm = float(sum(float(b.berm_width) for b in benches_list))
+        angles = [float(b.face_angle) for b in benches_list]
+        avg_angle = float(np.mean(angles)) if angles else math.nan
+        max_overhang = float(max(
+            (float(b.overhang_m) for b in benches_list), default=0.0
+        ))
+
+        return {
+            "n_benches": int(n_benches),
+            "n_ramps": int(n_ramps),
+            "n_overhangs": int(n_overhangs),
+            "n_wedge_risks": int(n_wedge),
+            "n_toppling_risks": int(n_topple),
+            "n_consensus_benches": int(n_consensus),
+            "height_range_m": (float(height_range[0]), float(height_range[1])),
+            "total_berm_width_m": total_berm,
+            "avg_face_angle_deg": avg_angle,
+            "max_overhang_m": max_overhang,
+            "source": source,
+        }
+
+    def to_dataframe(self, benches=None) -> "pd.DataFrame":
+        """Return a :class:`pandas.DataFrame` with one row per point.
+
+        Base columns (always present, English snake_case): ``bench_number``,
+        ``segment_type``, ``distance_m``, ``elevation_m``, ``is_ramp``,
+        ``source``. ``is_ramp`` is ``True`` for points whose
+        ``segment_type == "ramp"``.
+
+        When ``benches`` is supplied, three hazard columns are appended
+        by bench-number match: ``overhang_m`` (NaN when the bench number
+        is absent in the supplied benches), ``wedge_risk`` (``False``
+        when absent), ``toppling_risk`` (``False`` when absent).
+        """
+        rows = [
+            {
+                "bench_number": int(p.bench_number),
+                "segment_type": str(p.segment_type),
+                "distance_m": float(p.distance),
+                "elevation_m": float(p.elevation),
+                "is_ramp": bool(p.segment_type == "ramp"),
+                "source": str(p.source),
+            }
+            for p in self.points
+        ]
+        base_cols = [
+            "bench_number", "segment_type", "distance_m",
+            "elevation_m", "is_ramp", "source",
+        ]
+        df = pd.DataFrame(rows, columns=base_cols)
+
+        if benches is not None:
+            by_num = {int(b.bench_number): b for b in benches}
+            overhang_col = []
+            wedge_col = []
+            toppling_col = []
+            for p in self.points:
+                b = by_num.get(int(p.bench_number))
+                if b is None:
+                    overhang_col.append(math.nan)
+                    wedge_col.append(False)
+                    toppling_col.append(False)
+                else:
+                    overhang_col.append(float(b.overhang_m))
+                    wedge_col.append(bool(b.wedge_risk))
+                    toppling_col.append(bool(b.toppling_risk))
+            df["overhang_m"] = overhang_col
+            df["wedge_risk"] = wedge_col
+            df["toppling_risk"] = toppling_col
+
+        return df
+
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable dict snapshot of the profile.
+
+        Shape: ``{"distances": list[float], "elevations": list[float],
+        "points": list[dict], "source": str}``. Each point dict has
+        keys ``bench_number``, ``segment_type``, ``distance_m``,
+        ``elevation_m``, ``is_ramp``, ``source``. ``is_ramp`` is derived
+        from ``segment_type == "ramp"``.
+        """
+        points = [
+            {
+                "bench_number": int(p.bench_number),
+                "segment_type": str(p.segment_type),
+                "distance_m": float(p.distance),
+                "elevation_m": float(p.elevation),
+                "is_ramp": bool(p.segment_type == "ramp"),
+                "source": str(p.source),
+            }
+            for p in self.points
+        ]
+        source = str(self.points[0].source) if self.points else "topo"
+        return {
+            "distances": [float(x) for x in self.distances],
+            "elevations": [float(x) for x in self.elevations],
+            "points": points,
+            "source": source,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ReconciledProfile":
+        """Reconstruct a :class:`ReconciledProfile` from a :meth:`to_dict` snapshot.
+
+        Unknown fields in ``d`` (and unknown keys inside point dicts) are
+        silently dropped. Point dicts MUST contain at least
+        ``distance_m``, ``elevation_m``, ``bench_number``, and
+        ``segment_type``; ``source`` defaults to ``"topo"``.
+        """
+        distances = np.asarray(d.get("distances", []), dtype=float)
+        elevations = np.asarray(d.get("elevations", []), dtype=float)
+        points: List[ReconciledPoint] = []
+        for pt in d.get("points", []) or []:
+            points.append(ReconciledPoint(
+                distance=float(pt["distance_m"]),
+                elevation=float(pt["elevation_m"]),
+                bench_number=int(pt["bench_number"]),
+                segment_type=str(pt["segment_type"]),
+                source=str(pt.get("source", "topo")),
+            ))
+        return cls(distances=distances, elevations=elevations, points=points)
 
 
 logger = logging.getLogger(__name__)

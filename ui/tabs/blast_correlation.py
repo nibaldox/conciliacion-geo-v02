@@ -9,6 +9,7 @@ try:
 except ImportError:
     _HAS_STATSMODELS = False
 from core.calculo_tronadura import proyectar_pozos_en_seccion
+from core.blast_attribution import attribute_holes_to_benches
 from core.blast_correlation import (
     aggregate_powder_factor_by_group,
     compute_powder_factor,
@@ -17,10 +18,14 @@ from core.blast_correlation import (
 from core.blast_model import (
     compute_energy_density_along_profile,
     compute_pasadura_toe_correlation,
+    compute_stemming_crest_correlation,
+    fit_multivariate_damage_model,
     fit_powder_factor_damage_model,
     predict_damage_for_pf,
 )
-from core.config import ADVISOR, DEFAULTS
+from core.blast_achievement import compute_design_achievement_score
+from core.backbreak_prediction import predict_backbreak
+from core.config import ADVISOR, BACKBREAK, DEFAULTS
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
 from ui.filter_cache import _ensure_filter_values
@@ -38,6 +43,7 @@ try:
     from core.blast_advisor import (
         format_recommendation_text,
         recommend_by_sector,
+        recommend_multivariate,
         recommend_pf_adjustment,
     )
     _HAS_BLAST_ADVISOR = True
@@ -173,6 +179,8 @@ def render_tab_blast_correlation(config: dict) -> None:
 
     model, valid = _render_powder_factor_damage_model(df_filtered_sections, use_pf_axis)
     _render_pf_recommendations(model, valid, df_filtered_sections)
+    mv_model = _render_multivariate_model(df_filtered_sections)
+    _render_backbreak_predictor(df_filtered_sections, mv_model)
 
     if _HAS_TREND_HELPERS:
         _render_temporal_analysis(blast_df, df_filtered_sections)
@@ -203,7 +211,7 @@ def render_tab_blast_correlation(config: dict) -> None:
         }
 
         df_sec_disp = df_filtered_sections[col_list].rename(columns=display_map)
-        st.dataframe(df_sec_disp, use_container_width=True, height=300)
+        st.dataframe(df_sec_disp, width="stretch", height=300)
 
         if len(df_filtered_sections) > 1:
             if use_pf_axis:
@@ -232,7 +240,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 trendline=trendline,
             )
             fig_scatter.update_layout(height=450)
-            st.plotly_chart(fig_scatter, use_container_width=True)
+            st.plotly_chart(fig_scatter, width="stretch")
             if not use_pf_axis:
                 st.caption("⚠️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
@@ -264,7 +272,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'energy_total_mj': 'Energía (MJ)',
             }
             df_b_disp = df_bench_corr[col_list_b].rename(columns=display_map_b)
-            st.dataframe(df_b_disp, use_container_width=True, height=300)
+            st.dataframe(df_b_disp, width="stretch", height=300)
 
             fig_bench = go.Figure()
             fig_bench.add_trace(go.Bar(
@@ -331,21 +339,27 @@ def render_tab_blast_correlation(config: dict) -> None:
             )
             if yaxis3_cfg:
                 fig_bench.update_layout(yaxis3=yaxis3_cfg)
-            st.plotly_chart(fig_bench, use_container_width=True)
+            st.plotly_chart(fig_bench, width="stretch")
 
             _render_pasadura_toe_block(blast_df, comparison_results)
+            _render_stemming_crest_block(blast_df, comparison_results)
+
+            attribution_results = attribute_holes_to_benches(
+                blast_df, comparison_results, sections, tolerance,
+            )
+            _render_attribution_block(attribution_results)
 
     with tab_mal:
         st.markdown("#### Evaluación de Daño Geotécnico por Malla / Polígono de Tronadura")
 
-        df_malla_corr = _compute_malla_correlation(sections, blast_df, df_filtered_sections, tolerance, kg_col, malla_col, fecha_corte_str)
+        df_malla_corr, global_score_pct = _compute_malla_correlation(sections, blast_df, df_filtered_sections, tolerance, kg_col, malla_col, fecha_corte_str)
         if df_malla_corr.empty:
             st.info("No se identificaron mallas o polígonos de tronadura válidos en los datos cargados.")
         else:
             if sel_mallas:
                 df_malla_corr = df_malla_corr[df_malla_corr['malla'].isin(sel_mallas)]
 
-            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'avg_overbreak', 'pf_vol_avg_kgm3', 'energy_total_mj']
+            col_list_m = ['malla', 'num_pozos', 'total_kg', 'avg_dev_crest_over', 'avg_dev_crest_under', 'avg_dev_toe_over', 'avg_dev_toe_under', 'avg_overbreak', 'pf_vol_avg_kgm3', 'energy_total_mj', 'score_pct']
             col_list_m = [c for c in col_list_m if c in df_malla_corr.columns]
             display_map_m = {
                 'malla': 'Malla / Polígono',
@@ -358,9 +372,11 @@ def render_tab_blast_correlation(config: dict) -> None:
                 'avg_overbreak': 'Sobre-excavación Media (m)',
                 'pf_vol_avg_kgm3': 'PF Vol. (kg/m³)',
                 'energy_total_mj': 'Energía (MJ)',
+                'score_pct': 'Logro Diseño (%)',
             }
+            st.metric("Logro Diseño Global", f"{global_score_pct}%")
             df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
-            st.dataframe(df_m_disp, use_container_width=True, height=300)
+            st.dataframe(df_m_disp, width="stretch", height=300)
 
             color_axis = 'pf_vol_avg_kgm3' if 'pf_vol_avg_kgm3' in df_malla_corr.columns and df_malla_corr['pf_vol_avg_kgm3'].notna().any() else 'total_kg'
             color_label = 'Powder Factor (kg/m³)' if color_axis == 'pf_vol_avg_kgm3' else 'Carga Explosiva Total (Kg)'
@@ -378,7 +394,7 @@ def render_tab_blast_correlation(config: dict) -> None:
                 title='Área de Sobre-excavación Promedio por Malla de Tronadura'
             )
             fig_malla.update_layout(height=450)
-            st.plotly_chart(fig_malla, use_container_width=True)
+            st.plotly_chart(fig_malla, width="stretch")
 
 
 def _get_or_compute_sections_data(sections, mesh_design, mesh_topo, blast_df, comparison_results, tolerance, fecha_corte=None) -> pd.DataFrame:
@@ -593,13 +609,14 @@ def _compute_bench_correlation(sections, blast_df, df_comps, tolerance, kg_col, 
     return df_b.drop(columns=['sort_level'])
 
 
-def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_col, malla_col, fecha_corte=None) -> pd.DataFrame:
+def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_col, malla_col, fecha_corte=None) -> tuple[pd.DataFrame, int]:
     if not malla_col or malla_col not in blast_df.columns:
-        return pd.DataFrame()
+        return pd.DataFrame(), 0
 
     mallas = blast_df[malla_col].dropna().unique().tolist()
     pf_enriched = compute_powder_factor(blast_df) if not blast_df.empty else blast_df
     malla_stats = []
+    malla_to_section: dict[str, list[str]] = {}
 
     for mal in mallas:
         df_mal_pozos = blast_df[blast_df[malla_col] == mal]
@@ -629,6 +646,8 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
                 if pf_val is not None and not (isinstance(pf_val, float) and np.isnan(pf_val)):
                     pf_pool.append(pf_val)
                 energy_sum += pf_row.get('energy_total_mj', 0.0)
+
+        malla_to_section[str(mal)] = list(intersected_sections)
 
         avg_dev_crest_over = 0.0
         avg_dev_crest_under = 0.0
@@ -680,7 +699,22 @@ def _compute_malla_correlation(sections, blast_df, df_sections, tolerance, kg_co
             'energy_total_mj': energy_sum,
         })
 
-    return pd.DataFrame(malla_stats).reset_index(drop=True)
+    df_out = pd.DataFrame(malla_stats).reset_index(drop=True)
+
+    comparison_results = st.session_state.get('comparison_results', []) or []
+    if comparison_results and not df_out.empty:
+        score = compute_design_achievement_score(
+            comparison_results, malla_to_section=malla_to_section,
+        )
+        df_out['score_pct'] = df_out['malla'].map(
+            score.get('per_malla') or {}
+        ).fillna(0).astype(int)
+        global_score = int(score.get('global', 0))
+    else:
+        df_out['score_pct'] = 0
+        global_score = 0
+
+    return df_out, global_score
 
 
 def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_pf_axis: bool) -> tuple:
@@ -787,7 +821,7 @@ def _render_powder_factor_damage_model(df_filtered_sections: pd.DataFrame, use_p
             height=450,
             margin=dict(l=40, r=20, t=50, b=40),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         st.markdown("**Escenario: ¿qué pasa si ajusto el PF objetivo?**")
         pf_min = float(min(0.05, pf.min()))
@@ -865,7 +899,7 @@ def _render_pf_recommendations(
                 target_overbreak_m=target_ob,
             )
             if not df_recs.empty:
-                st.dataframe(df_recs, use_container_width=True, height=300)
+                st.dataframe(df_recs, width="stretch", height=300)
                 for row in df_recs.itertuples(index=False):
                     if row.feasibility == 'APPLICABLE':
                         st.success(f"**{row.group_value}**: {row.message}")
@@ -875,6 +909,169 @@ def _render_pf_recommendations(
                 st.info("No hay datos suficientes para recomendaciones por sector.")
         else:
             st.info("Columna 'sector' no disponible en los datos.")
+
+
+def _render_multivariate_model(df_filtered_sections: pd.DataFrame) -> dict | None:
+    """Multivariate OLS expander: damage ~ PF + burden + S/B + stemming.
+
+    Returns the fitted model dict (or ``None`` if no model could be fit)
+    so downstream blocks (e.g. the back-break predictor) can reuse it
+    without re-fitting.
+    """
+    st.markdown("---")
+    with st.expander("🧮 Modelo multivariado (PF + burden + stemming)", expanded=False):
+        st.markdown(
+            "Regresión lineal múltiple: "
+            "`Sobre-excavación = β₀ + β_PF·PF + β_B·Burden + β_S/B·(Esp/Burden) + β_T·Taco + ε`. "
+            "Aísla el efecto del burden del efecto del powder factor cuando ambas "
+            "columnas están disponibles en la base de datos de pozos."
+        )
+
+        model = fit_multivariate_damage_model(df_filtered_sections)
+        features = model.get("features_used", [])
+        if model.get("confidence") == "INSUFFICIENT" or len(features) < 2:
+            st.info(
+                "ℹ️ Datos insuficientes para el modelo multivariado: se requieren al menos "
+                "12 secciones con powder factor, burden, espaciamiento/burden y taco válidos."
+            )
+            return model
+
+        coef_rows = [
+            {
+                "Predictor": feat,
+                "Coeficiente": round(float(model["coefficients"].get(feat, 0.0)), 4),
+                "Error estándar": round(float(model["std_errors"].get(feat, 0.0)), 4),
+                "p-valor": round(float(model["p_values"].get(feat, float("nan"))), 4),
+            }
+            for feat in features
+        ]
+        st.dataframe(pd.DataFrame(coef_rows), width="stretch", height=200)
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("R²", f"{model['r_squared']:.3f}")
+        c2.metric("R² ajustado", f"{model['r_squared_adj']:.3f}")
+        c3.metric("p-valor (F)", f"{model['f_pvalue']:.4f}")
+        c4.metric("Confianza", model["confidence"])
+        st.caption(
+            f"n = {model['n']}  |  número de condición = {model['condition_number']:.1f}"
+        )
+
+        if model.get("collinearity_warning"):
+            st.warning(f"⚠️ {model['collinearity_warning']}")
+
+        current_burden = float(model.get("feature_means", {}).get("burden", 0.0))
+        if current_burden <= 0.0:
+            st.info("ℹ️ Burden no disponible; no es posible recomendar un ajuste de burden.")
+            return model
+
+        rec = recommend_multivariate(model, current_burden=current_burden)
+        st.markdown(f"### 🎯 Recomendación de Burden (burden actual = {current_burden:.2f} m)")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Burden objetivo", f"{rec['target_burden']:.2f} m")
+        r2.metric("Δ Burden", f"{rec['delta_burden']:+.2f} m")
+        r3.metric("Factibilidad", rec["feasibility"])
+        if rec["feasibility"] == "APPLICABLE":
+            st.success(rec["message"])
+        else:
+            st.warning(rec["message"])
+
+    return model
+
+
+def _render_backbreak_predictor(
+    df_filtered_sections: pd.DataFrame,
+    multivariate_model: dict | None,
+) -> None:
+    """Forward back-break predictor with sliders and a single-shot metric.
+
+    Reuses the fitted multivariate model from the block above when its
+    confidence is sufficient; otherwise falls back to the empirical
+    Holmberg-Persson-aware heuristic.
+    """
+    st.markdown("---")
+    with st.expander("🔮 Predictor de Back-Break", expanded=False):
+        st.markdown(
+            "Estimación prospectiva del back-break esperado para un diseño de "
+            "tronadura propuesto. Si el bloque anterior ajustó un modelo "
+            "multivariado con suficiente confianza, la predicción usa los "
+            "coeficientes calibrados con tus propios datos; de lo contrario "
+            "se aplica la heurística empírica y un cross-check de "
+            "Holmberg-Persson como número de sanity."
+        )
+
+        defaults = BACKBREAK
+
+        col_a, col_b = st.columns(2)
+        burden = col_a.slider(
+            "Burden (m)", min_value=3.0, max_value=12.0,
+            value=defaults.default_burden_m, step=0.1,
+            key="backbreak_burden_slider",
+        )
+        spacing = col_b.slider(
+            "Espaciamiento (m)", min_value=4.0, max_value=14.0,
+            value=defaults.default_spacing_m, step=0.1,
+            key="backbreak_spacing_slider",
+        )
+        col_c, col_d = st.columns(2)
+        pf = col_c.slider(
+            "Powder Factor (kg/m³)", min_value=0.10, max_value=1.20,
+            value=defaults.pf_optimal_default_kgm3, step=0.05,
+            key="backbreak_pf_slider",
+        )
+        stemming = col_d.slider(
+            "Stemming (m)", min_value=1.0, max_value=12.0,
+            value=defaults.default_stemming_m, step=0.1,
+            key="backbreak_stemming_slider",
+        )
+        col_e, _ = st.columns(2)
+        diameter = col_e.slider(
+            "Diámetro (mm)", min_value=100, max_value=400,
+            value=defaults.default_diameter_mm, step=25,
+            key="backbreak_diameter_slider",
+        )
+        rock_factor = st.slider(
+            "Factor de roca",
+            min_value=defaults.rock_factor_min, max_value=defaults.rock_factor_max,
+            value=1.0, step=0.05,
+            key="backbreak_rock_factor_slider",
+            help="Multiplicador por dureza/estructura del macizo (0.7 = blando, 1.3 = muy duro).",
+        )
+
+        model_for_pred = (
+            multivariate_model
+            if isinstance(multivariate_model, dict)
+            and multivariate_model.get("confidence") not in (None, "", "INSUFFICIENT")
+            else None
+        )
+
+        try:
+            pred = predict_backbreak(
+                burden, spacing, pf, stemming, diameter,
+                model=model_for_pred, rock_factor=rock_factor,
+            )
+        except Exception as exc:
+            st.warning(
+                f"No fue posible calcular la predicción ({type(exc).__name__}). "
+                "Revisa que los valores sean numéricos."
+            )
+            return
+
+        m1, m2 = st.columns(2)
+        m1.metric(
+            "Back-break predicho",
+            f"{pred.predicted_m:.2f} m",
+            delta=f"IC 95% [{pred.ci_low_m:.2f}, {pred.ci_high_m:.2f}]",
+        )
+        method_label = (
+            "Modelo multivariado" if pred.method == "multivariate"
+            else "Heurística empírica"
+        )
+        m2.metric("Método", f"{method_label} · confianza {pred.confidence}")
+
+        if pred.notes:
+            with st.expander("Notas y cross-check", expanded=False):
+                for n in pred.notes:
+                    st.caption(f"• {n}")
 
 
 def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list) -> None:
@@ -905,7 +1102,7 @@ def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list)
             'Pasadura media (m)': list(pas_corr['pasadura_per_bench'].values()),
             'delta_toe (m)': list(pas_corr['toe_per_bench'].values()),
         }).sort_values('Nivel (cota)', ascending=False)
-        st.dataframe(pas_df, use_container_width=True, height=200)
+        st.dataframe(pas_df, width="stretch", height=200)
 
     if pas_corr['r'] < -0.3:
         st.warning(
@@ -917,6 +1114,102 @@ def _render_pasadura_toe_block(blast_df: pd.DataFrame, comparison_results: list)
             f"📈 Correlación positiva (r = {pas_corr['r']:.2f}): pasaduras largas se "
             "asocian a mayor sobre-excavación del piso. Revisa si hay sobreperforación."
         )
+
+
+def _render_stemming_crest_block(blast_df: pd.DataFrame, comparison_results: list) -> None:
+    """Per-bench correlation between stemming (taco) and delta_crest."""
+    st.markdown("---")
+    st.subheader("🔗 Stemming → Daño de Cresta (delta_crest)")
+
+    st.markdown(
+        "Agrupa los pozos por cota del piso (`Z_collar - altura_banco`) y "
+        "los empareja con la `delta_crest` de la conciliación geotécnica del "
+        "mismo nivel. Una correlación negativa sugiere tacos cortos están "
+        "asociados a mayor sobre-excavación de la cresta (gases venteando "
+        "hacia arriba / banco soplado)."
+    )
+
+    st_corr = compute_stemming_crest_correlation(
+        blast_df, comparison_results, bench_height=DEFAULTS.blast_default_bench_height,
+    )
+
+    cs1, cs2, cs3 = st.columns(3)
+    cs1.metric("Pearson r", f"{st_corr['r']:.2f}")
+    cs2.metric("n (bancos)", f"{st_corr['n_benches']}")
+    cs3.metric("Interpretación", st_corr['interpretation'])
+
+    if st_corr['n_benches'] >= 2:
+        st_df = pd.DataFrame({
+            'Nivel (cota)': list(st_corr['stemming_per_bench'].keys()),
+            'Taco medio (m)': list(st_corr['stemming_per_bench'].values()),
+            'delta_crest (m)': list(st_corr['crest_per_bench'].values()),
+        }).sort_values('Nivel (cota)', ascending=False)
+        st.dataframe(st_df, width="stretch", height=200)
+
+    if st_corr['r'] < -0.3:
+        st.warning(
+            f"📉 Correlación negativa (r = {st_corr['r']:.2f}): tacos cortos → "
+            "mayor sobre-excavación de cresta. Gases venteando hacia arriba, "
+            "revisar longitud de taco y retacado."
+        )
+    elif st_corr['r'] > 0.3:
+        st.info(
+            f"📈 Correlación positiva (r = {st_corr['r']:.2f}): tacos largos se "
+            "asocian a mayor sobre-excavación de cresta. Posible energía baja "
+            "/ taco excesivo reteniendo gases."
+        )
+
+
+def _render_attribution_block(results: list) -> None:
+    """Per-feature top-N blast hole attribution view (Spanish)."""
+    st.markdown("---")
+    st.subheader("🎯 Atribución por Pozo")
+
+    st.markdown(
+        "Para cada cresta o pata con desviación significativa (|Δ| > 0.5 m) "
+        "se listan los pozos dentro del radio de tolerancia, ordenados por "
+        "**carga / distancia²** (IDW, mismo criterio que la densidad de "
+        "energía del perfil). Permite identificar qué pozo es el "
+        "responsable más probable del sobre-quiebre o la deuda observada."
+    )
+
+    if not results:
+        st.info("Sin desviaciones atribuibles")
+        return
+
+    feature_labels = []
+    label_to_entry = {}
+    for entry in results:
+        feat_es = "Cresta" if entry["feature"] == "crest" else "Pata"
+        delta_m = entry["delta_m"]
+        sign = "+" if delta_m > 0 else ""
+        label = (
+            f"{entry['section']} · Banco {entry['bench_num']} · "
+            f"{feat_es} (Δ {sign}{delta_m:.2f} m)"
+        )
+        feature_labels.append(label)
+        label_to_entry[label] = entry
+
+    selected = st.selectbox(
+        "Seleccionar feature desviado:",
+        feature_labels,
+        key="blast_attr_feature",
+    )
+    entry = label_to_entry[selected]
+
+    df_attr = pd.DataFrame(entry["top_holes"]).rename(columns={
+        "label_pozo": "Pozo",
+        "malla": "Malla",
+        "kg": "Carga (kg)",
+        "distance_m": "Distancia (m)",
+        "contribution_pct": "Contribución (%)",
+    })
+    st.dataframe(df_attr, width="stretch", height=200)
+    st.caption(
+        f"{entry['n_candidates']} pozo(s) candidato(s) dentro del radio · "
+        f"Mostrando top {len(entry['top_holes'])} ordenado por contribución "
+        f"descendente."
+    )
 
 
 def _render_energy_density_along_profile(
@@ -996,7 +1289,7 @@ def _render_energy_density_along_profile(
         margin=dict(l=40, r=40, t=50, b=40),
         legend=dict(x=0.01, y=0.99),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
     st.caption(
         f"Energía acumulada por punto, radio de búsqueda = {DEFAULTS.blast_correlation_radius_m:.0f} m, "
         f"z de muestreo = {z_sample:.1f} m."
@@ -1020,7 +1313,7 @@ def _render_temporal_analysis(blast_df, df_filtered_sections):
             trend_slope = trend_df['trend_slope'].iloc[0] if 'trend_slope' in trend_df.columns else np.nan
             if pd.notna(trend_slope):
                 col_t2.metric("Tendencia PF (kg/m³ por mes)", f"{trend_slope:+.4f}")
-            st.dataframe(trend_df, use_container_width=True, height=300)
+            st.dataframe(trend_df, width="stretch", height=300)
             if len(trend_df) >= 2:
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(
@@ -1037,7 +1330,7 @@ def _render_temporal_analysis(blast_df, df_filtered_sections):
                     yaxis2=dict(title='Sobre-excavación (m)', overlaying='y', side='right'),
                     height=400, margin=dict(l=40, r=40, t=30, b=30),
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             try:
                 outliers = detect_pf_outliers_iqr(blast_df)
             except Exception:
@@ -1048,7 +1341,7 @@ def _render_temporal_analysis(blast_df, df_filtered_sections):
                 )
                 preview_cols = [c for c in ['label_pozo', 'pf_vol_kgm3'] if c in outliers.columns]
                 if preview_cols:
-                    st.dataframe(outliers[preview_cols].head(10), use_container_width=True)
+                    st.dataframe(outliers[preview_cols].head(10), width="stretch")
 
     with st.expander("🔄 Comparativa Pre/Post Campaña", expanded=False):
         campaign_date = st.date_input(

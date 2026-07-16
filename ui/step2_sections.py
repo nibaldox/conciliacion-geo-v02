@@ -198,7 +198,7 @@ def _render_file_preview(polyline, preview_sections) -> None:
         xaxis_title='Este (m)', yaxis_title='Norte (m)',
         yaxis=dict(scaleanchor='x', scaleratio=1),
         height=500, margin=dict(l=60, r=20, t=30, b=40))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ def _render_tab_interactive() -> None:
                     if s.name in st.session_state.pending_section_names]
     if pending_secs:
         st.subheader(f"📍 {len(pending_secs)} secciones colocadas")
-        st.dataframe(_sections_to_rows(pending_secs), use_container_width=True)
+        st.dataframe(_sections_to_rows(pending_secs), width="stretch")
 
     cols_btn = st.columns(2)
     if cols_btn[0].button("✅ Aplicar Secciones", type="primary", key="apply_int"):
@@ -418,7 +418,7 @@ def _render_sections_table() -> None:
         st.subheader("📋 Secciones Definidas")
         cols_tbl = st.columns([5, 1, 1])
         with cols_tbl[0]:
-            st.dataframe(_sections_to_rows(st.session_state.sections), use_container_width=True)
+            st.dataframe(_sections_to_rows(st.session_state.sections), width="stretch")
         with cols_tbl[1]:
             if st.button("🗑️ Limpiar Pendientes", key="clear_pending_btn", type="secondary"):
                 st.session_state.sections = [

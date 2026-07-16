@@ -15,6 +15,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
+from core.drill_compliance import compute_drill_compliance
+from core.drill_hardness_processor import (
+    enrich_blast_with_hardness,
+    load_drilling_csv,
+)
 from core.geom_utils import find_df_column
 from core.config import DEFAULTS, SECTOR_DEVIATION
 from core.blast_correlation import (
@@ -49,6 +54,17 @@ def render_modulo_tronadura() -> None:
         type=["csv", "xlsx", "xls"],
         key="blast_file",
     )
+    design_uploaded = st.file_uploader(
+        "Diseño de perforación (CSV, opcional)",
+        type=["csv"],
+        key="blast_design_file",
+    )
+    hardness_uploaded = st.file_uploader(
+        "Reporte de perforación (rig) — CSV opcional",
+        type=["csv"],
+        key="blast_drill_hardness_file",
+        help="CSV con Pozo, Tiempo Inicial/Final, Profundidad, Equipo y coordenadas. Enriquece cada pozo con dureza, índice de dureza y tasa de penetración.",
+    )
 
     if uploaded is None:
         if not ref_traces:
@@ -63,7 +79,7 @@ def render_modulo_tronadura() -> None:
         return
 
     st.subheader("Vista previa del archivo")
-    st.dataframe(df.head(20), use_container_width=True)
+    st.dataframe(df.head(20), width="stretch")
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
     # Clear processed state if file changes
@@ -93,6 +109,14 @@ def render_modulo_tronadura() -> None:
                     progress.empty()
                     return
             df_clean = enrich_blast_dataframe(df_clean)
+            if hardness_uploaded is not None:
+                try:
+                    hardness_buf = io.BytesIO(hardness_uploaded.getvalue())
+                    hardness_df_clean = load_drilling_csv(hardness_buf)
+                    if not hardness_df_clean.empty:
+                        df_clean = enrich_blast_with_hardness(df_clean, hardness_df_clean)
+                except Exception:
+                    logger.exception("Failed to enrich blast with hardness")
             st.session_state['blast_df_clean'] = df_clean
             st.session_state['blast_x_lines'] = x_lines
             st.session_state['blast_y_lines'] = y_lines
@@ -109,6 +133,22 @@ def render_modulo_tronadura() -> None:
 
     if st.session_state.get('blast_processed', False):
         df_clean = st.session_state['blast_df_clean']
+
+        if design_uploaded is None:
+            st.info("Sin diseño cargado — omitiendo verificación")
+        else:
+            try:
+                design_df = _read_uploaded(design_uploaded)
+                malla_col = find_df_column(
+                    df_clean, ["Nombre_Malla_Original", "malla"], raise_error=False
+                )
+                compliance = compute_drill_compliance(
+                    design_df, df_clean, group_by=malla_col
+                )
+                _render_drill_compliance_block(compliance)
+            except Exception:
+                logger.exception("Failed to compute drill compliance")
+                st.error("No se pudo analizar el cumplimiento del diseño de perforación.")
 
         tab_3d, tab_corr = st.tabs(["📊 Visualización 3D y Filtros", "🔬 Correlación Geotécnica"])
 
@@ -224,6 +264,15 @@ def render_modulo_tronadura() -> None:
                         color_options.append("Fase")
                     if banco_col:
                         color_options.append("Banco")
+                    diam_col = find_df_column(df_clean, ['Diam_mm', 'Diametro', 'Diameter'], raise_error=False)
+                    if diam_col:
+                        color_options.append("Diámetro (mm)")
+                    if 'dureza' in df_clean.columns:
+                        color_options.append("Dureza")
+                    if 'indice_dureza' in df_clean.columns:
+                        color_options.append("Índice de Dureza")
+                    if 'tasa_penetracion' in df_clean.columns:
+                        color_options.append("Tasa de Penetración")
                     color_options.extend(["Profundidad (m)", "Inclinación (°)", "Elevación Collar (m)"])
 
                     color_by = col_v1.selectbox(
@@ -316,7 +365,7 @@ def render_modulo_tronadura() -> None:
                     )
 
                 with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
-                    st.dataframe(df_filtered, use_container_width=True)
+                    st.dataframe(df_filtered, width="stretch")
 
         with tab_corr:
             df_filtered = df_clean.copy() # Base for correlation
@@ -357,7 +406,7 @@ def render_modulo_tronadura() -> None:
                 height=350,
                 margin=dict(l=40, r=20, t=40, b=40)
             )
-            st.plotly_chart(fig_pas, use_container_width=True)
+            st.plotly_chart(fig_pas, width="stretch")
 
             _render_sector_deviations()
 
@@ -467,7 +516,7 @@ def render_modulo_tronadura() -> None:
                         if df_corr.empty or df_corr['Kg_Explosivo'].sum() == 0:
                             st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
                         else:
-                            st.dataframe(df_corr, use_container_width=True)
+                            st.dataframe(df_corr, width="stretch")
 
                             if pf_available:
                                 x_col = 'PF_Vol_kgm3'
@@ -528,7 +577,7 @@ def render_modulo_tronadura() -> None:
                                 margin=dict(l=40, r=20, t=40, b=40),
                                 yaxis=dict(zeroline=True, zerolinecolor='gray', zerolinewidth=1)
                             )
-                            st.plotly_chart(fig_scat, use_container_width=True)
+                            st.plotly_chart(fig_scat, width="stretch")
                             if x_fallback:
                                 st.caption("ℹ️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
@@ -560,6 +609,24 @@ def render_modulo_tronadura() -> None:
                                 st.info(f"📈 **Deuda/Relleno — Correlación Positiva (r = {r_under:.2f})**")
                             else:
                                 st.info(f"⚖️ **Deuda/Relleno — Correlación Débil/Nula (r = {r_under:.2f})**")
+
+
+def _render_drill_compliance_block(result) -> None:
+    with st.expander("Cumplimiento del diseño de perforación", expanded=True):
+        score = result["compliance_score"]
+        st.metric("Cumplimiento", f"{score * 100:.1f}%" if score is not None else "Sin datos")
+        if not result["per_hole"].empty:
+            st.dataframe(result["per_hole"], width="stretch")
+        if result["per_group"] is not None:
+            st.subheader("Cumplimiento por malla")
+            st.dataframe(result["per_group"], width="stretch")
+        unmatched = result["unmatched"]
+        if unmatched["design"]:
+            st.warning(f"{len(unmatched['design'])} pozos de diseño sin coincidencia")
+        if unmatched["actual"]:
+            st.warning(f"{len(unmatched['actual'])} pozos perforados sin coincidencia")
+        for message in result["warnings"]:
+            st.info(message)
 
 
 def _read_uploaded(uploaded) -> "pd.DataFrame":
@@ -596,13 +663,15 @@ _COLLAR_HOVERTEMPLATE = (
     "<b>📊 Datos del Pozo</b><br>"
     "Explosivo: %{customdata[1]}<br>"
     "Kilos cargados: %{customdata[2]:.0f} kg<br>"
-    "Diámetro: %{customdata[3]:.0f} mm<br>"
+    "Diámetro: %{customdata[3]:.0f} mm / %{customdata[10]:.1f} pulg<br>"
     "Longitud real: %{customdata[4]:.2f} m<br>"
     "Stemming: %{customdata[5]:.2f} m<br>"
     "Altura de carga: %{customdata[6]:.2f} m<br>"
     "Densidad lineal: %{customdata[7]:.1f} kg/m<br>"
     "Inclinación: %{customdata[8]:.1f}°<br>"
     "Azimut: %{customdata[9]:.0f}°<br>"
+    "%{customdata[11]}<br>"
+    "%{customdata[12]}<br>"
     "<extra></extra>"
 )
 
@@ -625,7 +694,7 @@ def _build_collar_customdata(df, kg_col):
 
     n = len(df)
     if n == 0:
-        return np.empty((0, 10), dtype=object)
+        return np.empty((0, 13), dtype=object)
 
     label = (
         _safe_str(df["label_pozo"]).values
@@ -677,7 +746,28 @@ def _build_collar_customdata(df, kg_col):
         if "Az" in df.columns
         else np.zeros(n, dtype=float)
     )
-    return np.column_stack([label, expl, kilos, diam, length, taco, altura, kgpm, incl, az])
+    diam_inch = diam / 25.4
+
+    if "dureza" in df.columns:
+        dureza_raw = df["dureza"]
+        dureza_idx = pd.to_numeric(df["indice_dureza"], errors="coerce") if "indice_dureza" in df.columns else pd.Series([np.nan] * n)
+        dureza_strings = np.array([
+            "Dureza: " + ("" if pd.isna(d) else str(d)) + (" (idx " + f"{float(idx):.1f})" if pd.notna(idx) else "")
+            for d, idx in zip(dureza_raw, dureza_idx)
+        ], dtype=object)
+    else:
+        dureza_strings = np.array([""] * n, dtype=object)
+
+    if "tasa_penetracion" in df.columns:
+        tasa = pd.to_numeric(df["tasa_penetracion"], errors="coerce")
+        tasa_strings = np.array([
+            "Tasa perf.: " + (f"{float(t):.2f} m/min" if pd.notna(t) else "—")
+            for t in tasa
+        ], dtype=object)
+    else:
+        tasa_strings = np.array([""] * n, dtype=object)
+
+    return np.column_stack([label, expl, kilos, diam, length, taco, altura, kgpm, incl, az, diam_inch, dureza_strings, tasa_strings])
 
 
 def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: bool = False, sel_colorscale: str = "Inferno", show_design_mesh: bool = False, show_topo_mesh: bool = False) -> None:
@@ -840,6 +930,19 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         if color_by == "Carga Explosiva (Kg)" and kg_col:
             colors = df[kg_col].values.astype(float)
             title = "kg"
+        elif color_by == "Diámetro (mm)" and 'Diam_mm' in df.columns:
+            colors = df['Diam_mm'].values.astype(float)
+            title = "mm"
+        elif color_by == "Dureza" and 'dureza' in df.columns:
+            _dureza_map = {"roca suave": 1, "roca media": 2, "roca dura": 3, "roca muy dura": 4}
+            colors = df['dureza'].map(_dureza_map).fillna(0).astype(float).values
+            title = "Dureza (1-4)"
+        elif color_by == "Índice de Dureza" and 'indice_dureza' in df.columns:
+            colors = pd.to_numeric(df['indice_dureza'], errors='coerce').fillna(0).astype(float).values
+            title = "Índice (0-100)"
+        elif color_by == "Tasa de Penetración" and 'tasa_penetracion' in df.columns:
+            colors = pd.to_numeric(df['tasa_penetracion'], errors='coerce').fillna(0).astype(float).values
+            title = "m/min"
         elif color_by == "Profundidad (m)":
             colors = df['Len'].values
             title = "m (Largo)"
@@ -881,7 +984,7 @@ def _render_3d(df, x_lines, y_lines, z_lines, color_by: str, show_energy_grid: b
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     if show_energy_grid:
         st.caption(
@@ -948,8 +1051,8 @@ def _plot_discrete_traces(fig: go.Figure, df, category_col: str, unique_vals: li
             line_custom = np.repeat(sub_custom[mask], 3, axis=0)
             collar_custom = sub_custom[mask]
         else:
-            line_custom = np.empty((0, 10))
-            collar_custom = np.empty((0, 10))
+            line_custom = np.empty((0, 13))
+            collar_custom = np.empty((0, 13))
 
         fig.add_trace(go.Scatter3d(
             x=m_x, y=m_y, z=m_z,
@@ -1099,7 +1202,7 @@ def _render_sector_deviations() -> None:
             height=450,
             legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         )
-        st.plotly_chart(fig_sectors, use_container_width=True)
+        st.plotly_chart(fig_sectors, width="stretch")
 
         rows = []
         for s in sectors:
@@ -1112,7 +1215,7 @@ def _render_sector_deviations() -> None:
                 "Área sobre (m²)": f"{s.area_above_m2:.2f}",
                 "Área deuda (m²)": f"{s.area_below_m2:.2f}",
             })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+        st.dataframe(pd.DataFrame(rows), width="stretch")
 
         _render_face_angle_suggestion()
 

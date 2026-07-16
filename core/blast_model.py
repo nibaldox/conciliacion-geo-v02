@@ -8,12 +8,15 @@ helpers; the rest of the pipeline ignores them.
 """
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
 from core.blast_correlation import _pasadura
+from core.blast_metrics import _BURDEN_CANDIDATES, _ESP_CANDIDATES, _TACO_CANDIDATES
+from core.column_utils import first_present_column
 from core.config import DEFAULTS
 
 
@@ -130,6 +133,233 @@ def fit_powder_factor_damage_model(
         "mean_pf": float(np.mean(pf)),
         "confidence": confidence,
         "is_significant": bool(p_value < 0.05),
+    }
+
+
+_MULTIVARIATE_PREDICTOR_CANDIDATES: Dict[str, tuple] = {
+    "pf_vol": ("pf_vol_kgm3", "pf_vol_avg_kgm3", "PF_vol"),
+    "burden": _BURDEN_CANDIDATES,
+    "spacing_burden_ratio": ("spacing_burden_ratio",),
+    "stemming": _TACO_CANDIDATES,
+}
+
+_COLLINEARITY_CONDITION_THRESHOLD = 20.0
+
+_COLLINEARITY_WARNING = "Posible colinealidad entre predictores (tipicamente PF-burden)."
+
+_MULTIVARIATE_INSUFFICIENT_RESULT: Dict[str, Any] = {
+    "beta0": 0.0,
+    "beta1": 0.0,
+    "coefficients": {},
+    "std_errors": {},
+    "t_stats": {},
+    "p_values": {},
+    "r_squared": 0.0,
+    "r_squared_adj": 0.0,
+    "p_value": float("nan"),
+    "f_statistic": float("nan"),
+    "f_pvalue": float("nan"),
+    "n": 0,
+    "dof": 0,
+    "condition_number": float("nan"),
+    "features_used": [],
+    "feature_means": {},
+    "collinearity_warning": "",
+    "confidence": "INSUFFICIENT",
+    "is_significant": False,
+}
+
+
+def _fresh_multivariate_insufficient(n: int = 0, features_used: Optional[List[str]] = None) -> Dict[str, Any]:
+    result = copy.deepcopy(_MULTIVARIATE_INSUFFICIENT_RESULT)
+    result["n"] = int(n)
+    result["features_used"] = list(features_used) if features_used else []
+    return result
+
+
+def _classify_multivariate_confidence(
+    n: int,
+    f_pvalue: float,
+    condition_number: float,
+    rank_deficient: bool,
+) -> str:
+    base = _classify_confidence(n, float(f_pvalue))
+    collinear = (
+        rank_deficient
+        or not np.isfinite(condition_number)
+        or float(condition_number) >= _COLLINEARITY_CONDITION_THRESHOLD
+    )
+    if collinear and base != "INSUFFICIENT":
+        return "CAUTION"
+    return base
+
+
+def _resolve_multivariate_predictors(df: pd.DataFrame) -> Dict[str, pd.Series]:
+    resolved: Dict[str, pd.Series] = {}
+    for name, candidates in _MULTIVARIATE_PREDICTOR_CANDIDATES.items():
+        col = first_present_column(df, candidates)
+        if col is not None:
+            resolved[name] = pd.to_numeric(df[col], errors="coerce")
+    if "spacing_burden_ratio" not in resolved:
+        b_col = first_present_column(df, _BURDEN_CANDIDATES)
+        s_col = first_present_column(df, _ESP_CANDIDATES)
+        if b_col is not None and s_col is not None:
+            burden = pd.to_numeric(df[b_col], errors="coerce")
+            esp = pd.to_numeric(df[s_col], errors="coerce")
+            resolved["spacing_burden_ratio"] = esp / burden.replace(0.0, np.nan)
+    return resolved
+
+
+def fit_multivariate_damage_model(
+    df: pd.DataFrame,
+    damage_col: str = "avg_over_break",
+    min_samples: int = 12,
+) -> Dict[str, Any]:
+    """Fit multivariate OLS ``damage = beta0 + sum_i beta_i * x_i + epsilon``.
+
+    Predictors are auto-resolved from ``df`` among powder factor, burden,
+    spacing-to-burden ratio and stemming. Inference is derived from the
+    residual covariance using ``numpy.linalg.lstsq`` (no scikit-learn) and
+    ``scipy.stats`` for two-sided t and overall F probabilities.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Per-section table carrying the damage column and predictor columns.
+    damage_col : str
+        Column with mean over-break (signed, metres).
+    min_samples : int
+        Minimum number of complete rows required to fit.
+
+    Returns
+    -------
+    dict
+        Mirrors :func:`fit_powder_factor_damage_model` keys (``beta0``,
+        ``beta1``, ``r_squared``, ``p_value``, ``n``, ``confidence``,
+        ``is_significant``) plus multivariate extras: ``coefficients``,
+        ``std_errors``, ``t_stats``, ``p_values`` (per-predictor dicts),
+        ``r_squared_adj``, ``f_statistic``, ``f_pvalue``, ``dof``,
+        ``condition_number``, ``features_used``, ``feature_means`` and
+        ``collinearity_warning``. Insufficient or malformed input returns
+        the ``confidence='INSUFFICIENT'`` skeleton without raising.
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        return _fresh_multivariate_insufficient()
+
+    if damage_col not in df.columns:
+        return _fresh_multivariate_insufficient()
+
+    resolved = _resolve_multivariate_predictors(df)
+    if not resolved:
+        return _fresh_multivariate_insufficient()
+
+    damage = pd.to_numeric(df[damage_col], errors="coerce")
+    frame = pd.DataFrame({"__damage__": damage.to_numpy(dtype=float)})
+    for name, series in resolved.items():
+        frame[name] = np.asarray(series, dtype=float)
+
+    frame = frame.replace([np.inf, -np.inf], np.nan).dropna()
+    n = int(len(frame))
+
+    feature_names: List[str] = [
+        name
+        for name in resolved
+        if name in frame.columns and float(np.var(frame[name].to_numpy(dtype=float))) > 1e-12
+    ]
+
+    if len(feature_names) < 2 or n < min_samples:
+        return _fresh_multivariate_insufficient(n=n, features_used=feature_names)
+
+    y = frame["__damage__"].to_numpy(dtype=float)
+    predictor_cols = [frame[name].to_numpy(dtype=float) for name in feature_names]
+    X = np.column_stack([np.ones(n)] + predictor_cols)
+    p = X.shape[1]
+
+    beta, _residuals, rank, _sv = np.linalg.lstsq(X, y, rcond=None)
+    rank_deficient = bool(rank < p)
+
+    xtx = X.T @ X
+    try:
+        xtx_inv = np.linalg.pinv(xtx) if rank_deficient else np.linalg.inv(xtx)
+    except np.linalg.LinAlgError:
+        xtx_inv = np.linalg.pinv(xtx)
+        rank_deficient = True
+
+    residuals = y - X @ beta
+    dof = max(n - p, 1)
+    sse = float(np.sum(residuals ** 2))
+    sst = float(np.sum((y - float(np.mean(y))) ** 2))
+    sigma2 = sse / dof
+    se = np.sqrt(np.maximum(np.diag(xtx_inv) * sigma2, 0.0))
+
+    from scipy import stats
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_stats = np.where(se > 0.0, beta / se, 0.0)
+    p_values = 2.0 * stats.t.sf(np.abs(t_stats), dof)
+
+    r_squared = 1.0 - sse / sst if sst > 0.0 else 0.0
+    r_squared_adj = 1.0 - (1.0 - r_squared) * (n - 1) / dof if dof > 0 else 0.0
+
+    k = p - 1
+    ssr = sst - sse
+    if k > 0 and sse > 0.0 and dof > 0:
+        f_statistic = (ssr / k) / (sse / dof)
+        f_pvalue = float(stats.f.sf(f_statistic, k, dof))
+    else:
+        f_statistic = float("nan")
+        f_pvalue = float("nan")
+
+    # Standardize predictors before the condition check so the number
+    # reflects true collinearity, not column-scale mismatch (burden~5 m
+    # vs PF~0.35 kg/m³ would otherwise inflate cond on raw X).
+    if X.shape[1] > 2:
+        X_pred = X[:, 1:]
+        _std = X_pred.std(axis=0)
+        _std[_std == 0] = 1.0
+        X_z = (X_pred - X_pred.mean(axis=0)) / _std
+        condition_number = float(np.linalg.cond(X_z))
+    else:
+        condition_number = 1.0
+    confidence = _classify_multivariate_confidence(n, f_pvalue, condition_number, rank_deficient)
+
+    collinear = (
+        rank_deficient
+        or not np.isfinite(condition_number)
+        or condition_number >= _COLLINEARITY_CONDITION_THRESHOLD
+    )
+    collinearity_warning = _COLLINEARITY_WARNING if collinear else ""
+
+    coefficients = {name: float(beta[i + 1]) for i, name in enumerate(feature_names)}
+    std_errors = {name: float(se[i + 1]) for i, name in enumerate(feature_names)}
+    t_stats_out = {name: float(t_stats[i + 1]) for i, name in enumerate(feature_names)}
+    p_values_out = {name: float(p_values[i + 1]) for i, name in enumerate(feature_names)}
+    feature_means = {
+        name: float(np.mean(predictor_cols[i])) for i, name in enumerate(feature_names)
+    }
+
+    beta1 = coefficients.get("pf_vol", coefficients[feature_names[0]])
+
+    return {
+        "beta0": float(beta[0]),
+        "beta1": float(beta1),
+        "coefficients": coefficients,
+        "std_errors": std_errors,
+        "t_stats": t_stats_out,
+        "p_values": p_values_out,
+        "r_squared": float(r_squared),
+        "r_squared_adj": float(r_squared_adj),
+        "p_value": float(f_pvalue),
+        "f_statistic": float(f_statistic),
+        "f_pvalue": float(f_pvalue),
+        "n": n,
+        "dof": int(dof),
+        "condition_number": condition_number,
+        "features_used": list(feature_names),
+        "feature_means": feature_means,
+        "collinearity_warning": collinearity_warning,
+        "confidence": confidence,
+        "is_significant": bool(np.isfinite(f_pvalue) and f_pvalue < 0.05),
     }
 
 
@@ -322,6 +552,178 @@ def compute_pasadura_toe_correlation(
     return {
         "pasadura_per_bench": matched_pasadura,
         "toe_per_bench": matched_toe,
+        "r": r_val,
+        "p_value": p_val,
+        "n_benches": n,
+        "interpretation": interpretation,
+    }
+
+
+def compute_stemming_crest_correlation(
+    blast_df: pd.DataFrame,
+    comparisons: List[dict],
+    bench_height: float = 15.0,
+    taco_column: Optional[str] = None,
+) -> dict:
+    """Test the hypothesis ``short stemming -> high |delta_crest|`` per bench.
+
+    Structural twin of :func:`compute_pasadura_toe_correlation`: same return
+    shape, same guards, same lazy ``scipy.stats.pearsonr`` pattern. The
+    stemming (taco) column is auto-resolved via
+    :data:`core.blast_metrics._TACO_CANDIDATES` unless the caller pins it
+    with ``taco_column``.
+
+    Parameters
+    ----------
+    blast_df : pd.DataFrame
+        Processed blast holes (output of :func:`procesar_pozos`) with
+        a stemming column (``Taco_m`` / ``Taco`` / ``Stemming``) and
+        ``Z_collar``.
+    comparisons : list of dict
+        Per-bench reconciliation results. Each item is expected to expose
+        ``level`` (design toe elevation as a string) and ``delta_crest``
+        (m, signed).
+    bench_height : float
+        Bench height (m) used to derive the floor elevation from the
+        collar.
+    taco_column : str, optional
+        Explicit name of the stemming column. When ``None`` the function
+        picks the first present among ``_TACO_CANDIDATES``
+        (``Taco_m``, ``Taco``, ``Stemming``).
+
+    Returns
+    -------
+    dict
+        - ``stemming_per_bench``: dict[float, float], mean stemming (m) per
+          floor elevation.
+        - ``crest_per_bench``: dict[float, float], mean ``delta_crest``
+          (m) per floor elevation, for the matching level.
+        - ``r``: float, Pearson correlation between the two per-bench
+          series (``0.0`` when fewer than two paired samples).
+        - ``p_value``: float, two-sided p-value for ``r == 0`` (``nan``
+          when undefined).
+        - ``n_benches``: int, count of paired benches used in the
+          correlation.
+        - ``interpretation``: str, one-sentence read of the result.
+    """
+
+    empty = {
+        "stemming_per_bench": {},
+        "crest_per_bench": {},
+        "r": 0.0,
+        "p_value": float("nan"),
+        "n_benches": 0,
+        "interpretation": "Sin datos suficientes para correlacionar stemming y delta_crest.",
+    }
+
+    if (
+        blast_df is None
+        or blast_df.empty
+        or not comparisons
+        or "Z_collar" not in blast_df.columns
+    ):
+        return empty
+
+    resolved_taco = taco_column if taco_column else first_present_column(blast_df, _TACO_CANDIDATES)
+    if resolved_taco is None or resolved_taco not in blast_df.columns:
+        return empty
+
+    df = blast_df.copy()
+    df["_taco"] = pd.to_numeric(df[resolved_taco], errors="coerce")
+    if not df["_taco"].notna().any():
+        return empty
+
+    df["_floor"] = (df["Z_collar"] - bench_height).round(0)
+
+    stemming_per_bench: Dict[float, float] = (
+        df.groupby("_floor")["_taco"].mean().to_dict()
+    )
+
+    df_comps = pd.DataFrame(comparisons)
+    if "level" not in df_comps.columns or "delta_crest" not in df_comps.columns:
+        return empty
+
+    df_comps = df_comps.dropna(subset=["level", "delta_crest"])
+    if df_comps.empty:
+        return empty
+
+    def _to_int(v: Any) -> Optional[int]:
+        try:
+            return int(round(float(v)))
+        except (TypeError, ValueError):
+            return None
+
+    df_comps["_level_int"] = df_comps["level"].apply(_to_int)
+    df_comps = df_comps.dropna(subset=["_level_int"])
+    if df_comps.empty:
+        return empty
+
+    crest_per_bench_raw: Dict[int, float] = (
+        df_comps.groupby("_level_int")["delta_crest"].mean().to_dict()
+    )
+
+    paired_taco: List[float] = []
+    paired_crest: List[float] = []
+    matched_stemming: Dict[float, float] = {}
+    matched_crest: Dict[float, float] = {}
+    for level, stemming_mean in stemming_per_bench.items():
+        try:
+            level_int = int(round(float(level)))
+        except (TypeError, ValueError):
+            continue
+        if level_int in crest_per_bench_raw:
+            matched_stemming[float(level_int)] = float(stemming_mean)
+            matched_crest[float(level_int)] = float(crest_per_bench_raw[level_int])
+            paired_taco.append(float(stemming_mean))
+            paired_crest.append(float(crest_per_bench_raw[level_int]))
+
+    n = len(paired_taco)
+    if n < 2:
+        return {
+            "stemming_per_bench": matched_stemming,
+            "crest_per_bench": matched_crest,
+            "r": 0.0,
+            "p_value": float("nan"),
+            "n_benches": n,
+            "interpretation": (
+                "Solo hay " + str(n) + " banco(s) pareado(s); se necesitan al menos 2."
+            ),
+        }
+
+    taco_arr = np.asarray(paired_taco, dtype=float)
+    crest_arr = np.asarray(paired_crest, dtype=float)
+
+    if float(np.var(taco_arr)) <= 0.0 or float(np.var(crest_arr)) <= 0.0:
+        r_val = 0.0
+        p_val = float("nan")
+    else:
+        from scipy import stats
+
+        r_res = stats.pearsonr(taco_arr, crest_arr)
+        r_val = float(r_res.statistic)
+        p_val = float(r_res.pvalue)
+
+    if r_val < -0.3:
+        interpretation = (
+            f"Correlacion negativa (r={r_val:.2f}): bancos con taco corto "
+            "se asocian a mayor sobre-excavacion de la cresta. "
+            "Consistente con gases venteando hacia arriba (banco soplado)."
+        )
+    elif r_val > 0.3:
+        interpretation = (
+            f"Correlacion positiva (r={r_val:.2f}): taco mayor se asocia "
+            "a mayor sobre-excavacion de la cresta. "
+            "Sugiere energia baja / taco excesivo reteniendo gases."
+        )
+    else:
+        interpretation = (
+            f"Correlacion debil/nula (r={r_val:.2f}): stemming y delta_crest "
+            "no muestran relacion lineal clara con estos datos."
+        )
+
+    return {
+        "stemming_per_bench": matched_stemming,
+        "crest_per_bench": matched_crest,
         "r": r_val,
         "p_value": p_val,
         "n_benches": n,

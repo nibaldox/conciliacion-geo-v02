@@ -233,6 +233,231 @@ def recommend_pf_adjustment(
     }
 
 
+_MULTIVARIATE_DISPATCH_MIN_SAMPLES = 12
+_MULTIVARIATE_DISPATCH_MIN_FEATURES = 3
+
+
+_MULTIVARIATE_INSUFFICIENT: Dict[str, Any] = {
+    "target_burden": 0.0,
+    "current_burden": 0.0,
+    "delta_burden": 0.0,
+    "delta_burden_pct": 0.0,
+    "predicted_current_damage": 0.0,
+    "predicted_target_damage": 0.0,
+    "feasibility": FEASIBILITY_INSUFFICIENT,
+    "message": "",
+    "confidence": "INSUFFICIENT",
+}
+
+
+def _invert_burden(model: Dict[str, Any], target_damage: float) -> Optional[float]:
+    coefficients = model.get("coefficients", {}) or {}
+    feature_means = model.get("feature_means", {}) or {}
+    beta_burden = float(coefficients.get("burden", 0.0))
+    if not np.isfinite(beta_burden) or abs(beta_burden) < _BETA1_EPSILON:
+        return None
+    if not np.isfinite(target_damage):
+        return None
+    base = float(model.get("beta0", 0.0))
+    for name, coef in coefficients.items():
+        if name == "burden":
+            continue
+        base += float(coef) * float(feature_means.get(name, 0.0))
+    return float((target_damage - base) / beta_burden)
+
+
+def _predict_damage_at_burden(model: Dict[str, Any], burden: float) -> float:
+    coefficients = model.get("coefficients", {}) or {}
+    feature_means = model.get("feature_means", {}) or {}
+    value = float(model.get("beta0", 0.0))
+    for name, coef in coefficients.items():
+        x = float(burden) if name == "burden" else float(feature_means.get(name, 0.0))
+        value += float(coef) * x
+    return float(value)
+
+
+def _build_burden_message(
+    feasibility: str,
+    current_burden: float,
+    target_burden: float,
+    delta_burden: float,
+    delta_burden_pct: float,
+    predicted_current_damage: float,
+    target_overbreak_m: float,
+    confidence: str,
+    n: int,
+    f_pvalue: float,
+) -> str:
+    cur = float(current_burden)
+    tgt = float(target_burden)
+    dpct = float(delta_burden_pct) if np.isfinite(delta_burden_pct) else 0.0
+    dmg = float(predicted_current_damage)
+    p_str = f"{f_pvalue:.3f}" if np.isfinite(float(f_pvalue)) else "n/a"
+    n_str = str(int(n))
+
+    if feasibility == FEASIBILITY_INSUFFICIENT:
+        return (
+            "Modelo multivariado sin confianza estadistica suficiente "
+            f"(n={n_str}, p={p_str}); no se puede recomendar ajuste de burden."
+        )
+
+    if feasibility == FEASIBILITY_CAUTION:
+        return (
+            f"Burden objetivo ({tgt:.2f} m) queda fuera del rango operativo "
+            f"[0.5x, 2x] del burden actual ({cur:.2f} m); revisar diseno de malla "
+            "antes de aplicar."
+        )
+
+    verb = "Reducir" if delta_burden < 0 else "Aumentar" if delta_burden > 0 else "Mantener"
+    sign = "+" if dpct >= 0 else "-"
+    return (
+        f"{verb} burden de {cur:.2f} a {tgt:.2f} m ({sign}{abs(dpct):.0f}%) proyecta "
+        f"acotar sobre-excavacion de {dmg:.2f} m al objetivo de {target_overbreak_m:.2f} m "
+        f"(modelo p={p_str}, n={n_str}, confianza {confidence})."
+    )
+
+
+def recommend_burden_adjustment(
+    model: Dict[str, Any],
+    current_burden: float,
+    target_overbreak_m: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Invert the multivariate model for burden, holding other predictors fixed.
+
+    Solve ``target = beta0 + sum_i beta_i * mean_i + beta_burden * target_burden``
+    for ``target_burden`` while every non-burden predictor is held at
+    ``model['feature_means']``. Targets outside ``[0.5 * B, 2 * B]`` of the
+    current burden are flagged ``CAUTION``.
+
+    Parameters
+    ----------
+    model : dict
+        Output of :func:`core.blast_model.fit_multivariate_damage_model`.
+    current_burden : float
+        Burden currently in use (m).
+    target_overbreak_m : float, optional
+        Desired over-excavation target (m). Defaults to
+        ``ADVISOR.target_overbreak_m``.
+
+    Returns
+    -------
+    dict
+        Keys: ``target_burden``, ``current_burden``, ``delta_burden``,
+        ``delta_burden_pct``, ``predicted_current_damage``,
+        ``predicted_target_damage``, ``feasibility``, ``message``,
+        ``confidence``.
+    """
+    if model is None:
+        model = {}
+
+    if target_overbreak_m is None:
+        target_overbreak_m = ADVISOR.target_overbreak_m
+
+    target_overbreak_m = float(target_overbreak_m)
+    current_burden = float(current_burden)
+
+    confidence = str(model.get("confidence", "INSUFFICIENT"))
+    coefficients = model.get("coefficients", {}) or {}
+    beta_burden = float(coefficients.get("burden", 0.0))
+    n = int(model.get("n", 0))
+    f_pvalue = float(model.get("f_pvalue", model.get("p_value", float("nan"))))
+
+    has_signal = (
+        confidence != "INSUFFICIENT"
+        and n >= ADVISOR.min_samples_for_advice
+        and np.isfinite(beta_burden)
+        and abs(beta_burden) > _BETA1_EPSILON
+    )
+
+    predicted_current_damage = _predict_damage_at_burden(model, current_burden)
+    target_burden = _invert_burden(model, target_overbreak_m) if has_signal else None
+
+    if target_burden is None or not np.isfinite(target_burden):
+        result = dict(_MULTIVARIATE_INSUFFICIENT)
+        result["current_burden"] = current_burden
+        result["target_burden"] = current_burden
+        result["predicted_current_damage"] = float(predicted_current_damage)
+        result["predicted_target_damage"] = target_overbreak_m
+        result["message"] = _build_burden_message(
+            FEASIBILITY_INSUFFICIENT, current_burden, current_burden, 0.0, 0.0,
+            predicted_current_damage, target_overbreak_m, "INSUFFICIENT", n, f_pvalue,
+        )
+        return result
+
+    delta_burden = float(target_burden - current_burden)
+    delta_burden_pct = _safe_pct_change(target_burden, current_burden)
+    if not np.isfinite(delta_burden_pct):
+        delta_burden_pct = 0.0
+
+    feasibility = _classify_feasibility(
+        delta_pf_pct=delta_burden_pct,
+        target_pf=float(target_burden),
+        pf_optimal=current_burden * (2.0 / ADVISOR.pf_upper_bound_factor),
+        has_model=True,
+    )
+    if current_burden > 0.0 and (
+        target_burden < 0.5 * current_burden or target_burden > 2.0 * current_burden
+    ):
+        feasibility = FEASIBILITY_CAUTION
+
+    message = _build_burden_message(
+        feasibility, current_burden, float(target_burden), delta_burden, delta_burden_pct,
+        predicted_current_damage, target_overbreak_m, confidence, n, f_pvalue,
+    )
+
+    return {
+        "target_burden": float(target_burden),
+        "current_burden": current_burden,
+        "delta_burden": delta_burden,
+        "delta_burden_pct": float(delta_burden_pct),
+        "predicted_current_damage": float(predicted_current_damage),
+        "predicted_target_damage": target_overbreak_m,
+        "feasibility": feasibility,
+        "message": message,
+        "confidence": confidence,
+    }
+
+
+def recommend_multivariate(
+    model: Dict[str, Any],
+    current_burden: float,
+    target_overbreak_m: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Dispatch to :func:`recommend_burden_adjustment` when the model qualifies.
+
+    Routes to the burden-aware path only when the multivariate model has at
+    least ``12`` samples, at least ``3`` fitted features and a confidence
+    other than ``INSUFFICIENT``. Otherwise returns an INSUFFICIENT skeleton.
+    """
+    if model is None:
+        model = {}
+
+    n = int(model.get("n", 0))
+    features = model.get("features_used", []) or []
+    confidence = str(model.get("confidence", "INSUFFICIENT"))
+
+    qualifies = (
+        n >= _MULTIVARIATE_DISPATCH_MIN_SAMPLES
+        and len(features) >= _MULTIVARIATE_DISPATCH_MIN_FEATURES
+        and confidence != "INSUFFICIENT"
+    )
+
+    if qualifies:
+        return recommend_burden_adjustment(model, current_burden, target_overbreak_m)
+
+    current_burden = float(current_burden)
+    target = ADVISOR.target_overbreak_m if target_overbreak_m is None else float(target_overbreak_m)
+    result = dict(_MULTIVARIATE_INSUFFICIENT)
+    result["current_burden"] = current_burden
+    result["target_burden"] = current_burden
+    result["predicted_target_damage"] = target
+    result["message"] = _build_burden_message(
+        FEASIBILITY_INSUFFICIENT, current_burden, current_burden, 0.0, 0.0,
+        0.0, target, "INSUFFICIENT", n, float(model.get("f_pvalue", float("nan"))),
+    )
+    return result
+
+
 def recommend_charge_change_pct(
     model: Dict[str, Any],
     current_pf: float,

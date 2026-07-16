@@ -3,6 +3,7 @@ Test del pipeline completo con superficies sintéticas de un pit abierto.
 Genera dos superficies STL (diseño y as-built), ejecuta el análisis y exporta resultados.
 """
 import numpy as np
+import pandas
 import trimesh
 import sys
 from pathlib import Path
@@ -15,6 +16,8 @@ from core import (
     generate_word_report,
 )
 from core.section_cutter import generate_sections_along_crest
+from core.calculo_tronadura import procesar_pozos
+from core.drill_compliance import compute_drill_compliance
 
 
 def create_pit_surface(nx=100, ny=100, x_range=(0, 500), y_range=(0, 500),
@@ -223,6 +226,20 @@ def run_test():
         print("   ⚠️ No se obtuvieron comparaciones.")
         print("   Esto puede ser normal si las secciones no intersecan bien los bancos.")
     
+    blast_actual = pandas.DataFrame([{
+        "Pozo": "H-1", "Latitud_Geo": 100.0, "Longitud_Geo": 200.0,
+        "Nombre_Banco": 1000.0, "Inclinacion_real": 10.0,
+        "Azimuth_real": 90.0, "longitud_real": 16.0,
+        "Kilos_Cargados_real": 100.0,
+    }])
+    processed_holes, *_ = procesar_pozos(blast_actual)
+    blast_design = pandas.DataFrame([{
+        "Pozo": "H-1", "X": 100.0, "Y": 200.0, "Z_collar": 1015.0,
+        "Incl": 10.0, "Az": 90.0, "Len": 16.0, "Kilos": 100.0,
+    }])
+    drill_result = compute_drill_compliance(blast_design, processed_holes)
+    assert drill_result["compliance_score"] == 1.0
+
     print("\n" + "=" * 60)
     print("TEST COMPLETADO")
     print("=" * 60)
