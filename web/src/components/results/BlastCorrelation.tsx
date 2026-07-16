@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import Plot from 'react-plotly.js';
 import type { Data, Layout, Config } from 'plotly.js';
 import { useBlastCorrelation, useBlastDamageModel, useSections, useSettings, useUpdateSettings } from '../../api/hooks';
+import { BlastUploader } from './BlastUploader';
 import type {
   BlastCorrelationRow,
   BlastDamagePoint,
@@ -193,6 +194,7 @@ export function buildOverlayHistogram(
  */
 export function BlastCorrelation() {
   const { t } = useTranslation();
+  const qc = useQueryClient();
   const { data, isLoading, error } = useBlastCorrelation();
 
   const rows: BlastCorrelationRow[] = data?.rows ?? [];
@@ -224,7 +226,7 @@ export function BlastCorrelation() {
   if (rows.length === 0) {
     return (
       <div
-        className="flex flex-col items-center justify-center h-48 gap-2 text-center px-6"
+        className="flex flex-col items-center justify-center h-auto min-h-48 gap-3 text-center px-6 py-6"
       >
         <div className="text-4xl" aria-hidden="true">⚗️</div>
         <p
@@ -242,12 +244,20 @@ export function BlastCorrelation() {
               'Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.',
           })}
         </p>
+        <div className="w-full max-w-md">
+          <BlastUploader
+            onUploaded={() => qc.invalidateQueries({ queryKey: ['blast-correlation'] })}
+          />
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      <BlastUploader
+        onUploaded={() => qc.invalidateQueries({ queryKey: ['blast-correlation'] })}
+      />
       <BlastDensityControl />
       {/* Summary header */}
       <div

@@ -23,6 +23,8 @@ import type {
   BlastHolesOnProfileResponse,
   BlastCorrelationResponse,
   BlastDamageModelResponse,
+  BlastUploadResponse,
+  BlastHolesResponse,
   AIGenerateRequest,
   AIResponseChunk,
   AIUsageMetrics,
@@ -437,6 +439,51 @@ export function useResults(section?: string) {
         })
         .then(r => r.data);
     },
+  });
+}
+
+// ─── Blast-hole CSV upload ─────────────────────────────────
+
+/**
+ * Upload a blast-hole CSV to `POST /blast/upload`.
+ *
+ * The endpoint expects a multipart body with `file` and `session_id`.
+ * On success it returns the upload summary including the number of
+ * parsed holes, skipped rows, and mean charge/discharge metrics.
+ */
+export function useUploadBlastCsv() {
+  return useMutation({
+    mutationFn: async ({ sessionId, file }: { sessionId: string; file: File }) => {
+      const form = new FormData();
+      form.append('file', file);
+      form.append('session_id', sessionId);
+      const { data } = await client.post<BlastUploadResponse>('/blast/upload', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return data;
+    },
+  });
+}
+
+/**
+ * Fetch persisted blast-hole summaries for the session from
+ * `GET /blast/{sessionId}/holes`. Optionally filters by `section_name`
+ * when the backend supports it.
+ *
+ * Note: this hook is named `useBlastHolesBySession` because the legacy
+ * `useBlastHoles` (per-profile projection) already exists in this file.
+ */
+export function useBlastHolesBySession(sessionId: string | null, sectionName?: string | null) {
+  return useQuery({
+    queryKey: ['blast-holes-by-session', sessionId, sectionName],
+    queryFn: async () => {
+      const { data } = await client.get<BlastHolesResponse>(
+        `/blast/${sessionId}/holes`,
+        { params: sectionName ? { section_name: sectionName } : {} },
+      );
+      return data;
+    },
+    enabled: !!sessionId,
   });
 }
 

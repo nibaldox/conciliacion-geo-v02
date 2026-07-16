@@ -228,7 +228,16 @@
     "histogram_y_axis": "Frecuencia",
     "carga": "Carga",
     "descarga": "Descarga",
-    "no_data": "Sin datos de histograma"
+    "no_data": "Sin datos de histograma",
+    "upload_title": "Cargar archivo de pozos",
+    "file_selected": "Archivo seleccionado: {{filename}}",
+    "uploading": "Procesando archivo...",
+    "upload_error": "Error al cargar el archivo: {{error}}",
+    "upload_summary": "{{n}} pozos cargados, {{skipped}} filas omitidas",
+    "carga_mean": "Carga media: {{value}} kg",
+    "descarga_mean": "Descarga media: {{value}} kg",
+    "persisted_count": "{{n}} pozos persistidos en sesión",
+    "upload_no_session": "Inicie una sesión para cargar pozos."
   },
   "section_list": {
     "loading": "Cargando secciones...",

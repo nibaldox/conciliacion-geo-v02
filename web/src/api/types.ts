@@ -333,6 +333,34 @@ export interface BlastDamageModelResponse {
   y_metric: string;
 }
 
+// Blast-hole upload summary
+
+export interface BlastUploadResponse {
+  session_id: string;
+  n_holes: number;
+  n_rows_loaded: number;
+  n_rows_skipped: number;
+  carga_mean: number | null;
+  descarga_mean: number | null;
+  hardness_distribution: Record<string, number>;
+}
+
+export interface BlastHoleSummary {
+  hole_id: string;
+  x: number;
+  y: number;
+  z: number | null;
+  carga: number | null;
+  descarga: number | null;
+  hardness: string | null;
+  section_name?: string;
+}
+
+export interface BlastHolesResponse {
+  session_id: string;
+  holes: BlastHoleSummary[];
+}
+
 // AI reporter (core/ai_v2)
 export interface AIUsageMetrics {
   prompt_tokens: number;

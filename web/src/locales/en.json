@@ -228,7 +228,16 @@
     "histogram_y_axis": "Frequency",
     "carga": "Load",
     "descarga": "Discharge",
-    "no_data": "No histogram data"
+    "no_data": "No histogram data",
+    "upload_title": "Upload blast-hole file",
+    "file_selected": "Selected file: {{filename}}",
+    "uploading": "Processing file...",
+    "upload_error": "Error uploading file: {{error}}",
+    "upload_summary": "{{n}} holes loaded, {{skipped}} rows skipped",
+    "carga_mean": "Mean charge: {{value}} kg",
+    "descarga_mean": "Mean discharge: {{value}} kg",
+    "persisted_count": "{{n}} holes persisted in session",
+    "upload_no_session": "Start a session to upload holes."
   },
   "section_list": {
     "loading": "Loading sections...",

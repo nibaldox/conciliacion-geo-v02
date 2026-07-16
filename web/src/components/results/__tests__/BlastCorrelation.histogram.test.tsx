@@ -47,6 +47,15 @@ vi.mock('../../../api/hooks', () => ({
   useSettings: vi.fn(() => ({ data: undefined })),
   useSections: vi.fn(() => ({ data: [] })),
   useUpdateSettings: vi.fn(() => ({ mutate: vi.fn(), isPending: false })),
+  useUploadBlastCsv: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    data: undefined,
+    error: null,
+  })),
+  useBlastHolesBySession: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
 }));
 
 vi.mock('@tanstack/react-query', async () => {
