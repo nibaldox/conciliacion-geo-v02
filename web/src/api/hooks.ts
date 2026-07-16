@@ -19,6 +19,7 @@ import type {
   SettingsUpdate,
   VerticesResponse,
   ContourData,
+  ReferenceLineResponse,
   BlastHolesOnProfileResponse,
   BlastCorrelationResponse,
   BlastDamageModelResponse,
@@ -115,12 +116,42 @@ export function useDeleteMesh() {
   });
 }
 
-export function useMeshContours(meshId: string | null, interval = 15.0) {
+export function useMeshContours(meshId: string | null, interval = 15.0, resolution = 1) {
   return useQuery({
-    queryKey: ['mesh-contours', meshId, interval],
-    queryFn: () => client.get<ContourData>(`/meshes/${meshId}/contours`, { params: { interval } }).then(r => r.data),
+    queryKey: ['mesh-contours', meshId, interval, resolution],
+    queryFn: async () => {
+      const data = await client
+        .get<ContourData>(`/meshes/${meshId}/contours`, { params: { interval } })
+        .then(r => r.data);
+      if (resolution <= 1) return data;
+      // Client-side decimation: the backend does not expose a resolution
+      // parameter, so we stride the contour points by the chosen factor.
+      return {
+        ...data,
+        lines: data.lines.map((line) => ({
+          ...line,
+          segments: line.segments.map((segment) => segment.filter((_, i) => i % resolution === 0)),
+        })),
+      };
+    },
     enabled: !!meshId,
   });
+}
+
+/**
+ * Fetch reference lines (drilling/blast mesh boundaries) for the current session.
+ *
+ * TODO: backend endpoint `GET /api/v1/reference-lines?session_id=...` is not
+ * implemented yet. The hook is stubbed to an empty response so the overlay
+ * component can be built and tested now; once the endpoint exists, replace this
+ * stub with a real `useQuery` call.
+ */
+export function useReferenceLines(_drillHardnessSessionId: string | null) {
+  return {
+    data: { lines: [] } satisfies ReferenceLineResponse,
+    isLoading: false,
+    error: null,
+  };
 }
 
 export function useMeshBreaklines(meshId: string | null) {

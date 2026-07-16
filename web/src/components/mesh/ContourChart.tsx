@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Chart,
   CategoryScale,
@@ -11,9 +12,10 @@ import {
   type ChartDataset,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
-import { useMeshContours, useSections } from '../../api/hooks';
+import { useMeshContours, useSections, useReferenceLines } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import { useTheme } from '../../stores/theme';
+import { ReferenceLinesOverlay, buildReferenceLineDatasets } from './ReferenceLinesOverlay';
 
 Chart.register(CategoryScale, LinearScale, LineElement, PointElement, Title, Tooltip, Legend);
 
@@ -23,6 +25,9 @@ export interface ContourBounds {
   ymin: number;
   ymax: number;
 }
+
+export type ContourMeshMode = 'topo' | 'ambas' | 'design';
+export type ContourResolution = 'low' | 'medium' | 'high';
 
 /**
  * Compute the natural aspect ratio of the contour data so 1m
@@ -44,11 +49,46 @@ export function computeContourAspectRatio(
   return dx / dy;
 }
 
+const RESOLUTION_STRIDE: Record<ContourResolution, number> = {
+  low: 4,
+  medium: 2,
+  high: 1,
+};
+
 export function ContourChart() {
-  const { designMeshId } = useSession();
-  const { data: contourData, isLoading, error } = useMeshContours(designMeshId);
+  const { t } = useTranslation();
+  const { designMeshId, topoMeshId } = useSession();
+  const [meshMode, setMeshMode] = useState<ContourMeshMode>('topo');
+  const [interval, setInterval] = useState(2.0);
+  const [resolution, setResolution] = useState<ContourResolution>('medium');
+  const stride = RESOLUTION_STRIDE[resolution];
+
+  const activeDesignMeshId = meshMode === 'design' || meshMode === 'ambas' ? designMeshId : null;
+  const activeTopoMeshId = meshMode === 'topo' || meshMode === 'ambas' ? topoMeshId : null;
+
+  const designContours = useMeshContours(activeDesignMeshId, interval, stride);
+  const topoContours = useMeshContours(activeTopoMeshId, interval, stride);
   const { data: sections } = useSections();
+  const { data: referenceLinesData } = useReferenceLines(null);
   const { isDark } = useTheme();
+  const referenceLines = referenceLinesData?.lines ?? [];
+
+  const contourData = useMemo(() => {
+    if (meshMode === 'design') return designContours.data;
+    if (meshMode === 'topo') return topoContours.data;
+    // 'ambas': overlay both meshes if both are available; otherwise fall back
+    // to whichever is loaded.
+    if (!designContours.data || !topoContours.data) {
+      return designContours.data ?? topoContours.data;
+    }
+    return {
+      ...designContours.data,
+      lines: [...designContours.data.lines, ...topoContours.data.lines],
+    };
+  }, [meshMode, designContours.data, topoContours.data]);
+
+  const isLoading = designContours.isLoading || topoContours.isLoading;
+  const error = designContours.error || topoContours.error;
 
   const textColor = isDark ? '#a3a3a3' : '#6b7280';
   const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
@@ -130,9 +170,14 @@ export function ContourChart() {
     });
   }, [sections, isDark]);
 
+  const referenceLineDatasets = useMemo<ChartDataset<'line'>[]>(
+    () => buildReferenceLineDatasets(referenceLines, isDark),
+    [referenceLines, isDark],
+  );
+
   const allDatasets = useMemo(
-    () => [...contourDatasets, ...sectionDatasets],
-    [contourDatasets, sectionDatasets],
+    () => [...contourDatasets, ...sectionDatasets, ...referenceLineDatasets],
+    [contourDatasets, sectionDatasets, referenceLineDatasets],
   );
 
   const chartData = useMemo(
@@ -203,7 +248,13 @@ export function ContourChart() {
     };
   }, [contourData, isDark, textColor, gridColor]);
 
-  if (!designMeshId) {
+  const requiredMeshId = meshMode === 'design'
+    ? designMeshId
+    : meshMode === 'topo'
+      ? topoMeshId
+      : (designMeshId ?? topoMeshId);
+
+  if (!requiredMeshId) {
     return (
       <div
         className="flex items-center justify-center h-full rounded-xl"
@@ -248,8 +299,76 @@ export function ContourChart() {
   }
 
   return (
-    <div className="w-full h-full">
-      <Line data={chartData} options={chartOptions} />
+    <div className="w-full h-full flex flex-col">
+      <div
+        className="flex flex-wrap items-center gap-4 px-3 py-2 text-sm"
+        style={{ borderBottom: '1px solid var(--color-border)' }}
+      >
+        <fieldset className="flex items-center gap-2">
+          <legend className="sr-only">{t('contour.mesh_label', 'Superficie')}</legend>
+          <label className="flex items-center gap-1">
+            <input
+              type="radio"
+              name="contour-mesh"
+              value="topo"
+              checked={meshMode === 'topo'}
+              onChange={() => setMeshMode('topo')}
+            />
+            {t('contour.mesh_topo', 'Topografía')}
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="radio"
+              name="contour-mesh"
+              value="ambas"
+              checked={meshMode === 'ambas'}
+              onChange={() => setMeshMode('ambas')}
+            />
+            {t('contour.mesh_ambas', 'Ambas')}
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="radio"
+              name="contour-mesh"
+              value="design"
+              checked={meshMode === 'design'}
+              onChange={() => setMeshMode('design')}
+            />
+            {t('contour.mesh_design', 'Diseño')}
+          </label>
+        </fieldset>
+
+        <label className="flex items-center gap-2">
+          {t('contour.interval_label', 'Intervalo (m)')}
+          <input
+            type="range"
+            min={0.5}
+            max={10}
+            step={0.5}
+            value={interval}
+            onChange={(e) => setInterval(parseFloat(e.target.value))}
+            aria-label={t('contour.interval_label', 'Intervalo (m)')}
+          />
+          <span className="tabular-nums">{interval.toFixed(1)} m</span>
+        </label>
+
+        <label className="flex items-center gap-2">
+          {t('contour.resolution_label', 'Resolución')}
+          <select
+            value={resolution}
+            onChange={(e) => setResolution(e.target.value as ContourResolution)}
+            aria-label={t('contour.resolution_label', 'Resolución')}
+          >
+            <option value="low">{t('contour.resolution_low', 'Baja')}</option>
+            <option value="medium">{t('contour.resolution_medium', 'Media')}</option>
+            <option value="high">{t('contour.resolution_high', 'Alta')}</option>
+          </select>
+        </label>
+      </div>
+      <div className="flex-1 min-h-0">
+        <Line data={chartData} options={chartOptions} />
+        <ReferenceLinesOverlay lines={referenceLines} bounds={contourData?.bounds as unknown as ContourBounds} />
+      </div>
     </div>
   );
 }

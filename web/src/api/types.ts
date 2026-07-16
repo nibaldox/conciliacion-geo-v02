@@ -228,6 +228,22 @@ export interface ContourData {
   lines: ContourLine[];
 }
 
+export interface ReferenceLinePoint {
+  x: number;
+  y: number;
+}
+
+export interface ReferenceLine {
+  id: string;
+  name: string;
+  color?: string;
+  points: ReferenceLinePoint[];
+}
+
+export interface ReferenceLineResponse {
+  lines: ReferenceLine[];
+}
+
 export interface BlastHoleOnProfile {
   hole_id: string;
   distance: number;

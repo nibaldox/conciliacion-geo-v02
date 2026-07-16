@@ -516,5 +516,15 @@
       "no_benches": "Sin bancos",
       "bar_aria": "Distribución de cumplimiento"
     }
+  },
+  "contour": {
+    "mesh_topo": "Topografía",
+    "mesh_ambas": "Ambas",
+    "mesh_design": "Diseño",
+    "interval_label": "Intervalo (m)",
+    "resolution_label": "Resolución",
+    "resolution_low": "Baja",
+    "resolution_medium": "Media",
+    "resolution_high": "Alta"
   }
 }
