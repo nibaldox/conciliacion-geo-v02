@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -160,3 +161,45 @@ def mesh_stl_temp(pit_mesh_design):
     yield path
     if os.path.exists(path):
         os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Electron bundle helpers
+# ---------------------------------------------------------------------------
+
+
+def _sidecar_paths():
+    repo = Path(__file__).resolve().parent.parent
+    return {
+        "linux": repo / "dist" / "conciliacion-api",
+        "win": repo / "dist" / "conciliacion-api.exe",
+    }
+
+
+def _get_sidecar_path():
+    paths = _sidecar_paths()
+    if paths["linux"].exists():
+        return paths["linux"]
+    if paths["win"].exists():
+        return paths["win"]
+    return None
+
+
+@pytest.fixture
+def sidecar_path(request):
+    """Return the built sidecar binary path, or skip if it does not exist."""
+    if request.config.getoption("--skip-electron", False):
+        pytest.skip("Skipped via --skip-electron")
+    path = _get_sidecar_path()
+    if not path:
+        pytest.skip("Sidecar binary not built")
+    return path
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--skip-electron",
+        action="store_true",
+        default=False,
+        help="Skip Electron/sidecar E2E tests that require the built bundle",
+    )

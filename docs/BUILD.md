@@ -111,7 +111,34 @@ cd electron
 npm test
 ```
 
-Incluye tests para `lib/port.js`, `lib/health.js` y `lib/dev-mode.js`.
+Incluye tests para `lib/port.js`, `lib/health.js`, `lib/dev-mode.js` y `lib/spawn-sidecar.js`.
+
+### Tests de integración de Electron
+
+```bash
+cd electron
+npm run test:integration
+```
+
+Este comando ejecuta los tests de `electron/lib/*.test.js` de forma explícita.
+
+### Tests E2E del bundle (Python)
+
+Estos tests verifican que el sidecar compilado arranque, responda a `/api/v1/health` y sirva el frontend empaquetado. Requieren el binario del sidecar y, si el puerto `57890` está ocupado, se saltan automáticamente.
+
+```bash
+# Requiere el sidecar compilado
+pyinstaller --clean --noconfirm conciliacion-api.spec
+
+# Ejecutar E2E
+pytest tests/test_electron_e2e.py -v
+```
+
+Si no se compiló el sidecar, los tests se saltan con `pytest.skip` y no fallan. Para forzar el salto:
+
+```bash
+pytest tests/test_electron_e2e.py -v --skip-electron
+```
 
 ## Solución de problemas
 

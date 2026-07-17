@@ -6,6 +6,7 @@ const { spawn } = require('node:child_process');
 const { isPortInUse } = require('./lib/port');
 const { waitForHealth } = require('./lib/health');
 const { isDevMode, getDevUrl } = require('./lib/dev-mode');
+const { spawnSidecar } = require('./lib/spawn-sidecar');
 
 const API_PORT = 57890;
 let pythonProcess = null;
@@ -25,11 +26,6 @@ app.setPath('userData', path.join(
   'chromium'
 ));
 
-function getSidecarPath() {
-  const name = process.platform === 'win32' ? 'conciliacion-api.exe' : 'conciliacion-api';
-  return path.join(process.resourcesPath, name);
-}
-
 function getLogFile() {
   if (process.platform === 'win32') {
     return path.join(process.env.APPDATA || os.homedir(), 'conciliacion', 'logs', 'conciliacion.log');
@@ -45,17 +41,7 @@ function setupSidecarLogging() {
 }
 
 function startSidecar(logFile) {
-  const sidecar = getSidecarPath();
-  if (!fs.existsSync(sidecar)) {
-    throw new Error(`Sidecar binary not found at ${sidecar}`);
-  }
-  const proc = spawn(sidecar, [], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  const out = fs.createWriteStream(logFile, { flags: 'a' });
-  proc.stdout.pipe(out);
-  proc.stderr.pipe(out);
+  const proc = spawnSidecar({ logFile });
   proc.on('exit', (code) => {
     if (code !== 0 && code !== null && mainWindow && !mainWindow.isDestroyed()) {
       console.error(`Sidecar exited with code ${code}`);
