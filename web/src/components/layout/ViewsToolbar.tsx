@@ -6,7 +6,8 @@ import { Icon3D, IconProfiles, IconDashboard, IconLightning, IconExport } from '
 
 export function ViewsToolbar() {
   const { t } = useTranslation();
-  const { activeWorkspaceView, setActiveWorkspaceView } = useSession();
+  const activeWorkspaceView = useSession((s) => s.activeWorkspaceView);
+  const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
 
   const views: {
     key: typeof activeWorkspaceView;

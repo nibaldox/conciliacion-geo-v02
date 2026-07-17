@@ -105,7 +105,9 @@ function Scene({
   bounds,
   layers,
 }: SceneProps) {
-  const { mapClickHandler, selectedCurveId, selectedCurvePoints } = useSession();
+  const mapClickHandler = useSession((s) => s.mapClickHandler);
+  const selectedCurveId = useSession((s) => s.selectedCurveId);
+  const selectedCurvePoints = useSession((s) => s.selectedCurvePoints);
   const { raycaster } = useThree();
 
   useEffect(() => {
@@ -383,7 +385,9 @@ function Scene({
 // ─── Main Exported Component (3D Viewport) ─────────────────────
 
 export function Mesh3DViewer() {
-  const { designMeshId, topoMeshId, selectedSection } = useSession();
+  const designMeshId = useSession((s) => s.designMeshId);
+  const topoMeshId = useSession((s) => s.topoMeshId);
+  const selectedSection = useSession((s) => s.selectedSection);
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
   const { data: designContours, isLoading: loadingContours } = useMeshBreaklines(designMeshId);

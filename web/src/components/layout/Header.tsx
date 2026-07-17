@@ -15,7 +15,8 @@ import { KeyboardShortcutsHelp } from '../ui/KeyboardShortcutsHelp';
 import { Button } from '../ui/Button';
 
 export function Header() {
-  const { reset, demoMode } = useSession();
+  const reset = useSession((s) => s.reset);
+  const demoMode = useSession((s) => s.demoMode);
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 

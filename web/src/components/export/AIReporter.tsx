@@ -151,7 +151,9 @@ function CollapsibleFieldset({ summary, open, onToggle, testId, children }: Fiel
 
 export function AIReporter() {
   const { t } = useTranslation();
-  const { demoMode, filters, setFilters } = useSession();
+  const demoMode = useSession((s) => s.demoMode);
+  const filters = useSession((s) => s.filters);
+  const setFilters = useSession((s) => s.setFilters);
   const health = useAIHealth();
   const healthState: 'pending' | 'ok' | 'unavailable' = health.isLoading
     ? 'pending'

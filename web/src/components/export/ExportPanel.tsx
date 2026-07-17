@@ -43,7 +43,7 @@ function readProfileFilters(): ProfileFilterSnapshot {
 
 export function ExportPanel() {
   const { t } = useTranslation();
-  const { filters: sessionFilters } = useSession();
+  const sessionFilters = useSession((s) => s.filters);
   const exportExcel = useExportExcel();
   const exportWord = useExportWord();
   const exportDxf = useExportDxf();

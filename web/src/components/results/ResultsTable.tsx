@@ -32,7 +32,7 @@ function MatchBadge({ type, t }: { type: MatchType; t: (k: string) => string }) 
 }
 
 export function ResultsTable() {
-  const { filters } = useSession();
+  const filters = useSession((s) => s.filters);
   const { data: results, isLoading, error } = useResults();
   const { t } = useTranslation();
 

@@ -27,7 +27,7 @@ interface AppLayoutProps {
 }
 
 export function AppLayout({ children }: AppLayoutProps) {
-  const { activeWorkspaceView } = useSession();
+  const activeWorkspaceView = useSession((s) => s.activeWorkspaceView);
   const { t } = useTranslation();
 
   const getViewTitle = () => {

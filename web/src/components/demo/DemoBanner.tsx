@@ -9,7 +9,11 @@ import { useSession } from '../../stores/session';
  * The user can exit demo mode at any time to switch to the real flow.
  */
 export function DemoBanner() {
-  const { demoMode, demoLoading, demoError, exitDemo, demoData } = useSession();
+  const demoMode = useSession((s) => s.demoMode);
+  const demoLoading = useSession((s) => s.demoLoading);
+  const demoError = useSession((s) => s.demoError);
+  const exitDemo = useSession((s) => s.exitDemo);
+  const demoData = useSession((s) => s.demoData);
   const { t } = useTranslation();
 
   if (!demoMode && !demoLoading && !demoError) return null;

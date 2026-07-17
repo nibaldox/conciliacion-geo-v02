@@ -6,15 +6,18 @@ import { Button } from '../ui/Button';
 
 export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHandler?: (handler: ((x: number, y: number, curveId?: string, pointIndex?: number) => void) | null) => void }) {
   const { t } = useTranslation();
-  const { designMeshId } = useSession();
+  const designMeshId = useSession((s) => s.designMeshId);
   const { data: contourData } = useMeshBreaklines(designMeshId);
   const mutation = useCurveSection();
-  
+
   const [spacing, setSpacing] = useState(10);
   const [lengthUp, setLengthUp] = useState(100);
   const [lengthDown, setLengthDown] = useState(100);
   const [sector, setSector] = useState('');
-  const { selectedCurveId, selectedCurvePoints, setSelectedCurveId, setSelectedCurvePoints } = useSession();
+  const selectedCurveId = useSession((s) => s.selectedCurveId);
+  const selectedCurvePoints = useSession((s) => s.selectedCurvePoints);
+  const setSelectedCurveId = useSession((s) => s.setSelectedCurveId);
+  const setSelectedCurvePoints = useSession((s) => s.setSelectedCurvePoints);
 
   const handleMapClick = useCallback(
     (x: number, y: number, curveId?: string, pointIndex?: number) => {

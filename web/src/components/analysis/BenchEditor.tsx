@@ -49,7 +49,7 @@ function ReadOnlyCell({ value, format }: { value: number; format: 'meters' | 'de
 // ─── Main Component ──────────────────────────────────────────
 
 export function BenchEditor() {
-  const { selectedSection } = useSession();
+  const selectedSection = useSession((s) => s.selectedSection);
   const { data: profile } = useProfile(selectedSection);
   const updateReconciled = useUpdateReconciled();
 

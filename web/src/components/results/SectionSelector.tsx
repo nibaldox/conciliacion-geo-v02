@@ -4,7 +4,8 @@ import { useSession } from '../../stores/session';
 
 export function SectionSelector() {
   const { data: sections, isLoading } = useSections();
-  const { selectedSection, setSelectedSection } = useSession();
+  const selectedSection = useSession((s) => s.selectedSection);
+  const setSelectedSection = useSession((s) => s.setSelectedSection);
   const { t } = useTranslation();
 
   return (

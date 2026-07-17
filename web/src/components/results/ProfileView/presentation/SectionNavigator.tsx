@@ -32,7 +32,8 @@ export interface SectionNavigatorProps {
 export function SectionNavigator({ variant = 'compact', showLabels = false }: SectionNavigatorProps) {
   const { t } = useTranslation();
   const { data: sections } = useSectionsQuery();
-  const { selectedSection, setSelectedSection } = useSession();
+  const selectedSection = useSession((s) => s.selectedSection);
+  const setSelectedSection = useSession((s) => s.setSelectedSection);
 
   const { prev, next } = useMemo(() => {
     if (!selectedSection || sections.length === 0) return { prev: null, next: null };

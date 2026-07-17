@@ -23,16 +23,14 @@ type SectionTab = 'curves' | 'file';
 
 export function LeftSidebar() {
   const { t } = useTranslation();
-  const {
-    sidebarCollapsed,
-    setSidebarCollapsed,
-    setActiveWorkspaceView,
-    designMeshId,
-    topoMeshId,
-    setDesignMeshId,
-    setTopoMeshId,
-    setMapClickHandler,
-  } = useSession();
+  const sidebarCollapsed = useSession((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
+  const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
+  const designMeshId = useSession((s) => s.designMeshId);
+  const topoMeshId = useSession((s) => s.topoMeshId);
+  const setDesignMeshId = useSession((s) => s.setDesignMeshId);
+  const setTopoMeshId = useSession((s) => s.setTopoMeshId);
+  const setMapClickHandler = useSession((s) => s.setMapClickHandler);
 
   const bothUploaded = !!designMeshId && !!topoMeshId;
 

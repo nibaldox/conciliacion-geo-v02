@@ -47,7 +47,8 @@ function WarningState({ icon, title, description }: { icon: string; title: strin
 
 function ProfilesWorkspace() {
   const { t } = useTranslation();
-  const { selectedSection, setSelectedSection } = useSession();
+  const selectedSection = useSession((s) => s.selectedSection);
+  const setSelectedSection = useSession((s) => s.setSelectedSection);
   const [mode, setMode] = useState<'grid' | 'detail'>('grid');
 
   // When user picks a section from the grid, auto-switch to detail
@@ -130,7 +131,9 @@ function ProfilesWorkspace() {
 
 
 function WorkspaceRouter() {
-  const { activeWorkspaceView, designMeshId, topoMeshId } = useSession();
+  const activeWorkspaceView = useSession((s) => s.activeWorkspaceView);
+  const designMeshId = useSession((s) => s.designMeshId);
+  const topoMeshId = useSession((s) => s.topoMeshId);
   const { data: sections } = useSections();
   const { data: status } = useProcessStatus();
   const { t } = useTranslation();
@@ -244,7 +247,7 @@ function App() {
 
   const { isDark } = useTheme();
   const { i18n } = useTranslation();
-  const { setActiveWorkspaceView } = useSession();
+  const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
 
   // Workspace view hotkeys
   useHotkeys(['1', '2', '3', '4', '5'], (e) => {

@@ -10,7 +10,9 @@ import { Button } from '../ui/Button';
  * results tab so they can see what the app looks like with data.
  */
 export function TryDemoButton() {
-  const { demoMode, demoLoading, loadDemo } = useSession();
+  const demoMode = useSession((s) => s.demoMode);
+  const demoLoading = useSession((s) => s.demoLoading);
+  const loadDemo = useSession((s) => s.loadDemo);
   const qc = useQueryClient();
   const { t } = useTranslation();
 

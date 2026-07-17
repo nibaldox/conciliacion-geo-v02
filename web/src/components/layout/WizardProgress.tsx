@@ -35,7 +35,8 @@ interface WizardProgressProps {
 
 export function WizardProgress({ variant = 'numbered' }: WizardProgressProps) {
   const { t } = useTranslation();
-  const { currentStep, setStep } = useSession();
+  const currentStep = useSession((s) => s.currentStep);
+  const setStep = useSession((s) => s.setStep);
 
   return (
     <nav

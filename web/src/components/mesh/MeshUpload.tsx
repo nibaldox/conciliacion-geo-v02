@@ -226,7 +226,10 @@ export type { DropZoneProps };
 /* ─── Main MeshUpload Component ──────────────────────────── */
 
 export function MeshUpload() {
-  const { designMeshId, topoMeshId, setDesignMeshId, setTopoMeshId } = useSession();
+  const designMeshId = useSession((s) => s.designMeshId);
+  const topoMeshId = useSession((s) => s.topoMeshId);
+  const setDesignMeshId = useSession((s) => s.setDesignMeshId);
+  const setTopoMeshId = useSession((s) => s.setTopoMeshId);
   const { t } = useTranslation();
   const bothUploaded = !!designMeshId && !!topoMeshId;
 

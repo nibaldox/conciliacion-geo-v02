@@ -57,7 +57,8 @@ const RESOLUTION_STRIDE: Record<ContourResolution, number> = {
 
 export function ContourChart() {
   const { t } = useTranslation();
-  const { designMeshId, topoMeshId } = useSession();
+  const designMeshId = useSession((s) => s.designMeshId);
+  const topoMeshId = useSession((s) => s.topoMeshId);
   const [meshMode, setMeshMode] = useState<ContourMeshMode>('topo');
   const [interval, setInterval] = useState(2.0);
   const [resolution, setResolution] = useState<ContourResolution>('medium');
