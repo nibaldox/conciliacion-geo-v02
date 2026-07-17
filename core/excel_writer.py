@@ -6,6 +6,7 @@ ui/tabs/export) can rely on a single exception type for error handling.
 See docs/BARRIDO_2026-06-21.md issue D2.
 """
 from typing import List, Dict, Any, Optional
+from dataclasses import dataclass
 
 import openpyxl
 import pandas as pd
@@ -23,6 +24,22 @@ class ExcelWriterError(Exception):
     can inspect the cause while presenting a clean domain error to
     end users. See docs/BARRIDO_2026-06-21.md issue D2.
     """
+
+
+# ─── Number-format constants ────────────────────────────────────────────────
+# Centralised so a future change to display rules (more decimals, locale-
+# aware separators) only touches one place. Previously these were 4 inline
+# string literals scattered across 2 functions.
+
+@dataclass(frozen=True)
+class NumberFormat:
+    integer: str = "#,##0"
+    decimal2: str = "0.00"
+    decimal1: str = "0.0"
+    integer_with_radix_decimal: str = "#,##0.0"
+
+
+NUMBER_FORMAT = NumberFormat()
 
 from core.blast_correlation import (
     compute_blast_geotech_correlation,
@@ -486,10 +503,10 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
             cell.font = regular_font
             cell.border = thin_border
             if col_idx in (2, 3):
-                cell.number_format = '#,##0'
+                cell.number_format = NUMBER_FORMAT.integer
                 cell.alignment = center_align
             elif col_idx == 4:
-                cell.number_format = '0.00'
+                cell.number_format = NUMBER_FORMAT.decimal2
                 cell.alignment = center_align
             else:
                 cell.alignment = left_align
@@ -556,9 +573,9 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
             else:
                 cell.alignment = center_align
                 if col_idx in (2, 3, 4, 5, 6, 7):
-                    cell.number_format = '#,##0.0'
+                    cell.number_format = NUMBER_FORMAT.integer_with_radix_decimal
                 elif col_idx in (8, 9, 10, 11, 12):
-                    cell.number_format = '0.0'
+                    cell.number_format = NUMBER_FORMAT.decimal1
 
         if idx % 2 == 1:
             for col_idx in range(1, 13):
