@@ -13,13 +13,57 @@ import {
   useUpdateSettings,
   useProcessStatus,
 } from '../../api/hooks';
-import type { ProcessSettings } from '../../api/types';
+import type { ProcessSettings, Tolerances } from '../../api/types';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
 import { Button } from '../ui/Button';
 import { IconMesh, IconSections, IconSettings, IconLightning } from '../ui/Icons';
+import { useSidebarResize } from './useSidebarResize';
+import { TolerancesForm } from './TolerancesForm';
 
 
 type SectionTab = 'curves' | 'file';
+
+type AccordionKey = 'mallas' | 'secciones' | 'tolerancias' | 'procesamiento';
+
+// Process-parameter input config. Drives the map-driven render in the
+// "Parámetros de Proceso" section of the sidebar.
+const PROCESS_FIELDS = [
+  { key: 'resolution',     labelKey: 'sidebar.resolution',     step: 0.1, min: 0.1, max: undefined, fallback: 0.1 },
+  { key: 'face_threshold', labelKey: 'sidebar.face_threshold', step: 1,   min: 1,   max: 90,        fallback: 40 },
+  { key: 'berm_threshold', labelKey: 'sidebar.berm_threshold', step: 1,   min: 1,   max: 90,        fallback: 20 },
+] as const;
+
+interface AccordionItemProps {
+  id: AccordionKey;
+  title: string;
+  icon: React.ReactNode;
+  openSection: AccordionKey | '';
+  toggle: (id: AccordionKey) => void;
+  children: React.ReactNode;
+}
+
+function AccordionItem({ id, title, icon, openSection, toggle, children }: AccordionItemProps) {
+  const isOpen = openSection === id;
+  return (
+    <div className="border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+      <button
+        onClick={() => toggle(id)}
+        className="w-full flex items-center justify-between p-3 text-xs font-mono font-semibold uppercase tracking-wider transition-colors hover:bg-surface-muted"
+        style={{
+          backgroundColor: isOpen ? 'var(--color-surface-sunken)' : 'transparent',
+          color: isOpen ? 'var(--color-accent-bright)' : 'var(--color-text-secondary)',
+        }}
+      >
+        <span className="flex items-center gap-2">
+          {icon}
+          {title}
+        </span>
+        <span>{isOpen ? '▼' : '▶'}</span>
+      </button>
+      {isOpen && children}
+    </div>
+  );
+}
 
 export function LeftSidebar() {
   const { t } = useTranslation();
@@ -39,6 +83,9 @@ export function LeftSidebar() {
 
   // Section definition tab state
   const [sectionTab, setSectionTab] = useState<SectionTab>('curves');
+
+  // Sidebar resize (mouse drag + localStorage persistence)
+  const { sidebarWidth, startResizing, isResizing } = useSidebarResize();
 
   // Settings state & mutations
   const { data: settings } = useSettings();
@@ -109,51 +156,19 @@ export function LeftSidebar() {
     setOpenSection(openSection === section ? '' : section);
   };
 
-  // Resize state
-  const [sidebarWidth, setSidebarWidth] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('sidebar_width');
-      if (saved) return parseInt(saved, 10);
-    }
-    return 320;
-  });
-  const isResizing = useRef(false);
-  // Keep latest width in a ref so the window listeners (attached once)
-  // can persist to localStorage on mouseup without re-subscribing per
-  // pixel of drag. Previously the effect depended on `sidebarWidth`
-  // and re-attached the listeners every mousemove tick.
-  const sidebarWidthRef = useRef(sidebarWidth);
-  sidebarWidthRef.current = sidebarWidth;
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
-      const newWidth = Math.max(240, Math.min(e.clientX, 800));
-      setSidebarWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      if (isResizing.current) {
-        isResizing.current = false;
-        document.body.style.cursor = 'default';
-        document.body.classList.remove('select-none');
-        localStorage.setItem('sidebar_width', sidebarWidthRef.current.toString());
-      }
-    };
-
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, []);
-
-  const startResizing = (e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizing.current = true;
-    document.body.style.cursor = 'col-resize';
-    document.body.classList.add('select-none');
+  // Persist a single tolerance field (debounced through saveSettings).
+  const handleToleranceChange = <K extends keyof Tolerances>(
+    key: K,
+    partial: Partial<Tolerances[K]>,
+  ) => {
+    if (!settings) return;
+    saveSettings({
+      process: processSettings,
+      tolerances: {
+        ...settings.tolerances,
+        [key]: { ...settings.tolerances[key], ...partial },
+      },
+    });
   };
 
   // Input styles
@@ -230,178 +245,96 @@ export function LeftSidebar() {
 
       {/* Accordions container */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {/* ── Accordion 1: Mallas ─────────────────── */}
-        <div className="border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
-          <button
-            onClick={() => toggleAccordion('mallas')}
-            className="w-full flex items-center justify-between p-3 text-xs font-mono font-semibold uppercase tracking-wider transition-colors hover:bg-surface-muted"
-            style={{
-              backgroundColor: openSection === 'mallas' ? 'var(--color-surface-sunken)' : 'transparent',
-              color: openSection === 'mallas' ? 'var(--color-accent-bright)' : 'var(--color-text-secondary)',
-            }}
-          >
-            <span className="flex items-center gap-2">
-              <IconMesh className="w-4 h-4" />
-              {t('step1.title')}
-            </span>
-            <span>{openSection === 'mallas' ? '▼' : '▶'}</span>
-          </button>
-
-          {openSection === 'mallas' && (
-            <div className="p-3 space-y-3 bg-surface-sunken border-t border-border">
-              <div className="space-y-3">
-                <DropZone type="design" meshId={designMeshId} onSetMeshId={setDesignMeshId} />
-                <DropZone type="topo" meshId={topoMeshId} onSetMeshId={setTopoMeshId} />
+        <AccordionItem id="mallas" title={t('step1.title')} icon={<IconMesh className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-3 space-y-3 bg-surface-sunken border-t border-border">
+            <div className="space-y-3">
+              <DropZone type="design" meshId={designMeshId} onSetMeshId={setDesignMeshId} />
+              <DropZone type="topo" meshId={topoMeshId} onSetMeshId={setTopoMeshId} />
+            </div>
+            {!bothUploaded && (
+              <div className="pt-2 text-center">
+                <TryDemoButton />
               </div>
-              {!bothUploaded && (
-                <div className="pt-2 text-center">
-                  <TryDemoButton />
+            )}
+          </div>
+        </AccordionItem>
+
+        <AccordionItem id="secciones" title={t('step2.title', { defaultValue: 'Líneas de Sección' })} icon={<IconSections className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-3 space-y-4 bg-surface-sunken border-t border-border">
+            {!bothUploaded ? (
+              <div className="p-4 rounded border border-dashed text-center" style={{ borderColor: 'var(--status-nok-border)', backgroundColor: 'var(--status-nok-bg)' }}>
+                <p className="text-xs font-medium" style={{ color: 'var(--status-nok-text)' }}>
+                  {t('plan_view_no_data', { defaultValue: 'Cargue superficies primero para definir secciones' })}
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Step 2 Form tabs */}
+                <div className="grid grid-cols-2 gap-1 p-1 rounded-lg shrink-0" style={{ backgroundColor: 'var(--color-surface)' }}>
+                  {(['curves', 'file'] as SectionTab[]).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setSectionTab(tab)}
+                      className="py-1 text-[9px] uppercase tracking-wider font-semibold rounded transition-all"
+                      style={{
+                        backgroundColor: sectionTab === tab ? 'var(--color-accent-bg)' : 'transparent',
+                        color: sectionTab === tab ? 'var(--color-accent-bright)' : 'var(--color-text-muted)',
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {tab === 'curves' ? 'Por Curvas' : 'Archivo'}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
 
-        {/* ── Accordion 2: Secciones ─────────────────── */}
-        <div className="border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
-          <button
-            onClick={() => toggleAccordion('secciones')}
-            className="w-full flex items-center justify-between p-3 text-xs font-mono font-semibold uppercase tracking-wider transition-colors hover:bg-surface-muted"
-            style={{
-              backgroundColor: openSection === 'secciones' ? 'var(--color-surface-sunken)' : 'transparent',
-              color: openSection === 'secciones' ? 'var(--color-accent-bright)' : 'var(--color-text-secondary)',
-            }}
-          >
-            <span className="flex items-center gap-2">
-              <IconSections className="w-4 h-4" />
-              {t('step2.title', { defaultValue: 'Líneas de Sección' })}
-            </span>
-            <span>{openSection === 'secciones' ? '▼' : '▶'}</span>
-          </button>
-
-          {openSection === 'secciones' && (
-            <div className="p-3 space-y-4 bg-surface-sunken border-t border-border">
-              {!bothUploaded ? (
-                <div className="p-4 rounded border border-dashed text-center" style={{ borderColor: 'var(--status-nok-border)', backgroundColor: 'var(--status-nok-bg)' }}>
-                  <p className="text-xs font-medium" style={{ color: 'var(--status-nok-text)' }}>
-                    {t('plan_view_no_data', { defaultValue: 'Cargue superficies primero para definir secciones' })}
-                  </p>
+                {/* Selected form */}
+                <div className="p-2 border rounded" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-raised)' }}>
+                  {sectionTab === 'curves' && (
+                    <SectionCurveForm onRegisterClickHandler={setMapClickHandler} />
+                  )}
+                  {sectionTab === 'file' && <SectionFileUpload />}
                 </div>
-              ) : (
-                <>
-                  {/* Step 2 Form tabs */}
-                  <div className="grid grid-cols-2 gap-1 p-1 rounded-lg shrink-0" style={{ backgroundColor: 'var(--color-surface)' }}>
-                    {(['curves', 'file'] as SectionTab[]).map((tab) => (
-                      <button
-                        key={tab}
-                        onClick={() => setSectionTab(tab)}
-                        className="py-1 text-[9px] uppercase tracking-wider font-semibold rounded transition-all"
-                        style={{
-                          backgroundColor: sectionTab === tab ? 'var(--color-accent-bg)' : 'transparent',
-                          color: sectionTab === tab ? 'var(--color-accent-bright)' : 'var(--color-text-muted)',
-                          fontFamily: 'var(--font-mono)',
-                        }}
-                      >
-                        {tab === 'curves' ? 'Por Curvas' : 'Archivo'}
-                      </button>
-                    ))}
+
+                {/* List of sections */}
+                <div>
+                  <h4 className="text-[10px] uppercase tracking-widest font-mono font-bold mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                    {t('step2.existing_sections', { defaultValue: 'Secciones Existentes' })}
+                  </h4>
+                  <div className="max-h-48 overflow-y-auto border rounded" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
+                    <SectionList />
                   </div>
+                </div>
+              </>
+            )}
+          </div>
+        </AccordionItem>
 
-                  {/* Selected form */}
-                  <div className="p-2 border rounded" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-raised)' }}>
-                    {sectionTab === 'curves' && (
-                      <SectionCurveForm onRegisterClickHandler={setMapClickHandler} />
-                    )}
-                    {sectionTab === 'file' && <SectionFileUpload />}
-                  </div>
-
-                  {/* List of sections */}
-                  <div>
-                    <h4 className="text-[10px] uppercase tracking-widest font-mono font-bold mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      {t('step2.existing_sections', { defaultValue: 'Secciones Existentes' })}
-                    </h4>
-                    <div className="max-h-48 overflow-y-auto border rounded" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
-                      <SectionList />
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* ── Accordion 3: Tolerancias y Parámetros ─────────────────── */}
-        <div className="border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
-          <button
-            onClick={() => toggleAccordion('tolerancias')}
-            className="w-full flex items-center justify-between p-3 text-xs font-mono font-semibold uppercase tracking-wider transition-colors hover:bg-surface-muted"
-            style={{
-              backgroundColor: openSection === 'tolerancias' ? 'var(--color-surface-sunken)' : 'transparent',
-              color: openSection === 'tolerancias' ? 'var(--color-accent-bright)' : 'var(--color-text-secondary)',
-            }}
-          >
-            <span className="flex items-center gap-2">
-              <IconSettings className="w-4 h-4" />
-              {t('step3.settings_title', { defaultValue: 'Tolerancias y Parámetros' })}
-            </span>
-            <span>{openSection === 'tolerancias' ? '▼' : '▶'}</span>
-          </button>
-
-          {openSection === 'tolerancias' && (
-            <div className="p-3 space-y-4 bg-surface-sunken border-t border-border">
+        <AccordionItem id="tolerancias" title={t('step3.settings_title', { defaultValue: 'Tolerancias y Parámetros' })} icon={<IconSettings className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-3 space-y-4 bg-surface-sunken border-t border-border">
               {/* Process parameters */}
               <section className="space-y-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                 <h4 className="text-[10px] uppercase tracking-widest font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('sidebar.process_title')}
                 </h4>
                 <div className="grid grid-cols-1 gap-2.5">
-                  <div>
-                    <label className="block text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      {t('sidebar.resolution')}
-                    </label>
-                    <input
-                      type="number"
-                      step={0.1}
-                      min={0.1}
-                      value={processSettings.resolution}
-                      onChange={(e) => handleProcessChange('resolution', parseFloat(e.target.value) || 0.1)}
-                      className={inputCls}
-                      style={inputStyle}
-                      disabled={isProcessing}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      {t('sidebar.face_threshold')}
-                    </label>
-                    <input
-                      type="number"
-                      step={1}
-                      min={1}
-                      max={90}
-                      value={processSettings.face_threshold}
-                      onChange={(e) => handleProcessChange('face_threshold', parseFloat(e.target.value) || 40)}
-                      className={inputCls}
-                      style={inputStyle}
-                      disabled={isProcessing}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                      {t('sidebar.berm_threshold')}
-                    </label>
-                    <input
-                      type="number"
-                      step={1}
-                      min={1}
-                      max={90}
-                      value={processSettings.berm_threshold}
-                      onChange={(e) => handleProcessChange('berm_threshold', parseFloat(e.target.value) || 20)}
-                      className={inputCls}
-                      style={inputStyle}
-                      disabled={isProcessing}
-                    />
-                  </div>
+                  {PROCESS_FIELDS.map((f) => (
+                    <div key={f.key}>
+                      <label className="block text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
+                        {t(f.labelKey)}
+                      </label>
+                      <input
+                        type="number"
+                        step={f.step}
+                        min={f.min}
+                        max={f.max}
+                        value={processSettings[f.key]}
+                        onChange={(e) => handleProcessChange(f.key, parseFloat(e.target.value) || f.fallback)}
+                        className={inputCls}
+                        style={inputStyle}
+                        disabled={isProcessing}
+                      />
+                    </div>
+                  ))}
                   <Button
                     variant="terminal"
                     onClick={handleSaveSettings}
@@ -417,216 +350,30 @@ export function LeftSidebar() {
 
               {/* Tolerances */}
               {settings && (
-                <section className="space-y-3">
-                  <h4 className="text-[10px] uppercase tracking-widest font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('sidebar.tolerances_title')}
-                  </h4>
-                  <div className="space-y-2.5">
-                    <div>
-                      <p className="text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_bench_height')}</p>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          step={0.1}
-                          placeholder="−"
-                          value={settings.tolerances.bench_height.neg}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, bench_height: { ...settings.tolerances.bench_height, neg: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                        <input
-                          type="number"
-                          step={0.1}
-                          placeholder="+"
-                          value={settings.tolerances.bench_height.pos}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, bench_height: { ...settings.tolerances.bench_height, pos: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_face_angle')}</p>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          step={0.5}
-                          placeholder="−"
-                          value={settings.tolerances.face_angle.neg}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, face_angle: { ...settings.tolerances.face_angle, neg: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                        <input
-                          type="number"
-                          step={0.5}
-                          placeholder="+"
-                          value={settings.tolerances.face_angle.pos}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, face_angle: { ...settings.tolerances.face_angle, pos: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                        {t('sidebar.tol_berm_min')}
-                      </label>
-                      <input
-                        type="number"
-                        step={0.5}
-                        min={0}
-                        value={settings.tolerances.berm_width.min}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          if (!isNaN(val)) saveSettings({
-                            process: processSettings,
-                            tolerances: { ...settings.tolerances, berm_width: { min: val } },
-                          });
-                        }}
-                        className={inputCls}
-                        style={inputStyle}
-                      />
-                    </div>
-
-                    <div>
-                      <p className="text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_inter_ramp')}</p>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          step={0.5}
-                          placeholder="−"
-                          value={settings.tolerances.inter_ramp_angle.neg}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, inter_ramp_angle: { ...settings.tolerances.inter_ramp_angle, neg: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                        <input
-                          type="number"
-                          step={0.5}
-                          placeholder="+"
-                          value={settings.tolerances.inter_ramp_angle.pos}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, inter_ramp_angle: { ...settings.tolerances.inter_ramp_angle, pos: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <p className="text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>{t('sidebar.tol_overall')}</p>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          step={0.5}
-                          placeholder="−"
-                          value={settings.tolerances.overall_angle.neg}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, overall_angle: { ...settings.tolerances.overall_angle, neg: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                        <input
-                          type="number"
-                          step={0.5}
-                          placeholder="+"
-                          value={settings.tolerances.overall_angle.pos}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            if (!isNaN(val)) saveSettings({
-                              process: processSettings,
-                              tolerances: { ...settings.tolerances, overall_angle: { ...settings.tolerances.overall_angle, pos: val } },
-                            });
-                          }}
-                          className={inputCls}
-                          style={inputStyle}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </section>
+                <TolerancesForm
+                  tolerances={settings.tolerances}
+                  onChange={handleToleranceChange}
+                />
               )}
             </div>
-          )}
-        </div>
+        </AccordionItem>
 
-        {/* ── Accordion 4: Procesamiento ─────────────────── */}
-        <div className="border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
-          <button
-            onClick={() => toggleAccordion('procesamiento')}
-            className="w-full flex items-center justify-between p-3 text-xs font-mono font-semibold uppercase tracking-wider transition-colors hover:bg-surface-muted"
-            style={{
-              backgroundColor: openSection === 'procesamiento' ? 'var(--color-surface-sunken)' : 'transparent',
-              color: openSection === 'procesamiento' ? 'var(--color-accent-bright)' : 'var(--color-text-secondary)',
-            }}
-          >
-            <span className="flex items-center gap-2">
-              <IconLightning className="w-4 h-4" />
-              {t('step3.title')}
-            </span>
-            <span>{openSection === 'procesamiento' ? '▼' : '▶'}</span>
-          </button>
-
-          {openSection === 'procesamiento' && (
-            <div className="p-3 bg-surface-sunken border-t border-border flex flex-col items-center gap-3">
-              <ProcessButton />
-              <ProcessProgress />
-            </div>
-          )}
-        </div>
+        <AccordionItem id="procesamiento" title={t('step3.title')} icon={<IconLightning className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-3 bg-surface-sunken border-t border-border flex flex-col items-center gap-3">
+            <ProcessButton />
+            <ProcessProgress />
+          </div>
+        </AccordionItem>
       </div>
 
       {/* Resize Handle */}
       <div
         className="absolute top-0 right-0 w-1 h-full cursor-col-resize z-50 transition-colors"
-        style={{ backgroundColor: isResizing.current ? 'var(--color-accent)' : 'transparent' }}
+        style={{ backgroundColor: isResizing ? 'var(--color-accent)' : 'transparent' }}
         onMouseDown={startResizing}
         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-accent)')}
         onMouseLeave={(e) => {
-          if (!isResizing.current) e.currentTarget.style.backgroundColor = 'transparent';
+          if (!isResizing) e.currentTarget.style.backgroundColor = 'transparent';
         }}
         aria-hidden="true"
       />
