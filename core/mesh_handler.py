@@ -175,7 +175,7 @@ def load_dxf_polyline(file_path: str) -> np.ndarray:
 
         raise ValueError("No se encontraron entidades POLYLINE o LWPOLYLINE en el DXF.")
     except (ValueError, KeyError, AttributeError) as e:
-        logger.warning("DXF polyline extraction failed for %s: %s", filepath, e)
+        logger.warning("DXF polyline extraction failed for %s: %s", file_path, e)
         return np.array([])
 
 
