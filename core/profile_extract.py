@@ -882,6 +882,7 @@ def _build_reconciled_points(
     benches,
     source: str = "topo",
     profile=None,
+    floor_elevation: float | None = None,
 ) -> List[ReconciledPoint]:
     """Return ordered :class:`ReconciledPoint` entries for ``benches``.
 
@@ -989,4 +990,23 @@ def _build_reconciled_points(
                     segment_type="berm_top",
                     source=source,
                 ))
+
+    # Extender el perfil hasta el piso real (cota del fondo del rajo).
+    # El último toe detectado rara vez coincide con el fondo real porque:
+    # - La pared final puede no formar un banco detectable
+    # - Hay derrames acumulados sobre el piso
+    # - El RDP colapsa el tramo final
+    # Si se provee floor_elevation y es menor que el último toe,
+    # bajamos verticalmente desde el último toe hasta la cota del piso.
+    if floor_elevation is not None and pts:
+        last = pts[-1]
+        if float(floor_elevation) < float(last.elevation):
+            pts.append(ReconciledPoint(
+                distance=float(last.distance),
+                elevation=float(floor_elevation),
+                bench_number=int(last.bench_number),
+                segment_type="floor",
+                source=source,
+            ))
+
     return pts

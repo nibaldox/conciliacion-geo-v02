@@ -506,12 +506,23 @@ def _build_profile_payload_sync(
         (pt_prof.distances, pt_prof.elevations)
         if pt_prof is not None else None
     )
+    # Cota del piso y crest máxima: se calculan del perfil original ANTES
+    # de construir los reconciled profiles para que el perfil conciliado
+    # se extienda hasta el piso real.
+    topo_floor = None
+    topo_crest_max = None
+    if pt_prof is not None and len(pt_prof.elevations) > 0:
+        topo_floor = float(np.min(pt_prof.elevations))
+        topo_crest_max = float(np.max(pt_prof.elevations))
+
     design_extraction = db.get_extraction(session_id, sec.name, "design")
     if design_extraction:
         benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
         if benches_d:
+            design_floor = float(np.min(pd_prof.elevations)) if pd_prof is not None else None
             prof_d = build_reconciled_profile_v2(
                 benches_d, source="design", profile=profile_d_arg,
+                floor_elevation=design_floor,
             )
             result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
             result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(benches_d)
@@ -522,17 +533,16 @@ def _build_profile_payload_sync(
         if benches_t:
             prof_t = build_reconciled_profile_v2(
                 benches_t, source="topo", profile=profile_t_arg,
+                floor_elevation=topo_floor,
             )
             result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
             result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(benches_t)
             result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
 
-    # Cota del piso y crest máxima: se calculan del perfil topo original
-    # (pt_prof) para capturar el punto más bajo real del terreno,
-    # no del perfil idealizado.
-    if pt_prof is not None and len(pt_prof.elevations) > 0:
-        result["floor_elevation"] = float(np.min(pt_prof.elevations))
-        result["crest_elevation_max"] = float(np.max(pt_prof.elevations))
+    if topo_floor is not None:
+        result["floor_elevation"] = topo_floor
+    if topo_crest_max is not None:
+        result["crest_elevation_max"] = topo_crest_max
 
     return result
 

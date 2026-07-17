@@ -55,7 +55,8 @@ def _evaluate_status(deviation, tol_neg, tol_pos):
 
 def build_reconciled_profile(benches, *, source: str = "topo",
                              return_v2: bool = False,
-                             profile=None):
+                             profile=None,
+                             floor_elevation: float | None = None):
     """Build an idealised profile from detected crest/toe points.
 
     Parameters
@@ -118,7 +119,8 @@ def build_reconciled_profile(benches, *, source: str = "topo",
             np.array([p[1] for p in pts_sorted], dtype=float),
         )
 
-    pts = _build_reconciled_points(benches, source=source, profile=profile)
+    pts = _build_reconciled_points(benches, source=source, profile=profile,
+                                   floor_elevation=floor_elevation)
     if not pts:
         return ReconciledProfile(
             distances=np.array([], dtype=float),
@@ -137,6 +139,7 @@ def build_reconciled_profile(benches, *, source: str = "topo",
 def build_reconciled_profile_v2(
     benches, *, source: str = "topo",
     profile=None,
+    floor_elevation: float | None = None,
 ) -> ReconciledProfile:
     """Convenience wrapper that always returns a :class:`ReconciledProfile`.
 
@@ -147,9 +150,13 @@ def build_reconciled_profile_v2(
     If ``profile`` is provided, the returned
     :class:`ReconciledProfile` includes ``face`` segments sampled
     from the profile between each crest and toe.
+
+    If ``floor_elevation`` is provided, the polyline extends
+    vertically from the last detected toe down to the real pit floor.
     """
     return build_reconciled_profile(
         benches, source=source, return_v2=True, profile=profile,
+        floor_elevation=floor_elevation,
     )
 
 
