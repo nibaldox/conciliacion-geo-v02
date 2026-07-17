@@ -184,3 +184,50 @@ El bundle usa un directorio de usuario (`userData`) bajo `~/.local/share/concili
 - `web/public/Cesium/` está trackeado en git (~22 MB) y no se incluye como dependencia npm. No agregar `cesium` a `package.json`.
 - Para builds de Electron portable se desactiva el Service Worker con `VITE_PWA=false` antes de compilar el frontend, de lo contrario la recarga de página puede servir un `index.html` cacheado con hashes de assets antiguos.
 - El build de PyInstaller puede tardar varios minutos la primera vez porque empaqueda las librerías científicas (numpy, scipy, trimesh, etc.).
+
+## CI/CD
+
+The repo has two GitHub Actions workflows:
+
+### Build (`.github/workflows/build.yml`)
+Runs on every push to main and every PR:
+1. Set up Python 3.14 + Node 20
+2. Install pyinstaller + project deps
+3. `web/npm ci && npm run build`
+4. `pytest tests/ -q` (backend tests)
+5. `cd electron && npm test` (Node unit tests)
+6. `pyinstaller --clean --noconfirm conciliacion-api.spec`
+7. Verify the sidecar binary exists
+8. `cd electron && npm run build:linux`
+9. Upload artifacts (sidecar + AppImage)
+
+Artifacts are kept for 7 days.
+
+### Release (`.github/workflows/release.yml`)
+Runs on every `v*` tag push:
+1. Builds web + sidecar + AppImage (same as build.yml)
+2. Creates a draft GitHub Release with the artifacts
+3. Auto-generates release notes
+4. The maintainer reviews and publishes
+
+To cut a release:
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+### Windows builds
+**Not yet automated.** Building a Windows .exe from Linux requires
+Wine. To add this:
+- Install Wine in the build job (`sudo apt-get install -y wine64`)
+- Run `npm run build:windows` (which calls `electron-builder --win`)
+- The .exe artifact is in `electron/dist-portable/`
+
+For now, Windows builds are done locally by maintainers with
+access to a Windows machine or VM.
+
+### Dependabot
+`.github/dependabot.yml` is configured to check npm and pip
+dependencies weekly. PRs are auto-created and labeled
+`dependencies`.
+

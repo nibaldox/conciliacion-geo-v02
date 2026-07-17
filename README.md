@@ -8,6 +8,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-847%20passed-brightgreen)](tests/)
 [![Coverage](https://img.shields.io/badge/coverage-95%25%20(v2)-brightgreen)](tests/)
+[![Build Status](https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/build.yml/badge.svg)](https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/build.yml)
 
 > **Open-source geotechnical reconciliation for open-pit mining.** Compare
 > 3D design surfaces vs as-built topography, generate cross-sections,
