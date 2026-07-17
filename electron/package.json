@@ -6,6 +6,7 @@
   "main": "main.js",
   "scripts": {
     "dev": "electron .",
+    "version": "bash ../scripts/version.sh",
     "build": "electron-builder --config builder.config.js",
     "build:linux": "electron-builder --linux --config builder.config.js",
     "build:windows": "electron-builder --win --config builder.config.js",

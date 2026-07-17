@@ -7,6 +7,8 @@ const { isPortInUse } = require('./lib/port');
 const { waitForHealth } = require('./lib/health');
 const { isDevMode, getDevUrl } = require('./lib/dev-mode');
 const { spawnSidecar } = require('./lib/spawn-sidecar');
+const { showSplash, closeSplash } = require('./lib/splash');
+const { installAppMenu } = require('./lib/menu');
 
 const API_PORT = 57890;
 let pythonProcess = null;
@@ -74,51 +76,61 @@ function killPythonProcess() {
 }
 
 app.whenReady().then(async () => {
+  const iconPath = path.join(__dirname, 'assets', 'icon.png');
+  const splash = showSplash({ iconPath });
   let logFile;
 
-  if (!isDevMode()) {
-    if (await isPortInUse(API_PORT)) {
-      fatalError(`El puerto ${API_PORT} ya está en uso. ¿Hay otra instancia de Conciliación corriendo? Ciérrala e intenta de nuevo.`);
-      return;
+  try {
+    if (!isDevMode()) {
+      if (await isPortInUse(API_PORT)) {
+        fatalError(`El puerto ${API_PORT} ya está en uso. ¿Hay otra instancia de Conciliación corriendo? Ciérrala e intenta de nuevo.`);
+        return;
+      }
+
+      try {
+        logFile = setupSidecarLogging();
+        pythonProcess = startSidecar(logFile);
+      } catch (err) {
+        fatalError(`No se pudo iniciar el backend: ${err.message}`);
+        return;
+      }
+
+      try {
+        await waitForHealth(API_PORT, 15000, 200);
+      } catch (err) {
+        fatalError(`El backend no respondió a tiempo. Revisá el log en ${logFile}`);
+        return;
+      }
     }
 
-    try {
-      logFile = setupSidecarLogging();
-      pythonProcess = startSidecar(logFile);
-    } catch (err) {
-      fatalError(`No se pudo iniciar el backend: ${err.message}`);
-      return;
-    }
+    mainWindow = new BrowserWindow({
+      width: 1280,
+      height: 800,
+      minWidth: 1024,
+      minHeight: 768,
+      title: 'Conciliación Geotécnica',
+      icon: iconPath,
+      show: false,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
 
-    try {
-      await waitForHealth(API_PORT, 15000, 200);
-    } catch (err) {
-      fatalError(`El backend no respondió a tiempo. Revisá el log en ${logFile}`);
-      return;
-    }
+    installAppMenu(mainWindow);
+
+    const targetUrl = isDevMode() ? getDevUrl() : `http://127.0.0.1:${API_PORT}`;
+    await mainWindow.loadURL(targetUrl);
+    mainWindow.show();
+
+    mainWindow.on('closed', () => {
+      mainWindow = null;
+    });
+  } finally {
+    closeSplash(splash);
   }
-
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
-    minWidth: 1024,
-    minHeight: 768,
-    title: 'Conciliación Geotécnica',
-    icon: path.join(__dirname, 'assets', 'icon.png'),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
-  });
-  mainWindow.setMenuBarVisibility(false);
-  const targetUrl = isDevMode() ? getDevUrl() : `http://127.0.0.1:${API_PORT}`;
-  await mainWindow.loadURL(targetUrl);
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
 });
 
 app.on('window-all-closed', () => {

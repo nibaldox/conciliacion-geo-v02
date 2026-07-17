@@ -79,6 +79,26 @@ jobs:
           ls -la dist/conciliacion-api
           file dist/conciliacion-api
 
+      - name: Smoke test sidecar
+        if: hashFiles('dist/conciliacion-api') != ''
+        run: |
+          # Start the sidecar in the background
+          ./dist/conciliacion-api &
+          SIDECAR_PID=$!
+          # Wait for health
+          for i in {1..30}; do
+            if curl -sf http://127.0.0.1:57890/api/v1/health; then
+              echo "Sidecar healthy"
+              break
+            fi
+            sleep 1
+          done
+          # Test the API
+          curl -sf http://127.0.0.1:57890/api/v1/sections -o /dev/null -w "%{http_code}\n"
+          # Kill
+          kill $SIDECAR_PID
+          wait $SIDECAR_PID 2>/dev/null || true
+
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@v4
         with:

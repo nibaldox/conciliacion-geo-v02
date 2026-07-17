@@ -185,6 +185,33 @@ El bundle usa un directorio de usuario (`userData`) bajo `~/.local/share/concili
 - Para builds de Electron portable se desactiva el Service Worker con `VITE_PWA=false` antes de compilar el frontend, de lo contrario la recarga de página puede servir un `index.html` cacheado con hashes de assets antiguos.
 - El build de PyInstaller puede tardar varios minutos la primera vez porque empaqueda las librerías científicas (numpy, scipy, trimesh, etc.).
 
+## Production UX
+
+### Splash screen
+On startup, the user sees a frameless dark splash with the app
+icon and a "Iniciando..." spinner while the sidecar starts. The
+splash closes automatically once the main window is ready.
+
+### Native menu
+- **File > Open STL/DXF...** (Ctrl+O / Cmd+O) — opens a file
+  dialog to load a surface. Sends an IPC event to the renderer.
+- **Help > About** — shows the app version, Electron version,
+  and Node version.
+- **Help > Documentation** — opens the GitHub README in the
+  default browser.
+
+### Versioning
+The version is read from `git describe --tags` and falls back to
+`electron/package.json`. Use `npm run version --prefix electron`
+to print the current version.
+
+### Release process
+1. Update the version in `electron/package.json`
+2. Commit
+3. Tag: `git tag v0.2.0 && git push origin v0.2.0`
+4. The release workflow builds + creates a draft GitHub Release
+5. Review the draft and publish
+
 ## CI/CD
 
 The repo has two GitHub Actions workflows:

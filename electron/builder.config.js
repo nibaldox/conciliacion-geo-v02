@@ -1,4 +1,5 @@
 const path = require('node:path');
+const { execSync } = require('node:child_process');
 
 /**
  * electron-builder config for the portable bundle.
@@ -11,10 +12,23 @@ const path = require('node:path');
  *   npm run build:windows  -> ../dist-portable/conciliacion-portable-windows/
  *   npm run build:linux    -> ../dist-portable/conciliacion-portable-linux.AppImage
  */
+
+function getBuildVersion() {
+  try {
+    return execSync('bash ../scripts/version.sh', { cwd: __dirname, encoding: 'utf8' }).trim();
+  } catch {
+    return require('./package.json').version;
+  }
+}
+
 module.exports = {
   appId: 'app.conciliacion.geotecnica',
   productName: 'Conciliación Geotécnica',
   copyright: 'Copyright © 2026',
+  buildVersion: getBuildVersion(),
+  extraMetadata: {
+    version: getBuildVersion(),
+  },
 
   directories: {
     output: path.join(__dirname, '..', 'dist-portable'),
