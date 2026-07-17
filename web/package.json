@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node -e \"const fs=require('fs'); const missing=['public/Cesium','src/locales/es.json','src/locales/en.json'].filter(p=>!fs.existsSync(p)); if(missing.length){console.error('prebuild: faltan activos requeridos:', missing.join(', ')); process.exit(1)} console.log('prebuild: activos requeridos OK');\"",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",

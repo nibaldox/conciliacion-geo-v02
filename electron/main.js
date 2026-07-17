@@ -5,6 +5,7 @@ const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { isPortInUse } = require('./lib/port');
 const { waitForHealth } = require('./lib/health');
+const { isDevMode, getDevUrl } = require('./lib/dev-mode');
 
 const API_PORT = 57890;
 let pythonProcess = null;
@@ -87,25 +88,28 @@ function killPythonProcess() {
 }
 
 app.whenReady().then(async () => {
-  if (await isPortInUse(API_PORT)) {
-    fatalError(`El puerto ${API_PORT} ya está en uso. ¿Hay otra instancia de Conciliación corriendo? Ciérrala e intenta de nuevo.`);
-    return;
-  }
-
   let logFile;
-  try {
-    logFile = setupSidecarLogging();
-    pythonProcess = startSidecar(logFile);
-  } catch (err) {
-    fatalError(`No se pudo iniciar el backend: ${err.message}`);
-    return;
-  }
 
-  try {
-    await waitForHealth(API_PORT, 15000, 200);
-  } catch (err) {
-    fatalError(`El backend no respondió a tiempo. Revisá el log en ${logFile}`);
-    return;
+  if (!isDevMode()) {
+    if (await isPortInUse(API_PORT)) {
+      fatalError(`El puerto ${API_PORT} ya está en uso. ¿Hay otra instancia de Conciliación corriendo? Ciérrala e intenta de nuevo.`);
+      return;
+    }
+
+    try {
+      logFile = setupSidecarLogging();
+      pythonProcess = startSidecar(logFile);
+    } catch (err) {
+      fatalError(`No se pudo iniciar el backend: ${err.message}`);
+      return;
+    }
+
+    try {
+      await waitForHealth(API_PORT, 15000, 200);
+    } catch (err) {
+      fatalError(`El backend no respondió a tiempo. Revisá el log en ${logFile}`);
+      return;
+    }
   }
 
   mainWindow = new BrowserWindow({
@@ -123,7 +127,8 @@ app.whenReady().then(async () => {
     },
   });
   mainWindow.setMenuBarVisibility(false);
-  await mainWindow.loadURL(`http://127.0.0.1:${API_PORT}`);
+  const targetUrl = isDevMode() ? getDevUrl() : `http://127.0.0.1:${API_PORT}`;
+  await mainWindow.loadURL(targetUrl);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
