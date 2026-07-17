@@ -805,8 +805,60 @@ def _projected_to_holes(
     return out
 
 
+def _project_blast_holes_sync(
+    session_id: str,
+    section_id: int,
+    mesh_id: str,
+    tolerance: float,
+) -> schemas.BlastHolesOnProfileResponse:
+    """Project blast holes onto a section off the event loop.
+
+    The ``proyectar_pozos_en_seccion`` primitive + DataFrame iter rows are
+    CPU-bound (pandas + numpy hypot), so we keep them off the event loop
+    by routing this through ``run_in_executor``.
+    """
+    sections_raw = db.get_sections(session_id)
+    if section_id < 0 or section_id >= len(sections_raw):
+        return schemas.BlastHolesOnProfileResponse(
+            section_id="",
+            mesh_id=mesh_id,
+            tolerance=tolerance,
+            holes=[],
+        )
+
+    sec = _section_from_dict(sections_raw[section_id])
+
+    df_holes = _load_session_blast_holes(session_id)
+    if df_holes is None or df_holes.empty:
+        return schemas.BlastHolesOnProfileResponse(
+            section_id=sec.name,
+            mesh_id=mesh_id,
+            tolerance=tolerance,
+            holes=[],
+        )
+
+    inclusion_radius = max(
+        float(tolerance),
+        float(DEFAULTS.blast_correlation_radius_m),
+    )
+    projected = proyectar_pozos_en_seccion(
+        df_holes,
+        origin=sec.origin,
+        azimuth=sec.azimuth,
+        length=sec.length,
+        tolerance=inclusion_radius,
+    )
+    holes = _projected_to_holes(projected, float(tolerance))
+    return schemas.BlastHolesOnProfileResponse(
+        section_id=sec.name,
+        mesh_id=mesh_id,
+        tolerance=tolerance,
+        holes=holes,
+    )
+
+
 @router.get("/profiles/{section_id}/blast-holes")
-def get_blast_holes(
+async def get_blast_holes(
     request: Request,
     section_id: int,
     mesh_id: str = "",
@@ -834,6 +886,9 @@ def get_blast_holes(
     this change and the process router already owns section-scoped profile
     endpoints. Full path: ``GET /api/v1/process/profiles/{section_id}/blast-holes``.
 
+    The DataFrame projection + numpy hypot fan-out run on the default
+    executor so the event loop isn't blocked while holes are scored.
+
     Parameters
     ----------
     section_id : int
@@ -848,45 +903,15 @@ def get_blast_holes(
         ``is_within_tolerance=False``.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
-
-        sections_raw = db.get_sections(session_id)
-        if section_id < 0 or section_id >= len(sections_raw):
-            return schemas.BlastHolesOnProfileResponse(
-                section_id="",
-                mesh_id=mesh_id,
-                tolerance=tolerance,
-                holes=[],
-            )
-
-        sec = _section_from_dict(sections_raw[section_id])
-
-        df_holes = _load_session_blast_holes(session_id)
-        if df_holes is None or df_holes.empty:
-            return schemas.BlastHolesOnProfileResponse(
-                section_id=sec.name,
-                mesh_id=mesh_id,
-                tolerance=tolerance,
-                holes=[],
-            )
-
-        inclusion_radius = max(
-            float(tolerance),
-            float(DEFAULTS.blast_correlation_radius_m),
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
         )
-        projected = proyectar_pozos_en_seccion(
-            df_holes,
-            origin=sec.origin,
-            azimuth=sec.azimuth,
-            length=sec.length,
-            tolerance=inclusion_radius,
-        )
-        holes = _projected_to_holes(projected, float(tolerance))
-        return schemas.BlastHolesOnProfileResponse(
-            section_id=sec.name,
-            mesh_id=mesh_id,
-            tolerance=tolerance,
-            holes=holes,
+        return await _run_in_executor(
+            _project_blast_holes_sync,
+            session_id,
+            section_id,
+            mesh_id,
+            tolerance,
         )
     except HTTPException:
         raise
@@ -948,8 +973,51 @@ def _resolve_blast_correlation_rows(
     return rows, sections_raw, resolved_tolerance
 
 
+def _build_blast_correlation_sync(
+    session_id: str,
+    tolerance: Optional[float],
+) -> schemas.BlastCorrelationResponse:
+    """Build the blast↔geotech correlation response off the event loop.
+
+    All DB reads, ``compute_blast_geotech_correlation``, and the row→schema
+    mapping run on the default executor so the event loop isn't blocked
+    while the (potentially large) correlation table is assembled.
+    """
+    rows, sections_raw, resolved_tolerance = _resolve_blast_correlation_rows(
+        session_id, tolerance
+    )
+
+    schema_rows = [
+        schemas.BlastCorrelationRowSchema(
+            section_name=r.section_name,
+            num_wells=int(r.num_wells),
+            total_kg=_safe_float(r.total_kg),
+            mean_abs_deviation=_safe_float(r.mean_abs_deviation),
+            avg_over_break=_safe_float(r.avg_over_break),
+            avg_under_break=_safe_float(r.avg_under_break),
+            n_over=int(r.n_over),
+            n_under=int(r.n_under),
+            pf_vol_avg_kgm3=_safe_float(r.pf_vol_avg_kgm3),
+            pf_area_avg_kgm2=_safe_float(r.pf_area_avg_kgm2),
+            pf_g_per_ton_avg=_safe_float(r.pf_g_per_ton_avg),
+            pf_g_per_ton_net_avg=_safe_float(r.pf_g_per_ton_net_avg),
+            energy_total_mj=_safe_float(r.energy_total_mj),
+            n_pf_valid=int(r.n_pf_valid),
+            sector=str(getattr(r, "sector", "") or ""),
+            rock_density_used=_safe_float(getattr(r, "rock_density_used", 0.0)),
+        )
+        for r in rows
+    ]
+
+    return schemas.BlastCorrelationResponse(
+        rows=schema_rows,
+        tolerance=resolved_tolerance,
+        n_sections=len(sections_raw),
+    )
+
+
 @router.get("/blast-correlation")
-def get_blast_correlation(
+async def get_blast_correlation(
     request: Request,
     tolerance: Optional[float] = None,
 ):
@@ -984,6 +1052,9 @@ def get_blast_correlation(
     core primitive falls back to the ``BLAST`` singleton defaults
     (2.7 ton/m³, 15.0 m).
 
+    The DB reads + correlation primitive run off the event loop via
+    ``run_in_executor``.
+
     Parameters
     ----------
     tolerance : float | None
@@ -992,38 +1063,11 @@ def get_blast_correlation(
         inside the core primitive.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
-
-        rows, sections_raw, resolved_tolerance = _resolve_blast_correlation_rows(
-            session_id, tolerance
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
         )
-
-        schema_rows = [
-            schemas.BlastCorrelationRowSchema(
-                section_name=r.section_name,
-                num_wells=int(r.num_wells),
-                total_kg=_safe_float(r.total_kg),
-                mean_abs_deviation=_safe_float(r.mean_abs_deviation),
-                avg_over_break=_safe_float(r.avg_over_break),
-                avg_under_break=_safe_float(r.avg_under_break),
-                n_over=int(r.n_over),
-                n_under=int(r.n_under),
-                pf_vol_avg_kgm3=_safe_float(r.pf_vol_avg_kgm3),
-                pf_area_avg_kgm2=_safe_float(r.pf_area_avg_kgm2),
-                pf_g_per_ton_avg=_safe_float(r.pf_g_per_ton_avg),
-                pf_g_per_ton_net_avg=_safe_float(r.pf_g_per_ton_net_avg),
-                energy_total_mj=_safe_float(r.energy_total_mj),
-                n_pf_valid=int(r.n_pf_valid),
-                sector=str(getattr(r, "sector", "") or ""),
-                rock_density_used=_safe_float(getattr(r, "rock_density_used", 0.0)),
-            )
-            for r in rows
-        ]
-
-        return schemas.BlastCorrelationResponse(
-            rows=schema_rows,
-            tolerance=resolved_tolerance,
-            n_sections=len(sections_raw),
+        return await _run_in_executor(
+            _build_blast_correlation_sync, session_id, tolerance
         )
     except HTTPException:
         raise
@@ -1037,8 +1081,68 @@ def get_blast_correlation(
 # ---------------------------------------------------------------------------
 
 
+def _build_damage_model_sync(
+    session_id: str,
+    tolerance: Optional[float],
+) -> schemas.BlastDamageModelResponse:
+    """Fit the PF↔damage OLS model off the event loop.
+
+    DB reads, the correlation-row walk, the numpy ``polyfit`` and the
+    schema assembly all happen on the default executor so the event
+    loop isn't blocked while the fit is computed.
+    """
+    rows, _sections_raw, _tol = _resolve_blast_correlation_rows(
+        session_id, tolerance
+    )
+
+    # Build the (PF, overbreak) sample, dropping zero/NaN PF rows so the
+    # emitted points match the samples the fitter consumes.
+    points: List[schemas.BlastDamagePointSchema] = []
+    pf_values_list: List[float] = []
+    dmg_values_list: List[float] = []
+    for r in rows:
+        pf = float(r.pf_g_per_ton_avg)
+        over = float(r.avg_over_break)
+        if not math.isfinite(pf) or not math.isfinite(over):
+            continue
+        if pf <= 0.0:
+            continue
+        points.append(schemas.BlastDamagePointSchema(
+            section_name=str(r.section_name),
+            pf_g_per_ton=_safe_float(pf),
+            over_break=_safe_float(over),
+        ))
+        pf_values_list.append(pf)
+        dmg_values_list.append(over)
+
+    fit_schema: Optional[schemas.BlastDamageModelFitSchema] = None
+    if pf_values_list:
+        pf_arr = np.asarray(pf_values_list, dtype=float)
+        dmg_arr = np.asarray(dmg_values_list, dtype=float)
+        model = fit_powder_factor_damage_model(pf_arr, dmg_arr)
+        confidence = str(model.get("confidence", "INSUFFICIENT"))
+        if confidence != "INSUFFICIENT":
+            fit_schema = schemas.BlastDamageModelFitSchema(
+                beta0=_safe_float(model.get("beta0", 0.0)),
+                beta1=_safe_float(model.get("beta1", 0.0)),
+                r_squared=_safe_float(model.get("r_squared", 0.0)),
+                p_value=_safe_float(model.get("p_value", float("nan"))),
+                n=int(model.get("n", 0)),
+                confidence=confidence,
+                ci_beta1_low=_safe_float(model.get("ci_beta1_low", 0.0)),
+                ci_beta1_high=_safe_float(model.get("ci_beta1_high", 0.0)),
+            )
+
+    return schemas.BlastDamageModelResponse(
+        points=points,
+        fit=fit_schema,
+        x_metric="pf_g_per_ton",
+        y_metric="over_break",
+    )
+
+
 @router.get("/blast-correlation/damage-model")
-def get_blast_correlation_damage_model(
+async def get_blast_correlation_damage_model(
     request: Request,
     tolerance: Optional[float] = None,
 ):
@@ -1070,6 +1174,9 @@ def get_blast_correlation_damage_model(
     safety: every numeric field flows through :func:`_safe_float` so NaN
     never reaches the JSON payload.
 
+    The DB reads + numpy fit run off the event loop via
+    ``run_in_executor``.
+
     Parameters
     ----------
     tolerance : float | None
@@ -1077,54 +1184,11 @@ def get_blast_correlation_damage_model(
         Forwarded to :func:`_resolve_blast_correlation_rows`.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
-        rows, _sections_raw, _tol = _resolve_blast_correlation_rows(
-            session_id, tolerance
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
         )
-
-        # Build the (PF, overbreak) sample, dropping zero/NaN PF rows so the
-        # emitted points match the samples the fitter consumes.
-        points: List[schemas.BlastDamagePointSchema] = []
-        pf_values_list: List[float] = []
-        dmg_values_list: List[float] = []
-        for r in rows:
-            pf = float(r.pf_g_per_ton_avg)
-            over = float(r.avg_over_break)
-            if not math.isfinite(pf) or not math.isfinite(over):
-                continue
-            if pf <= 0.0:
-                continue
-            points.append(schemas.BlastDamagePointSchema(
-                section_name=str(r.section_name),
-                pf_g_per_ton=_safe_float(pf),
-                over_break=_safe_float(over),
-            ))
-            pf_values_list.append(pf)
-            dmg_values_list.append(over)
-
-        fit_schema: Optional[schemas.BlastDamageModelFitSchema] = None
-        if pf_values_list:
-            pf_arr = np.asarray(pf_values_list, dtype=float)
-            dmg_arr = np.asarray(dmg_values_list, dtype=float)
-            model = fit_powder_factor_damage_model(pf_arr, dmg_arr)
-            confidence = str(model.get("confidence", "INSUFFICIENT"))
-            if confidence != "INSUFFICIENT":
-                fit_schema = schemas.BlastDamageModelFitSchema(
-                    beta0=_safe_float(model.get("beta0", 0.0)),
-                    beta1=_safe_float(model.get("beta1", 0.0)),
-                    r_squared=_safe_float(model.get("r_squared", 0.0)),
-                    p_value=_safe_float(model.get("p_value", float("nan"))),
-                    n=int(model.get("n", 0)),
-                    confidence=confidence,
-                    ci_beta1_low=_safe_float(model.get("ci_beta1_low", 0.0)),
-                    ci_beta1_high=_safe_float(model.get("ci_beta1_high", 0.0)),
-                )
-
-        return schemas.BlastDamageModelResponse(
-            points=points,
-            fit=fit_schema,
-            x_metric="pf_g_per_ton",
-            y_metric="over_break",
+        return await _run_in_executor(
+            _build_damage_model_sync, session_id, tolerance
         )
     except HTTPException:
         raise
