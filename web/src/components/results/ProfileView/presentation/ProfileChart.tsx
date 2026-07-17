@@ -73,17 +73,25 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
   );
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    const observer = new ResizeObserver((entries) => {
-      if (entries[0]) {
-        setContainerSize({
-          width: entries[0].contentRect.width,
-          height: entries[0].contentRect.height,
-        });
-      }
+    const el = containerRef.current;
+    if (!el) return;
+    let rafId = 0;
+    // Throttle resize via requestAnimationFrame coalescing so that
+    // continuous drags (e.g. sidebar resize) don't trigger a full
+    // Plotly recompute + re-render per pixel.
+    const observer = new ResizeObserver(() => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = 0;
+        const rect = el.getBoundingClientRect();
+        setContainerSize({ width: rect.width, height: rect.height });
+      });
     });
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
+    observer.observe(el);
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      observer.disconnect();
+    };
   }, []);
 
   // ── 1. Build the data array (pure derivation) ─────────────

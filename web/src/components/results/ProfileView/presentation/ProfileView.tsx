@@ -49,7 +49,7 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
   const selectedSectionId = useSession((s: ReturnType<typeof useSession.getState>) => s.selectedSection);
   const filter = useFilterState();
   const crossLink = useCrossLinkState();
-  const { viewModel, isLoading, error } = useProfileViewModel(selectedSectionId);
+  const { viewModel, isLoading, error, refetch } = useProfileViewModel(selectedSectionId);
 
   // Reset cross-link when the section changes
   useEffect(() => {
@@ -75,7 +75,7 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
     return (
       <ErrorState
         message={error.message}
-        onRetry={() => window.location.reload()}
+        onRetry={refetch}
       />
     );
   }

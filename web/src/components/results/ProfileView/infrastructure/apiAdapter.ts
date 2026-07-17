@@ -33,6 +33,7 @@ export function useProfileQuery(selectedSectionId: string | null) {
     isLoading: query.isLoading,
     error: query.error as Error | null,
     sectionId: selectedSectionId,
+    refetch: query.refetch,
   };
 }
 

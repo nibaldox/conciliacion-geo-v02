@@ -17,6 +17,8 @@ export interface UseProfileViewModelResult {
   readonly error: Error | null;
   /** True if any of the underlying queries is still fetching. */
   readonly isStale: boolean;
+  /** Refetch the profile query (used by error-retry UI). */
+  readonly refetch: () => void;
 }
 
 export function useProfileViewModel(
@@ -41,5 +43,6 @@ export function useProfileViewModel(
       (!!profileQuery.data && comparisonsQuery.isLoading),
     error: profileQuery.error ?? sectionsQuery.error ?? comparisonsQuery.error,
     isStale: profileQuery.isLoading || sectionsQuery.isLoading,
+    refetch: () => { void profileQuery.refetch(); },
   };
 }

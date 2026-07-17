@@ -43,6 +43,19 @@ function isDemoMeshId(meshId: string | null | undefined): boolean {
   return meshId === DEMO_MESH_IDS.design || meshId === DEMO_MESH_IDS.topo;
 }
 
+// Loop-based min/max: Math.min(...xs) spread throws RangeError past
+// ~100-150K elements, and real meshes routinely exceed that.
+function safeMin(xs: number[]): number {
+  let m = Infinity;
+  for (const v of xs) if (v < m) m = v;
+  return m;
+}
+function safeMax(xs: number[]): number {
+  let m = -Infinity;
+  for (const v of xs) if (v > m) m = v;
+  return m;
+}
+
 
 // ─── Meshes ────────────────────────────────────────────────
 
@@ -62,9 +75,9 @@ export function useMeshInfo(meshId: string | null) {
           n_vertices: xs.length,
           n_faces: 0,
           bounds: {
-            min_x: Math.min(...xs), max_x: Math.max(...xs),
-            min_y: Math.min(...ys), max_y: Math.max(...ys),
-            min_z: Math.min(...zs), max_z: Math.max(...zs),
+            min_x: safeMin(xs), max_x: safeMax(xs),
+            min_y: safeMin(ys), max_y: safeMax(ys),
+            min_z: safeMin(zs), max_z: safeMax(zs),
           },
           filename: kind === 'design' ? 'demo-design.stl' : 'demo-topo.stl',
           uploaded_at: new Date().toISOString(),
