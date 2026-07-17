@@ -52,10 +52,13 @@ vi.mock('../../../api/hooks', () => ({
 }));
 
 vi.mock('../../../stores/session', () => ({
-  useSession: () => ({
-    designMeshId: 'design-id',
-    topoMeshId: 'topo-id',
-  }),
+  // After the scoped-selector refactor (Fix 4.1 of the React audit),
+  // components call useSession with a selector fn. The mock must accept
+  // a selector (s) => s.field and apply it to the fake state.
+  useSession: (selector?: (s: { designMeshId: string; topoMeshId: string }) => unknown) => {
+    const state = { designMeshId: 'design-id', topoMeshId: 'topo-id' };
+    return selector ? selector(state) : state;
+  },
 }));
 
 vi.mock('../../../stores/theme', () => ({
