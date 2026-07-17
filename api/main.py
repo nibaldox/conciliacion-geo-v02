@@ -159,8 +159,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Restrict methods to the ones actually used by the app (Web + Electron).
+    # Wildcard "*" was a CSRF surface even with credentials restricted.
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    # Restrict headers to what the frontend sends. Wildcard allowed arbitrary
+    # client-defined headers which can be abused for cache-poisoning or
+    # request-smuggling.
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Session-ID",
+        "X-API-Key",
+        "Accept",
+        "Origin",
+        "Referer",
+    ],
     expose_headers=["X-Session-ID", "x-session-id"],
 )
 
