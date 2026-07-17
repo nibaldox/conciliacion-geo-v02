@@ -8,6 +8,7 @@ Endpoints:
     GET /export/images  Export section plot images as ZIP
 """
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -35,6 +36,12 @@ from core.param_extractor import ExtractionResult
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+def _run_in_executor(func, *args):
+    """Schedule a CPU/IO-bound callable on the default executor."""
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(None, func, *args)
 
 
 _SPILL_BENCH_FIELDS = (
@@ -317,122 +324,134 @@ def export_word(
 # ---------------------------------------------------------------------------
 
 
+def _build_dxf_payload_sync(session_id: str) -> str:
+    """Build the 3D DXF file off the event loop.
+
+    Returns the absolute path to the generated ``.dxf``.
+    """
+    try:
+        mesh_design = _load_mesh_from_db(session_id, "design")
+        mesh_topo = _load_mesh_from_db(session_id, "topo")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Error loading meshes: {exc}")
+
+    import ezdxf
+    from core import cut_both_surfaces
+
+    doc = ezdxf.new("R2010")
+    msp = doc.modelspace()
+
+    # Create compliance layers
+    doc.layers.add("DISEÑO_CUMPLE", color=3)
+    doc.layers.add("DISEÑO_NO_CUMPLE", color=1)
+    doc.layers.add("DISEÑO_FUERA_TOL", color=2)
+    doc.layers.add("TOPO_CUMPLE", color=3)
+    doc.layers.add("TOPO_NO_CUMPLE", color=1)
+    doc.layers.add("TOPO_FUERA_TOL", color=2)
+    doc.layers.add("CONCILIADO_DISEÑO", color=5)
+    doc.layers.add("CONCILIADO_TOPO", color=6)
+    doc.layers.add("ETIQUETAS", color=7)
+
+    # Determine per-section compliance status from results
+    results = db.get_results(session_id)
+    section_status: Dict[str, str] = {}
+    for c in results:
+        sec_name = c.get("section", "")
+        statuses = [
+            c.get("height_status", ""),
+            c.get("angle_status", ""),
+            c.get("berm_status", ""),
+        ]
+        if sec_name not in section_status:
+            section_status[sec_name] = "CUMPLE"
+        if "NO CUMPLE" in statuses:
+            section_status[sec_name] = "NO CUMPLE"
+        elif (
+            "FUERA DE TOLERANCIA" in statuses
+            and section_status[sec_name] != "NO CUMPLE"
+        ):
+            section_status[sec_name] = "FUERA DE TOLERANCIA"
+
+    sections_raw = db.get_sections(session_id)
+    n_exported = 0
+
+    for i, sec_dict in enumerate(sections_raw):
+        sec = _section_from_dict(sec_dict)
+        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+        if not (pd_prof and pt_prof):
+            continue
+
+        direction = azimuth_to_direction(sec.azimuth)
+        ox, oy = sec.origin[0], sec.origin[1]
+
+        status = section_status.get(sec.name, "CUMPLE")
+        suffix = {"NO CUMPLE": "NO_CUMPLE", "FUERA DE TOLERANCIA": "FUERA_TOL"}.get(
+            status, "CUMPLE"
+        )
+
+        def _to_3d(dists, elevs):
+            return [
+                (ox + d * direction[0], oy + d * direction[1], float(e))
+                for d, e in zip(dists, elevs)
+            ]
+
+        def _draw_lines(pts, layer):
+            msp.add_polyline3d(pts, dxfattribs={"layer": layer})
+
+        # Design + Topo raw profiles
+        d3d = _to_3d(pd_prof.distances, pd_prof.elevations)
+        t3d = _to_3d(pt_prof.distances, pt_prof.elevations)
+        if len(d3d) > 1:
+            _draw_lines(d3d, f"DISEÑO_{suffix}")
+        if len(t3d) > 1:
+            _draw_lines(t3d, f"TOPO_{suffix}")
+
+        # Reconciled profiles from extraction cache
+        design_ext = db.get_extraction(session_id, sec.name, "design")
+        topo_ext = db.get_extraction(session_id, sec.name, "topo")
+
+        if design_ext:
+            benches_d = [_dict_to_bench(b) for b in design_ext.get("benches", [])]
+            if benches_d:
+                rd, re = build_reconciled_profile(benches_d)
+                if len(rd) > 0:
+                    _draw_lines(_to_3d(rd, re), "CONCILIADO_DISEÑO")
+
+        if topo_ext:
+            benches_t = [_dict_to_bench(b) for b in topo_ext.get("benches", [])]
+            if benches_t:
+                rt, ret = build_reconciled_profile(benches_t)
+                if len(rt) > 0:
+                    _draw_lines(_to_3d(rt, ret), "CONCILIADO_TOPO")
+
+        # Section label
+        mid_z = float(max(pd_prof.elevations.max(), pt_prof.elevations.max())) + 3
+        msp.add_text(
+            f"{sec.name} [{status}]",
+            dxfattribs={"height": 2.0, "layer": "ETIQUETAS", "insert": (ox, oy, mid_z)},
+        )
+        n_exported += 1
+
+    if n_exported == 0:
+        raise HTTPException(400, "No profiles could be exported")
+
+    tmp = os.path.join(tempfile.gettempdir(), f"Perfiles_3D_{session_id[:8]}.dxf")
+    doc.saveas(tmp)
+    return tmp
+
+
 @router.get("/dxf")
-def export_dxf(request: Request):
-    """Export profiles as 3D DXF with compliance layers."""
+async def export_dxf(request: Request):
+    """Export profiles as 3D DXF with compliance layers.
+
+    The ezdxf document build runs on the default executor so multi-section
+    exports don't stall the event loop.
+    """
     try:
         session_id = db.get_or_create_session(request.state.session_id)
-
-        try:
-            mesh_design = _load_mesh_from_db(session_id, "design")
-            mesh_topo = _load_mesh_from_db(session_id, "topo")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(400, f"Error loading meshes: {exc}")
-
-        import ezdxf
-        from core import cut_both_surfaces
-
-        doc = ezdxf.new("R2010")
-        msp = doc.modelspace()
-
-        # Create compliance layers
-        doc.layers.add("DISEÑO_CUMPLE", color=3)
-        doc.layers.add("DISEÑO_NO_CUMPLE", color=1)
-        doc.layers.add("DISEÑO_FUERA_TOL", color=2)
-        doc.layers.add("TOPO_CUMPLE", color=3)
-        doc.layers.add("TOPO_NO_CUMPLE", color=1)
-        doc.layers.add("TOPO_FUERA_TOL", color=2)
-        doc.layers.add("CONCILIADO_DISEÑO", color=5)
-        doc.layers.add("CONCILIADO_TOPO", color=6)
-        doc.layers.add("ETIQUETAS", color=7)
-
-        # Determine per-section compliance status from results
-        results = db.get_results(session_id)
-        section_status: Dict[str, str] = {}
-        for c in results:
-            sec_name = c.get("section", "")
-            statuses = [
-                c.get("height_status", ""),
-                c.get("angle_status", ""),
-                c.get("berm_status", ""),
-            ]
-            if sec_name not in section_status:
-                section_status[sec_name] = "CUMPLE"
-            if "NO CUMPLE" in statuses:
-                section_status[sec_name] = "NO CUMPLE"
-            elif (
-                "FUERA DE TOLERANCIA" in statuses
-                and section_status[sec_name] != "NO CUMPLE"
-            ):
-                section_status[sec_name] = "FUERA DE TOLERANCIA"
-
-        sections_raw = db.get_sections(session_id)
-        n_exported = 0
-
-        for i, sec_dict in enumerate(sections_raw):
-            sec = _section_from_dict(sec_dict)
-            pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-            if not (pd_prof and pt_prof):
-                continue
-
-            direction = azimuth_to_direction(sec.azimuth)
-            ox, oy = sec.origin[0], sec.origin[1]
-
-            status = section_status.get(sec.name, "CUMPLE")
-            suffix = {"NO CUMPLE": "NO_CUMPLE", "FUERA DE TOLERANCIA": "FUERA_TOL"}.get(
-                status, "CUMPLE"
-            )
-
-            def _to_3d(dists, elevs):
-                return [
-                    (ox + d * direction[0], oy + d * direction[1], float(e))
-                    for d, e in zip(dists, elevs)
-                ]
-
-            def _draw_lines(pts, layer):
-                msp.add_polyline3d(pts, dxfattribs={"layer": layer})
-
-            # Design + Topo raw profiles
-            d3d = _to_3d(pd_prof.distances, pd_prof.elevations)
-            t3d = _to_3d(pt_prof.distances, pt_prof.elevations)
-            if len(d3d) > 1:
-                _draw_lines(d3d, f"DISEÑO_{suffix}")
-            if len(t3d) > 1:
-                _draw_lines(t3d, f"TOPO_{suffix}")
-
-            # Reconciled profiles from extraction cache
-            design_ext = db.get_extraction(session_id, sec.name, "design")
-            topo_ext = db.get_extraction(session_id, sec.name, "topo")
-
-            if design_ext:
-                benches_d = [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-                if benches_d:
-                    rd, re = build_reconciled_profile(benches_d)
-                    if len(rd) > 0:
-                        _draw_lines(_to_3d(rd, re), "CONCILIADO_DISEÑO")
-
-            if topo_ext:
-                benches_t = [_dict_to_bench(b) for b in topo_ext.get("benches", [])]
-                if benches_t:
-                    rt, ret = build_reconciled_profile(benches_t)
-                    if len(rt) > 0:
-                        _draw_lines(_to_3d(rt, ret), "CONCILIADO_TOPO")
-
-            # Section label
-            mid_z = float(max(pd_prof.elevations.max(), pt_prof.elevations.max())) + 3
-            msp.add_text(
-                f"{sec.name} [{status}]",
-                dxfattribs={"height": 2.0, "layer": "ETIQUETAS", "insert": (ox, oy, mid_z)},
-            )
-            n_exported += 1
-
-        if n_exported == 0:
-            raise HTTPException(400, "No profiles could be exported")
-
-        tmp = os.path.join(tempfile.gettempdir(), f"Perfiles_3D_{session_id[:8]}.dxf")
-        doc.saveas(tmp)
+        tmp = await _run_in_executor(_build_dxf_payload_sync, session_id)
         return FileResponse(tmp, media_type="application/dxf", filename="Perfiles_3D.dxf")
     except HTTPException:
         raise
@@ -446,9 +465,81 @@ def export_dxf(request: Request):
 # ---------------------------------------------------------------------------
 
 
+def _build_images_zip_sync(session_id: str):
+    """Build the section-images ZIP off the event loop.
+
+    Returns whatever ``generate_section_images_zip`` returns (typically a
+    ``BytesIO`` buffer), ready to wrap in a ``StreamingResponse``.
+    """
+    sections_raw = db.get_sections(session_id)
+    mesh_design = _load_mesh_from_db(session_id, "design")
+    mesh_topo = _load_mesh_from_db(session_id, "topo")
+
+    from core import cut_both_surfaces
+
+    # Build all_data structure expected by generate_section_images_zip
+    all_data: List[Dict[str, Any]] = []
+    for sec_dict in sections_raw:
+        sec = _section_from_dict(sec_dict)
+        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+
+        design_ext = db.get_extraction(session_id, sec.name, "design")
+        topo_ext = db.get_extraction(session_id, sec.name, "topo")
+
+        benches_d = (
+            [_dict_to_bench(b) for b in design_ext.get("benches", [])]
+            if design_ext
+            else []
+        )
+        benches_t = (
+            [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
+        )
+
+        p_design = ExtractionResult(
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_d,
+            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
+            if design_ext
+            else 0.0,
+            overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
+        )
+        p_topo = ExtractionResult(
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_t,
+            inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
+            overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
+        )
+
+        all_data.append(
+            {
+                "section_name": sec.name,
+                "params_design": p_design,
+                "params_topo": p_topo,
+                "profile_d": (
+                    (pd_prof.distances, pd_prof.elevations)
+                    if pd_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+                "profile_t": (
+                    (pt_prof.distances, pt_prof.elevations)
+                    if pt_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+            }
+        )
+
+    return generate_section_images_zip(all_data)
+
+
 @router.get("/images")
-def export_images(request: Request):
-    """Export section plot images as a ZIP file."""
+async def export_images(request: Request):
+    """Export section plot images as a ZIP file.
+
+    Mesh cutting + matplotlib rendering run on the default executor so a
+    multi-section ZIP build doesn't stall the event loop.
+    """
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
@@ -456,66 +547,7 @@ def export_images(request: Request):
         if not results:
             raise HTTPException(400, "No results to export — run the pipeline first")
 
-        sections_raw = db.get_sections(session_id)
-        mesh_design = _load_mesh_from_db(session_id, "design")
-        mesh_topo = _load_mesh_from_db(session_id, "topo")
-
-        from core import cut_both_surfaces
-
-        # Build all_data structure expected by generate_section_images_zip
-        all_data: List[Dict[str, Any]] = []
-        for sec_dict in sections_raw:
-            sec = _section_from_dict(sec_dict)
-            pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-
-            design_ext = db.get_extraction(session_id, sec.name, "design")
-            topo_ext = db.get_extraction(session_id, sec.name, "topo")
-
-            benches_d = (
-                [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-                if design_ext
-                else []
-            )
-            benches_t = (
-                [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
-            )
-
-            p_design = ExtractionResult(
-                section_name=sec.name,
-                sector=sec.sector,
-                benches=benches_d,
-                inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
-                if design_ext
-                else 0.0,
-                overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
-            )
-            p_topo = ExtractionResult(
-                section_name=sec.name,
-                sector=sec.sector,
-                benches=benches_t,
-                inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
-                overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
-            )
-
-            all_data.append(
-                {
-                    "section_name": sec.name,
-                    "params_design": p_design,
-                    "params_topo": p_topo,
-                    "profile_d": (
-                        (pd_prof.distances, pd_prof.elevations)
-                        if pd_prof is not None
-                        else (np.array([]), np.array([]))
-                    ),
-                    "profile_t": (
-                        (pt_prof.distances, pt_prof.elevations)
-                        if pt_prof is not None
-                        else (np.array([]), np.array([]))
-                    ),
-                }
-            )
-
-        zip_buffer = generate_section_images_zip(all_data)
+        zip_buffer = await _run_in_executor(_build_images_zip_sync, session_id)
 
         return StreamingResponse(
             zip_buffer,
