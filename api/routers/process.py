@@ -527,12 +527,12 @@ def _build_profile_payload_sync(
             result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(benches_t)
             result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
 
-            toe_elevs = [float(b.toe_elevation) for b in benches_t]
-            crest_elevs = [float(b.crest_elevation) for b in benches_t]
-            if toe_elevs:
-                result["floor_elevation"] = min(toe_elevs)
-            if crest_elevs:
-                result["crest_elevation_max"] = max(crest_elevs)
+    # Cota del piso y crest máxima: se calculan del perfil topo original
+    # (pt_prof) para capturar el punto más bajo real del terreno,
+    # no del perfil idealizado.
+    if pt_prof is not None and len(pt_prof.elevations) > 0:
+        result["floor_elevation"] = float(np.min(pt_prof.elevations))
+        result["crest_elevation_max"] = float(np.max(pt_prof.elevations))
 
     return result
 

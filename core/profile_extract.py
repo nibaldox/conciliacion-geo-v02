@@ -866,13 +866,14 @@ def extract_parameters(distances, elevations, section_name, sector,
             benches, list(design_benches), tols, section_name, sector,
         )
 
-    # Cota del piso y crest máxima: se derivan del último toe detectado
-    # (punto más profundo del perfil idealizado) y de la crest más alta.
-    if benches:
-        toe_elevs = [float(b.toe_elevation) for b in benches]
-        crest_elevs = [float(b.crest_elevation) for b in benches]
-        result.floor_elevation = min(toe_elevs)
-        result.crest_elevation_max = max(crest_elevs)
+    # Cota del piso y crest máxima: se calculan directamente del perfil
+    # original (no del perfil idealizado) para capturar el punto más bajo
+    # real del terreno, que puede ser más profundo que el último toe
+    # detectado (ej: zona de extracción final, fondo del rajo).
+    e_arr = np.asarray(elevations, dtype=float)
+    if e_arr.size > 0:
+        result.floor_elevation = float(np.min(e_arr))
+        result.crest_elevation_max = float(np.max(e_arr))
 
     return result
 
