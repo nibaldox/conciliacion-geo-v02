@@ -17,6 +17,27 @@ class ProviderType(str, Enum):
     GROK = "grok"
 
 
+def _resolve_default_model(provider_type: ProviderType) -> str:
+    """Resolve the default model for ``provider_type``.
+
+    Order of precedence:
+      1. Environment variable ``CONCILIACION_<PROVIDER>_DEFAULT_MODEL``
+         (e.g. ``CONCILIACION_OPENROUTER_DEFAULT_MODEL``).
+      2. Hardcoded value in ``PROVIDER_PRESETS``.
+
+    Whitespace around the env var value is stripped; a variable set to an
+    empty string is treated as unset so operators can safely blank a value
+    without breaking the registry.
+    """
+    env_var = f"CONCILIACION_{provider_type.value.upper()}_DEFAULT_MODEL"
+    raw = os.environ.get(env_var)
+    if raw is not None:
+        candidate = raw.strip()
+        if candidate:
+            return candidate
+    return PROVIDER_PRESETS[provider_type]["default_model"]
+
+
 PROVIDER_PRESETS: dict[ProviderType, dict[str, str]] = {
     ProviderType.OLLAMA: {
         "base_url": "http://localhost:11434/v1",
@@ -66,7 +87,7 @@ class ProviderRegistry:
 
     @classmethod
     def get_default_model(cls, provider_type: ProviderType) -> str:
-        return PROVIDER_PRESETS[provider_type]["default_model"]
+        return _resolve_default_model(provider_type)
 
     @classmethod
     def list_providers(cls) -> list[str]:
