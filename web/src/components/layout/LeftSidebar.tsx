@@ -35,7 +35,7 @@ export function LeftSidebar() {
   const bothUploaded = !!designMeshId && !!topoMeshId;
 
   // Accordion open states
-  const [openSection, setOpenSection] = useState<'mallas' | 'secciones' | 'tolerancias' | 'procesamiento'>('mallas');
+  const [openSection, setOpenSection] = useState<'mallas' | 'secciones' | 'tolerancias' | 'procesamiento' | ''>('mallas');
 
   // Section definition tab state
   const [sectionTab, setSectionTab] = useState<SectionTab>('curves');
@@ -91,15 +91,22 @@ export function LeftSidebar() {
     }
   }, [openSection, sectionTab, setActiveWorkspaceView]);
 
-  // Auto-switch to 3D View when a mesh is uploaded
+  // Auto-switch to 3D View when a mesh upload completes. Previously
+  // this effect fired whenever `designMeshId`/`topoMeshId` changed
+  // identity, which also happens on first render and on store
+  // hydration — yanking the user back to 3D even if they were reading
+  // the Dashboard. Now it only runs once, when both meshes are present
+  // for the first time in this session.
+  const didAutoSwitchTo3D = useRef(false);
   useEffect(() => {
-    if (designMeshId || topoMeshId) {
+    if (!didAutoSwitchTo3D.current && designMeshId && topoMeshId) {
+      didAutoSwitchTo3D.current = true;
       setActiveWorkspaceView('3d');
     }
   }, [designMeshId, topoMeshId, setActiveWorkspaceView]);
 
   const toggleAccordion = (section: 'mallas' | 'secciones' | 'tolerancias' | 'procesamiento') => {
-    setOpenSection(openSection === section ? 'mallas' : section);
+    setOpenSection(openSection === section ? '' : section);
   };
 
   // Resize state
@@ -111,6 +118,12 @@ export function LeftSidebar() {
     return 320;
   });
   const isResizing = useRef(false);
+  // Keep latest width in a ref so the window listeners (attached once)
+  // can persist to localStorage on mouseup without re-subscribing per
+  // pixel of drag. Previously the effect depended on `sidebarWidth`
+  // and re-attached the listeners every mousemove tick.
+  const sidebarWidthRef = useRef(sidebarWidth);
+  sidebarWidthRef.current = sidebarWidth;
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -124,7 +137,7 @@ export function LeftSidebar() {
         isResizing.current = false;
         document.body.style.cursor = 'default';
         document.body.classList.remove('select-none');
-        localStorage.setItem('sidebar_width', sidebarWidth.toString());
+        localStorage.setItem('sidebar_width', sidebarWidthRef.current.toString());
       }
     };
 
@@ -134,7 +147,7 @@ export function LeftSidebar() {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [sidebarWidth]);
+  }, []);
 
   const startResizing = (e: React.MouseEvent) => {
     e.preventDefault();
