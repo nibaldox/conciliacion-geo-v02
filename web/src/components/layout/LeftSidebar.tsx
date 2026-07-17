@@ -168,15 +168,16 @@ export function LeftSidebar() {
           className="w-8 h-8 rounded-md flex items-center justify-center border hover:bg-surface-muted transition-colors cursor-pointer text-xs mb-6"
           style={{ borderColor: 'var(--color-border)' }}
           title={t('sidebar.expand', { defaultValue: 'Expandir Panel' })}
+          aria-label={t('sidebar.expand', { defaultValue: 'Expandir Panel' })}
         >
           ▶
         </button>
 
         <div className="flex flex-col gap-6 items-center opacity-50 mt-4">
-          <span className="cursor-help transition-colors hover:text-accent" title="Mallas" onClick={() => { setSidebarCollapsed(false); setOpenSection('mallas'); }}><IconMesh className="w-5 h-5" /></span>
-          <span className="cursor-help transition-colors hover:text-accent" title="Secciones" onClick={() => { setSidebarCollapsed(false); setOpenSection('secciones'); }}><IconSections className="w-5 h-5" /></span>
-          <span className="cursor-help transition-colors hover:text-accent" title="Parámetros" onClick={() => { setSidebarCollapsed(false); setOpenSection('tolerancias'); }}><IconSettings className="w-5 h-5" /></span>
-          <span className="cursor-help transition-colors hover:text-accent" title="Procesar" onClick={() => { setSidebarCollapsed(false); setOpenSection('procesamiento'); }}><IconLightning className="w-5 h-5" /></span>
+          <button type="button" aria-label={t('sidebar.mallas', { defaultValue: 'Mallas' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.mallas', { defaultValue: 'Mallas' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('mallas'); }}><IconMesh className="w-5 h-5" /></button>
+          <button type="button" aria-label={t('sidebar.secciones', { defaultValue: 'Secciones' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.secciones', { defaultValue: 'Secciones' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('secciones'); }}><IconSections className="w-5 h-5" /></button>
+          <button type="button" aria-label={t('sidebar.tolerancias', { defaultValue: 'Parámetros' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.tolerancias', { defaultValue: 'Parámetros' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('tolerancias'); }}><IconSettings className="w-5 h-5" /></button>
+          <button type="button" aria-label={t('sidebar.procesamiento', { defaultValue: 'Procesar' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.procesamiento', { defaultValue: 'Procesar' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('procesamiento'); }}><IconLightning className="w-5 h-5" /></button>
         </div>
       </aside>
     );
@@ -208,6 +209,7 @@ export function LeftSidebar() {
           className="w-6 h-6 rounded flex items-center justify-center border text-[9px] hover:bg-surface-muted transition-colors cursor-pointer"
           style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}
           title={t('sidebar.collapse', { defaultValue: 'Contraer Panel' })}
+          aria-label={t('sidebar.collapse', { defaultValue: 'Contraer Panel' })}
         >
           ◀
         </button>
