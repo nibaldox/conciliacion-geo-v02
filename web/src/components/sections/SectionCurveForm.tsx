@@ -21,14 +21,11 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
 
   const handleMapClick = useCallback(
     (x: number, y: number, curveId?: string, pointIndex?: number) => {
-      console.log("handleMapClick triggered:", {x, y, curveId, pointIndex});
       if (!curveId) return;
-      
+
       const session = useSession.getState();
       const currentSelectedCurve = session.selectedCurveId;
       const currentPoints = session.selectedCurvePoints;
-      
-      console.log("Current session state:", {currentSelectedCurve, currentPoints});
 
       if (!currentSelectedCurve) {
         // Line selection phase
@@ -82,15 +79,6 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
     if (p1.pointIndex > p2.pointIndex) {
       points = points.reverse();
     }
-    
-    console.log("handleGenerate: calling mutation.mutate with params:", {
-      pointsCount: points.length,
-      spacing,
-      length: lengthUp + lengthDown,
-      length_up: lengthUp,
-      length_down: lengthDown,
-      sector
-    });
 
     mutation.mutate({
       points,
@@ -101,7 +89,6 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
       sector
     }, {
       onSuccess: () => {
-        console.log("Profile generation mutation succeeded.");
         // Reset selection after successful generation
         setSelectedCurveId(null);
         setSelectedCurvePoints([]);
