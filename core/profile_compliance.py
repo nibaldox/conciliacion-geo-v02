@@ -114,10 +114,31 @@ def build_reconciled_profile(benches, *, source: str = "topo",
             pts_legacy.append((bench.crest_distance, bench.crest_elevation))
             pts_legacy.append((bench.toe_distance, bench.toe_elevation))
         pts_sorted = sorted(pts_legacy, key=lambda p: p[0])
-        d_out = [p[0] for p in pts_sorted]
-        e_out = [p[1] for p in pts_sorted]
+
+        # Insertar un punto de piso local por cada banco cuando el piso real
+        # está más bajo que el toe. Esto extiende cada banco hacia el terreno
+        # real, no solo el último. Se hace después del ordenamiento para
+        # preservar la continuidad de la polilínea.
+        bench_map = {b.toe_distance: b for b in benches}
+        d_out = []
+        e_out = []
+        for p_d, p_e in pts_sorted:
+            d_out.append(p_d)
+            e_out.append(p_e)
+            # Si este punto es un toe y el banco tiene piso local más bajo,
+            # insertar la extensión angular hasta el piso de ese banco.
+            b = bench_map.get(p_d)
+            if b is not None and b.floor_elevation > 0 and b.floor_elevation < b.toe_elevation:
+                angle_rad = np.radians(float(b.face_angle))
+                delta_z = float(b.toe_elevation) - float(b.floor_elevation)
+                if angle_rad > 0.01 and delta_z > 0:
+                    face_dir = 1.0 if b.toe_distance >= b.crest_distance else -1.0
+                    delta_d = (delta_z / np.tan(angle_rad)) * face_dir
+                    d_out.append(float(b.toe_distance) + delta_d)
+                    e_out.append(float(b.floor_elevation))
+
         # Prolongar la última cara del último banco con su mismo ángulo
-        # hasta alcanzar la cota del piso (en vez de línea vertical).
+        # hasta alcanzar la cota del piso global (en vez de línea vertical).
         if floor_elevation is not None and e_out and benches:
             last_bench = benches[-1]
             delta_z = float(last_bench.toe_elevation) - float(floor_elevation)
