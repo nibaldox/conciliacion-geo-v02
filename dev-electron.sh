@@ -127,6 +127,9 @@ cd electron
 if command -v xvfb-run >/dev/null 2>&1; then
   ELECTRON_DISPLAY_OPTS=(-a --server-args="-screen 0 1400x900x24")
   echo "   (using Xvfb virtual display)"
+  # Xvfb doesn't expose real GPU extensions, so disable hardware
+  # acceleration. The app renders fine with software rasterization.
+  export ELECTRON_DISABLE_GPU=1
 else
   ELECTRON_DISPLAY_OPTS=()
 fi

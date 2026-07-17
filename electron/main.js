@@ -76,6 +76,14 @@ function killPythonProcess() {
 }
 
 app.whenReady().then(async () => {
+  // Disable GPU when running under Xvfb (no real GL extensions). The
+  // user (or dev-electron.sh) sets ELECTRON_DISABLE_GPU=1; we also
+  // support passing --disable-gpu on the command line.
+  if (process.env.ELECTRON_DISABLE_GPU === '1'
+      || process.argv.includes('--disable-gpu')) {
+    app.disableHardwareAcceleration();
+  }
+
   const iconPath = path.join(__dirname, 'assets', 'icon.png');
   const splash = showSplash({ iconPath });
   let logFile;
