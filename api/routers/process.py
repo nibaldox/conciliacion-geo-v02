@@ -385,19 +385,29 @@ async def run_process(request: Request, body: Optional[schemas.ProcessSettings] 
 
 
 @router.get("/status")
-def get_status(request: Request):
-    """Return the current processing status for the session."""
+async def get_status(request: Request):
+    """Return the current processing status for the session.
+
+    Three sequential DB round-trips run on the default executor so the
+    event loop isn't blocked while the status + result count are read.
+    """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
-        raw = db.get_process_status(session_id)
-        n_results = db.get_results_count(session_id)
-        return schemas.ProcessStatus(
-            status=raw.get("status", "idle"),
-            current_section=raw.get("current_section") or None,
-            total_sections=raw.get("total_sections") or None,
-            completed_sections=raw.get("completed_sections", 0),
-            n_results=n_results,
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
         )
+
+        def _fetch_status():
+            raw = db.get_process_status(session_id)
+            n_results = db.get_results_count(session_id)
+            return schemas.ProcessStatus(
+                status=raw.get("status", "idle"),
+                current_section=raw.get("current_section") or None,
+                total_sections=raw.get("total_sections") or None,
+                completed_sections=raw.get("completed_sections", 0),
+                n_results=n_results,
+            )
+
+        return await _run_in_executor(_fetch_status)
     except HTTPException:
         raise
     except Exception as exc:
@@ -411,12 +421,21 @@ def get_status(request: Request):
 
 
 @router.get("/results")
-def get_results(request: Request, section: Optional[str] = None):
-    """Return all comparison results, optionally filtered by section."""
+async def get_results(request: Request, section: Optional[str] = None):
+    """Return all comparison results, optionally filtered by section.
+
+    The SQLite read runs on the default executor so the event loop isn't
+    blocked while the (potentially large) results table is fetched.
+    """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
-        results = db.get_results(session_id, section=section)
-        return results
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
+        )
+
+        def _fetch():
+            return db.get_results(session_id, section=section)
+
+        return await _run_in_executor(_fetch)
     except HTTPException:
         raise
     except Exception as exc:
@@ -542,8 +561,110 @@ async def get_profile(request: Request, section_id: int):
 # ---------------------------------------------------------------------------
 
 
+def _update_reconciled_sync(
+    session_id: str,
+    section_id: int,
+    body_updates: List[dict],
+) -> dict:
+    """Persist updated benches for a section and re-run its comparison.
+
+    Synchronous helper invoked via ``run_in_executor`` from
+    :func:`update_reconciled`. Takes the request body already serialised
+    to plain ``dict`` (Pydantic parsing must stay on the event loop) and
+    returns the response payload ready for JSON encoding.
+    """
+    sections_raw = db.get_sections(session_id)
+    if section_id < 0 or section_id >= len(sections_raw):
+        raise HTTPException(404, "Section index out of range")
+
+    sec_name = sections_raw[section_id]["name"]
+
+    # Load current topo extraction cache
+    topo_extraction = db.get_extraction(session_id, sec_name, "topo")
+    if not topo_extraction:
+        raise HTTPException(404, f"No extraction data for section {sec_name}")
+
+    # Reconstruct benches from cache and apply updates
+    benches = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
+
+    for i, update_dict in enumerate(body_updates):
+        if i < len(benches):
+            b = benches[i]
+            # Update positions
+            if "crest_distance" in update_dict:
+                b.crest_distance = float(update_dict["crest_distance"])
+            if "crest_elevation" in update_dict:
+                b.crest_elevation = float(update_dict["crest_elevation"])
+            if "toe_distance" in update_dict:
+                b.toe_distance = float(update_dict["toe_distance"])
+            if "toe_elevation" in update_dict:
+                b.toe_elevation = float(update_dict["toe_elevation"])
+
+            # Recalculate derived values
+            b.bench_height = abs(b.crest_elevation - b.toe_elevation)
+            dx = b.toe_distance - b.crest_distance
+            dz = b.crest_elevation - b.toe_elevation
+            if abs(dx) > 0.01:
+                b.face_angle = abs(float(np.degrees(np.arctan2(dz, abs(dx)))))
+            else:
+                b.face_angle = 90.0
+
+    # Recalculate berm widths between adjacent benches
+    for i in range(len(benches) - 1):
+        benches[i].berm_width = abs(
+            benches[i + 1].crest_distance - benches[i].toe_distance
+        )
+
+    # Persist updated extraction cache
+    updated_extraction = _extraction_to_dict(
+        ExtractionResult(
+            section_name=sec_name,
+            sector=sections_raw[section_id].get("sector", ""),
+            benches=benches,
+        )
+    )
+    db.save_extraction(session_id, sec_name, "topo", updated_extraction)
+
+    # Re-run comparison for this section
+    settings = db.get_settings(session_id) or {}
+    tolerances = settings.get("tolerances", {})
+
+    design_extraction = db.get_extraction(session_id, sec_name, "design")
+    if design_extraction:
+        benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
+        p_design = ExtractionResult(
+            section_name=sec_name,
+            sector=sections_raw[section_id].get("sector", ""),
+            benches=benches_d,
+        )
+        p_topo = ExtractionResult(
+            section_name=sec_name,
+            sector=sections_raw[section_id].get("sector", ""),
+            benches=benches,
+        )
+        new_comps = compare_design_vs_asbuilt(p_design, p_topo, tolerances)
+
+        # Remove old comparisons for this section, add new ones
+        existing = db.get_results(session_id)
+        filtered = [r for r in existing if r.get("section") != sec_name]
+        # Strip non-serialisable keys from new comparisons
+        safe_new = [
+            {k: v for k, v in c.items() if k not in ("bench_design", "bench_real")}
+            for c in new_comps
+        ]
+        filtered.extend(safe_new)
+        db.save_results(session_id, filtered)
+
+    # Return updated reconciled profile + benches (v2: rich segments)
+    prof = build_reconciled_profile_v2(benches, source="topo")
+    return {
+        "reconciled_topo": _reconciled_profile_to_dict(prof),
+        "benches": [_bench_to_dict(b) for b in benches],
+    }
+
+
 @router.put("/results/{section_id}/reconciled")
-def update_reconciled(
+async def update_reconciled(
     request: Request, section_id: int, body: List[schemas.BenchParamsSchema]
 ):
     """
@@ -552,103 +673,26 @@ def update_reconciled(
     Receives updated crest/toe positions, recalculates derived values
     (height, angle, berm width), re-runs comparison for this section,
     and returns the updated reconciled profile.
+
+    The bench updates + comparison rerun happen off the event loop via
+    ``run_in_executor`` so the SQLite writes and numpy math don't stall
+    the event loop.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
-
-        sections_raw = db.get_sections(session_id)
-        if section_id < 0 or section_id >= len(sections_raw):
-            raise HTTPException(404, "Section index out of range")
-
-        sec_name = sections_raw[section_id]["name"]
-
-        # Load current topo extraction cache
-        topo_extraction = db.get_extraction(session_id, sec_name, "topo")
-        if not topo_extraction:
-            raise HTTPException(404, f"No extraction data for section {sec_name}")
-
-        # Reconstruct benches from cache and apply updates
-        benches = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
-
-        for i, bench_update in enumerate(body):
-            update_dict = (
-                bench_update.model_dump()
-                if hasattr(bench_update, "model_dump")
-                else bench_update.dict()
-            )
-            if i < len(benches):
-                b = benches[i]
-                # Update positions
-                if "crest_distance" in update_dict:
-                    b.crest_distance = float(update_dict["crest_distance"])
-                if "crest_elevation" in update_dict:
-                    b.crest_elevation = float(update_dict["crest_elevation"])
-                if "toe_distance" in update_dict:
-                    b.toe_distance = float(update_dict["toe_distance"])
-                if "toe_elevation" in update_dict:
-                    b.toe_elevation = float(update_dict["toe_elevation"])
-
-                # Recalculate derived values
-                b.bench_height = abs(b.crest_elevation - b.toe_elevation)
-                dx = b.toe_distance - b.crest_distance
-                dz = b.crest_elevation - b.toe_elevation
-                if abs(dx) > 0.01:
-                    b.face_angle = abs(float(np.degrees(np.arctan2(dz, abs(dx)))))
-                else:
-                    b.face_angle = 90.0
-
-        # Recalculate berm widths between adjacent benches
-        for i in range(len(benches) - 1):
-            benches[i].berm_width = abs(
-                benches[i + 1].crest_distance - benches[i].toe_distance
-            )
-
-        # Persist updated extraction cache
-        updated_extraction = _extraction_to_dict(
-            ExtractionResult(
-                section_name=sec_name,
-                sector=sections_raw[section_id].get("sector", ""),
-                benches=benches,
-            )
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
         )
-        db.save_extraction(session_id, sec_name, "topo", updated_extraction)
 
-        # Re-run comparison for this section
-        settings = db.get_settings(session_id) or {}
-        tolerances = settings.get("tolerances", {})
+        # Pre-serialise the request body on the event loop (Pydantic parses
+        # cleanly here; the worker thread receives plain dicts).
+        body_updates = [
+            item.model_dump() if hasattr(item, "model_dump") else item.dict()
+            for item in body
+        ]
 
-        design_extraction = db.get_extraction(session_id, sec_name, "design")
-        if design_extraction:
-            benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
-            p_design = ExtractionResult(
-                section_name=sec_name,
-                sector=sections_raw[section_id].get("sector", ""),
-                benches=benches_d,
-            )
-            p_topo = ExtractionResult(
-                section_name=sec_name,
-                sector=sections_raw[section_id].get("sector", ""),
-                benches=benches,
-            )
-            new_comps = compare_design_vs_asbuilt(p_design, p_topo, tolerances)
-
-            # Remove old comparisons for this section, add new ones
-            existing = db.get_results(session_id)
-            filtered = [r for r in existing if r.get("section") != sec_name]
-            # Strip non-serialisable keys from new comparisons
-            safe_new = [
-                {k: v for k, v in c.items() if k not in ("bench_design", "bench_real")}
-                for c in new_comps
-            ]
-            filtered.extend(safe_new)
-            db.save_results(session_id, filtered)
-
-        # Return updated reconciled profile + benches (v2: rich segments)
-        prof = build_reconciled_profile_v2(benches, source="topo")
-        return {
-            "reconciled_topo": _reconciled_profile_to_dict(prof),
-            "benches": [_bench_to_dict(b) for b in benches],
-        }
+        return await _run_in_executor(
+            _update_reconciled_sync, session_id, section_id, body_updates
+        )
     except HTTPException:
         raise
     except Exception as exc:

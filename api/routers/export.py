@@ -110,8 +110,88 @@ def _filters_header(filters: ExportFilters) -> Dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+def _build_excel_payload_sync(
+    session_id: str,
+    project: Optional[str],
+    author: Optional[str],
+    operation: Optional[str],
+    phase: Optional[str],
+    filters: Optional[str],
+) -> tuple[str, ExportFilters]:
+    """Build the Excel workbook off the event loop.
+
+    Returns ``(tmp_path, export_filters)`` so the async handler can wrap the
+    result in a ``FileResponse`` once the executor task resolves.
+    """
+    export_filters = _parse_filters(filters)
+
+    results = db.get_results(session_id)
+    if not results:
+        raise HTTPException(400, "No results to export — run the pipeline first")
+
+    results = _filter_comparisons(results, export_filters)
+
+    settings = db.get_settings(session_id) or {}
+    tolerances = settings.get("tolerances", {})
+
+    # Reconstruct ExtractionResult objects from extraction cache
+    sections_raw = db.get_sections(session_id)
+    params_design: List[ExtractionResult] = []
+    params_topo: List[ExtractionResult] = []
+
+    for sec in sections_raw:
+        sec_name = sec["name"]
+        sector = sec.get("sector", "")
+
+        design_ext = db.get_extraction(session_id, sec_name, "design")
+        if design_ext:
+            benches_d = [_dict_to_bench(b) for b in design_ext.get("benches", [])]
+            params_design.append(
+                ExtractionResult(
+                    section_name=sec_name,
+                    sector=sector,
+                    benches=benches_d,
+                    inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0),
+                    overall_angle=design_ext.get("overall_angle", 0.0),
+                )
+            )
+        else:
+            params_design.append(ExtractionResult(section_name=sec_name, sector=sector))
+
+        topo_ext = db.get_extraction(session_id, sec_name, "topo")
+        if topo_ext:
+            benches_t = [_dict_to_bench(b) for b in topo_ext.get("benches", [])]
+            params_topo.append(
+                ExtractionResult(
+                    section_name=sec_name,
+                    sector=sector,
+                    benches=benches_t,
+                    inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0),
+                    overall_angle=topo_ext.get("overall_angle", 0.0),
+                )
+            )
+        else:
+            params_topo.append(ExtractionResult(section_name=sec_name, sector=sector))
+
+    params_design = _apply_bench_filters(params_design, export_filters)
+    params_topo = _apply_bench_filters(params_topo, export_filters)
+
+    project_info = {
+        "project": project or "",
+        "author": author or "",
+        "operation": operation or "",
+        "phase": phase or "",
+        "date": __import__("datetime").datetime.now().strftime("%d/%m/%Y"),
+    }
+
+    tmp = os.path.join(tempfile.gettempdir(), f"conciliacion_{session_id[:8]}.xlsx")
+    export_results(results, params_design, params_topo, tolerances, tmp, project_info)
+
+    return tmp, export_filters
+
+
 @router.get("/excel")
-def export_excel(
+async def export_excel(
     request: Request,
     project: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
@@ -123,73 +203,23 @@ def export_excel(
         "When omitted, all benches and default toggles apply.",
     ),
 ):
-    """Export comparison results to a formatted Excel workbook."""
+    """Export comparison results to a formatted Excel workbook.
+
+    The Excel build (DB reads + openpyxl write) runs on the default executor
+    so multi-section workbooks don't stall the event loop.
+    """
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
-        export_filters = _parse_filters(filters)
-
-        results = db.get_results(session_id)
-        if not results:
-            raise HTTPException(400, "No results to export — run the pipeline first")
-
-        results = _filter_comparisons(results, export_filters)
-
-        settings = db.get_settings(session_id) or {}
-        tolerances = settings.get("tolerances", {})
-
-        # Reconstruct ExtractionResult objects from extraction cache
-        sections_raw = db.get_sections(session_id)
-        params_design: List[ExtractionResult] = []
-        params_topo: List[ExtractionResult] = []
-
-        for sec in sections_raw:
-            sec_name = sec["name"]
-            sector = sec.get("sector", "")
-
-            design_ext = db.get_extraction(session_id, sec_name, "design")
-            if design_ext:
-                benches_d = [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-                params_design.append(
-                    ExtractionResult(
-                        section_name=sec_name,
-                        sector=sector,
-                        benches=benches_d,
-                        inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0),
-                        overall_angle=design_ext.get("overall_angle", 0.0),
-                    )
-                )
-            else:
-                params_design.append(ExtractionResult(section_name=sec_name, sector=sector))
-
-            topo_ext = db.get_extraction(session_id, sec_name, "topo")
-            if topo_ext:
-                benches_t = [_dict_to_bench(b) for b in topo_ext.get("benches", [])]
-                params_topo.append(
-                    ExtractionResult(
-                        section_name=sec_name,
-                        sector=sector,
-                        benches=benches_t,
-                        inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0),
-                        overall_angle=topo_ext.get("overall_angle", 0.0),
-                    )
-                )
-            else:
-                params_topo.append(ExtractionResult(section_name=sec_name, sector=sector))
-
-        params_design = _apply_bench_filters(params_design, export_filters)
-        params_topo = _apply_bench_filters(params_topo, export_filters)
-
-        project_info = {
-            "project": project or "",
-            "author": author or "",
-            "operation": operation or "",
-            "phase": phase or "",
-            "date": __import__("datetime").datetime.now().strftime("%d/%m/%Y"),
-        }
-
-        tmp = os.path.join(tempfile.gettempdir(), f"conciliacion_{session_id[:8]}.xlsx")
-        export_results(results, params_design, params_topo, tolerances, tmp, project_info)
+        tmp, export_filters = await _run_in_executor(
+            _build_excel_payload_sync,
+            session_id,
+            project,
+            author,
+            operation,
+            phase,
+            filters,
+        )
 
         return FileResponse(
             tmp,
@@ -210,8 +240,104 @@ def export_excel(
 # ---------------------------------------------------------------------------
 
 
+def _build_word_payload_sync(
+    session_id: str,
+    project: Optional[str],
+    author: Optional[str],
+    operation: Optional[str],
+    phase: Optional[str],
+    filters: Optional[str],
+) -> tuple[str, ExportFilters]:
+    """Build the Word report off the event loop.
+
+    Returns ``(tmp_path, export_filters)`` so the async handler can wrap the
+    result in a ``FileResponse`` once the executor task resolves.
+    """
+    export_filters = _parse_filters(filters)
+
+    results = db.get_results(session_id)
+    if not results:
+        raise HTTPException(400, "No results to export — run the pipeline first")
+
+    results = _filter_comparisons(results, export_filters)
+
+    sections_raw = db.get_sections(session_id)
+    mesh_design = _load_mesh_from_db(session_id, "design")
+    mesh_topo = _load_mesh_from_db(session_id, "topo")
+
+    # Build all_data structure expected by generate_word_report
+    from core import cut_both_surfaces
+
+    all_data: List[Dict[str, Any]] = []
+    for sec_dict in sections_raw:
+        sec = _section_from_dict(sec_dict)
+        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+
+        # Reconstruct ExtractionResult objects from cache
+        design_ext = db.get_extraction(session_id, sec.name, "design")
+        topo_ext = db.get_extraction(session_id, sec.name, "topo")
+
+        benches_d = (
+            [_dict_to_bench(b) for b in design_ext.get("benches", [])]
+            if design_ext
+            else []
+        )
+        benches_t = (
+            [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
+        )
+
+        p_design = ExtractionResult(
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_d,
+            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
+            if design_ext
+            else 0.0,
+            overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
+        )
+        p_topo = ExtractionResult(
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_t,
+            inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
+            overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
+        )
+
+        p_design, p_topo = _apply_bench_filters([p_design, p_topo], export_filters)
+
+        all_data.append(
+            {
+                "section_name": sec.name,
+                "params_design": p_design,
+                "params_topo": p_topo,
+                "profile_d": (
+                    (pd_prof.distances, pd_prof.elevations)
+                    if pd_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+                "profile_t": (
+                    (pt_prof.distances, pt_prof.elevations)
+                    if pt_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+            }
+        )
+
+    project_info = {
+        "project": project or "",
+        "author": author or "",
+        "operation": operation or "",
+        "phase": phase or "",
+    }
+
+    tmp = os.path.join(tempfile.gettempdir(), f"report_{session_id[:8]}.docx")
+    generate_word_report(results, all_data, tmp, project_info)
+
+    return tmp, export_filters
+
+
 @router.get("/word")
-def export_word(
+async def export_word(
     request: Request,
     project: Optional[str] = Query(None),
     author: Optional[str] = Query(None),
@@ -222,89 +348,23 @@ def export_word(
         description="JSON-encoded ExportFilters (camelCase keys).",
     ),
 ):
-    """Export a full Word report with summary tables and section plots."""
+    """Export a full Word report with summary tables and section plots.
+
+    The Word build (trimesh cuts + python-docx writes) runs on the default
+    executor so multi-section reports don't stall the event loop.
+    """
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
-        export_filters = _parse_filters(filters)
-
-        results = db.get_results(session_id)
-        if not results:
-            raise HTTPException(400, "No results to export — run the pipeline first")
-
-        results = _filter_comparisons(results, export_filters)
-
-        sections_raw = db.get_sections(session_id)
-        mesh_design = _load_mesh_from_db(session_id, "design")
-        mesh_topo = _load_mesh_from_db(session_id, "topo")
-
-        # Build all_data structure expected by generate_word_report
-        from core import cut_both_surfaces
-
-        all_data: List[Dict[str, Any]] = []
-        for sec_dict in sections_raw:
-            sec = _section_from_dict(sec_dict)
-            pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-
-            # Reconstruct ExtractionResult objects from cache
-            design_ext = db.get_extraction(session_id, sec.name, "design")
-            topo_ext = db.get_extraction(session_id, sec.name, "topo")
-
-            benches_d = (
-                [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-                if design_ext
-                else []
-            )
-            benches_t = (
-                [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
-            )
-
-            p_design = ExtractionResult(
-                section_name=sec.name,
-                sector=sec.sector,
-                benches=benches_d,
-                inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
-                if design_ext
-                else 0.0,
-                overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
-            )
-            p_topo = ExtractionResult(
-                section_name=sec.name,
-                sector=sec.sector,
-                benches=benches_t,
-                inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
-                overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
-            )
-
-            p_design, p_topo = _apply_bench_filters([p_design, p_topo], export_filters)
-
-            all_data.append(
-                {
-                    "section_name": sec.name,
-                    "params_design": p_design,
-                    "params_topo": p_topo,
-                    "profile_d": (
-                        (pd_prof.distances, pd_prof.elevations)
-                        if pd_prof is not None
-                        else (np.array([]), np.array([]))
-                    ),
-                    "profile_t": (
-                        (pt_prof.distances, pt_prof.elevations)
-                        if pt_prof is not None
-                        else (np.array([]), np.array([]))
-                    ),
-                }
-            )
-
-        project_info = {
-            "project": project or "",
-            "author": author or "",
-            "operation": operation or "",
-            "phase": phase or "",
-        }
-
-        tmp = os.path.join(tempfile.gettempdir(), f"report_{session_id[:8]}.docx")
-        generate_word_report(results, all_data, tmp, project_info)
+        tmp, export_filters = await _run_in_executor(
+            _build_word_payload_sync,
+            session_id,
+            project,
+            author,
+            operation,
+            phase,
+            filters,
+        )
 
         return FileResponse(
             tmp,
