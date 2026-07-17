@@ -574,5 +574,26 @@
     "cumple": "CUMPLE",
     "fuera": "FUERA",
     "no_cumple": "NO CUMPLE"
+  },
+  "columnMapper": {
+    "eyebrow": "MAPEO DE COLUMNAS",
+    "title": "Asignar columnas del archivo",
+    "subtitle": "{{n}} columnas detectadas. Asigna cada campo canónico a una columna del archivo.",
+    "error": "No se pudo auto-detectar el mapeo. Asigna las columnas manualmente.",
+    "summary": "{{done}} de {{total}} campos requeridos cubiertos · {{missing}} faltantes.",
+    "col_field": "Campo canónico",
+    "col_description": "Descripción",
+    "col_source": "Columna del archivo",
+    "unmapped_option": "— sin asignar —",
+    "loading": "Auto-detectando…",
+    "preview_title": "Vista previa (primeras 5 filas)",
+    "preview_empty": "Asigna al menos un campo con una columna para ver la vista previa.",
+    "preview_no_rows": "Sin datos para mostrar.",
+    "confidence_exact": "EXACTO",
+    "confidence_fuzzy": "APROX.",
+    "confidence_unmatched": "—",
+    "confidence_hint": "Coincidencia {{kind}}",
+    "missing_required": "Faltan campos requeridos: {{names}}.",
+    "ready": "Listo para confirmar."
   }
 }

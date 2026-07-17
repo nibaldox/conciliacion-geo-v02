@@ -574,5 +574,26 @@
     "cumple": "PASS",
     "fuera": "OUT OF TOL.",
     "no_cumple": "FAIL"
+  },
+  "columnMapper": {
+    "eyebrow": "COLUMN MAPPING",
+    "title": "Map source file columns",
+    "subtitle": "{{n}} columns detected. Assign each canonical field to a column in the file.",
+    "error": "Auto-detect failed. Map the columns manually.",
+    "summary": "{{done}} of {{total}} required fields covered · {{missing}} missing.",
+    "col_field": "Canonical field",
+    "col_description": "Description",
+    "col_source": "Source column",
+    "unmapped_option": "— unmapped —",
+    "loading": "Auto-detecting…",
+    "preview_title": "Live preview (first 5 rows)",
+    "preview_empty": "Map at least one field to a source column to see the preview.",
+    "preview_no_rows": "No data to show.",
+    "confidence_exact": "EXACT",
+    "confidence_fuzzy": "FUZZY",
+    "confidence_unmatched": "—",
+    "confidence_hint": "{{kind}} match",
+    "missing_required": "Missing required fields: {{names}}.",
+    "ready": "Ready to confirm."
   }
 }

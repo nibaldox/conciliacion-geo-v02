@@ -411,3 +411,49 @@ export interface AIGenerateRequest {
   filters?: AIFilters;
   blast_trend?: Record<string, unknown>;
 }
+
+// Column-mapping API (POST /mapping/detect, GET /mapping/schema)
+//
+// Mirrors the backend schemas in `api/routers/mapping.py`. The
+// canonical schema is sourced from `core.column_mapping.py` (20
+// fields, 6 required) and is used by the ColumnMapper modal in the
+// upload wizard.
+//
+// Field-name wire format is what Pydantic emits in JSON, so we match
+// the `Field(alias=...)` rather than the Python attribute name — the
+// detect response payload uses the key `schema` (alias), not
+// `field_schema` (attribute name).
+
+export type ColumnMappingConfidence = 'exact' | 'fuzzy' | 'unmatched';
+
+export interface ColumnMappingField {
+  name: string;
+  required: boolean;
+  description: string;
+  unit: string;
+  aliases: string[];
+  dtype: 'float' | 'int' | 'str';
+}
+
+export interface ColumnMappingConfidenceEntry {
+  kind: ColumnMappingConfidence;
+  score: number;
+}
+
+export interface ColumnDetectRequest {
+  columns: string[];
+}
+
+export interface ColumnDetectResponse {
+  mapping: Record<string, string | null>;
+  confidence: Record<string, ColumnMappingConfidenceEntry>;
+  /** Wire-format key for the embedded canonical schema block. */
+  schema: ColumnMappingField[];
+  is_complete: boolean;
+  missing_required: string[];
+}
+
+export interface ColumnSchemaResponse {
+  fields: ColumnMappingField[];
+  required_fields: string[];
+}

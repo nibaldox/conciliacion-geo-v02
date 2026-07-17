@@ -28,6 +28,9 @@ import type {
   AIGenerateRequest,
   AIResponseChunk,
   AIUsageMetrics,
+  ColumnDetectRequest,
+  ColumnDetectResponse,
+  ColumnSchemaResponse,
 } from './types';
 
 // ─── Demo data helpers ──────────────────────────────────────
@@ -765,5 +768,46 @@ export function useCurveSection() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sections'] });
     },
+  });
+}
+
+// ─── Column mapping (schema-agnostic CSV/Excel ingest) ───────
+
+/**
+ * GET /mapping/schema
+ *
+ * Returns the canonical blast-hole schema (20 fields, 6 required) from
+ * `core.column_mapping.py`. Cached aggressively (5 min staleTime) so
+ * the modal does not refetch on every remount; the schema never
+ * changes during a session.
+ */
+export function useMappingSchema() {
+  return useQuery({
+    queryKey: ['mapping', 'schema'],
+    queryFn: () =>
+      client.get<ColumnSchemaResponse>('/mapping/schema').then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * POST /mapping/detect
+ *
+ * Wraps the auto-detect endpoint and exposes it as a `useMutation` so
+ * the ColumnMapper modal can call it imperatively once the source
+ * columns are known (i.e. after `useUploadBlastCsv` succeeds — at
+ * that point we POST the parsed headers and receive a suggested
+ * mapping per canonical field plus per-field confidence
+ * (`exact` | `fuzzy` | `unmatched`).
+ *
+ * Returns the `useMutation` handle so the caller can drive loading
+ * states via `isPending` / `isError` / `data`.
+ */
+export function useDetectColumnMapping() {
+  return useMutation({
+    mutationFn: (body: ColumnDetectRequest) =>
+      client
+        .post<ColumnDetectResponse>('/mapping/detect', body)
+        .then((r) => r.data),
   });
 }
