@@ -162,7 +162,10 @@ def _build_scatter_lines(
     return x_lines, y_lines, z_lines
 
 
-def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
+def procesar_pozos(
+    df: pd.DataFrame,
+    column_map: dict[str, str | None] | None = None,
+) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
     Coordinate correction applied:
@@ -206,8 +209,15 @@ def procesar_pozos(df: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray, np.ndarr
             df_work["fecha_tronadura"], errors="coerce"
         ).dt.date
 
-    resolved = _resolve_column_aliases(df_work)
-    df_work = _rename_to_canonical(df_work, resolved)
+    # If the caller provided an explicit column mapping (from the
+    # column-mapper UI), apply it directly. Otherwise, fall back to the
+    # legacy alias-based auto-detection.
+    if column_map is not None:
+        from core.column_mapping import apply_mapping
+        df_work = apply_mapping(df_work, column_map)
+    else:
+        resolved = _resolve_column_aliases(df_work)
+        df_work = _rename_to_canonical(df_work, resolved)
     _coerce_typed_columns(df_work)
 
     df_work["Z_collar"] = df_work["Z_collar"] + BENCH_HEIGHT
