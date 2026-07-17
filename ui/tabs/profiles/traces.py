@@ -223,25 +223,6 @@ def add_reconciled_trace(fig, rd, re, color, label, dash, width=1.5, show_berm_w
             line=dict(color=color, width=width, dash=dash),
             marker=dict(size=5 if width == 1.5 else 6, symbol='diamond', color=color),
             showlegend=showlegend))
-
-        # Cota visible en cada banco (crest + toe) — no solo en hover
-        if topo_benches is not None:
-            for bench in topo_benches:
-                fig.add_annotation(
-                    x=float(bench.crest_distance), y=float(bench.crest_elevation),
-                    text=f"<b>{bench.crest_elevation:.0f}</b>",
-                    showarrow=False,
-                    font=dict(size=9, color=color),
-                    yanchor='bottom', yshift=4,
-                )
-                fig.add_annotation(
-                    x=float(bench.toe_distance), y=float(bench.toe_elevation),
-                    text=f"<b>{bench.toe_elevation:.0f}</b>",
-                    showarrow=False,
-                    font=dict(size=9, color=color),
-                    yanchor='top', yshift=-4,
-                )
-
         if show_berm_width and comparison_results is not None and topo_benches is not None:
             add_berm_width_indicators(fig, topo_benches, comparison_results)
 

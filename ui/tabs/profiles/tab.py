@@ -47,6 +47,7 @@ def render_tab_profiles(config: dict) -> None:
                 controls["show_reconciled"], controls["show_pozos"], controls["blast_tolerance"],
                 controls["show_sector_areas"],
                 controls["num_cols"],
+                "cota_labels_v1",
             )
             cached = fig_cache.get(i)
             if cached and cached[0] == cache_key:
