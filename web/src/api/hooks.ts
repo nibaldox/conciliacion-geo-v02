@@ -581,16 +581,20 @@ function buildExportQuery(params?: ExportProjectInfo): Record<string, string> {
   return query;
 }
 
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function useExportExcel() {
   return useMutation({
     mutationFn: (params?: ExportProjectInfo) =>
       client.get('/export/excel', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
-        const url = URL.createObjectURL(r.data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'Conciliacion_Geotecnica.xlsx';
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(r.data, 'Conciliacion_Geotecnica.xlsx');
       }),
   });
 }
@@ -599,12 +603,7 @@ export function useExportWord() {
   return useMutation({
     mutationFn: (params?: ExportProjectInfo) =>
       client.get('/export/word', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
-        const url = URL.createObjectURL(r.data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'Reporte_Geotecnico.docx';
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(r.data, 'Reporte_Geotecnico.docx');
       }),
   });
 }
@@ -613,12 +612,7 @@ export function useExportDxf() {
   return useMutation({
     mutationFn: () =>
       client.get('/export/dxf', { responseType: 'blob' }).then(r => {
-        const url = URL.createObjectURL(r.data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'Perfiles_3D.dxf';
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(r.data, 'Perfiles_3D.dxf');
       }),
   });
 }
@@ -627,12 +621,7 @@ export function useExportImages() {
   return useMutation({
     mutationFn: () =>
       client.get('/export/images', { responseType: 'blob' }).then(r => {
-        const url = URL.createObjectURL(r.data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'Secciones_Imagenes.zip';
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(r.data, 'Secciones_Imagenes.zip');
       }),
   });
 }
