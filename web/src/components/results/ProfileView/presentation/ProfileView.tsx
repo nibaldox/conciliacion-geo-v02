@@ -93,6 +93,8 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
       <SectionHeader
         section={viewModel.section}
         benchCount={viewModel.benches.length}
+        floorElevation={viewModel.floorElevation ?? undefined}
+        crestElevationMax={viewModel.crestElevationMax ?? undefined}
         lastRunAt={lastRunAt}
       />
       <FilterBar filter={filter} blastDataAvailable={blastDataAvailable} />

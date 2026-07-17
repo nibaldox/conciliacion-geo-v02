@@ -94,6 +94,8 @@ export interface ProfileViewModel {
   readonly section: SectionMeta;
   readonly lines: readonly ProfileLine[];
   readonly benches: readonly Bench[];
+  readonly floorElevation?: number | null;
+  readonly crestElevationMax?: number | null;
 }
 
 // ─── Source DTOs (narrowed) ─────────────────────────────────

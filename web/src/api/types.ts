@@ -131,6 +131,8 @@ export interface ExtractionResult {
   benches: BenchParams[];
   inter_ramp_angle: number;
   overall_angle: number;
+  floor_elevation?: number | null;
+  crest_elevation_max?: number | null;
 }
 
 export interface ProfileData {

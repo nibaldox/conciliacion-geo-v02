@@ -15,11 +15,13 @@ import { formatStatus } from '../domain/status';
 export interface SectionHeaderProps {
   readonly section: SectionMeta;
   readonly benchCount: number;
+  readonly floorElevation?: number | null;
+  readonly crestElevationMax?: number | null;
   /** Optional: ISO timestamp of the last successful analysis run. */
   readonly lastRunAt?: string | null;
 }
 
-export function SectionHeader({ section, benchCount, lastRunAt }: SectionHeaderProps) {
+export function SectionHeader({ section, benchCount, floorElevation, crestElevationMax, lastRunAt }: SectionHeaderProps) {
   const { t } = useTranslation();
 
   return (
@@ -86,6 +88,22 @@ export function SectionHeader({ section, benchCount, lastRunAt }: SectionHeaderP
         value={benchCount}
         size="sm"
       />
+      {floorElevation != null && Number.isFinite(floorElevation) && (
+        <MetricValue
+          label={t('profileView.header.floorElev', { defaultValue: 'Cota Piso' })}
+          value={floorElevation.toFixed(0)}
+          unit="m"
+          size="sm"
+        />
+      )}
+      {crestElevationMax != null && Number.isFinite(crestElevationMax) && (
+        <MetricValue
+          label={t('profileView.header.crestMax', { defaultValue: 'Cota Cresta' })}
+          value={crestElevationMax.toFixed(0)}
+          unit="m"
+          size="sm"
+        />
+      )}
 
       <div className="flex-1" />
 

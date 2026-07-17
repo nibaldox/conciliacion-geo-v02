@@ -531,7 +531,9 @@
   "profileView": {
     "header": {
       "eyebrow": "SECTION ANALYSIS",
-      "last_run": "LAST RUN · {{ago}}"
+      "last_run": "LAST RUN · {{ago}}",
+      "floorElev": "Floor Elev",
+      "crestMax": "Crest Elev"
     },
     "summary": {
       "title": "MISSION STATUS",

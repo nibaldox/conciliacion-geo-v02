@@ -16,7 +16,7 @@ import json
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import List, Literal, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -323,6 +323,8 @@ class ExtractionResult:
     inter_ramp_angle: float = 0.0
     overall_angle: float = 0.0
     gaps: List[ReconciliationGap] = field(default_factory=list)
+    floor_elevation: Optional[float] = None
+    crest_elevation_max: Optional[float] = None
 
 
 def _adaptive_smooth(elevations) -> np.ndarray:
@@ -863,6 +865,14 @@ def extract_parameters(distances, elevations, section_name, sector,
         result.gaps = _emit_reconciliation_gaps(
             benches, list(design_benches), tols, section_name, sector,
         )
+
+    # Cota del piso y crest máxima: se derivan del último toe detectado
+    # (punto más profundo del perfil idealizado) y de la crest más alta.
+    if benches:
+        toe_elevs = [float(b.toe_elevation) for b in benches]
+        crest_elevs = [float(b.crest_elevation) for b in benches]
+        result.floor_elevation = min(toe_elevs)
+        result.crest_elevation_max = max(crest_elevs)
 
     return result
 

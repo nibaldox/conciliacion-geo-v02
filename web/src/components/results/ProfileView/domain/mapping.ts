@@ -177,5 +177,7 @@ export function toProfileViewModel(
     section: toSectionMeta(section),
     lines: toProfileLines(profile),
     benches: toBenches(profile.benches_topo ?? null, profile.section_name, comparisons),
+    floorElevation: profile.floor_elevation ?? null,
+    crestElevationMax: profile.crest_elevation_max ?? null,
   };
 }

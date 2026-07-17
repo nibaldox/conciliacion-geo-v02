@@ -104,6 +104,8 @@ def _extraction_to_dict(er: ExtractionResult) -> dict:
         ],
         "inter_ramp_angle": er.inter_ramp_angle,
         "overall_angle": er.overall_angle,
+        "floor_elevation": er.floor_elevation,
+        "crest_elevation_max": er.crest_elevation_max,
     }
 
 
@@ -524,6 +526,13 @@ def _build_profile_payload_sync(
             result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
             result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(benches_t)
             result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
+
+            toe_elevs = [float(b.toe_elevation) for b in benches_t]
+            crest_elevs = [float(b.crest_elevation) for b in benches_t]
+            if toe_elevs:
+                result["floor_elevation"] = min(toe_elevs)
+            if crest_elevs:
+                result["crest_elevation_max"] = max(crest_elevs)
 
     return result
 
