@@ -121,21 +121,57 @@ echo "🖥️  Starting Electron in dev mode..."
 export CONCILIACION_DEV_URL="http://localhost:${web_port}"
 cd electron
 
-# Use Xvfb if available (needed when there's no real X11/Wayland display,
-# e.g. over SSH or in a headless container). xvfb-run allocates a virtual
-# display on-the-fly, runs electron inside it, and tears it down on exit.
-if command -v xvfb-run >/dev/null 2>&1; then
-  ELECTRON_DISPLAY_OPTS=(-a --server-args="-screen 0 1400x900x24")
-  echo "   (using Xvfb virtual display)"
-  # Xvfb doesn't expose real GPU extensions, so disable hardware
-  # acceleration. The app renders fine with software rasterization.
-  export ELECTRON_DISABLE_GPU=1
-else
-  ELECTRON_DISPLAY_OPTS=()
+# Choose how to present the UI. Priority:
+# 1) Real native display (X11/Wayland) → Electron in a real window
+# 2) x11vnc/xpra already viewing an Xvfb display → Xvfb + Electron
+# 3) No display → fall back to the system browser. You lose the
+#    native menu + file dialog (those only work inside Electron), but
+#    the React UI renders identically and is always visible.
+
+has_display=0
+if [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]]; then
+  has_display=1
 fi
 
-xvfb-run "${ELECTRON_DISPLAY_OPTS[@]}" npm run dev &
-ELECTRON_PID=$!
+if [[ $has_display -eq 1 ]]; then
+  echo "   (using native display)"
+  npm run dev &
+  ELECTRON_PID=$!
+elif command -v xvfb-run >/dev/null 2>&1; then
+  # Xvfb allocates a virtual display on-the-fly. Useful if you have
+  # x11vnc/xpra forwarding that display :99 to your machine.
+  # Xvfb doesn't expose real GPU extensions, so disable hardware accel.
+  export ELECTRON_DISABLE_GPU=1
+  echo "   (using Xvfb virtual display :99 — view via x11vnc/xpra if needed)"
+  xvfb-run -a --server-args="-screen 0 1400x900x24" npm run dev &
+  ELECTRON_PID=$!
+else
+  # No display server: fall back to opening the Vite URL in the user's
+  # default browser. Always works, no X required.
+  echo "   (no display server detected — opening Vite URL in browser)"
+  echo "   Web:    http://localhost:${web_port}/conciliacion-geo-v02/"
+  BROWSER=""
+  for cmd in xdg-open gio open wslview sensible-browser; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      BROWSER="$cmd"
+      break
+    fi
+  done
+  if [[ -n "$BROWSER" ]]; then
+    sleep 2  # let Vite settle
+    "$BROWSER" "http://localhost:${web_port}/conciliacion-geo-v02/" >/dev/null 2>&1 &
+    ELECTRON_PID=$!
+    echo "   Opened with: $BROWSER"
+    echo ""
+    echo "   Note: native menu (File > Open STL) and file dialogs only work in Electron."
+    echo "         The browser fallback gives you the full UI minus those."
+  else
+    echo "   No browser command found (xdg-open, gio, open, wslview, sensible-browser)."
+    echo "   Open manually: http://localhost:${web_port}/conciliacion-geo-v02/"
+    ELECTRON_PID=""
+  fi
+fi
+
 cd ..
 
 # Block until any child dies. The trap cleans up the rest.
