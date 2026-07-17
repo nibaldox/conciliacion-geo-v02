@@ -463,7 +463,7 @@ export function buildAnnotations(
     annotations.push({
       x: bench.toeDistance,
       y: bench.toeElevation,
-      text: `B${bench.benchNumber}'`,
+      text: `B${bench.benchNumber}'<br><b>${bench.toeElevation.toFixed(0)}m</b>`,
       showarrow: false,
       font: { size: 10, color: '#888' },
     });

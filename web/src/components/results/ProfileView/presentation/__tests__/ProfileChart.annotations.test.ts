@@ -115,7 +115,7 @@ describe('buildAnnotations', () => {
     expect(buildAnnotations(vm, false)).toHaveLength(0);
   });
 
-  it('formats toe labels as B{number}\' anchored at the toe point with no arrow', () => {
+  it("formats toe labels as B{number}' anchored at the toe point with no arrow", () => {
     const vm = makeViewModel([
       makeBench({ benchNumber: 7, toeDistance: 42, toeElevation: 3099 }),
     ]);
@@ -124,7 +124,9 @@ describe('buildAnnotations', () => {
 
     // Prime symbol distinguishes the toe (pie) label from the crest
     // label `B7` already rendered by the bench-marker trace.
-    expect(annotation?.text).toBe("B7'");
+    // Includes the toe elevation for geotechnical context.
+    expect(annotation?.text).toContain("B7'");
+    expect(annotation?.text).toContain("3099");
     expect(annotation?.x).toBe(42);
     expect(annotation?.y).toBe(3099);
     expect(annotation?.showarrow).toBe(false);
