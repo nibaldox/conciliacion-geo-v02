@@ -77,9 +77,17 @@ def _precompute_profile_artefacts(results: dict) -> None:
             area_fill_topo[i] = (a_under, a_over, d_i, z_eval_i, z_ref_i)
 
         if ep_d is not None and ep_d.benches:
-            reconciled_design[i] = build_reconciled_profile(ep_d.benches)
+            design_floor = float(np.min(pd_prof.elevations)) if pd_prof is not None else None
+            reconciled_design[i] = build_reconciled_profile(
+                ep_d.benches,
+                floor_elevation=design_floor,
+            )
         if ep_t is not None and ep_t.benches:
-            reconciled_topo[i] = build_reconciled_profile(ep_t.benches)
+            topo_floor = float(np.min(pt_prof.elevations)) if pt_prof is not None else None
+            reconciled_topo[i] = build_reconciled_profile(
+                ep_t.benches,
+                floor_elevation=topo_floor,
+            )
 
     st.session_state['reconciled_design'] = reconciled_design
     st.session_state['reconciled_topo'] = reconciled_topo
