@@ -15,7 +15,7 @@ from api.database import init_db, cleanup_old_sessions
 from api.middleware import install_health_endpoints, install_middleware
 from api.middleware_auth import install_api_key_auth
 from api.middleware_ratelimit import install_rate_limiter
-from api.routers import ai, blast, meshes, sections, process, export, settings
+from api.routers import ai, blast, mapping, meshes, sections, process, export, settings
 from core.config import DEFAULTS, DEPLOY
 
 logger = logging.getLogger(__name__)
@@ -199,6 +199,7 @@ app.include_router(process.router, prefix="/api/v1")
 app.include_router(blast.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
 app.include_router(settings.router, prefix="/api/v1")
+app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 
 # Auth must be installed AFTER routers so it wraps them in the middleware
