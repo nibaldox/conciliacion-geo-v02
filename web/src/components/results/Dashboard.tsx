@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import Plot from 'react-plotly.js';
 import type { Data, Layout, Config } from 'plotly.js';
 import { useResults, useSections } from '../../api/hooks';
@@ -174,6 +175,7 @@ function getValueColor(pct: number): string {
 }
 
 export function Dashboard() {
+  const { t } = useTranslation();
   const { data: results } = useResults();
   const { data: sections } = useSections();
   const filters = useSession((s) => s.filters);
@@ -249,20 +251,20 @@ export function Dashboard() {
     () => [
       {
         type: 'bar',
-        name: 'Sobre-excavación',
+        name: t('dashboard.over_excavation'),
         x: areasBySector.map((a) => a.sector),
         y: areasBySector.map((a) => a.overExcavation),
         marker: { color: '#ef4444' },
       },
       {
         type: 'bar',
-        name: 'Deuda',
+        name: t('dashboard.debt'),
         x: areasBySector.map((a) => a.sector),
         y: areasBySector.map((a) => a.debt),
         marker: { color: '#f59e0b' },
       },
     ],
-    [areasBySector],
+    [areasBySector, t],
   );
   const areasLayout = useMemo<Partial<Layout>>(
     () => ({
@@ -272,11 +274,11 @@ export function Dashboard() {
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: 'Sector' },
-      yaxis: { title: 'Área (m²)' },
+      xaxis: { title: t('dashboard.sector') },
+      yaxis: { title: t('dashboard.area_m2') },
       legend: { orientation: 'h', y: -0.2 },
     }),
-    [],
+    [t],
   );
 
   const crestData = useMemo<Data[]>(
@@ -297,37 +299,37 @@ export function Dashboard() {
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: 'Delta cresta (m)' },
-      yaxis: { title: 'Frecuencia' },
+      xaxis: { title: t('dashboard.crest_delta_m') },
+      yaxis: { title: t('dashboard.frequency') },
     }),
-    [],
+    [t],
   );
 
   const statusData = useMemo<Data[]>(
     () => [
       {
         type: 'bar',
-        name: 'CUMPLE',
+        name: t('status.cumple'),
         x: statusBySector.map((s) => s.sector),
         y: statusBySector.map((s) => s.CUMPLE),
         marker: { color: '#10b981' },
       },
       {
         type: 'bar',
-        name: 'FUERA',
+        name: t('status.fuera'),
         x: statusBySector.map((s) => s.sector),
         y: statusBySector.map((s) => s.FUERA),
         marker: { color: '#f59e0b' },
       },
       {
         type: 'bar',
-        name: 'NO CUMPLE',
+        name: t('status.no_cumple'),
         x: statusBySector.map((s) => s.sector),
         y: statusBySector.map((s) => s.NO_CUMPLE),
         marker: { color: '#ef4444' },
       },
     ],
-    [statusBySector],
+    [statusBySector, t],
   );
   const statusLayout = useMemo<Partial<Layout>>(
     () => ({
@@ -337,11 +339,11 @@ export function Dashboard() {
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: 'Sector' },
-      yaxis: { title: 'N° de bancos' },
+      xaxis: { title: t('dashboard.sector') },
+      yaxis: { title: t('dashboard.bench_count') },
       legend: { orientation: 'h', y: -0.2 },
     }),
-    [],
+    [t],
   );
   const plotConfig = useMemo<Partial<Config>>(
     () => ({ displayModeBar: false, responsive: true }),
@@ -351,7 +353,7 @@ export function Dashboard() {
   if (!results || results.length === 0) {
     return (
       <div className="flex items-center justify-center h-48 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-        Sin resultados para mostrar. Ejecuta el procesamiento primero.
+        {t('dashboard.empty_state')}
       </div>
     );
   }
@@ -442,28 +444,28 @@ export function Dashboard() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <KPICard
-          title="Cumplimiento Global"
+          title={t('dashboard.kpi_global')}
           value={formatPct(stats.globalPct)}
           valueColor={getValueColor(stats.globalPct)}
           pct={stats.globalPct}
           icon={GlobalIcon}
         />
         <KPICard
-          title="Altura de Banco"
+          title={t('dashboard.kpi_height')}
           value={formatPct(stats.heightPct)}
           valueColor={getValueColor(stats.heightPct)}
           pct={stats.heightPct}
           icon={HeightIcon}
         />
         <KPICard
-          title="Ángulo de Cara"
+          title={t('dashboard.kpi_angle')}
           value={formatPct(stats.anglePct)}
           valueColor={getValueColor(stats.anglePct)}
           pct={stats.anglePct}
           icon={AngleIcon}
         />
         <KPICard
-          title="Ancho de Berma"
+          title={t('dashboard.kpi_berm')}
           value={formatPct(stats.bermPct)}
           valueColor={getValueColor(stats.bermPct)}
           pct={stats.bermPct}
@@ -475,7 +477,7 @@ export function Dashboard() {
       {areasBySector.length > 0 && (
         <div className="glass-panel rounded-xl p-5 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-            Área de Sobre-excavación / Deuda por Sector (m²)
+            {t('dashboard.areas_title')}
           </p>
           <Plot
             data={areasData}
@@ -489,7 +491,7 @@ export function Dashboard() {
       {/* G06: deviation distribution (crest) */}
       <div className="glass-panel rounded-xl p-5 space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-          Distribución de Desviación de Cresta (m)
+          {t('dashboard.crest_dev_title')}
         </p>
         {crestDeviations.length > 0 ? (
           <Plot
@@ -500,7 +502,7 @@ export function Dashboard() {
           />
         ) : (
           <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            Sin datos de desviación para los bancos seleccionados.
+            {t('dashboard.no_deviation_data')}
           </p>
         )}
       </div>
@@ -509,7 +511,7 @@ export function Dashboard() {
       {statusBySector.length > 0 && (
         <div className="glass-panel rounded-xl p-5 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-            Distribución de Cumplimiento por Sector
+            {t('dashboard.compliance_title')}
           </p>
           <Plot
             data={statusData}
@@ -523,14 +525,14 @@ export function Dashboard() {
       {/* Visual bars & detail statistics */}
       <div className="glass-panel rounded-xl p-5 space-y-4">
         <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-          Desglose y Comparativa Geotécnica
+          {t('dashboard.breakdown_title')}
         </p>
         <div className="space-y-4">
           {([
-            ['Cumplimiento Global', stats.globalPct, GlobalIcon],
-            ['Altura de Banco', stats.heightPct, HeightIcon],
-            ['Ángulo de Cara', stats.anglePct, AngleIcon],
-            ['Ancho de Berma', stats.bermPct, BermIcon],
+            [t('dashboard.kpi_global'), stats.globalPct, GlobalIcon],
+            [t('dashboard.kpi_height'), stats.heightPct, HeightIcon],
+            [t('dashboard.kpi_angle'), stats.anglePct, AngleIcon],
+            [t('dashboard.kpi_berm'), stats.bermPct, BermIcon],
           ] as const).map(([label, pct, icon]) => (
             <div key={label} className="space-y-1.5">
               <div className="flex justify-between items-center text-xs">

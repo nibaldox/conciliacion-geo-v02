@@ -550,5 +550,29 @@
     "resolution_low": "Low",
     "resolution_medium": "Medium",
     "resolution_high": "High"
+  },
+  "dashboard": {
+    "empty_state": "No results to show. Run the processing first.",
+    "areas_title": "Over-excavation / Debt Area by Sector (m²)",
+    "crest_dev_title": "Crest Deviation Distribution (m)",
+    "no_deviation_data": "No deviation data for the selected benches.",
+    "compliance_title": "Compliance Distribution by Sector",
+    "breakdown_title": "Geotechnical Breakdown & Comparison",
+    "over_excavation": "Over-excavation",
+    "debt": "Debt",
+    "sector": "Sector",
+    "area_m2": "Area (m²)",
+    "crest_delta_m": "Crest delta (m)",
+    "frequency": "Frequency",
+    "bench_count": "# of benches",
+    "kpi_global": "Global Compliance",
+    "kpi_height": "Bench Height",
+    "kpi_angle": "Face Angle",
+    "kpi_berm": "Berm Width"
+  },
+  "status": {
+    "cumple": "PASS",
+    "fuera": "OUT OF TOL.",
+    "no_cumple": "FAIL"
   }
 }

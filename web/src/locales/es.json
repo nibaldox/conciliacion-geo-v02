@@ -550,5 +550,29 @@
     "resolution_low": "Baja",
     "resolution_medium": "Media",
     "resolution_high": "Alta"
+  },
+  "dashboard": {
+    "empty_state": "Sin resultados para mostrar. Ejecuta el procesamiento primero.",
+    "areas_title": "Área de Sobre-excavación / Deuda por Sector (m²)",
+    "crest_dev_title": "Distribución de Desviación de Cresta (m)",
+    "no_deviation_data": "Sin datos de desviación para los bancos seleccionados.",
+    "compliance_title": "Distribución de Cumplimiento por Sector",
+    "breakdown_title": "Desglose y Comparativa Geotécnica",
+    "over_excavation": "Sobre-excavación",
+    "debt": "Deuda",
+    "sector": "Sector",
+    "area_m2": "Área (m²)",
+    "crest_delta_m": "Delta cresta (m)",
+    "frequency": "Frecuencia",
+    "bench_count": "N° de bancos",
+    "kpi_global": "Cumplimiento Global",
+    "kpi_height": "Altura de Banco",
+    "kpi_angle": "Ángulo de Cara",
+    "kpi_berm": "Ancho de Berma"
+  },
+  "status": {
+    "cumple": "CUMPLE",
+    "fuera": "FUERA",
+    "no_cumple": "NO CUMPLE"
   }
 }
