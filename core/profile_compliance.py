@@ -114,9 +114,15 @@ def build_reconciled_profile(benches, *, source: str = "topo",
             pts_legacy.append((bench.crest_distance, bench.crest_elevation))
             pts_legacy.append((bench.toe_distance, bench.toe_elevation))
         pts_sorted = sorted(pts_legacy, key=lambda p: p[0])
+        d_out = [p[0] for p in pts_sorted]
+        e_out = [p[1] for p in pts_sorted]
+        # Extender hasta el piso real si es más bajo que el último toe
+        if floor_elevation is not None and e_out and floor_elevation < e_out[-1]:
+            d_out.append(d_out[-1])
+            e_out.append(float(floor_elevation))
         return (
-            np.array([p[0] for p in pts_sorted], dtype=float),
-            np.array([p[1] for p in pts_sorted], dtype=float),
+            np.array(d_out, dtype=float),
+            np.array(e_out, dtype=float),
         )
 
     pts = _build_reconciled_points(benches, source=source, profile=profile,
