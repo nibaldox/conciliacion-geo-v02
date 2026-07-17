@@ -3,8 +3,17 @@ Mesh router — upload, info, vertices, delete.
 
 All endpoints operate under the session identified by ``request.state.session_id``
 (which is set by the session middleware in ``api/main.py``).
+
+Performance: every handler is ``async def`` and off-loads DB round-trips
+(``api.database`` is synchronous SQLite) to the default executor via
+:func:`api._async_db.run_db`. The cached heavy helpers (``_get_decimated_*``,
+``_get_contours_*``, ``_get_breaklines_*``) stay synchronous so tests can still
+call ``.cache_clear()`` on them, but the handler awaits them through
+``run_db`` so trimesh decimation / sectioning / breakline extraction never
+blocks the event loop.
 """
 
+import asyncio
 import os
 import tempfile
 import functools
@@ -16,6 +25,7 @@ import trimesh
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 
 import api.database as db
+from api._async_db import run_db
 from core import load_mesh, get_mesh_bounds
 
 router = APIRouter(prefix="/meshes", tags=["meshes"])
@@ -96,8 +106,9 @@ async def upload_mesh(
         "zmax": raw_bounds["zmax"],
     }
 
-    session_id = db.get_or_create_session(get_session_id(request))
-    mesh_id = db.save_mesh(
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    mesh_id = await run_db(
+        db.save_mesh,
         session_id=session_id,
         mesh_type=type,
         filename=filename,
@@ -116,10 +127,10 @@ async def upload_mesh(
 
 
 @router.get("/{mesh_id}/info")
-def mesh_info(request: Request, mesh_id: str):
+async def mesh_info(request: Request, mesh_id: str):
     """Return summary information for a stored mesh."""
     session_id = get_session_id(request)
-    mesh = db.get_mesh_by_id(mesh_id)
+    mesh = await run_db(db.get_mesh_by_id, mesh_id)
     if mesh is None:
         raise HTTPException(404, "Mesh not found")
     return {
@@ -136,7 +147,7 @@ def mesh_info(request: Request, mesh_id: str):
 @functools.lru_cache(maxsize=16)
 def _get_decimated_vertices_cached(mesh_id: str, step: int) -> dict:
     tmesh = db.get_trimesh_by_id(mesh_id)
-    
+
     from core.mesh_handler import decimate_mesh
     if len(tmesh.faces) > 0:
         dec = decimate_mesh(tmesh, step)
@@ -167,7 +178,7 @@ def _get_contours_cached(mesh_id: str, interval: float, grid_size: int) -> dict:
     )
 
     contour_lines: list[dict] = []
-    
+
     # We use exact trimesh sectioning instead of griddata interpolation!
     # This prevents staircases and produces geometrically perfect contours.
     for z in levels:
@@ -180,7 +191,7 @@ def _get_contours_cached(mesh_id: str, interval: float, grid_size: int) -> dict:
                     continue
                 poly_2d = [[float(v[0]), float(v[1])] for v in poly]
                 segs.append(poly_2d)
-                
+
             if segs:
                 contour_lines.append({
                     "elevation": float(z),
@@ -206,29 +217,29 @@ def _get_contours_cached(mesh_id: str, interval: float, grid_size: int) -> dict:
 
 
 @router.get("/{mesh_id}/vertices")
-def mesh_vertices(request: Request, mesh_id: str, step: int = 8000):
+async def mesh_vertices(request: Request, mesh_id: str, step: int = 8000):
     """
     Return decimated mesh vertices and faces for 3D visualization.
 
     ``step`` is the *maximum number of faces/points* to return (default 8000).
     """
     try:
-        return _get_decimated_vertices_cached(mesh_id, step)
+        return await run_db(_get_decimated_vertices_cached, mesh_id, step)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
 
 
 @router.delete("/{mesh_id}")
-def delete_mesh(request: Request, mesh_id: str):
+async def delete_mesh(request: Request, mesh_id: str):
     """Delete a stored mesh."""
-    deleted = db.delete_mesh(mesh_id)
+    deleted = await run_db(db.delete_mesh, mesh_id)
     if not deleted:
         raise HTTPException(404, "Mesh not found")
     return {"message": "Mesh deleted"}
 
 
 @router.get("/{mesh_id}/contours")
-def mesh_contours(
+async def mesh_contours(
     request: Request,
     mesh_id: str,
     interval: float = 15.0,
@@ -244,18 +255,19 @@ def mesh_contours(
     rendering with Chart.js or any line chart library.
     """
     try:
-        return _get_contours_cached(mesh_id, interval, grid_size)
+        return await run_db(_get_contours_cached, mesh_id, interval, grid_size)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
+
 
 @functools.lru_cache(maxsize=16)
 def _get_breaklines_cached(mesh_id: str, angle_threshold: float) -> dict:
     from core.breaklines import extract_breaklines
     tmesh = db.get_trimesh_by_id(mesh_id)
-    
+
     # Extract breaklines
     result = extract_breaklines(tmesh, angle_threshold_deg=angle_threshold)
-    
+
     contour_lines = []
     if result["crests"]:
         contour_lines.append({
@@ -269,7 +281,7 @@ def _get_breaklines_cached(mesh_id: str, angle_threshold: float) -> dict:
             "type": "toe",
             "segments": result["toes"]
         })
-        
+
     bounds = {
         "xmin": float(tmesh.bounds[0][0]),
         "xmax": float(tmesh.bounds[1][0]),
@@ -287,8 +299,9 @@ def _get_breaklines_cached(mesh_id: str, angle_threshold: float) -> dict:
         "lines": contour_lines,
     }
 
+
 @router.get("/{mesh_id}/breaklines")
-def mesh_breaklines(
+async def mesh_breaklines(
     request: Request,
     mesh_id: str,
     angle_threshold: float = 20.0,
@@ -297,6 +310,6 @@ def mesh_breaklines(
     Return analytic structural breaklines (crests, toes) extracted from the mesh dihedral angles.
     """
     try:
-        return _get_breaklines_cached(mesh_id, angle_threshold)
+        return await run_db(_get_breaklines_cached, mesh_id, angle_threshold)
     except ValueError as exc:
         raise HTTPException(404, str(exc))
