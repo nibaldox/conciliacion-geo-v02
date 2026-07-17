@@ -136,6 +136,7 @@ def _bench_to_dict(b: BenchParams) -> dict:
         "effective_berm_width": round(b.effective_berm_width, 2),
         "spill_start_distance": round(b.spill_start_distance, 2),
         "spill_start_elevation": round(b.spill_start_elevation, 2),
+        "floor_elevation": b.floor_elevation,
     }
 
 

@@ -299,6 +299,7 @@ class BenchParams:
     n_detection_methods_agreeing: int = 1
     source_points: int = 0
     ramp_segment: bool = False
+    floor_elevation: float = 0.0
 
 
 @dataclass
@@ -871,20 +872,40 @@ def extract_parameters(distances, elevations, section_name, sector,
     # real del terreno, que puede ser más profundo que el último toe
     # detectado (ej: zona de extracción final, fondo del rajo).
     e_arr = np.asarray(elevations, dtype=float)
+    d_arr = np.asarray(distances, dtype=float)
     if e_arr.size > 0:
         result.floor_elevation = float(np.min(e_arr))
         result.crest_elevation_max = float(np.max(e_arr))
 
-    # Ajustar la altura del último banco para que incluya la extensión
-    # de la cara hasta el piso real. Sin esto, la altura reportada queda
-    # corta porque no considera el tramo extendido que dibuja el perfil
-    # conciliado hasta el fondo del rajo.
-    if benches and result.floor_elevation is not None:
-        last_bench = benches[-1]
-        if result.floor_elevation < last_bench.toe_elevation:
-            last_bench.bench_height = float(abs(
-                last_bench.crest_elevation - result.floor_elevation
-            ))
+    # Calcular la cota de piso local para CADA banco: la elevación mínima
+    # del perfil original en el tramo [toe_del_banco, límite_inferior].
+    # El límite inferior es el inicio (crest_distance) del siguiente banco,
+    # o el final del perfil para el último banco. Esto permite que cada
+    # banco extienda su cara hasta el terreno real bajo él.
+    if benches and d_arr.size > 0:
+        for idx, b in enumerate(benches):
+            toe_d = float(b.toe_distance)
+            if idx + 1 < len(benches):
+                next_start = float(benches[idx + 1].crest_distance)
+            else:
+                idx_end = int(np.searchsorted(d_arr, toe_d))
+                next_start = float(d_arr[-1]) if idx_end < len(d_arr) else toe_d
+
+            d_lo = min(toe_d, next_start)
+            d_hi = max(toe_d, next_start)
+            mask = (d_arr >= d_lo) & (d_arr <= d_hi)
+            if not np.any(mask):
+                local_floor = float(b.toe_elevation)
+            else:
+                local_floor = float(np.min(e_arr[mask]))
+
+            b.floor_elevation = local_floor
+
+            # Ajustar la altura del banco para incluir la extensión hasta
+            # el piso local. Esto hace que bench_height refleje la altura
+            # real desde la crest hasta el fondo del terreno.
+            if local_floor < b.toe_elevation:
+                b.bench_height = float(abs(b.crest_elevation - local_floor))
 
     return result
 
@@ -994,18 +1015,20 @@ def _build_reconciled_points(
         if not b.is_ramp and idx + 1 < len(benches):
             next_b = benches[idx + 1]
             if next_b.crest_elevation >= b.toe_elevation:
-                # En lugar de un salto vertical desde toe hasta la crest del
-                # siguiente banco, prolongamos la cara del banco actual con su
-                # mismo ángulo hasta alcanzar la elevación de la siguiente crest.
-                # Esto genera una transición orgánica entre bancos.
+                # Cada banco prolonga su cara con su mismo ángulo hasta la
+                # cota del siguiente crest. La cota de piso local del banco
+                # (b.floor_elevation) define el límite inferior de la extensión.
                 angle_rad = math.radians(float(b.face_angle))
-                delta_z = float(b.toe_elevation) - float(next_b.crest_elevation)
+                target_e = float(next_b.crest_elevation)
+                if b.floor_elevation > 0:
+                    target_e = max(target_e, float(b.floor_elevation))
+                delta_z = float(b.toe_elevation) - target_e
                 if angle_rad > 0.01 and delta_z > 0:
                     face_dir = 1.0 if b.toe_distance >= b.crest_distance else -1.0
                     delta_d = (delta_z / math.tan(angle_rad)) * face_dir
                     pts.append(ReconciledPoint(
                         distance=float(b.toe_distance) + delta_d,
-                        elevation=float(next_b.crest_elevation),
+                        elevation=target_e,
                         bench_number=int(b.bench_number),
                         segment_type="berm_top",
                         source=source,
@@ -1013,16 +1036,15 @@ def _build_reconciled_points(
                 else:
                     pts.append(ReconciledPoint(
                         distance=float(b.toe_distance),
-                        elevation=float(next_b.crest_elevation),
+                        elevation=target_e,
                         bench_number=int(b.bench_number),
                         segment_type="berm_top",
                         source=source,
                     ))
 
-    # Extender el perfil hasta el piso real (cota del fondo del rajo).
-    # En lugar de una línea vertical, prolongamos la última cara del banco
-    # con su mismo ángulo hasta alcanzar la cota del piso, para que la
-    # transición sea orgánica y forme parte del perfil conciliado.
+    # Extender el perfil del último banco hasta el piso real (cota del
+    # fondo del rajo). En lugar de una línea vertical, prolongamos la cara
+    # del banco con su mismo ángulo hasta alcanzar la cota del piso.
     if floor_elevation is not None and pts and benches:
         last_bench = benches[-1]
         delta_z = float(last_bench.toe_elevation) - float(floor_elevation)
