@@ -68,5 +68,18 @@ def render_tab_profiles(config: dict) -> None:
                 fig_cache[i] = (cache_key, fig)
             with cols[col_idx]:
                 st.plotly_chart(fig, width="stretch")
+                params_topo = st.session_state.get('params_topo') or []
+                if i < len(params_topo):
+                    er = params_topo[i]
+                    if er is not None and er.benches:
+                        m_cols = st.columns(2)
+                        m_cols[0].metric(
+                            "Cota Piso",
+                            f"{er.floor_elevation:.0f} m" if er.floor_elevation is not None else "—",
+                        )
+                        m_cols[1].metric(
+                            "Cota Cresta",
+                            f"{er.crest_elevation_max:.0f} m" if er.crest_elevation_max is not None else "—",
+                        )
                 if controls["show_sector_areas"]:
                     render_face_angle_suggestion(section, i)
