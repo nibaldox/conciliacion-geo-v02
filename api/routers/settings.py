@@ -12,6 +12,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 
 import api.database as db
+from api._async_db import run_db
 import api.schemas as schemas
 from core.config import BLAST, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 
@@ -79,17 +80,17 @@ def _get_default_settings() -> dict:
 
 
 @router.get("")
-def get_settings(request: Request):
+async def get_settings(request: Request):
     """
     Return current settings merged with core defaults.
 
     DB values override defaults; any missing key falls back to the
     corresponding value from core.config.
     """
-    session_id = db.get_or_create_session(request.state.session_id)
+    session_id = await run_db(db.get_or_create_session, request.state.session_id)
     defaults = _get_default_settings()
 
-    stored = db.get_settings(session_id)
+    stored = await run_db(db.get_settings, session_id)
     if not stored:
         return defaults
 
@@ -113,7 +114,7 @@ def get_settings(request: Request):
 
 
 @router.put("")
-def update_settings(request: Request, body: schemas.SettingsUpdate):
+async def update_settings(request: Request, body: schemas.SettingsUpdate):
     """
     Update process, tolerance, and blast settings.
 
@@ -122,10 +123,10 @@ def update_settings(request: Request, body: schemas.SettingsUpdate):
     per-session drill & blast tunables (rock density ρ, height fallback)
     that drive the per-mass powder factor on ``GET /process/blast-correlation``.
     """
-    session_id = db.get_or_create_session(request.state.session_id)
+    session_id = await run_db(db.get_or_create_session, request.state.session_id)
 
     # Get existing settings or defaults
-    existing = db.get_settings(session_id) or _get_default_settings()
+    existing = (await run_db(db.get_settings, session_id)) or _get_default_settings()
 
     # Merge incoming body into existing settings. ``exclude_unset=True``
     # keeps only fields the client actually sent, so a partial PUT (e.g.
@@ -164,6 +165,6 @@ def update_settings(request: Request, body: schemas.SettingsUpdate):
                     raise HTTPException(400, f"Density for sector '{_sector}' must be positive")
         existing["blast"].update(incoming_blast)
 
-    db.save_settings(session_id, existing)
+    await run_db(db.save_settings, session_id, existing)
 
     return {"message": "Settings updated", "settings": existing}

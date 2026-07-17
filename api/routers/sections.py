@@ -17,6 +17,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from pydantic import BaseModel
 
 import api.database as db
+from api._async_db import run_db
 from core import load_mesh, load_dxf_polyline
 from core.section_cutter import (
     SectionLine,
@@ -99,22 +100,28 @@ def _dict_to_section(d: dict) -> SectionLine:
     )
 
 
-def _get_design_mesh(session_id: str):
-    """Load the design mesh from DB or raise 400."""
-    mesh = db.get_mesh(session_id, "design")
+async def _get_design_mesh(session_id: str):
+    """Load the design mesh from DB or raise 400.
+
+    Runs the SQLite ``get_mesh`` lookup on the worker thread; the
+    secondary ``get_trimesh_by_id`` call is then performed inline (the
+    trimesh reconstruction itself is a CPU/IO-bound chunk already handed
+    off to the threadpool by FastAPI for any subsequent ``def`` caller).
+    """
+    mesh = await run_db(db.get_mesh, session_id, "design")
     if mesh is None:
         raise HTTPException(400, "Upload design mesh first")
     return db.get_trimesh_by_id(mesh["id"])
 
 
-def _save_sections(session_id: str, sections: List[SectionLine]):
+async def _save_sections(session_id: str, sections: List[SectionLine]):
     """Persist a list of SectionLine objects to the database."""
-    db.save_sections(session_id, [_section_to_dict(s) for s in sections])
+    await run_db(db.save_sections, session_id, [_section_to_dict(s) for s in sections])
 
 
-def _load_sections(session_id: str) -> List[dict]:
+async def _load_sections(session_id: str) -> List[dict]:
     """Load stored section dicts from the database."""
-    return db.get_sections(session_id)
+    return await run_db(db.get_sections, session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -176,15 +183,15 @@ class SectionClickParams(BaseModel):
 
 
 @router.get("")
-def list_sections(request: Request):
+async def list_sections(request: Request):
     """Return all sections for the current session."""
-    session_id = db.get_or_create_session(get_session_id(request))
-    sections = _load_sections(session_id)
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    sections = await _load_sections(session_id)
     return [_section_to_response(i, s) for i, s in enumerate(sections)]
 
 
 @router.post("/auto")
-def sections_auto(request: Request, params: SectionAutoParams):
+async def sections_auto(request: Request, params: SectionAutoParams):
     """
     Generate sections evenly spaced along a start→end line.
 
@@ -193,8 +200,8 @@ def sections_auto(request: Request, params: SectionAutoParams):
     - **fixed**: all sections use ``fixed_az``.
     - **local_slope**: compute azimuth from design mesh slope at each section origin.
     """
-    session_id = db.get_or_create_session(get_session_id(request))
-    design_mesh = _get_design_mesh(session_id)
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    design_mesh = await _get_design_mesh(session_id)
 
     start = np.array(params.start, dtype=float)
     end = np.array(params.end, dtype=float)
@@ -219,18 +226,18 @@ def sections_auto(request: Request, params: SectionAutoParams):
         for sec in sections:
             sec.azimuth = compute_local_azimuth(design_mesh, sec.origin)
 
-    _save_sections(session_id, sections)
+    await _save_sections(session_id, sections)
 
-    stored = _load_sections(session_id)
+    stored = await _load_sections(session_id)
     return {
         "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
     }
 
 
 @router.post("/manual")
-def sections_manual(request: Request, sections_data: List[SectionCreate]):
+async def sections_manual(request: Request, sections_data: List[SectionCreate]):
     """Set sections from manual input (replaces any existing sections)."""
-    session_id = db.get_or_create_session(get_session_id(request))
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
     sections: List[SectionLine] = []
     for idx, s in enumerate(sections_data):
         sec = SectionLine(
@@ -244,8 +251,8 @@ def sections_manual(request: Request, sections_data: List[SectionCreate]):
         )
         sections.append(sec)
 
-    _save_sections(session_id, sections)
-    stored = _load_sections(session_id)
+    await _save_sections(session_id, sections)
+    stored = await _load_sections(session_id)
     return {
         "message": f"{len(stored)} sections set",
         "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
@@ -253,26 +260,26 @@ def sections_manual(request: Request, sections_data: List[SectionCreate]):
 
 
 @router.post("/click")
-def add_section_click(request: Request, params: SectionClickParams):
+async def add_section_click(request: Request, params: SectionClickParams):
     """
     Add a single section by clicking on the plan view.
 
     If ``az_mode`` is ``"auto"``, computes azimuth from the design mesh slope.
     Appends to existing sections.
     """
-    session_id = db.get_or_create_session(get_session_id(request))
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
     origin = np.array(params.origin, dtype=float)
     length = params.length
     sector = params.sector
 
     if params.az_mode == "auto":
-        design_mesh = _get_design_mesh(session_id)
+        design_mesh = await _get_design_mesh(session_id)
         az = compute_local_azimuth(design_mesh, origin)
     else:
         az = params.azimuth if params.azimuth is not None else 0.0
 
     # Load existing sections
-    existing = _load_sections(session_id)
+    existing = await _load_sections(session_id)
     n = len(existing) + 1
     sec = SectionLine(
         name=f"S-{n:02d}",
@@ -286,9 +293,9 @@ def add_section_click(request: Request, params: SectionClickParams):
 
     # Append and save
     new_sections = existing + [_section_to_dict(sec)]
-    db.save_sections(session_id, new_sections)
+    await run_db(db.save_sections, session_id, new_sections)
 
-    stored = _load_sections(session_id)
+    stored = await _load_sections(session_id)
     return {
         "section": _section_to_response(len(stored) - 1, stored[-1]),
         "total": len(stored),
@@ -312,8 +319,8 @@ async def sections_from_file(
     Parses the uploaded file as a polyline, then calls
     ``generate_perpendicular_sections()``.
     """
-    session_id = db.get_or_create_session(get_session_id(request))
-    design_mesh = _get_design_mesh(session_id)
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    design_mesh = await _get_design_mesh(session_id)
 
     spacing_f = float(spacing)
     length_f = float(length)
@@ -368,9 +375,9 @@ async def sections_from_file(
         length_up=l_up_f, length_down=l_down_f
     )
 
-    _save_sections(session_id, sections)
+    await _save_sections(session_id, sections)
 
-    stored = _load_sections(session_id)
+    stored = await _load_sections(session_id)
     return {
         "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
         "polyline": polyline.tolist()
@@ -380,14 +387,14 @@ async def sections_from_file(
 
 
 @router.put("/{section_id}")
-def update_section(request: Request, section_id: str, body: SectionCreate):
+async def update_section(request: Request, section_id: str, body: SectionCreate):
     """
     Update a single section by its index-based ID.
 
     Replaces the section at the given index with new data.
     """
-    session_id = db.get_or_create_session(get_session_id(request))
-    sections = _load_sections(session_id)
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    sections = await _load_sections(session_id)
 
     try:
         idx = int(section_id)
@@ -410,16 +417,16 @@ def update_section(request: Request, section_id: str, body: SectionCreate):
         "sector": body.sector,
     }
     sections[idx] = updated
-    db.save_sections(session_id, sections)
+    await run_db(db.save_sections, session_id, sections)
 
     return _section_to_response(idx, updated)
 
 
 @router.delete("/{section_id}")
-def delete_section(request: Request, section_id: str):
+async def delete_section(request: Request, section_id: str):
     """Delete a single section by its index-based ID."""
-    session_id = db.get_or_create_session(get_session_id(request))
-    sections = _load_sections(session_id)
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    sections = await _load_sections(session_id)
 
     try:
         idx = int(section_id)
@@ -432,7 +439,7 @@ def delete_section(request: Request, section_id: str):
         )
 
     removed = sections.pop(idx)
-    db.save_sections(session_id, sections)
+    await run_db(db.save_sections, session_id, sections)
 
     return {
         "message": f"Section '{removed['name']}' deleted",
@@ -441,26 +448,27 @@ def delete_section(request: Request, section_id: str):
 
 
 @router.delete("")
-def clear_sections(request: Request):
+async def clear_sections(request: Request):
     """Clear all sections for the current session."""
-    session_id = db.get_or_create_session(get_session_id(request))
-    db.save_sections(session_id, [])
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    await run_db(db.save_sections, session_id, [])
     return {"message": "All sections cleared"}
 
+
 @router.post("/curve")
-def sections_curve(request: Request, params: SectionCurveParams):
+async def sections_curve(request: Request, params: SectionCurveParams):
     """
     Generate sections perpendicular to an arbitrary polyline (e.g. contour curve segment).
     """
-    session_id = db.get_or_create_session(get_session_id(request))
+    session_id = await run_db(db.get_or_create_session, get_session_id(request))
     # We do not strictly need the design mesh unless az_method=local_slope,
     # but the current generate_perpendicular_sections handles az automatically.
-    
+
     # We pass the polyline points to generate_perpendicular_sections
     points_array = np.array(params.points, dtype=float)
     if len(points_array) < 2:
         raise HTTPException(400, "Curve must have at least 2 points")
-        
+
     sections = generate_perpendicular_sections(
         points=points_array,
         spacing=params.spacing,
@@ -469,9 +477,9 @@ def sections_curve(request: Request, params: SectionCurveParams):
         length_up=params.length_up,
         length_down=params.length_down
     )
-    
-    _save_sections(session_id, sections)
-    stored = _load_sections(session_id)
+
+    await _save_sections(session_id, sections)
+    stored = await _load_sections(session_id)
     return {
         "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
     }
