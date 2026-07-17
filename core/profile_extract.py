@@ -875,6 +875,17 @@ def extract_parameters(distances, elevations, section_name, sector,
         result.floor_elevation = float(np.min(e_arr))
         result.crest_elevation_max = float(np.max(e_arr))
 
+    # Ajustar la altura del último banco para que incluya la extensión
+    # de la cara hasta el piso real. Sin esto, la altura reportada queda
+    # corta porque no considera el tramo extendido que dibuja el perfil
+    # conciliado hasta el fondo del rajo.
+    if benches and result.floor_elevation is not None:
+        last_bench = benches[-1]
+        if result.floor_elevation < last_bench.toe_elevation:
+            last_bench.bench_height = float(abs(
+                last_bench.crest_elevation - result.floor_elevation
+            ))
+
     return result
 
 
