@@ -336,10 +336,10 @@ function Scene({
         const opacity = selectedCurveId ? (isSelected ? 1.0 : 0.2) : 0.9;
         
         return (
-          <line 
-            key={item.id} 
+          <line
+            key={item.id}
             {...{ geometry: item.geo } as any}
-            onClick={(e: any) => {
+            onClick={(e: { stopPropagation: () => void; index?: number; point: { x: number; z: number } }) => {
               e.stopPropagation();
               if (mapClickHandler) {
                 const vertexIndex = e.index;

@@ -47,17 +47,17 @@ client.interceptors.request.use((config) => {
 // Store session ID from response
 client.interceptors.response.use(
   (response) => {
-    const sessionId = response.headers['x-session-id'];
-    if (sessionId) {
-      currentSessionId = sessionId as string;
+    const sid = response.headers['x-session-id'];
+    if (typeof sid === 'string') {
+      currentSessionId = sid;
     }
     return response;
   },
   (error) => {
     // Preserve session ID even on errors
-    const sessionId = error.response?.headers?.['x-session-id'];
-    if (sessionId) {
-      currentSessionId = sessionId as string;
+    const sid = error.response?.headers?.['x-session-id'];
+    if (typeof sid === 'string') {
+      currentSessionId = sid;
     }
     return Promise.reject(error);
   }

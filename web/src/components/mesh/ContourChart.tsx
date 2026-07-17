@@ -10,6 +10,7 @@ import {
   Tooltip,
   Legend,
   type ChartDataset,
+  type TooltipItem,
 } from 'chart.js';
 import { Line } from 'react-chartjs-2';
 import { useMeshContours, useSections, useReferenceLines } from '../../api/hooks';
@@ -207,12 +208,13 @@ export function ContourChart() {
           borderColor: isDark ? '#2e2e2e' : '#e5e7eb',
           borderWidth: 1,
           callbacks: {
-            title: (items: any[]) => {
+            title: (items: TooltipItem<'line'>[]) => {
               const pt = items[0]?.element?.parsed;
               if (!pt) return '';
-              return `(${pt.x.toFixed(1)}, ${pt.y.toFixed(1)})`;
+              const p = pt as { x: number; y: number };
+              return `(${p.x.toFixed(1)}, ${p.y.toFixed(1)})`;
             },
-            label: (item: any) => item.dataset.label || '',
+            label: (item: TooltipItem<'line'>) => item.dataset.label || '',
           },
         },
       },
