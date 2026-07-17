@@ -116,10 +116,20 @@ def build_reconciled_profile(benches, *, source: str = "topo",
         pts_sorted = sorted(pts_legacy, key=lambda p: p[0])
         d_out = [p[0] for p in pts_sorted]
         e_out = [p[1] for p in pts_sorted]
-        # Extender hasta el piso real si es más bajo que el último toe
-        if floor_elevation is not None and e_out and floor_elevation < e_out[-1]:
-            d_out.append(d_out[-1])
-            e_out.append(float(floor_elevation))
+        # Prolongar la última cara del último banco con su mismo ángulo
+        # hasta alcanzar la cota del piso (en vez de línea vertical).
+        if floor_elevation is not None and e_out and benches:
+            last_bench = benches[-1]
+            delta_z = float(last_bench.toe_elevation) - float(floor_elevation)
+            if delta_z > 0:
+                angle_rad = np.radians(float(last_bench.face_angle))
+                if angle_rad > 0.01:
+                    face_dir = 1.0 if last_bench.toe_distance >= last_bench.crest_distance else -1.0
+                    delta_d = (delta_z / np.tan(angle_rad)) * face_dir
+                    d_out.append(float(last_bench.toe_distance) + delta_d)
+                else:
+                    d_out.append(d_out[-1])
+                e_out.append(float(floor_elevation))
         return (
             np.array(d_out, dtype=float),
             np.array(e_out, dtype=float),

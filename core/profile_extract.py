@@ -992,19 +992,24 @@ def _build_reconciled_points(
                 ))
 
     # Extender el perfil hasta el piso real (cota del fondo del rajo).
-    # El último toe detectado rara vez coincide con el fondo real porque:
-    # - La pared final puede no formar un banco detectable
-    # - Hay derrames acumulados sobre el piso
-    # - El RDP colapsa el tramo final
-    # Si se provee floor_elevation y es menor que el último toe,
-    # bajamos verticalmente desde el último toe hasta la cota del piso.
-    if floor_elevation is not None and pts:
-        last = pts[-1]
-        if float(floor_elevation) < float(last.elevation):
+    # En lugar de una línea vertical, prolongamos la última cara del banco
+    # con su mismo ángulo hasta alcanzar la cota del piso, para que la
+    # transición sea orgánica y forme parte del perfil conciliado.
+    if floor_elevation is not None and pts and benches:
+        last_bench = benches[-1]
+        delta_z = float(last_bench.toe_elevation) - float(floor_elevation)
+        if delta_z > 0:
+            angle_rad = math.radians(float(last_bench.face_angle))
+            if angle_rad > 0.01:
+                face_dir = 1.0 if last_bench.toe_distance >= last_bench.crest_distance else -1.0
+                delta_d = (delta_z / math.tan(angle_rad)) * face_dir
+                floor_d = float(last_bench.toe_distance) + delta_d
+            else:
+                floor_d = float(last_bench.toe_distance)
             pts.append(ReconciledPoint(
-                distance=float(last.distance),
+                distance=floor_d,
                 elevation=float(floor_elevation),
-                bench_number=int(last.bench_number),
+                bench_number=int(last_bench.bench_number),
                 segment_type="floor",
                 source=source,
             ))
