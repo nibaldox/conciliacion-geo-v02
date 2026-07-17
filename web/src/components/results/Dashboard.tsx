@@ -242,6 +242,112 @@ export function Dashboard() {
     };
   }, [filteredResults, sections]);
 
+  // Memoized Plotly data/layout for the 3 charts so Plotly.react
+  // diffing only fires when the underlying memoized inputs change,
+  // not on every render (e.g. on each bench-filter keystroke).
+  const areasData = useMemo<Data[]>(
+    () => [
+      {
+        type: 'bar',
+        name: 'Sobre-excavación',
+        x: areasBySector.map((a) => a.sector),
+        y: areasBySector.map((a) => a.overExcavation),
+        marker: { color: '#ef4444' },
+      },
+      {
+        type: 'bar',
+        name: 'Deuda',
+        x: areasBySector.map((a) => a.sector),
+        y: areasBySector.map((a) => a.debt),
+        marker: { color: '#f59e0b' },
+      },
+    ],
+    [areasBySector],
+  );
+  const areasLayout = useMemo<Partial<Layout>>(
+    () => ({
+      barmode: 'stack',
+      height: 320,
+      margin: { l: 50, r: 20, t: 20, b: 40 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: 'var(--color-text-secondary)' },
+      xaxis: { title: 'Sector' },
+      yaxis: { title: 'Área (m²)' },
+      legend: { orientation: 'h', y: -0.2 },
+    }),
+    [],
+  );
+
+  const crestData = useMemo<Data[]>(
+    () => [
+      {
+        type: 'histogram',
+        x: crestDeviations,
+        nbinsx: 15,
+        marker: { color: '#3b82f6' },
+      },
+    ] as unknown as Data[],
+    [crestDeviations],
+  );
+  const crestLayout = useMemo<Partial<Layout>>(
+    () => ({
+      height: 300,
+      margin: { l: 50, r: 20, t: 20, b: 40 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: 'var(--color-text-secondary)' },
+      xaxis: { title: 'Delta cresta (m)' },
+      yaxis: { title: 'Frecuencia' },
+    }),
+    [],
+  );
+
+  const statusData = useMemo<Data[]>(
+    () => [
+      {
+        type: 'bar',
+        name: 'CUMPLE',
+        x: statusBySector.map((s) => s.sector),
+        y: statusBySector.map((s) => s.CUMPLE),
+        marker: { color: '#10b981' },
+      },
+      {
+        type: 'bar',
+        name: 'FUERA',
+        x: statusBySector.map((s) => s.sector),
+        y: statusBySector.map((s) => s.FUERA),
+        marker: { color: '#f59e0b' },
+      },
+      {
+        type: 'bar',
+        name: 'NO CUMPLE',
+        x: statusBySector.map((s) => s.sector),
+        y: statusBySector.map((s) => s.NO_CUMPLE),
+        marker: { color: '#ef4444' },
+      },
+    ],
+    [statusBySector],
+  );
+  const statusLayout = useMemo<Partial<Layout>>(
+    () => ({
+      barmode: 'stack',
+      height: 320,
+      margin: { l: 50, r: 20, t: 20, b: 40 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: 'var(--color-text-secondary)' },
+      xaxis: { title: 'Sector' },
+      yaxis: { title: 'N° de bancos' },
+      legend: { orientation: 'h', y: -0.2 },
+    }),
+    [],
+  );
+  const plotConfig = useMemo<Partial<Config>>(
+    () => ({ displayModeBar: false, responsive: true }),
+    [],
+  );
+
   if (!results || results.length === 0) {
     return (
       <div className="flex items-center justify-center h-48 text-sm" style={{ color: 'var(--color-text-muted)' }}>
@@ -372,34 +478,9 @@ export function Dashboard() {
             Área de Sobre-excavación / Deuda por Sector (m²)
           </p>
           <Plot
-            data={[
-              {
-                type: 'bar',
-                name: 'Sobre-excavación',
-                x: areasBySector.map((a) => a.sector),
-                y: areasBySector.map((a) => a.overExcavation),
-                marker: { color: '#ef4444' },
-              },
-              {
-                type: 'bar',
-                name: 'Deuda',
-                x: areasBySector.map((a) => a.sector),
-                y: areasBySector.map((a) => a.debt),
-                marker: { color: '#f59e0b' },
-              },
-            ] as Data[]}
-            layout={{
-              barmode: 'stack',
-              height: 320,
-              margin: { l: 50, r: 20, t: 20, b: 40 },
-              paper_bgcolor: 'rgba(0,0,0,0)',
-              plot_bgcolor: 'rgba(0,0,0,0)',
-              font: { color: 'var(--color-text-secondary)' },
-              xaxis: { title: 'Sector' },
-              yaxis: { title: 'Área (m²)' },
-              legend: { orientation: 'h', y: -0.2 },
-            } as Partial<Layout>}
-            config={{ displayModeBar: false, responsive: true } as Partial<Config>}
+            data={areasData}
+            layout={areasLayout}
+            config={plotConfig}
             style={{ width: '100%' }}
           />
         </div>
@@ -412,24 +493,9 @@ export function Dashboard() {
         </p>
         {crestDeviations.length > 0 ? (
           <Plot
-            data={[
-              {
-                type: 'histogram',
-                x: crestDeviations,
-                nbinsx: 15,
-                marker: { color: '#3b82f6' },
-              },
-            ] as unknown as Data[]}
-            layout={{
-              height: 300,
-              margin: { l: 50, r: 20, t: 20, b: 40 },
-              paper_bgcolor: 'rgba(0,0,0,0)',
-              plot_bgcolor: 'rgba(0,0,0,0)',
-              font: { color: 'var(--color-text-secondary)' },
-              xaxis: { title: 'Delta cresta (m)' },
-              yaxis: { title: 'Frecuencia' },
-            } as Partial<Layout>}
-            config={{ displayModeBar: false, responsive: true } as Partial<Config>}
+            data={crestData}
+            layout={crestLayout}
+            config={plotConfig}
             style={{ width: '100%' }}
           />
         ) : (
@@ -446,41 +512,9 @@ export function Dashboard() {
             Distribución de Cumplimiento por Sector
           </p>
           <Plot
-            data={[
-              {
-                type: 'bar',
-                name: 'CUMPLE',
-                x: statusBySector.map((s) => s.sector),
-                y: statusBySector.map((s) => s.CUMPLE),
-                marker: { color: '#10b981' },
-              },
-              {
-                type: 'bar',
-                name: 'FUERA',
-                x: statusBySector.map((s) => s.sector),
-                y: statusBySector.map((s) => s.FUERA),
-                marker: { color: '#f59e0b' },
-              },
-              {
-                type: 'bar',
-                name: 'NO CUMPLE',
-                x: statusBySector.map((s) => s.sector),
-                y: statusBySector.map((s) => s.NO_CUMPLE),
-                marker: { color: '#ef4444' },
-              },
-            ] as Data[]}
-            layout={{
-              barmode: 'stack',
-              height: 320,
-              margin: { l: 50, r: 20, t: 20, b: 40 },
-              paper_bgcolor: 'rgba(0,0,0,0)',
-              plot_bgcolor: 'rgba(0,0,0,0)',
-              font: { color: 'var(--color-text-secondary)' },
-              xaxis: { title: 'Sector' },
-              yaxis: { title: 'N° de bancos' },
-              legend: { orientation: 'h', y: -0.2 },
-            } as Partial<Layout>}
-            config={{ displayModeBar: false, responsive: true } as Partial<Config>}
+            data={statusData}
+            layout={statusLayout}
+            config={plotConfig}
             style={{ width: '100%' }}
           />
         </div>
