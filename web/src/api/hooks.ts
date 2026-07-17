@@ -660,36 +660,6 @@ export function useUpdateSettings() {
 
 // ─── AI ────────────────────────────────────────────────────
 
-export interface AIProviderInfo {
-  available: boolean;
-  provider: string;
-  models?: string[];
-  base_url?: string;
-  error?: string;
-}
-
-export interface AIProvidersResponse {
-  providers: Record<string, AIProviderInfo>;
-  default_provider: string;
-}
-
-export function useAIProviders() {
-  return useQuery({
-    queryKey: ['ai-providers'],
-    queryFn: () => client.get<AIProvidersResponse>('/ai/providers').then(r => r.data),
-    staleTime: 60_000, // Check every minute
-  });
-}
-
-export function useAIModels(provider: string | null) {
-  return useQuery({
-    queryKey: ['ai-models', provider],
-    queryFn: () => client.get<{ provider: string; models: string[] }>(`/ai/models/${provider}`).then(r => r.data),
-    enabled: !!provider,
-    staleTime: 60_000,
-  });
-}
-
 /** Callbacks delivered by {@link useGenerateAIStream} as the NDJSON stream
  *  produced by `POST /ai/generate/stream` is parsed. */
 export interface AIStreamCallbacks {
