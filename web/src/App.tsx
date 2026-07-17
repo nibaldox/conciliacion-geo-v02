@@ -16,9 +16,9 @@ import {
   LazyDashboard,
   LazyBlastCorrelation,
   LazyAIReporter,
+  LazyProfileView,
+  LazyProfilesGrid,
 } from './components/lazy';
-import { ProfileView } from './components/results/ProfileView';
-import { ProfilesGrid } from './components/results/ProfileView';
 import { SectionSelector } from './components/results/SectionSelector';
 import { IconGrid, IconList } from './components/ui/Icons';
 
@@ -112,7 +112,9 @@ function ProfilesWorkspace() {
       {/* Content */}
       {mode === 'grid' ? (
         <div className="flex-1 overflow-y-auto min-h-0">
-          <ProfilesGrid onSectionSelect={handleGridSelect} />
+          <Suspense fallback={<LoadingSpinner />}>
+            <LazyProfilesGrid onSectionSelect={handleGridSelect} />
+          </Suspense>
         </div>
       ) : (
         <div className="space-y-3 flex-1 flex flex-col min-h-0">
@@ -120,7 +122,9 @@ function ProfilesWorkspace() {
             <SectionSelector />
           </div>
           <div className="flex-1 min-h-0">
-            <ProfileView />
+            <Suspense fallback={<LoadingSpinner />}>
+              <LazyProfileView />
+            </Suspense>
           </div>
         </div>
       )}

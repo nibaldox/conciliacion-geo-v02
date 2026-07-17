@@ -11,10 +11,18 @@ export const LazyMesh3DViewer = lazy(() =>
 );
 
 
-// Note: the old LazyProfileChart is gone. ProfileView (the new
-// orchestrator) is loaded eagerly because Plotly is its biggest
-// dependency and is already in the Plotly vendor chunk. The
-// ProfileView itself dynamically imports Plotly on first render.
+// ProfileView + ProfilesGrid pull in react-plotly.js (~3.5 MB parsed).
+// Both are re-exported from the same barrel, so a single dynamic import
+// puts the whole feature — and Plotly — into one on-demand chunk that is
+// only fetched when the user opens the Profiles workspace. Plotly itself
+// still lands in the `vendor-plotly` manualChunk (see vite.config.ts).
+export const LazyProfileView = lazy(() =>
+  import('./results/ProfileView').then(m => ({ default: m.ProfileView }))
+);
+
+export const LazyProfilesGrid = lazy(() =>
+  import('./results/ProfileView').then(m => ({ default: m.ProfilesGrid }))
+);
 
 export const LazyResultsTable = lazy(() =>
   import('./results/ResultsTable').then(m => ({ default: m.ResultsTable }))
