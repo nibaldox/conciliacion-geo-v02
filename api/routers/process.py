@@ -8,9 +8,10 @@ Endpoints:
     PUT  /results/{section_id}/reconciled  Update benches after drag & drop
 """
 
+import asyncio
+import logging
 import math
 import os
-import logging
 import tempfile
 import warnings
 from pathlib import Path
@@ -46,6 +47,16 @@ from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/process", tags=["process"])
+
+
+def _run_in_executor(func, *args):
+    """Schedule a CPU/IO-bound callable on the default executor.
+
+    Keeps handlers ``async def`` while still letting trimesh / pandas /
+    numpy / file-IO work run off the event-loop thread.
+    """
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(None, func, *args)
 
 
 # ---------------------------------------------------------------------------
@@ -195,14 +206,155 @@ def _legacy_reconciled_to_dict(benches) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _run_pipeline_sync(
+    session_id: str,
+    sections_raw: list,
+    body_overrides: dict,
+) -> dict:
+    """Run the full cut → extract → compare pipeline off the event loop.
+
+    Synchronous helper invoked via ``run_in_executor`` from
+    :func:`run_process`. Performs the same work the original sync handler
+    did: load meshes, merge settings, run per-section work in a
+    ``ThreadPoolExecutor``, persist extractions, and return a result dict
+    ready for JSON encoding.
+    """
+    # Load both meshes (will raise 400 if missing)
+    try:
+        mesh_design = _load_mesh_from_db(session_id, "design")
+        mesh_topo = _load_mesh_from_db(session_id, "topo")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Error loading meshes: {exc}")
+
+    # Merge settings: DB defaults ← body overrides
+    settings = db.get_settings(session_id) or {}
+    process_cfg = settings.get("process", {})
+    tolerances = settings.get("tolerances", {})
+
+    process_cfg.update(body_overrides.get("process", {}))
+    tolerances.update(body_overrides.get("tolerances", {}))
+
+    # Fall back to DEFAULT_TOLERANCES if no tolerances were provided
+    if not tolerances:
+        tolerances = {
+            "bench_height": DEFAULT_TOLERANCES.bench_height,
+            "face_angle": DEFAULT_TOLERANCES.face_angle,
+            "berm_width": DEFAULT_TOLERANCES.berm_width,
+            "inter_ramp_angle": DEFAULT_TOLERANCES.inter_ramp_angle,
+            "overall_angle": DEFAULT_TOLERANCES.overall_angle,
+        }
+
+    resolution = process_cfg.get("resolution", 0.1)
+    face_threshold = process_cfg.get("face_threshold", DETECTION.face_threshold)
+    berm_threshold = process_cfg.get("berm_threshold", DETECTION.berm_threshold)
+
+    # Reconstruct SectionLine objects
+    sections = [_section_from_dict(s) for s in sections_raw]
+
+    # Mark processing started
+    db.update_process_status(session_id, "processing", 0, len(sections))
+
+    # Allocate result containers
+    params_design_list: List[Optional[ExtractionResult]] = [None] * len(sections)
+    params_topo_list: List[Optional[ExtractionResult]] = [None] * len(sections)
+    comparison_results: List[Dict[str, Any]] = []
+
+    def _process_section(args: tuple):
+        """Worker: cut → extract → compare for a single section."""
+        idx, sec = args
+        try:
+            pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+            if pd_prof is not None and pt_prof is not None:
+                p_d = extract_parameters(
+                    pd_prof.distances,
+                    pd_prof.elevations,
+                    sec.name,
+                    sec.sector,
+                    resolution,
+                    face_threshold,
+                    berm_threshold,
+                )
+                p_t = extract_parameters(
+                    pt_prof.distances,
+                    pt_prof.elevations,
+                    sec.name,
+                    sec.sector,
+                    resolution,
+                    face_threshold,
+                    berm_threshold,
+                )
+                comps = compare_design_vs_asbuilt(p_d, p_t, tolerances)
+                return idx, sec, p_d, p_t, comps
+            else:
+                p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
+                p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
+                return idx, sec, p_d_empty, p_t_empty, []
+        except Exception as exc:
+            logger.exception("Section %s processing failed: %s", sec.name, exc)
+            p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
+            p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
+            return idx, sec, p_d_empty, p_t_empty, []
+
+    # Execute in parallel (inside the executor thread, so this pool only
+    # uses background threads; no event-loop blocking).
+    completed = 0
+    with ThreadPoolExecutor() as executor:
+        for idx, sec, p_d, p_t, comps in executor.map(
+            _process_section, enumerate(sections)
+        ):
+            params_design_list[idx] = p_d
+            params_topo_list[idx] = p_t
+            comparison_results.extend(comps)
+            completed += 1
+            db.update_process_status(session_id, "processing", completed, len(sections))
+
+    # Persist results
+    # Save extraction cache for each section
+    for idx, sec in enumerate(sections):
+        if params_design_list[idx] is not None:
+            db.save_extraction(
+                session_id,
+                sec.name,
+                "design",
+                _extraction_to_dict(params_design_list[idx]),
+            )
+        if params_topo_list[idx] is not None:
+            db.save_extraction(
+                session_id,
+                sec.name,
+                "topo",
+                _extraction_to_dict(params_topo_list[idx]),
+            )
+
+    # Make comparison results JSON-safe before saving
+    safe_results = []
+    for c in comparison_results:
+        safe_c = {k: v for k, v in c.items() if k not in ("bench_design", "bench_real")}
+        safe_results.append(safe_c)
+
+    db.save_results(session_id, safe_results)
+    db.update_process_status(session_id, "complete", len(sections), len(sections))
+
+    return {
+        "status": "complete",
+        "total_sections": len(sections),
+        "total_results": len(comparison_results),
+    }
+
+
 @router.post("")
-def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None):
+async def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None):
     """
     Run the full geotechnical reconciliation pipeline:
     cut all sections → extract parameters → compare design vs as-built.
 
     Uses ThreadPoolExecutor for parallel section processing.
     Results and extraction cache are persisted to the database.
+
+    The bulk of the work (mesh loading, per-section cut/extract/compare,
+    DB persistence) is executed off the event loop via ``run_in_executor``.
     """
     try:
         session_id = db.get_or_create_session(request.state.session_id)
@@ -212,130 +364,14 @@ def run_process(request: Request, body: Optional[schemas.ProcessSettings] = None
         if not sections_raw:
             raise HTTPException(400, "Load sections first")
 
-        # Load both meshes (will raise 400 if missing)
-        try:
-            mesh_design = _load_mesh_from_db(session_id, "design")
-            mesh_topo = _load_mesh_from_db(session_id, "topo")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(400, f"Error loading meshes: {exc}")
-
-        # Merge settings: DB defaults ← body overrides
-        settings = db.get_settings(session_id) or {}
-        process_cfg = settings.get("process", {})
-        tolerances = settings.get("tolerances", {})
-
+        body_overrides: dict = {}
         if body is not None:
             body_dict = body.model_dump() if hasattr(body, "model_dump") else body.dict()
-            process_cfg.update(body_dict.get("process", {}))
-            tolerances.update(body_dict.get("tolerances", {}))
+            body_overrides = body_dict
 
-        # Fall back to DEFAULT_TOLERANCES if no tolerances were provided
-        if not tolerances:
-            tolerances = {
-                "bench_height": DEFAULT_TOLERANCES.bench_height,
-                "face_angle": DEFAULT_TOLERANCES.face_angle,
-                "berm_width": DEFAULT_TOLERANCES.berm_width,
-                "inter_ramp_angle": DEFAULT_TOLERANCES.inter_ramp_angle,
-                "overall_angle": DEFAULT_TOLERANCES.overall_angle,
-            }
-
-        resolution = process_cfg.get("resolution", 0.1)
-        face_threshold = process_cfg.get("face_threshold", DETECTION.face_threshold)
-        berm_threshold = process_cfg.get("berm_threshold", DETECTION.berm_threshold)
-
-        # Reconstruct SectionLine objects
-        sections = [_section_from_dict(s) for s in sections_raw]
-
-        # Mark processing started
-        db.update_process_status(session_id, "processing", 0, len(sections))
-
-        # Allocate result containers
-        params_design_list: List[Optional[ExtractionResult]] = [None] * len(sections)
-        params_topo_list: List[Optional[ExtractionResult]] = [None] * len(sections)
-        comparison_results: List[Dict[str, Any]] = []
-
-        def _process_section(args: tuple):
-            """Worker: cut → extract → compare for a single section."""
-            idx, sec = args
-            try:
-                pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-                if pd_prof is not None and pt_prof is not None:
-                    p_d = extract_parameters(
-                        pd_prof.distances,
-                        pd_prof.elevations,
-                        sec.name,
-                        sec.sector,
-                        resolution,
-                        face_threshold,
-                        berm_threshold,
-                    )
-                    p_t = extract_parameters(
-                        pt_prof.distances,
-                        pt_prof.elevations,
-                        sec.name,
-                        sec.sector,
-                        resolution,
-                        face_threshold,
-                        berm_threshold,
-                    )
-                    comps = compare_design_vs_asbuilt(p_d, p_t, tolerances)
-                    return idx, sec, p_d, p_t, comps
-                else:
-                    p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                    p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                    return idx, sec, p_d_empty, p_t_empty, []
-            except Exception as exc:
-                logger.exception("Section %s processing failed: %s", sec.name, exc)
-                p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                return idx, sec, p_d_empty, p_t_empty, []
-
-        # Execute in parallel
-        completed = 0
-        with ThreadPoolExecutor() as executor:
-            for idx, sec, p_d, p_t, comps in executor.map(
-                _process_section, enumerate(sections)
-            ):
-                params_design_list[idx] = p_d
-                params_topo_list[idx] = p_t
-                comparison_results.extend(comps)
-                completed += 1
-                db.update_process_status(session_id, "processing", completed, len(sections))
-
-        # Persist results
-        # Save extraction cache for each section
-        for idx, sec in enumerate(sections):
-            if params_design_list[idx] is not None:
-                db.save_extraction(
-                    session_id,
-                    sec.name,
-                    "design",
-                    _extraction_to_dict(params_design_list[idx]),
-                )
-            if params_topo_list[idx] is not None:
-                db.save_extraction(
-                    session_id,
-                    sec.name,
-                    "topo",
-                    _extraction_to_dict(params_topo_list[idx]),
-                )
-
-        # Make comparison results JSON-safe before saving
-        safe_results = []
-        for c in comparison_results:
-            safe_c = {k: v for k, v in c.items() if k not in ("bench_design", "bench_real")}
-            safe_results.append(safe_c)
-
-        db.save_results(session_id, safe_results)
-        db.update_process_status(session_id, "complete", len(sections), len(sections))
-
-        return {
-            "status": "complete",
-            "total_sections": len(sections),
-            "total_results": len(comparison_results),
-        }
+        return await _run_in_executor(
+            _run_pipeline_sync, session_id, sections_raw, body_overrides
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -393,13 +429,96 @@ def get_results(request: Request, section: Optional[str] = None):
 # ---------------------------------------------------------------------------
 
 
+def _build_profile_payload_sync(
+    session_id: str,
+    sec_dict: dict,
+) -> dict:
+    """Compute profile / extraction payload off the event loop.
+
+    Cuts both meshes on the section, builds reconciled profiles (legacy +
+    v2), and returns a JSON-ready dict.
+    """
+    sec = _section_from_dict(sec_dict)
+
+    # Load meshes and cut profiles
+    try:
+        mesh_design = _load_mesh_from_db(session_id, "design")
+        mesh_topo = _load_mesh_from_db(session_id, "topo")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Error loading meshes: {exc}")
+
+    pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+
+    result: Dict[str, Any] = {
+        "section_name": sec.name,
+        "sector": sec.sector,
+        "origin": sec.origin.tolist(),
+        "azimuth": sec.azimuth,
+    }
+
+    if pd_prof is not None:
+        result["design"] = {
+            "distances": pd_prof.distances.tolist(),
+            "elevations": pd_prof.elevations.tolist(),
+        }
+    if pt_prof is not None:
+        result["topo"] = {
+            "distances": pt_prof.distances.tolist(),
+            "elevations": pt_prof.elevations.tolist(),
+        }
+
+    # Reconciled profiles from extraction cache. The v2 builder
+    # returns a ReconciledProfile whose ``segments`` field carries
+    # per-point metadata (bench_number, segment_type, source) that
+    # the frontend uses to differentiate face / berm / ramp.
+    # When the original cut profile is available (pd_prof / pt_prof)
+    # we pass it to the builder so the reconciled polyline samples
+    # intermediate face points from the actual as-built curvature
+    # rather than drawing straight crest-toe lines.
+    profile_d_arg = (
+        (pd_prof.distances, pd_prof.elevations)
+        if pd_prof is not None else None
+    )
+    profile_t_arg = (
+        (pt_prof.distances, pt_prof.elevations)
+        if pt_prof is not None else None
+    )
+    design_extraction = db.get_extraction(session_id, sec.name, "design")
+    if design_extraction:
+        benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
+        if benches_d:
+            prof_d = build_reconciled_profile_v2(
+                benches_d, source="design", profile=profile_d_arg,
+            )
+            result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
+            result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(benches_d)
+
+    topo_extraction = db.get_extraction(session_id, sec.name, "topo")
+    if topo_extraction:
+        benches_t = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
+        if benches_t:
+            prof_t = build_reconciled_profile_v2(
+                benches_t, source="topo", profile=profile_t_arg,
+            )
+            result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
+            result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(benches_t)
+            result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
+
+    return result
+
+
 @router.get("/profiles/{section_id}")
-def get_profile(request: Request, section_id: int):
+async def get_profile(request: Request, section_id: int):
     """
     Return profile data for a section by its index in the sections list.
 
     Includes raw design/topo profiles, reconciled profiles from the
     extraction cache, and bench data for interactive editing.
+
+    The cut/extract work (trimesh slicing + reconciled profile building)
+    runs off the event loop via ``run_in_executor``.
     """
     try:
         session_id = db.get_or_create_session(request.state.session_id)
@@ -408,75 +527,9 @@ def get_profile(request: Request, section_id: int):
         if section_id < 0 or section_id >= len(sections_raw):
             raise HTTPException(404, "Section index out of range")
 
-        sec = _section_from_dict(sections_raw[section_id])
-
-        # Load meshes and cut profiles
-        try:
-            mesh_design = _load_mesh_from_db(session_id, "design")
-            mesh_topo = _load_mesh_from_db(session_id, "topo")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(400, f"Error loading meshes: {exc}")
-
-        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-
-        result: Dict[str, Any] = {
-            "section_name": sec.name,
-            "sector": sec.sector,
-            "origin": sec.origin.tolist(),
-            "azimuth": sec.azimuth,
-        }
-
-        if pd_prof is not None:
-            result["design"] = {
-                "distances": pd_prof.distances.tolist(),
-                "elevations": pd_prof.elevations.tolist(),
-            }
-        if pt_prof is not None:
-            result["topo"] = {
-                "distances": pt_prof.distances.tolist(),
-                "elevations": pt_prof.elevations.tolist(),
-            }
-
-        # Reconciled profiles from extraction cache. The v2 builder
-        # returns a ReconciledProfile whose ``segments`` field carries
-        # per-point metadata (bench_number, segment_type, source) that
-        # the frontend uses to differentiate face / berm / ramp.
-        # When the original cut profile is available (pd_prof / pt_prof)
-        # we pass it to the builder so the reconciled polyline samples
-        # intermediate face points from the actual as-built curvature
-        # rather than drawing straight crest-toe lines.
-        profile_d_arg = (
-            (pd_prof.distances, pd_prof.elevations)
-            if pd_prof is not None else None
+        return await _run_in_executor(
+            _build_profile_payload_sync, session_id, sections_raw[section_id]
         )
-        profile_t_arg = (
-            (pt_prof.distances, pt_prof.elevations)
-            if pt_prof is not None else None
-        )
-        design_extraction = db.get_extraction(session_id, sec.name, "design")
-        if design_extraction:
-            benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
-            if benches_d:
-                prof_d = build_reconciled_profile_v2(
-                    benches_d, source="design", profile=profile_d_arg,
-                )
-                result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
-                result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(benches_d)
-
-        topo_extraction = db.get_extraction(session_id, sec.name, "topo")
-        if topo_extraction:
-            benches_t = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
-            if benches_t:
-                prof_t = build_reconciled_profile_v2(
-                    benches_t, source="topo", profile=profile_t_arg,
-                )
-                result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
-                result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(benches_t)
-                result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
-
-        return result
     except HTTPException:
         raise
     except Exception as exc:

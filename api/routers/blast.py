@@ -8,6 +8,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import math
@@ -24,6 +25,16 @@ from core.calculo_tronadura import procesar_pozos
 from core.column_utils import KILOS_CANDIDATES, first_present_column
 
 logger = logging.getLogger(__name__)
+
+
+def _run_in_executor(func, *args):
+    """Schedule a CPU/IO-bound callable on the default executor.
+
+    Keeps handlers ``async def`` while still letting pandas / trimesh /
+    file-IO work run off the event-loop thread.
+    """
+    loop = asyncio.get_event_loop()
+    return loop.run_in_executor(None, func, *args)
 
 router = APIRouter(prefix="/blast", tags=["blast"])
 
@@ -234,6 +245,70 @@ def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
     )
 
 
+def _build_upload_payload(
+    file_bytes: bytes,
+) -> dict:
+    """Run the full blast-upload pipeline off the event-loop thread.
+
+    Returns a plain dict with everything the async handler still needs:
+
+    - ``df_clean``: processed DataFrame (used to derive mean / distribution).
+    - ``n_rows_input``: length of the raw parsed CSV.
+    - ``records``: hole dicts ready for ``db.save_blast_upload``.
+    - ``carga_mean``, ``descarga_mean``: scalar metrics.
+    - ``hardness_distribution``: ``Dict[str, int]``.
+    """
+    if isinstance(file_bytes, bytes):
+        content = file_bytes.decode("utf-8", errors="replace")
+    else:
+        content = file_bytes
+
+    try:
+        df = pd.read_csv(io.StringIO(content), engine="python", on_bad_lines="warn")
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid CSV: {exc}")
+
+    if df.empty:
+        raise HTTPException(400, "CSV file is empty")
+
+    n_rows_input = len(df)
+
+    try:
+        df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(df)
+    except KeyError as exc:
+        raise HTTPException(400, f"Missing required blast-hole column: {exc}")
+    except Exception as exc:
+        raise HTTPException(400, f"Failed to process blast holes: {exc}")
+
+    try:
+        df_clean = enrich_blast_dataframe(df_clean)
+    except Exception as exc:
+        logger.warning("Blast enrichment failed: %s", exc)
+
+    if df_clean is None or df_clean.empty:
+        raise HTTPException(400, "No valid blast holes found in CSV")
+
+    n_holes = len(df_clean)
+    n_rows_skipped = max(0, n_rows_input - n_holes)
+
+    carga_series = _compute_carga_series(df_clean)
+    descarga_series = _compute_descarga_series(df_clean)
+    carga_mean = _safe_mean(carga_series)
+    descarga_mean = _safe_mean(descarga_series)
+    hardness_dist = _hardness_distribution(df_clean)
+    records = _df_to_hole_records(df_clean)
+
+    return {
+        "n_holes": n_holes,
+        "n_rows_loaded": n_holes,
+        "n_rows_skipped": n_rows_skipped,
+        "carga_mean": round(carga_mean, 3),
+        "descarga_mean": round(descarga_mean, 3),
+        "hardness_distribution": hardness_dist,
+        "records": records,
+    }
+
+
 # ---------------------------------------------------------------------------
 # POST /blast/upload
 # ---------------------------------------------------------------------------
@@ -251,43 +326,46 @@ async def upload_blast_csv(
     the Streamlit reference does. The resulting hole records are stored under
     the session's ``blast_holes`` settings key so existing blast endpoints can
     consume them.
+
+    CPU/IO work (pandas parsing + procesar_pozos + enrichment + metrics) runs
+    on the default executor so the event-loop stays responsive.
     """
     if not session_id.strip():
         raise HTTPException(422, "session_id is required")
 
     db.get_or_create_session(session_id)
 
-    df = _read_uploaded_csv(file)
-    n_rows_input = len(df)
+    try:
+        content = file.file.read()
+    except Exception as exc:
+        raise HTTPException(400, f"Could not read uploaded file: {exc}")
 
-    df_clean = _process_blast_dataframe(df)
-    n_holes = len(df_clean)
-    n_rows_skipped = max(0, n_rows_input - n_holes)
+    payload = await _run_in_executor(_build_upload_payload, content)
 
-    carga_mean = _safe_mean(_compute_carga_series(df_clean))
-    descarga_mean = _safe_mean(_compute_descarga_series(df_clean))
-    hardness_dist = _hardness_distribution(df_clean)
-
-    holes_records = _df_to_hole_records(df_clean)
     db.save_blast_upload(
         session_id,
         {
-            "holes": holes_records,
-            "n_holes": n_holes,
-            "n_rows_loaded": n_holes,
-            "n_rows_skipped": n_rows_skipped,
+            "holes": payload["records"],
+            "n_holes": payload["n_holes"],
+            "n_rows_loaded": payload["n_rows_loaded"],
+            "n_rows_skipped": payload["n_rows_skipped"],
         },
     )
 
     return schemas.BlastUploadResponse(
         session_id=session_id,
-        n_holes=n_holes,
-        n_rows_loaded=n_holes,
-        n_rows_skipped=n_rows_skipped,
-        carga_mean=round(carga_mean, 3),
-        descarga_mean=round(descarga_mean, 3),
-        hardness_distribution=hardness_dist,
+        n_holes=payload["n_holes"],
+        n_rows_loaded=payload["n_rows_loaded"],
+        n_rows_skipped=payload["n_rows_skipped"],
+        carga_mean=payload["carga_mean"],
+        descarga_mean=payload["descarga_mean"],
+        hardness_distribution=payload["hardness_distribution"],
     )
+
+
+def _build_hole_summaries(records: List[Dict[str, object]]) -> List[schemas.BlastHoleSummary]:
+    """Map a list of persisted records to ``BlastHoleSummary`` schemas (sync)."""
+    return [_record_to_summary(record) for record in records]
 
 
 # ---------------------------------------------------------------------------
@@ -313,5 +391,5 @@ async def get_blast_holes(
     if not isinstance(raw, list):
         return schemas.BlastHolesResponse(session_id=session_id, holes=[])
 
-    holes = [_record_to_summary(record) for record in raw]
+    holes = await _run_in_executor(_build_hole_summaries, raw)
     return schemas.BlastHolesResponse(session_id=session_id, holes=holes)
