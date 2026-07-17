@@ -983,13 +983,30 @@ def _build_reconciled_points(
         if not b.is_ramp and idx + 1 < len(benches):
             next_b = benches[idx + 1]
             if next_b.crest_elevation >= b.toe_elevation:
-                pts.append(ReconciledPoint(
-                    distance=float(b.toe_distance),
-                    elevation=float(next_b.crest_elevation),
-                    bench_number=int(b.bench_number),
-                    segment_type="berm_top",
-                    source=source,
-                ))
+                # En lugar de un salto vertical desde toe hasta la crest del
+                # siguiente banco, prolongamos la cara del banco actual con su
+                # mismo ángulo hasta alcanzar la elevación de la siguiente crest.
+                # Esto genera una transición orgánica entre bancos.
+                angle_rad = math.radians(float(b.face_angle))
+                delta_z = float(b.toe_elevation) - float(next_b.crest_elevation)
+                if angle_rad > 0.01 and delta_z > 0:
+                    face_dir = 1.0 if b.toe_distance >= b.crest_distance else -1.0
+                    delta_d = (delta_z / math.tan(angle_rad)) * face_dir
+                    pts.append(ReconciledPoint(
+                        distance=float(b.toe_distance) + delta_d,
+                        elevation=float(next_b.crest_elevation),
+                        bench_number=int(b.bench_number),
+                        segment_type="berm_top",
+                        source=source,
+                    ))
+                else:
+                    pts.append(ReconciledPoint(
+                        distance=float(b.toe_distance),
+                        elevation=float(next_b.crest_elevation),
+                        bench_number=int(b.bench_number),
+                        segment_type="berm_top",
+                        source=source,
+                    ))
 
     # Extender el perfil hasta el piso real (cota del fondo del rajo).
     # En lugar de una línea vertical, prolongamos la última cara del banco
