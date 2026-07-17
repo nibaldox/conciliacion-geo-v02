@@ -22,6 +22,23 @@ export CONCILIACION_ELECTRON_DEV=1
 API_PORT="${CONCILIACION_API_PORT:-8000}"
 export CONCILIACION_API_PORT
 
+# Kill any hung instances from previous runs. We check the specific
+# ports the script uses; if anything is bound, the user can either let
+# us kill it (with KILL_HUNG=1) or stop and resolve manually.
+if [[ -n "$(ss -tln 2>/dev/null | grep -E "[:.](${API_PORT})$")" ]]; then
+  echo "⚠️  Port ${API_PORT} is already in use. Run: lsof -i :${API_PORT} (or restart in a new shell)."
+  if [[ "${KILL_HUNG:-0}" == "1" ]]; then
+    fuser -k "${API_PORT}/tcp" 2>/dev/null && sleep 2
+  else
+    exit 1
+  fi
+fi
+# Also clear any hung vite processes that might be holding 5173-5180
+if [[ "${CLEAN_VITE:-0}" == "1" ]]; then
+  pkill -9 -f "node.*vite" 2>/dev/null || true
+  sleep 1
+fi
+
 # --- Preflight checks -------------------------------------------------------
 if [[ ! -d .venv ]]; then
   echo "❌ .venv/ not found. Run: uv sync"
@@ -73,17 +90,22 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 # --- Wait until both dev servers are responding ------------------------------
-api_ready=0
+# Track which port Vite ACTUALLY binds to (last "Local:" line in the
+# log). We can't just take the first match because prior runs may
+# have logged "Port 5173 is in use" lines that include the URL.
 web_port=""
-web_ready=0
-
 for i in {1..30}; do
   if [[ $api_ready -eq 0 ]] && curl -sf -o /dev/null --max-time 1 "http://localhost:${API_PORT}/api/v1/health"; then
     api_ready=1
   fi
 
   if [[ -z $web_port ]]; then
-    web_port=$(grep -oE 'http://localhost:[0-9]+' /tmp/conciliacion-web-electron.log 2>/dev/null | head -1 | grep -oE '[0-9]+$') || true
+    # Match "Local:   http://localhost:NNNN/" and extract NNNN.
+    # Tails the log so we get the LAST Vite startup, not a previous one.
+    web_port=$(tail -1 /tmp/conciliacion-web-electron.log 2>/dev/null \
+                | grep -oE 'localhost:[0-9]+' \
+                | head -1 \
+                | grep -oE '[0-9]+$' || true)
   fi
   if [[ $api_ready -eq 1 && -n $web_port && $web_ready -eq 0 ]]; then
     if curl -sf -o /dev/null --max-time 1 "http://localhost:${web_port}/"; then
@@ -159,9 +181,14 @@ else
   done
   if [[ -n "$BROWSER" ]]; then
     sleep 2  # let Vite settle
-    "$BROWSER" "http://localhost:${web_port}/conciliacion-geo-v02/" >/dev/null 2>&1 &
+    # Open the actual app URL, not the Vite root (which 302-redirects).
+    # If the user wants the Vite dev tools / file tree, they can change
+    # this to http://localhost:${web_port}/ themselves.
+    APP_URL="http://localhost:${web_port}/conciliacion-geo-v02/"
+    "$BROWSER" "$APP_URL" >/dev/null 2>&1 &
     ELECTRON_PID=$!
     echo "   Opened with: $BROWSER"
+    echo "   URL:        $APP_URL"
     echo ""
     echo "   Note: native menu (File > Open STL) and file dialogs only work in Electron."
     echo "         The browser fallback gives you the full UI minus those."
