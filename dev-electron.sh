@@ -120,7 +120,18 @@ echo "🖥️  Starting Electron in dev mode..."
 # --- Start Electron ----------------------------------------------------------
 export CONCILIACION_DEV_URL="http://localhost:${web_port}"
 cd electron
-npm run dev &
+
+# Use Xvfb if available (needed when there's no real X11/Wayland display,
+# e.g. over SSH or in a headless container). xvfb-run allocates a virtual
+# display on-the-fly, runs electron inside it, and tears it down on exit.
+if command -v xvfb-run >/dev/null 2>&1; then
+  ELECTRON_DISPLAY_OPTS=(-a --server-args="-screen 0 1400x900x24")
+  echo "   (using Xvfb virtual display)"
+else
+  ELECTRON_DISPLAY_OPTS=()
+fi
+
+xvfb-run "${ELECTRON_DISPLAY_OPTS[@]}" npm run dev &
 ELECTRON_PID=$!
 cd ..
 
