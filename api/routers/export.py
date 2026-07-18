@@ -1,11 +1,12 @@
 """
-Export router — Excel, Word, DXF, and image ZIP exports.
+Export router — Excel, Word, DXF, image ZIP, and PDF exports.
 
 Endpoints:
     GET /export/excel   Export comparison results to formatted Excel
     GET /export/word    Export full Word report with section plots
     GET /export/dxf     Export profiles as 3D DXF with compliance layers
     GET /export/images  Export section plot images as ZIP
+    GET /export/pdf     Export unified executive PDF report
 """
 
 import asyncio
@@ -32,6 +33,7 @@ from core import (
 from core.section_cutter import azimuth_to_direction
 from core.excel_writer import export_results
 from core.report_generator import generate_word_report, generate_section_images_zip
+from core.pdf_report import generate_pdf_report
 from core.param_extractor import ExtractionResult
 
 logger = logging.getLogger(__name__)
@@ -619,3 +621,72 @@ async def export_images(request: Request):
     except Exception as exc:
         logger.exception("Images export failed")
         raise HTTPException(500, detail=f"Images export failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /export/pdf
+# ---------------------------------------------------------------------------
+
+
+def _build_pdf_payload_sync(
+    session_id: str,
+    project: Optional[str],
+    author: Optional[str],
+    operation: Optional[str],
+    phase: Optional[str],
+) -> str:
+    """Build the executive PDF off the event loop."""
+    results = db.get_results(session_id)
+    if not results:
+        raise HTTPException(400, "No results to export — run the pipeline first")
+
+    # Reconstruct minimal all_data (the PDF doesn't need profiles/plots,
+    # just the section names and comparisons).
+    sections_raw = db.get_sections(session_id)
+    all_data = [{"section_name": s["name"]} for s in sections_raw]
+
+    project_info = {
+        "project": project or "N/A",
+        "author": author or "N/A",
+        "operation": operation or "N/A",
+        "phase": phase or "N/A",
+    }
+
+    tmp = os.path.join(tempfile.gettempdir(), f"Conciliacion_PDF_{session_id[:8]}.pdf")
+    generate_pdf_report(results, all_data, tmp, project_info=project_info)
+    return tmp
+
+
+@router.get("/pdf")
+async def export_pdf(
+    request: Request,
+    project: Optional[str] = Query(None),
+    author: Optional[str] = Query(None),
+    operation: Optional[str] = Query(None),
+    phase: Optional[str] = Query(None),
+):
+    """Export a unified executive PDF report.
+
+    The PDF build (reportlab + matplotlib pie chart) runs on the default
+    executor so the event loop stays responsive.
+    """
+    try:
+        session_id = db.get_or_create_session(request.state.session_id)
+        tmp = await _run_in_executor(
+            _build_pdf_payload_sync,
+            session_id,
+            project,
+            author,
+            operation,
+            phase,
+        )
+        return FileResponse(
+            tmp,
+            media_type="application/pdf",
+            filename="Conciliacion_Geotecnica.pdf",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("PDF export failed")
+        raise HTTPException(500, detail=f"PDF export failed: {exc}") from exc

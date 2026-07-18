@@ -12,6 +12,7 @@ statsmodels
 ezdxf
 python-docx
 matplotlib
+reportlab>=4.0
 openai
 pydantic>=2.0
 pydantic-settings>=2.0
