@@ -141,11 +141,17 @@ def _generate_pdf(config: dict) -> dict:
     with widgets.spinner("Generando PDF..."):
         project_info = _project_info(config)
         tmp_path = tempfile.mktemp(suffix=".pdf")
+        mesh_topo = st.session_state.get('mesh_topo')
+        grid_ref = float(config.get('grid_ref', 0.0))
+        sections = st.session_state.get('sections', [])
         generate_pdf_report(
             st.session_state.comparison_results,
-            [{"section_name": s.name} for s in st.session_state.get('sections', [])],
+            [{"section_name": s.name} for s in sections],
             tmp_path,
             project_info=project_info,
+            sections=sections,
+            mesh_topo=mesh_topo,
+            grid_ref=grid_ref,
         )
         with open(tmp_path, "rb") as f:
             pdf_bytes = f.read()

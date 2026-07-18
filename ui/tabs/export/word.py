@@ -38,6 +38,9 @@ def build_document(
         })
 
     output_path = os.path.join(tempfile.gettempdir(), "Informe_Conciliacion.docx")
+    import streamlit as st
+    mesh_topo = st.session_state.get('mesh_topo')
+    grid_ref = st.session_state.get('config', {}).get('grid_ref', 0.0)
     generate_word_report(
         filtered_comps,
         all_data_for_report,
@@ -46,6 +49,8 @@ def build_document(
         df_pozos=df_pozos,
         sections=sections_full,
         plot_options=plot_options,
+        mesh_topo=mesh_topo,
+        grid_ref=grid_ref,
     )
     with open(output_path, "rb") as f:
         return f.read()

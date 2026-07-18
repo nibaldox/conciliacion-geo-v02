@@ -226,6 +226,109 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
     return buf
 
 
+def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
+    """Render the compliance plan view (vista en planta) as PNG bytes.
+
+    Draws topographic contour lines (5m spacing, grid_ref base) as background
+    and each section as a coloured line segment: green (score >= 70) or
+    red (score < 70). Returns a BytesIO ready for docx/pdf embedding.
+    """
+    if not sections:
+        return None
+
+    # ── Score per section ──
+    section_scores = {}
+    for r in comparisons:
+        sec_name = r.get('section', '')
+        if sec_name not in section_scores:
+            section_scores[sec_name] = []
+        if r.get('type') == 'MATCH':
+            section_scores[sec_name].append(r.get('bench_score', 0))
+
+    section_status = {}
+    for sec_name, scores in section_scores.items():
+        avg = sum(scores) / len(scores) if scores else 0
+        section_status[sec_name] = {'score': round(avg, 1), 'cumple': avg >= 70}
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # ── Background: topographic contour lines ──
+    if mesh_topo is not None:
+        try:
+            from scipy.interpolate import griddata
+            verts = mesh_topo.vertices
+            if len(verts) > 200_000:
+                step = len(verts) // 200_000
+                verts = verts[::step]
+            x, y, z = verts[:, 0], verts[:, 1], verts[:, 2]
+            grid_size = 300
+            xi = np.linspace(x.min(), x.max(), grid_size)
+            yi = np.linspace(y.min(), y.max(), grid_size)
+            xi_grid, yi_grid = np.meshgrid(xi, yi)
+            zi_grid = griddata((x, y), z, (xi_grid, yi_grid), method='linear')
+
+            z_min = float(np.nanmin(zi_grid))
+            z_max = float(np.nanmax(zi_grid))
+            contour_interval = 5.0
+            levels = np.arange(grid_ref, z_max + contour_interval, contour_interval)
+            cs = ax.contour(xi_grid, yi_grid, zi_grid, levels=levels,
+                            colors='#8D6E63', linewidths=0.5, alpha=0.6)
+            ax.clabel(cs, fontsize=6, fmt='%.0f', colors='#5D4037')
+        except Exception:
+            pass  # Sin topo, solo perfiles
+
+    # ── Section lines ──
+    for sec in sections:
+        name = sec.name
+        status = section_status.get(name, {'score': 0, 'cumple': False})
+        color = '#2E7D32' if status['cumple'] else '#C62828'
+        score = status['score']
+
+        origin = np.asarray(sec.origin)
+        az_rad = np.radians(sec.azimuth)
+        direction = np.array([np.sin(az_rad), np.cos(az_rad)])
+        half_len = sec.length / 2.0
+        p1 = origin - direction * half_len
+        p2 = origin + direction * half_len
+
+        ax.plot([p1[0], p2[0]], [p1[1], p2[1]],
+                color=color, linewidth=3.5, solid_capstyle='round', zorder=5)
+        # Label at midpoint
+        mid_x = (p1[0] + p2[0]) / 2
+        mid_y = (p1[1] + p2[1]) / 2
+        ax.annotate(
+            f"{name}\n{score:.0f}",
+            xy=(mid_x, mid_y),
+            xytext=(8, 8), textcoords='offset points',
+            fontsize=7, fontweight='bold', color=color,
+            bbox=dict(boxstyle='round,pad=0.2', facecolor='white',
+                      edgecolor=color, alpha=0.85),
+            zorder=6,
+        )
+
+    ax.set_xlabel('Este (m)', fontsize=9)
+    ax.set_ylabel('Norte (m)', fontsize=9)
+    ax.set_title('Plano de Cumplimiento por Perfil', fontsize=11, fontweight='bold')
+    ax.set_aspect('equal', adjustable='box')
+    ax.grid(True, alpha=0.2)
+
+    # Legend
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], color='#2E7D32', lw=3, label='CUMPLE (≥70)'),
+        Line2D([0], [0], color='#C62828', lw=3, label='NO CUMPLE (<70)'),
+    ]
+    ax.legend(handles=legend_elements, loc='lower right', fontsize=8,
+              framealpha=0.9)
+
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
 def create_compliance_pie_charts(comparisons):
     """Create a row of donut charts (one per parameter) of compliance breakdown.
 
@@ -317,7 +420,8 @@ def _setup_landscape_doc() -> Document:
 
 
 def generate_word_report(comparisons, all_data, output_path, project_info=None,
-                         df_pozos=None, sections=None, plot_options=None):
+                         df_pozos=None, sections=None, plot_options=None,
+                         mesh_topo=None, grid_ref=0.0):
     if project_info is None:
         project_info = {}
 
@@ -403,6 +507,19 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             pie_stream.close()
         except Exception as e:
             doc.add_paragraph(f"(Error al generar gráficos de torta: {e})")
+
+        # Plano de cumplimiento (vista en planta) después de los pie charts
+        if sections:
+            try:
+                plan_stream = create_plan_view_image(
+                    comparisons, sections, mesh_topo=mesh_topo, grid_ref=grid_ref)
+                if plan_stream is not None:
+                    p_plan = doc.add_paragraph()
+                    p_plan.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p_plan.add_run().add_picture(plan_stream, width=Inches(8.5))
+                    plan_stream.close()
+            except Exception as e:
+                doc.add_paragraph(f"(Error al generar plano de cumplimiento: {e})")
 
         doc.add_paragraph("Resumen por parámetro:")
         # Tabla binaria: CUMPLE + NO CUMPLE = Total. % Logro es

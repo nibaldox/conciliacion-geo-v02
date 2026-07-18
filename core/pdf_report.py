@@ -900,6 +900,59 @@ def _build_pie_section(
 
 
 # ---------------------------------------------------------------------------
+# Plan view section
+# ---------------------------------------------------------------------------
+
+
+def _build_plan_section(
+    story: List[Any],
+    comparisons: List[Dict[str, Any]],
+    sections: List[Any],
+    styles: Dict[str, ParagraphStyle],
+    mesh_topo: Optional[Any] = None,
+    grid_ref: float = 0.0,
+) -> None:
+    """Append the compliance plan view image (vista en planta) to the PDF."""
+    from core.report_generator import create_plan_view_image
+
+    story.append(
+        Paragraph(
+            "<b>Plano de Cumplimiento por Perfil</b>",
+            styles["section"],
+        )
+    )
+    story.append(Spacer(1, 0.3 * cm))
+
+    try:
+        plan_buf = create_plan_view_image(
+            comparisons, sections, mesh_topo=mesh_topo, grid_ref=grid_ref)
+        if plan_buf is None:
+            story.append(Paragraph(
+                "<i>(No hay secciones para dibujar el plano.)</i>",
+                styles["body"]))
+            return
+
+        reader = ImageReader(plan_buf)
+        iw, ih = reader.getSize()
+        max_w = 16.5 * cm
+        ratio = max_w / float(iw)
+        display_h = float(ih) * ratio
+        story.append(
+            Image(
+                reader,
+                width=max_w,
+                height=display_h,
+                hAlign="CENTER",
+            )
+        )
+        plan_buf.close()
+    except Exception as exc:
+        story.append(Paragraph(
+            f"<i>(Error al generar el plano: {exc})</i>",
+            styles["body"]))
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -911,6 +964,8 @@ def generate_pdf_report(
     project_info: Optional[Dict[str, Any]] = None,
     df_pozos: Optional[Any] = None,  # pandas.DataFrame — unused in this stub
     sections: Optional[List[Any]] = None,  # unused in this stub
+    mesh_topo: Optional[Any] = None,
+    grid_ref: float = 0.0,
 ) -> str:
     """Build the unified executive PDF report at ``output_path``.
 
@@ -989,6 +1044,11 @@ def generate_pdf_report(
 
     # 5. Gráfico de torta embebido
     _build_pie_section(story, comparisons, styles)
+
+    # 6. Plano de cumplimiento (vista en planta)
+    if sections:
+        _build_plan_section(story, comparisons, sections, styles,
+                            mesh_topo=mesh_topo, grid_ref=grid_ref)
 
     # Footer line
     story.append(Spacer(1, 0.6 * cm))
