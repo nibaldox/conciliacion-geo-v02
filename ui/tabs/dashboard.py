@@ -263,7 +263,7 @@ def _render_plan_view(results) -> None:
     """
     import numpy as np
     from core.section_cutter import azimuth_to_direction
-    from ui.step2_sections.cutting import get_plan_view_vertices
+    from ui.plots import mesh_to_contour_data
 
     st.subheader("🗺️ Plano de Cumplimiento por Perfil")
 
@@ -292,28 +292,31 @@ def _render_plan_view(results) -> None:
 
     fig = go.Figure()
 
-    # ── Fondo: topografía como scatter coloreado por elevación ──
+    # ── Fondo: curvas de nivel de la topografía ──
     mesh_topo = st.session_state.get('mesh_topo')
     if mesh_topo is not None:
-        topo_pts = get_plan_view_vertices(mesh_topo, max_points=10000)
-        if len(topo_pts) > 0:
-            fig.add_trace(go.Scatter(
-                x=topo_pts[:, 0],
-                y=topo_pts[:, 1],
-                mode='markers',
-                marker=dict(
-                    size=2.5,
-                    color=topo_pts[:, 2],
-                    colorscale='Earth',
-                    showscale=True,
-                    colorbar=dict(title="Elev (m)", x=1.02, len=0.8),
+        xi, yi, _, _, zig = mesh_to_contour_data(mesh_topo, grid_size=300)
+        if xi is not None and zig is not None:
+            z_min = float(np.nanmin(zig))
+            z_max = float(np.nanmax(zig))
+            interval = max(5.0, (z_max - z_min) / 20)  # ~20 curvas
+            fig.add_trace(go.Contour(
+                x=xi, y=yi, z=zig,
+                contours=dict(
+                    start=z_min,
+                    end=z_max,
+                    size=interval,
+                    showlabels=True,
+                    labelfont=dict(size=8, color='#5D4037'),
+                    coloring='lines',
                 ),
-                name='Topografía',
-                hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{marker.color:.0f}m<extra></extra>',
-                opacity=0.6,
+                line=dict(color='#8D6E63', width=1.0),
+                showscale=False,
+                name='Curvas de Nivel',
+                hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Topo</extra>',
             ))
 
-    # ── Perfiles: líneas verde/rojo sobre la topo ──
+    # ── Perfiles: líneas verde/rojo sobre las curvas ──
     for sec in sections:
         name = sec.name
         status = section_status.get(name, {'score': 0, 'cumple': False})
