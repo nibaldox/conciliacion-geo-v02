@@ -158,6 +158,127 @@ def _render_compliance_table(results: list[dict]) -> str:
     return "\n".join(rows)
 
 
+def _render_floor_analysis(results: list[dict]) -> str:
+    """Render per-bench pit-depth floor analysis for the LLM prompt.
+
+    Each comparison result may carry a ``bench_real`` BenchParams with a
+    ``floor_elevation`` (robust bottom-decile mean) and an adjusted
+    ``bench_height``. Without this context the LLM cannot comment on pit
+    depth, sub-grade drilling or bench extension (negative breakage
+    below the design toe).
+
+    Returns a markdown block summarising:
+      - global min/max floor crest, and the resulting total depth,
+      - benches whose measured ``floor_elevation`` dropped below the
+        design ``toe_elevation`` (positive extension / sobre-excavación
+        de piso), with the per-bench extension in metres.
+
+    Returns an empty string when no bench has a populated
+    ``floor_elevation`` so the prompt stays silent for legacy inputs.
+    """
+    if not results:
+        return ""
+
+    rows_data: list[dict] = []
+    for r in results:
+        bp = _coerce_bench_params(r.get("bench_real"))
+        if bp is None:
+            continue
+        if not isinstance(bp.floor_elevation, (int, float)):
+            continue
+        # 0.0 means "not computed" for legacy fixtures; skip those so we
+        # don't produce misleading "depth = 0 m" tables.
+        if bp.floor_elevation <= 0:
+            continue
+        if not isinstance(bp.toe_elevation, (int, float)):
+            continue
+        rows_data.append({
+            "bench_id": _format_bench(r),
+            "section": _section_label(r),
+            "crest_elevation": (
+                bp.crest_elevation
+                if isinstance(bp.crest_elevation, (int, float)) else None
+            ),
+            "toe_elevation": float(bp.toe_elevation),
+            "floor_elevation": float(bp.floor_elevation),
+            "bench_height": (
+                float(bp.bench_height)
+                if isinstance(bp.bench_height, (int, float)) else 0.0
+            ),
+        })
+
+    if not rows_data:
+        return ""
+
+    floors = [row["floor_elevation"] for row in rows_data]
+    crests = [
+        row["crest_elevation"] for row in rows_data
+        if isinstance(row["crest_elevation"], (int, float))
+    ]
+    min_floor = min(floors)
+    max_crest = max(crests) if crests else None
+    total_depth = (max_crest - min_floor) if max_crest is not None else None
+
+    extended_benches = [
+        row for row in rows_data
+        if row["floor_elevation"] < row["toe_elevation"]
+    ]
+    extended_benches.sort(
+        key=lambda row: row["toe_elevation"] - row["floor_elevation"],
+        reverse=True,
+    )
+
+    pieces: list[str] = []
+    pieces.append(
+        "Se cuenta con elevación de piso (bottom-decile robusto) "
+        f"para {len(rows_data)} banco(s)."
+    )
+    if total_depth is not None:
+        pieces.append(
+            f"**Profundidad total del pit (piso más bajo → cresta más alta): "
+            f"{total_depth:.2f} m** "
+            f"(min floor {min_floor:.2f} m, max crest {max_crest:.2f} m)."
+        )
+    else:
+        pieces.append(
+            f"**Piso más bajo detectado: {min_floor:.2f} m.** "
+            "(No hay crestas válidas para derivar profundidad total.)"
+        )
+
+    if extended_benches:
+        pieces.append("")
+        pieces.append(
+            "**Bancos con extensión de piso (>0 m bajo el toe de diseño):**"
+        )
+        rows = [
+            "| Sección | Banco | Toe diseño (m) | Floor real (m) | "
+            "Extensión (m) |",
+            "|---|---|---|---|---|",
+        ]
+        for row in extended_benches:
+            extension = row["toe_elevation"] - row["floor_elevation"]
+            rows.append(
+                f"| {row['section']} | {row['bench_id']} | "
+                f"{row['toe_elevation']:.2f} | "
+                f"{row['floor_elevation']:.2f} | "
+                f"{extension:+.2f} |"
+            )
+        pieces.append("\n".join(rows))
+        pieces.append(
+            "Interpretación: piso real bajo la cota de diseño indica "
+            "sobre-excavación / perforación por debajo del toe planificado. "
+            "Evaluar Burden, factor de carga y patrón de perforación en "
+            "estos bancos."
+        )
+    else:
+        pieces.append(
+            "_Ningún banco con floor_elevation bajo su toe de diseño._ "
+            "Las excavaciones respetan la cota planificada."
+        )
+
+    return "\n\n".join(pieces)
+
+
 def _format_bench(r: dict) -> str:
     """Render bench_num with a human-readable type tag (Idea from brainstorm)."""
     btype = r.get("type")
@@ -587,6 +708,7 @@ def build_analysis_prompt(
         verdict_global=_compute_verdict(results),
         criterios_tolerancia=_render_tolerances(settings),
         tabla_cumplimiento=_render_compliance_table(results),
+        analisis_piso=_render_floor_analysis(results),
         top5_desviaciones=_render_top5_desviations(results),
         fs_y_alertas=_render_stability_summary(results),
         recomendaciones_blast=_render_blast_recommendations(blast_trend),

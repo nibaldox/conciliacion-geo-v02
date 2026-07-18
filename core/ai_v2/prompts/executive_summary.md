@@ -19,6 +19,10 @@
 
 {tabla_cumplimiento}
 
+### 2.1. Análisis de Piso (Profundidad y Extensión)
+
+{analisis_piso}
+
 ## 3. Top Desviaciones
 
 {top5_desviaciones}
