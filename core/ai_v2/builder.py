@@ -79,7 +79,7 @@ def _compute_verdict(results: list[dict]) -> str:
     n_no_cumple_total = sum(
         1 for r in results
         for k in ("height_status", "angle_status", "berm_status")
-        if r.get(k) == STATUS_NO_CUMPLE
+        if r.get(k) in (STATUS_NO_CUMPLE, STATUS_FUERA)
     )
 
     if match_only and (avg_score is None or avg_score >= 70) and n_no_cumple_total == 0:
@@ -103,7 +103,7 @@ def _compute_verdict(results: list[dict]) -> str:
 def _render_tolerances(settings: dict | None) -> str:
     """Render the tolerance block (Idea 2).
 
-    The LLM classifies CUMPLE/FUERA/NO_CUMPLE but without the actual
+    The LLM classifies CUMPLE/NO_CUMPLE but without the actual
     tolerances it cannot judge *why* a bank is out. This block exposes the
     threshold values used by the engine.
     """
@@ -146,15 +146,17 @@ def _render_tolerances(settings: dict | None) -> str:
 def _render_compliance_table(results: list[dict]) -> str:
     if not results:
         return "_Sin datos._"
-    rows = ["| Parámetro | CUMPLE | FUERA | NO CUMPLE |", "|---|---|---|---|"]
+    # Binary compliance (Track D-2): FUERA DE TOLERANCIA is folded into
+    # NO CUMPLE so the LLM never sees the intermediate category.
+    rows = ["| Parámetro | CUMPLE | NO CUMPLE |", "|---|---|---|"]
     for param in ("height", "angle", "berm"):
         status_key = f"{param}_status"
         cumple = sum(1 for r in results if r.get(status_key) == STATUS_CUMPLE)
-        fuera = sum(1 for r in results if r.get(status_key) == STATUS_FUERA)
         no_cumple = sum(
-            1 for r in results if r.get(status_key) == STATUS_NO_CUMPLE
+            1 for r in results
+            if r.get(status_key) in (STATUS_NO_CUMPLE, STATUS_FUERA)
         )
-        rows.append(f"| {param.upper()} | {cumple} | {fuera} | {no_cumple} |")
+        rows.append(f"| {param.upper()} | {cumple} | {no_cumple} |")
     return "\n".join(rows)
 
 

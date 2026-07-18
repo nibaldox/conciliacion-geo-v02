@@ -4,23 +4,23 @@
 
 ## 1. Resumen Ejecutivo
 
-Cumplimiento global del sector: **NO CUMPLE**. De 3 bancos evaluados, 1 cumple, 1 fuera de tolerancia y 1 no cumple. La desviación dominante es sobre-excavación de berma (+1.8 m promedio, banco 4135).
+Cumplimiento global del sector: **NO CUMPLE**. De 3 bancos evaluados, 1 cumple y 2 no cumplen. La desviación dominante es sobre-excavación de berma (+1.8 m promedio, banco 4135).
 
 ## Criterios de cumplimiento
 
-| Parámetro | Tolerancia | Fuera de tol. | No cumple |
-|---|---|---|---|
-| Ancho de berma | ±1.0 m | 1.0–1.5 m | >1.5 m |
-| Ángulo de talud | ±3° | 3–4.5° | >4.5° |
-| Altura de banco | ±0.5 m | 0.5–0.75 m | >0.75 m |
+| Parámetro | Tolerancia | No cumple |
+|---|---|---|
+| Ancho de berma | ±1.0 m | >1.0 m |
+| Ángulo de talud | ±3° | >3° |
+| Altura de banco | ±0.5 m | >0.5 m |
 
 ## 2. Cumplimiento por Parámetro
 
 | Banco | Berma | Talud | Altura | Veredicto |
 |---|---|---|---|---|
 | 4150 | CUMPLE (−0.4 m) | CUMPLE (+1°) | CUMPLE (+0.2 m) | CUMPLE |
-| 4135 | NO CUMPLE (+2.3 m) | FUERA (+4°) | CUMPLE (−0.3 m) | NO CUMPLE |
-| 4120 | FUERA (−1.2 m) | CUMPLE (+2°) | Sin datos. | FUERA DE TOL. |
+| 4135 | NO CUMPLE (+2.3 m) | NO CUMPLE (+4°) | CUMPLE (−0.3 m) | NO CUMPLE |
+| 4120 | NO CUMPLE (−1.2 m) | CUMPLE (+2°) | Sin datos. | NO CUMPLE |
 
 ## 3. Top Desviaciones
 
