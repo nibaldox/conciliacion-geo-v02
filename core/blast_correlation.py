@@ -382,21 +382,11 @@ def attribute_failure_to_holes(
     if projected.empty or "Z_toe" not in projected or "dist_along" not in projected:
         affected = projected.iloc[0:0].copy()
     else:
-        z_toe = pd.Series(
-            pd.to_numeric(projected["Z_toe"], errors="coerce"),
-            index=projected.index,
-            dtype=float,
-        )
-        dist_along = pd.Series(
-            pd.to_numeric(projected["dist_along"], errors="coerce"),
-            index=projected.index,
-            dtype=float,
-        )
+        z_toe = pd.to_numeric(projected["Z_toe"], errors="coerce")
+        dist_along = pd.to_numeric(projected["dist_along"], errors="coerce")
         affected = projected.loc[
-            (z_toe >= z_min)
-            & (z_toe <= z_max)
-            & (dist_along >= distance_min)
-            & (dist_along <= distance_max)
+            z_toe.between(z_min, z_max, inclusive="both")
+            & dist_along.between(distance_min, distance_max, inclusive="both")
         ].copy()
 
     if affected.empty:
@@ -985,3 +975,110 @@ __all__ = [
     "detect_pf_outliers_iqr",
     "split_campaign",
 ]
+
+
+def attribute_failure_to_holes(
+    comp_row: dict,
+    df_pozos: Any,
+    section: Any,
+    tolerancia_z: float = 2.0,
+) -> Optional[dict]:
+    """Identifica los pozos de tronadura que afectaron un banco específico.
+
+    Filtra los pozos proyectados en la sección cuyo Z_toe cae dentro del
+    rango de elevación del banco [crest_elevation - tol, toe_elevation + tol]
+    y cuyo dist_along cae dentro de [crest_distance, toe_distance].
+
+    Returns None si no hay datos de pozos o el banco no existe.
+    """
+    if df_pozos is None or len(df_pozos) == 0:
+        return None
+
+    bt = comp_row.get("bench_real")
+    if bt is None:
+        return None
+
+    crest_e = float(bt.crest_elevation)
+    toe_e = float(bt.toe_elevation)
+    crest_d = float(bt.crest_distance)
+    toe_d = float(bt.toe_distance)
+
+    # Proyectar pozos a la sección
+    try:
+        df_proj = proyectar_pozos_en_seccion(df_pozos, section)
+    except Exception:
+        return None
+
+    if df_proj is None or len(df_proj) == 0:
+        return None
+
+    # Filtrar pozos que caen dentro del banco (elevación + horizontal)
+    z_lo = max(crest_e, toe_e) + tolerancia_z
+    z_hi = min(crest_e, toe_e) - tolerancia_z
+    d_lo = min(crest_d, toe_d) - tolerancia_z
+    d_hi = max(crest_d, toe_d) + tolerancia_z
+
+    has_z = "Z_toe" in df_proj.columns
+    has_dist = "dist_along" in df_proj.columns
+
+    mask = pd.Series(True, index=df_proj.index)
+    if has_z:
+        mask &= (df_proj["Z_toe"] <= z_lo) & (df_proj["Z_toe"] >= z_hi)
+    if has_dist:
+        mask &= (df_proj["dist_along"] >= d_lo) & (df_proj["dist_along"] <= d_hi)
+
+    matched = df_proj[mask]
+    if len(matched) == 0:
+        return {
+            "section_name": comp_row.get("section", ""),
+            "bench_num": comp_row.get("bench_num", 0),
+            "n_holes": 0,
+            "holes": [],
+            "pf_avg": 0.0,
+            "stemming_ratio_avg": 0.0,
+            "burden_avg": 0.0,
+            "spacing_avg": 0.0,
+            "subdrill_avg": 0.0,
+            "kg_total": 0.0,
+            "kg_per_meter_avg": 0.0,
+        }
+
+    # Extraer métricas por pozo
+    holes = []
+    for _, row in matched.iterrows():
+        hole = {
+            "id": str(row.get("uniqid", row.get("id_pozo", "?"))),
+            "pf": float(row.get("pf_vol_kgm3", 0.0) or 0.0),
+            "stemming_ratio": float(row.get("stemming_ratio", 0.0) or 0.0),
+            "burden": float(row.get("Burden", row.get("burden_est_m", 0.0)) or 0.0),
+            "spacing": float(row.get("Esp", row.get("esp_est_m", 0.0)) or 0.0),
+            "subdrill": float(row.get("subdrilling_ratio", 0.0) or 0.0),
+            "kg_per_meter": float(row.get("kg_per_meter", 0.0) or 0.0),
+            "x": float(row.get("X", 0.0) or 0.0),
+            "y": float(row.get("Y", 0.0) or 0.0),
+            "z_collar": float(row.get("Z_collar", 0.0) or 0.0),
+            "z_toe": float(row.get("Z_toe", 0.0) or 0.0),
+        }
+        holes.append(hole)
+
+    # Agregados
+    def _avg(key):
+        vals = [h[key] for h in holes if h[key] != 0.0]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    kg_col = kilos_column(matched) if hasattr(matched, 'columns') else None
+    kg_total = float(matched[kg_col].sum()) if kg_col and kg_col in matched.columns else 0.0
+
+    return {
+        "section_name": comp_row.get("section", ""),
+        "bench_num": comp_row.get("bench_num", 0),
+        "n_holes": len(holes),
+        "holes": holes,
+        "pf_avg": _avg("pf"),
+        "stemming_ratio_avg": _avg("stemming_ratio"),
+        "burden_avg": _avg("burden"),
+        "spacing_avg": _avg("spacing"),
+        "subdrill_avg": _avg("subdrill"),
+        "kg_total": kg_total,
+        "kg_per_meter_avg": _avg("kg_per_meter"),
+    }
