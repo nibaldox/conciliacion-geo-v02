@@ -99,6 +99,11 @@ def _extraction_to_dict(er: ExtractionResult) -> dict:
                 "face_angle": b.face_angle,
                 "berm_width": b.berm_width,
                 "is_ramp": b.is_ramp,
+                "spill_width": b.spill_width,
+                "effective_berm_width": b.effective_berm_width,
+                "spill_start_distance": b.spill_start_distance,
+                "spill_start_elevation": b.spill_start_elevation,
+                "floor_elevation": b.floor_elevation,
             }
             for b in er.benches
         ],
