@@ -256,7 +256,12 @@ def add_berm_width_indicators(fig, benches, comparison_results):
                 x0 = x1 - berm
         else:
             b_prev = benches[j - 1]
-            x0 = max(b_prev.toe_distance, b_prev.crest_distance)
+            # Usar el toe extendido del banco anterior cuando existe piso
+            # local, para que el indicador coincida con la extensión angular
+            # que dibuja el perfil conciliado.
+            from core.bench_classify import _extended_toe_distance
+            prev_toe_ext = _extended_toe_distance(b_prev)
+            x0 = max(prev_toe_ext, b_prev.crest_distance)
             x1 = min(bench.toe_distance, bench.crest_distance)
 
             if b_prev.toe_distance > b_prev.crest_distance:
