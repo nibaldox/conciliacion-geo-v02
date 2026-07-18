@@ -5,10 +5,12 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.section import WD_ORIENT
 from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 from datetime import datetime
 import numpy as np
 
@@ -314,18 +316,6 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
 
         ax.plot([p1[0], p2[0]], [p1[1], p2[1]],
                 color=color, linewidth=3.5, solid_capstyle='round', zorder=5)
-        # Label at midpoint
-        mid_x = (p1[0] + p2[0]) / 2
-        mid_y = (p1[1] + p2[1]) / 2
-        ax.annotate(
-            f"{name}\n{score:.0f}",
-            xy=(mid_x, mid_y),
-            xytext=(8, 8), textcoords='offset points',
-            fontsize=7, fontweight='bold', color=color,
-            bbox=dict(boxstyle='round,pad=0.2', facecolor='white',
-                      edgecolor=color, alpha=0.85),
-            zorder=6,
-        )
 
     ax.set_xlabel('Este (m)', fontsize=9)
     ax.set_ylabel('Norte (m)', fontsize=9)
@@ -619,8 +609,8 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         # column order matches the previous layout (Diseño first, Real
         # second) for each parameter, so the table reads top-to-bottom as:
         # Sección · Banco · H. Dise · H. Real · Ang. Dise · Ang. Real ·
-        # Berma Dise · Berma Real.
-        table_summary = doc.add_table(rows=1, cols=10)
+        # Berma Dise · Berma Real · Altura Total · Cota Piso · Estado.
+        table_summary = doc.add_table(rows=1, cols=11)
         table_summary.style = 'Table Grid'
 
         headers = [
@@ -629,6 +619,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             'Ang. Diseño (°)', 'Ang. Real (°)',
             'Berma Diseño (m)', 'Berma Real (m)',
             'Altura Total (m)', 'Cota Piso (m)',
+            'Estado',
         ]
         for col_idx, h in enumerate(headers):
             hdr_cell = table_summary.rows[0].cells[col_idx]
@@ -667,6 +658,24 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             br = c.get('bench_real')
             fe = getattr(br, 'floor_elevation', None) if br is not None else None
             row_cells[9].text = f"{fe:.1f}" if fe is not None and fe > 0 else "N/A"
+
+            # Columna Estado: score + color de fondo verde/rojo
+            bench_score = c.get('bench_score', 0)
+            cumple = bench_score >= 70
+            estado_text = f"{'✓' if cumple else '✗'} {bench_score:.0f}"
+            estado_cell = row_cells[10]
+            estado_cell.text = estado_text
+            # Aplicar color al texto (verde/rojo)
+            bg_color = "C6EFCE" if cumple else "FFC7CE"  # Excel-style green/red
+            font_color = "006100" if cumple else "9C0006"
+            shading_elm = OxmlElement('w:shd')
+            shading_elm.set(qn('w:fill'), bg_color)
+            estado_cell._tc.get_or_add_tcPr().append(shading_elm)
+            for paragraph in estado_cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(9)
+                    run.font.color.rgb = RGBColor.from_string(font_color)
 
             for cell in row_cells:
                 for paragraph in cell.paragraphs:
