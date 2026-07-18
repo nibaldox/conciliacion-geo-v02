@@ -46,7 +46,7 @@ def render_tab_dashboard(config: dict) -> None:
     st.divider()
     _render_sector_compliance_map(filtered_results)
     st.divider()
-    _render_plan_view(filtered_results)
+    _render_plan_view(filtered_results, config)
     st.divider()
     _render_deviation_histograms(filtered_results, config)
 
@@ -251,10 +251,11 @@ def _render_sector_compliance_map(results) -> None:
 # Section 4: Plan view (perfiles en planta verde/rojo)
 # ---------------------------------------------------------------------------
 
-def _render_plan_view(results) -> None:
+def _render_plan_view(results, config: dict) -> None:
     """Vista en planta con topografía + perfiles coloreados por score.
 
-    Fondo: nube de puntos del mesh topo coloreada por elevación.
+    Fondo: curvas de nivel de la topografía (espaciado 5m, cota base
+           = grid_ref de la barra lateral).
     Líneas: cada perfil como segmento verde (CUMPLE) o rojo (NO CUMPLE).
 
     Score por banco: berma=60, ángulo=20, altura=20.
@@ -264,6 +265,7 @@ def _render_plan_view(results) -> None:
     import numpy as np
     from core.section_cutter import azimuth_to_direction
     from ui.plots import mesh_to_contour_data
+    from core.config import VISUALIZATION
 
     st.subheader("🗺️ Plano de Cumplimiento por Perfil")
 
@@ -293,19 +295,21 @@ def _render_plan_view(results) -> None:
     fig = go.Figure()
 
     # ── Fondo: curvas de nivel de la topografía ──
+    # Espaciado fijo de 5m, cota base = grid_ref de la barra lateral.
     mesh_topo = st.session_state.get('mesh_topo')
     if mesh_topo is not None:
         xi, yi, _, _, zig = mesh_to_contour_data(mesh_topo, grid_size=300)
         if xi is not None and zig is not None:
             z_min = float(np.nanmin(zig))
             z_max = float(np.nanmax(zig))
-            interval = max(5.0, (z_max - z_min) / 20)  # ~20 curvas
+            grid_ref = float(config.get('grid_ref', VISUALIZATION.grid_ref))
+            contour_interval = 5.0  # metros
             fig.add_trace(go.Contour(
                 x=xi, y=yi, z=zig,
                 contours=dict(
-                    start=z_min,
+                    start=grid_ref,
                     end=z_max,
-                    size=interval,
+                    size=contour_interval,
                     showlabels=True,
                     labelfont=dict(size=8, color='#5D4037'),
                     coloring='lines',
