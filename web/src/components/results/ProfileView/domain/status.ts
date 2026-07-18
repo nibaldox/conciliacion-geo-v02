@@ -9,6 +9,8 @@
 
 import { assertNever, type BenchStatus } from './types';
 
+export type ComplianceStatus = 'CUMPLE' | 'NO_CUMPLE' | 'UNKNOWN';
+
 // ─── Backend status strings ──────────────────────────────────
 
 /** The seven strings the backend may return in `*_status` fields. */
@@ -133,14 +135,14 @@ export const STATUS_ICON: Record<BenchStatus, string> = {
  *  FUERA is intentionally absent: parseBenchStatus collapses all
  *  out-of-tolerance backend strings into NO_CUMPLE, so the
  *  presentation layer never needs to render a FUERA bucket. */
-export const STATUS_PRESENTATION_ORDER: readonly BenchStatus[] = [
+export const STATUS_PRESENTATION_ORDER: readonly ComplianceStatus[] = [
   'NO_CUMPLE',
   'CUMPLE',
   'UNKNOWN',
 ] as const;
 
 /** Exhaustiveness check helper. */
-export function forEachStatus(fn: (status: BenchStatus) => void): void {
+export function forEachStatus(fn: (status: ComplianceStatus) => void): void {
   for (const s of STATUS_PRESENTATION_ORDER) fn(s);
 }
 

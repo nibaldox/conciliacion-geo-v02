@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useDetectColumnMapping } from '../../api/hooks';
 import type {
-  ColumnDetectResponse,
   ColumnMappingField,
 } from '../../api/types';
 

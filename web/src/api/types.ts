@@ -147,6 +147,8 @@ export interface ProfileData {
   reconciled_design_legacy?: { distances: number[]; elevations: number[] } | null;
   reconciled_topo_legacy?: { distances: number[]; elevations: number[] } | null;
   benches_topo?: BenchParams[] | null;
+  floor_elevation?: number | null;
+  crest_elevation_max?: number | null;
 }
 
 export type MatchType = 'MATCH' | 'MISSING' | 'EXTRA';
@@ -171,6 +173,8 @@ export interface ComparisonResult {
   berm_status: string;
   delta_crest: number | null;
   delta_toe: number | null;
+  bench_score?: number;
+  section_score?: number;
 }
 
 export interface ProcessStatus {

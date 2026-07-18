@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import Plot from 'react-plotly.js';
 import type { Data, Layout, Config, Shape } from 'plotly.js';
 import { useResults, useSections } from '../../api/hooks';
-import { formatPct } from '../../utils/format';
 import { useSession } from '../../stores/session';
 import type { ComparisonResult } from '../../api/types';
 
