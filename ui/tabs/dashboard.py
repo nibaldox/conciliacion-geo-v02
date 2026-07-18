@@ -252,7 +252,10 @@ def _render_sector_compliance_map(results) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_plan_view(results) -> None:
-    """Vista en planta con perfiles coloreados según score ponderado.
+    """Vista en planta con topografía + perfiles coloreados por score.
+
+    Fondo: nube de puntos del mesh topo coloreada por elevación.
+    Líneas: cada perfil como segmento verde (CUMPLE) o rojo (NO CUMPLE).
 
     Score por banco: berma=60, ángulo=20, altura=20.
     Score por sección = promedio de bench_score.
@@ -260,6 +263,7 @@ def _render_plan_view(results) -> None:
     """
     import numpy as np
     from core.section_cutter import azimuth_to_direction
+    from ui.step2_sections.cutting import get_plan_view_vertices
 
     st.subheader("🗺️ Plano de Cumplimiento por Perfil")
 
@@ -288,7 +292,28 @@ def _render_plan_view(results) -> None:
 
     fig = go.Figure()
 
-    # Dibujar cada perfil como una línea
+    # ── Fondo: topografía como scatter coloreado por elevación ──
+    mesh_topo = st.session_state.get('mesh_topo')
+    if mesh_topo is not None:
+        topo_pts = get_plan_view_vertices(mesh_topo, max_points=10000)
+        if len(topo_pts) > 0:
+            fig.add_trace(go.Scatter(
+                x=topo_pts[:, 0],
+                y=topo_pts[:, 1],
+                mode='markers',
+                marker=dict(
+                    size=2.5,
+                    color=topo_pts[:, 2],
+                    colorscale='Earth',
+                    showscale=True,
+                    colorbar=dict(title="Elev (m)", x=1.02, len=0.8),
+                ),
+                name='Topografía',
+                hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{marker.color:.0f}m<extra></extra>',
+                opacity=0.6,
+            ))
+
+    # ── Perfiles: líneas verde/rojo sobre la topo ──
     for sec in sections:
         name = sec.name
         status = section_status.get(name, {'score': 0, 'cumple': False})
@@ -307,7 +332,7 @@ def _render_plan_view(results) -> None:
             x=[p1[0], p2[0]],
             y=[p1[1], p2[1]],
             mode='lines+text',
-            line=dict(color=color, width=6),
+            line=dict(color=color, width=5),
             text=[None, f"{name}<br>{score:.0f}"],
             textposition='top center',
             textfont=dict(size=9, color=color),
@@ -323,14 +348,14 @@ def _render_plan_view(results) -> None:
             showlegend=True,
         ))
 
-    # Actualar layout
+    # Layout
     fig.update_layout(
-        title="Vista en Planta — Perfiles Coloreados por Cumplimiento",
+        title="Vista en Planta — Topografía + Cumplimiento por Perfil",
         xaxis_title='Este (m)',
         yaxis_title='Norte (m)',
         yaxis=dict(scaleanchor='x', scaleratio=1),
-        height=500,
-        margin=dict(l=40, r=20, t=50, b=40),
+        height=600,
+        margin=dict(l=40, r=60, t=50, b=40),
         legend=dict(
             orientation="h",
             yanchor="bottom",
