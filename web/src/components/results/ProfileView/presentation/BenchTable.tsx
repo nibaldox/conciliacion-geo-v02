@@ -53,7 +53,7 @@ const COLUMN_LABELS: Record<SortField, string> = {
   faceAngle: 'Áng (R)',
   designBerm: 'Berma (D)',
   bermWidth: 'Berma (R)',
-  status: 'Est',
+  status: 'Estado',
 };
 
 const COLUMN_ALIGN: Record<SortField, 'left' | 'right'> = {
@@ -163,6 +163,8 @@ export function BenchTable({
         <thead>
           <tr>
             {SORT_FIELDS.map((f) => headerCell(f))}
+            <th scope="col" className="sticky top-0 px-3 py-2 text-[11px] uppercase tracking-wider font-semibold text-right" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)' }}>Piso (m)</th>
+            <th scope="col" className="sticky top-0 px-3 py-2 text-[11px] uppercase tracking-wider font-semibold text-center" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)' }}>Score</th>
           </tr>
         </thead>
         <tbody>
@@ -218,6 +220,16 @@ export function BenchTable({
                 </td>
                 <td className="px-3 py-2 text-center">
                   <StatusPill status={b.status} />
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {b.floorElevation != null ? b.floorElevation.toFixed(1) : '—'}
+                </td>
+                <td className="px-3 py-2 text-center">
+                  {b.benchScore != null ? (
+                    <span className={`inline-block px-1.5 py-0.5 rounded font-mono text-[11px] font-semibold ${b.benchScore >= 70 ? 'text-green-700 bg-green-100' : 'text-red-700 bg-red-100'}`}>
+                      {b.benchScore.toFixed(0)}
+                    </span>
+                  ) : '—'}
                 </td>
               </tr>
             );

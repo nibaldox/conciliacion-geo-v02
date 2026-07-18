@@ -99,6 +99,7 @@ type RawBench = {
   spill_width?: number | null;
   spill_start_distance?: number | null;
   spill_start_elevation?: number | null;
+  floor_elevation?: number | null;
 };
 
 /**
@@ -145,6 +146,8 @@ export function toBench(
     spillWidth: raw.spill_width != null && Number.isFinite(raw.spill_width) ? raw.spill_width : null,
     spillStartDistance: raw.spill_start_distance != null && Number.isFinite(raw.spill_start_distance) ? raw.spill_start_distance : null,
     spillStartElevation: raw.spill_start_elevation != null && Number.isFinite(raw.spill_start_elevation) ? raw.spill_start_elevation : null,
+    floorElevation: raw.floor_elevation != null && Number.isFinite(raw.floor_elevation) && raw.floor_elevation > 0 ? raw.floor_elevation : null,
+    benchScore: comparison?.bench_score ?? null,
   };
 }
 

@@ -123,6 +123,7 @@ export interface BenchParams {
   face_angle: number;
   berm_width: number;
   is_ramp: boolean;
+  floor_elevation?: number;
 }
 
 export interface ExtractionResult {

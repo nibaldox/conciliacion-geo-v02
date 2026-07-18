@@ -73,6 +73,8 @@ export interface Bench {
   readonly matched: boolean;
   readonly deltaCrest: number | null;
   readonly deltaToe: number | null;
+  readonly floorElevation?: number | null;
+  readonly benchScore?: number | null;
 }
 
 // ─── Section metadata ───────────────────────────────────────
