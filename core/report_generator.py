@@ -221,7 +221,7 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
     ax.set_aspect('equal', adjustable='box')
 
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    fig.savefig(buf, format='png', dpi=200, bbox_inches='tight')
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -290,7 +290,7 @@ def create_compliance_pie_charts(comparisons):
     fig.tight_layout()
 
     buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+    fig.savefig(buf, format='png', dpi=200, bbox_inches='tight')
     plt.close(fig)
     buf.seek(0)
     return buf
@@ -342,6 +342,53 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 
         doc.add_paragraph(f"Se evaluaron {len(match_comps)} bancos emparejados.")
         doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.0f}/100 — {section_status}")
+
+        # Profundidad total: cota cresta global (max crest_elevation across all
+        # bench_real) menos cota piso global (min floor_elevation > 0 across all
+        # bench_real). Se calcula al inicio del Resumen Ejecutivo para
+        # proporcionar el contexto vertical global antes de la tabla resumen.
+        floors, crests = [], []
+        for c in comparisons:
+            br = c.get('bench_real')
+            if br is None:
+                continue
+            fe = getattr(br, 'floor_elevation', None)
+            ce = getattr(br, 'crest_elevation', None)
+            if fe is not None and fe > 0:
+                floors.append(fe)
+            if ce is not None:
+                crests.append(ce)
+        doc.add_heading("Profundidad Total de la Excavación", level=2)
+        if floors and crests:
+            cota_piso = min(floors)
+            cota_cresta = max(crests)
+            profundidad = cota_cresta - cota_piso
+            depth_table = doc.add_table(rows=4, cols=2)
+            depth_table.style = 'Table Grid'
+            depth_data = [
+                ("Cota Piso Global",   f"{cota_piso:.2f} m"),
+                ("Cota Cresta Global", f"{cota_cresta:.2f} m"),
+                ("Profundidad Total",  f"{profundidad:.2f} m"),
+            ]
+            hdr_cells = depth_table.rows[0].cells
+            hdr_cells[0].text = "Métrica"
+            hdr_cells[1].text = "Valor"
+            for paragraph in hdr_cells[0].paragraphs + hdr_cells[1].paragraphs:
+                for run in paragraph.runs:
+                    run.font.bold = True
+                    run.font.size = Pt(9.5)
+            for i, (metric, value) in enumerate(depth_data, start=1):
+                row_cells = depth_table.rows[i].cells
+                row_cells[0].text = metric
+                row_cells[1].text = value
+                for cell in row_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.size = Pt(9.0)
+        else:
+            doc.add_paragraph(
+                "No hay datos suficientes de bancos para calcular la profundidad total."
+            )
 
         try:
             pie_stream = create_compliance_pie_charts(comparisons)
@@ -421,7 +468,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         # second) for each parameter, so the table reads top-to-bottom as:
         # Sección · Banco · H. Dise · H. Real · Ang. Dise · Ang. Real ·
         # Berma Dise · Berma Real.
-        table_summary = doc.add_table(rows=1, cols=8)
+        table_summary = doc.add_table(rows=1, cols=10)
         table_summary.style = 'Table Grid'
 
         headers = [
@@ -429,6 +476,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             'H. Diseño (m)', 'H. Real (m)',
             'Ang. Diseño (°)', 'Ang. Real (°)',
             'Berma Diseño (m)', 'Berma Real (m)',
+            'Altura Total (m)', 'Cota Piso (m)',
         ]
         for col_idx, h in enumerate(headers):
             hdr_cell = table_summary.rows[0].cells[col_idx]
@@ -460,6 +508,13 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
                                  if c.get('berm_design') is not None else "N/A")
             row_cells[7].text = (f"{c['berm_real']:.1f}"
                                  if c.get('berm_real') is not None else "N/A")
+
+            row_cells[8].text = (f"{c['height_real']:.1f}"
+                                 if c.get('height_real') is not None else "N/A")
+
+            br = c.get('bench_real')
+            fe = getattr(br, 'floor_elevation', None) if br is not None else None
+            row_cells[9].text = f"{fe:.1f}" if fe is not None and fe > 0 else "N/A"
 
             for cell in row_cells:
                 for paragraph in cell.paragraphs:
