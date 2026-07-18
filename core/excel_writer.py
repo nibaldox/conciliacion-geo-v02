@@ -90,8 +90,10 @@ def _apply_status_style(cell: Cell) -> None:
         cell.fill = FILL_OK
         cell.font = FONT_OK
     elif val == STATUS_FUERA:
-        cell.fill = FILL_WARN
-        cell.font = FONT_WARN
+        # FUERA DE TOLERANCIA se reporta como NO CUMPLE en el output de
+        # cara al usuario (binary compliance: CUMPLE / NO CUMPLE).
+        cell.fill = FILL_NOK
+        cell.font = FONT_NOK
     elif val == STATUS_NO_CUMPLE or "FALTA" in str(val):
         cell.fill = FILL_NOK
         cell.font = FONT_NOK
@@ -180,15 +182,17 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
 
     row += 1
 
-    # Compliance summary
+    # Compliance summary (binary: CUMPLE / NO CUMPLE).
+    # FUERA DE TOLERANCIA ya no aparece como columna separada; se fusiona
+    # en NO CUMPLE para mantener un reporte binario de cara al usuario.
     if comparisons:
         ws.cell(row=row, column=1,
                 value="Resumen de Cumplimiento").font = Font(
             bold=True, size=12)
         row += 1
         _write_header(ws, row,
-                      ["Parametro", STATUS_CUMPLE, "FUERA TOL.", STATUS_NO_CUMPLE,
-                       "Total", "% Cumpl."])
+                      ["Parametro", STATUS_CUMPLE, STATUS_NO_CUMPLE,
+                       "Total", "% Logro"])
         row += 1
 
         for key, label in [('height_status', 'Altura de banco'),
@@ -200,23 +204,22 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
             match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
             total = len(match_comps)
             n_ok = sum(1 for c in match_comps if c[key] == STATUS_CUMPLE)
-            n_warn = sum(1 for c in match_comps
-                        if c[key] == STATUS_FUERA)
-            n_nok = sum(1 for c in match_comps if c[key] == STATUS_NO_CUMPLE)
+            # FUERA DE TOLERANCIA → NO CUMPLE (binary compliance).
+            n_nok = sum(
+                1 for c in match_comps
+                if c[key] in (STATUS_FUERA, STATUS_NO_CUMPLE)
+            )
             pct = n_ok / total * 100 if total > 0 else 0
 
             ws.cell(row=row, column=1, value=label).border = THIN_BORDER
             c_ok = ws.cell(row=row, column=2, value=n_ok)
             c_ok.border = THIN_BORDER
             c_ok.fill = FILL_OK
-            c_warn = ws.cell(row=row, column=3, value=n_warn)
-            c_warn.border = THIN_BORDER
-            c_warn.fill = FILL_WARN
-            c_nok = ws.cell(row=row, column=4, value=n_nok)
+            c_nok = ws.cell(row=row, column=3, value=n_nok)
             c_nok.border = THIN_BORDER
             c_nok.fill = FILL_NOK
-            ws.cell(row=row, column=5, value=total).border = THIN_BORDER
-            ws.cell(row=row, column=6,
+            ws.cell(row=row, column=4, value=total).border = THIN_BORDER
+            ws.cell(row=row, column=5,
                     value=f"{pct:.1f}%").border = THIN_BORDER
             row += 1
 
@@ -345,8 +348,9 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
 
     total = len(comparisons)
     row = 3
+    # CUMPLE / NO CUMPLE binario: FUERA DE TOLERANCIA se fusiona en NO CUMPLE.
     _write_header(ws, row,
-                  ["Parametro", STATUS_CUMPLE, "FUERA TOL.", STATUS_NO_CUMPLE,
+                  ["Parametro", STATUS_CUMPLE, STATUS_NO_CUMPLE,
                    "% Cumplimiento"])
     row += 1
 
@@ -354,26 +358,27 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
                        ('angle_status', 'Angulo de cara'),
                        ('berm_status', 'Ancho de berma')]:
         n_ok = sum(1 for c in comparisons if c[key] == STATUS_CUMPLE)
-        n_warn = sum(1 for c in comparisons
-                    if c[key] == STATUS_FUERA)
-        n_nok = sum(1 for c in comparisons if c[key] == STATUS_NO_CUMPLE)
+        # FUERA DE TOLERANCIA → NO CUMPLE (binary compliance).
+        n_nok = sum(
+            1 for c in comparisons
+            if c[key] in (STATUS_FUERA, STATUS_NO_CUMPLE)
+        )
         pct = n_ok / total * 100 if total > 0 else 0
 
         ws.cell(row=row, column=1, value=label).border = THIN_BORDER
         c_ok = ws.cell(row=row, column=2, value=n_ok)
         c_ok.border = THIN_BORDER
         c_ok.fill = FILL_OK
-        c_warn = ws.cell(row=row, column=3, value=n_warn)
-        c_warn.border = THIN_BORDER
-        c_warn.fill = FILL_WARN
-        c_nok = ws.cell(row=row, column=4, value=n_nok)
+        c_nok = ws.cell(row=row, column=3, value=n_nok)
         c_nok.border = THIN_BORDER
         c_nok.fill = FILL_NOK
-        ws.cell(row=row, column=5,
+        ws.cell(row=row, column=4,
                 value=f"{pct:.1f}%").border = THIN_BORDER
         row += 1
 
-    # Global compliance
+    # Score Global / Cumplimiento General (binary: CUMPLE / NO CUMPLE).
+    # No es un % plano de parámetros individuales: se calcula sobre el
+    # total de estados CUMPLE / NO CUMPLE (FUERA ya fusionado arriba).
     row += 1
     n_all = total * 3
     n_ok_all = sum(
@@ -384,7 +389,7 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
     pct_global = n_ok_all / n_all * 100 if n_all > 0 else 0
 
     ws.cell(row=row, column=1,
-            value="CUMPLIMIENTO GLOBAL").font = Font(bold=True, size=12)
+            value="Cumplimiento General (Score Global)").font = Font(bold=True, size=12)
     ws.cell(row=row, column=2,
             value=f"{pct_global:.1f}%").font = Font(bold=True, size=14)
 
