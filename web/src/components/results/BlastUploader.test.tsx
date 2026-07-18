@@ -19,7 +19,15 @@ vi.mock('../../api/client', () => ({
 const { useUploadBlastCsv, useBlastHolesBySession } = await import('../../api/hooks');
 const { getSessionId } = await import('../../api/client');
 
-const uploadResponse = {
+const uploadResponse: {
+  session_id: string;
+  n_holes: number;
+  n_rows_loaded: number;
+  n_rows_skipped: number;
+  carga_mean: number | null;
+  descarga_mean: number | null;
+  hardness_distribution: Record<string, number>;
+} = {
   session_id: 'sess-001',
   n_holes: 42,
   n_rows_loaded: 42,

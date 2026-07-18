@@ -209,7 +209,15 @@ export function ContourChart() {
           borderWidth: 1,
           callbacks: {
             title: (items: TooltipItem<'line'>[]) => {
-              const pt = items[0]?.element?.parsed;
+              // chart.js's `element` type for the `'line'` controller does not
+              // expose `parsed` on its public API surface, but at runtime the
+              // tooltip item for a linear scatter definitely carries one. We
+              // narrow locally to `{ x: number; y: number }` so the toFixed()
+              // calls below type-check.
+              const element = items[0]?.element as unknown as
+                | { parsed?: { x: number; y: number } }
+                | undefined;
+              const pt = element?.parsed;
               if (!pt) return '';
               const p = pt as { x: number; y: number };
               return `(${p.x.toFixed(1)}, ${p.y.toFixed(1)})`;

@@ -561,6 +561,54 @@
   },
   "dashboard": {
     "empty_state": "No results to show. Run the processing first.",
+    "title": "General Reconciliation Summary",
+    "bench_filter": {
+      "all": "All",
+      "label": "Bench:"
+    },
+    "kpi": {
+      "global_score": "Global Weighted Score",
+      "profiles_ok": "Compliant Profiles",
+      "profiles_no": "Non-Compliant Profiles"
+    },
+    "section": {
+      "parameter_breakdown": "Parameter Breakdown (COMPLIANT / NON-COMPLIANT)",
+      "sector_compliance": "Compliance by Sector",
+      "deviation_height": "Height Deviation (m)",
+      "deviation_angle": "Angle Deviation (°)",
+      "deviation_crest": "Crest Deviation (m)"
+    },
+    "table": {
+      "parameter": "Parameter",
+      "pct_cumple": "% COMPLIANT",
+      "value_avg": "Avg Real Value"
+    },
+    "histogram": {
+      "no_data": "No deviation data"
+    },
+    "parameter": {
+      "height": "Height",
+      "angle": "Angle",
+      "berm": "Berm"
+    },
+    "summary": {
+      "bench_section": "{{benches}} Benches / {{sections}} Sections"
+    },
+    "plot": {
+      "axis": {
+        "parameter": "Parameter",
+        "bench_count": "# of benches",
+        "sector": "Sector",
+        "pct_compliance": "% Compliance",
+        "frequency": "Frequency",
+        "delta_height": "Δ Height (m)",
+        "delta_angle": "Δ Angle (°)",
+        "delta_crest": "Δ Crest (m)"
+      },
+      "hover": {
+        "compliance_label": "COMPLIANT"
+      }
+    },
     "areas_title": "Over-excavation / Debt Area by Sector (m²)",
     "crest_dev_title": "Crest Deviation Distribution (m)",
     "no_deviation_data": "No deviation data for the selected benches.",

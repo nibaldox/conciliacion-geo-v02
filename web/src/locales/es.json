@@ -561,6 +561,54 @@
   },
   "dashboard": {
     "empty_state": "Sin resultados para mostrar. Ejecuta el procesamiento primero.",
+    "title": "Resumen General de Conciliación",
+    "bench_filter": {
+      "all": "Todos",
+      "label": "Banco:"
+    },
+    "kpi": {
+      "global_score": "Score Ponderado Global",
+      "profiles_ok": "Perfiles CUMPLE",
+      "profiles_no": "Perfiles NO CUMPLE"
+    },
+    "section": {
+      "parameter_breakdown": "Desglose por Parámetro (CUMPLE / NO CUMPLE)",
+      "sector_compliance": "Cumplimiento por Sector",
+      "deviation_height": "Desviación de Altura (m)",
+      "deviation_angle": "Desviación de Ángulo (°)",
+      "deviation_crest": "Desviación de Cresta (m)"
+    },
+    "table": {
+      "parameter": "Parámetro",
+      "pct_cumple": "% CUMPLE",
+      "value_avg": "Valor Real Prom."
+    },
+    "histogram": {
+      "no_data": "Sin datos de desviación"
+    },
+    "parameter": {
+      "height": "Altura",
+      "angle": "Ángulo",
+      "berm": "Berma"
+    },
+    "summary": {
+      "bench_section": "{{benches}} Bancos / {{sections}} Secciones"
+    },
+    "plot": {
+      "axis": {
+        "parameter": "Parámetro",
+        "bench_count": "N° de bancos",
+        "sector": "Sector",
+        "pct_compliance": "% Cumplimiento",
+        "frequency": "Frecuencia",
+        "delta_height": "Δ Altura (m)",
+        "delta_angle": "Δ Ángulo (°)",
+        "delta_crest": "Δ Cresta (m)"
+      },
+      "hover": {
+        "compliance_label": "CUMPLE"
+      }
+    },
     "areas_title": "Área de Sobre-excavación / Deuda por Sector (m²)",
     "crest_dev_title": "Distribución de Desviación de Cresta (m)",
     "no_deviation_data": "Sin datos de desviación para los bancos seleccionados.",

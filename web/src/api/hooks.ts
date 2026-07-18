@@ -606,49 +606,33 @@ function downloadBlob(blob: Blob, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
+function useExportMutation(endpoint: string, defaultFilename: string, withParams = true) {
+  return useMutation({
+    mutationFn: (params?: ExportProjectInfo | void) => {
+      const config = withParams
+        ? { params: buildExportQuery(params as ExportProjectInfo | undefined), responseType: 'blob' as const }
+        : { responseType: 'blob' as const };
+      return client.get(endpoint, config).then(r => {
+        downloadBlob(r.data, defaultFilename);
+      });
+    },
+  });
+}
+
 export function useExportExcel() {
-  return useMutation({
-    mutationFn: (params?: ExportProjectInfo) =>
-      client.get('/export/excel', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
-        downloadBlob(r.data, 'Conciliacion_Geotecnica.xlsx');
-      }),
-  });
+  return useExportMutation('/export/excel', 'Conciliacion_Geotecnica.xlsx');
 }
-
 export function useExportWord() {
-  return useMutation({
-    mutationFn: (params?: ExportProjectInfo) =>
-      client.get('/export/word', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
-        downloadBlob(r.data, 'Reporte_Geotecnico.docx');
-      }),
-  });
+  return useExportMutation('/export/word', 'Reporte_Geotecnico.docx');
 }
-
 export function useExportPdf() {
-  return useMutation({
-    mutationFn: (params?: ExportProjectInfo) =>
-      client.get('/export/pdf', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
-        downloadBlob(r.data, 'Reporte_Ejecutivo.pdf');
-      }),
-  });
+  return useExportMutation('/export/pdf', 'Reporte_Ejecutivo.pdf');
 }
-
 export function useExportDxf() {
-  return useMutation({
-    mutationFn: () =>
-      client.get('/export/dxf', { responseType: 'blob' }).then(r => {
-        downloadBlob(r.data, 'Perfiles_3D.dxf');
-      }),
-  });
+  return useExportMutation('/export/dxf', 'Perfiles_3D.dxf', false);
 }
-
 export function useExportImages() {
-  return useMutation({
-    mutationFn: () =>
-      client.get('/export/images', { responseType: 'blob' }).then(r => {
-        downloadBlob(r.data, 'Secciones_Imagenes.zip');
-      }),
-  });
+  return useExportMutation('/export/images', 'Secciones_Imagenes.zip', false);
 }
 
 // ─── Settings ──────────────────────────────────────────────

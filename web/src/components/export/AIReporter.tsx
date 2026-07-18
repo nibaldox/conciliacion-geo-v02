@@ -4,19 +4,26 @@ import { useQuery } from '@tanstack/react-query';
 import client from '../../api/client';
 import { useResults, useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
-import type { AIHealthResponse, AIProvidersResponse } from './useAIReport';
-import {
-  useAIReport,
-  buildAIGeneratePayload,
-  computeTps,
-  estimateCost,
-} from './useAIReport';
+import { useAIReport, buildAIGeneratePayload, computeTps, estimateCost } from './useAIReport';
 import { AIConfigForm } from './AIConfigForm';
 import { AIResultPanel } from './AIResultPanel';
 import { AIStatusCard, AIInfoCard } from './AIStatusCard';
 import { useAIConfig, type AIErrorState } from './useAIConfig';
 
 const HEALTH_REFETCH_MS = 30_000;
+
+// Local response shapes for the lightweight AI health/providers probes.
+// Kept inline (rather than in useAIReport.ts or api/types.ts) because these
+// endpoints are read-only and only consumed by this component — promoting
+// them to shared types would be over-engineered for the current usage.
+interface AIHealthResponse {
+  status?: string;
+  detail?: string;
+}
+
+interface AIProvidersResponse {
+  providers?: string[];
+}
 
 export type AIHealthState = 'pending' | 'ok' | 'unavailable';
 

@@ -6,6 +6,28 @@ import { useResults, useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import type { ComparisonResult } from '../../api/types';
 
+// ─── Module-level icons (M3: hoisted to avoid per-render allocation) ──
+
+const GlobalIcon = (
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+);
+
+const ProfilesOkIcon = (
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M20 6 9 17l-5-5" />
+  </svg>
+);
+
+const ProfilesNoIcon = (
+  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
+  </svg>
+);
+
 // ─── Pure helpers (exported for testing) ─────────────────────
 //
 // The Dashboard's logic is pure: ComparisonResult[] + filter →
@@ -370,17 +392,18 @@ interface KPICardProps {
 }
 
 function KPICard({ title, value, valueColor, pct, icon }: KPICardProps) {
+  const safePct = Number.isFinite(pct) ? pct : 0;
   return (
-    <div className="glass-card rounded-xl p-5 flex flex-col gap-4 relative overflow-hidden group">
+    <dl className="glass-card rounded-xl p-5 flex flex-col gap-4 relative overflow-hidden group">
       <div
         className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-opacity duration-500 pointer-events-none"
         style={{ backgroundColor: valueColor }}
       />
 
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
+        <dt className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
           {title}
-        </span>
+        </dt>
         <div
           className="w-9 h-9 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 duration-300"
           style={{ backgroundColor: `${valueColor}15`, color: valueColor }}
@@ -390,18 +413,18 @@ function KPICard({ title, value, valueColor, pct, icon }: KPICardProps) {
       </div>
 
       <div className="flex flex-col gap-2">
-        <span className="text-3xl font-extrabold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
+        <dd className="text-3xl font-extrabold tracking-tight m-0" style={{ color: 'var(--color-text-primary)' }}>
           {value}
-        </span>
+        </dd>
 
-        <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
+        <dd className="w-full h-1.5 rounded-full overflow-hidden m-0" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
           <div
             className="h-full rounded-full transition-all duration-1000 ease-out"
-            style={{ width: `${Math.round(pct * 100)}%`, backgroundColor: valueColor }}
+            style={{ width: `${Math.round(safePct * 100)}%`, backgroundColor: valueColor }}
           />
-        </div>
+        </dd>
       </div>
-    </div>
+    </dl>
   );
 }
 
@@ -479,20 +502,20 @@ export function Dashboard() {
     () => [
       {
         type: 'bar',
-        name: 'CUMPLE',
-        x: parameterBreakdown.map((p) => parameterLabel(p.parameter)),
+        name: t('status.cumple'),
+        x: parameterBreakdown.map((p) => parameterLabel(p.parameter, t)),
         y: parameterBreakdown.map((p) => p.cumple),
         marker: { color: '#10b981' },
       },
       {
         type: 'bar',
-        name: 'NO CUMPLE',
-        x: parameterBreakdown.map((p) => parameterLabel(p.parameter)),
+        name: t('status.no_cumple'),
+        x: parameterBreakdown.map((p) => parameterLabel(p.parameter, t)),
         y: parameterBreakdown.map((p) => p.noCumple),
         marker: { color: '#ef4444' },
       },
     ],
-    [parameterBreakdown],
+    [parameterBreakdown, t],
   );
 
   const parameterLayout = useMemo<Partial<Layout>>(
@@ -503,16 +526,17 @@ export function Dashboard() {
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: { text: 'Parámetro' } },
-      yaxis: { title: { text: 'N° de bancos' } },
+      xaxis: { title: { text: t('dashboard.plot.axis.parameter') } },
+      yaxis: { title: { text: t('dashboard.plot.axis.bench_count') } },
       legend: { orientation: 'h', y: -0.2 },
     }),
-    [],
+    [t],
   );
 
   const sectorChartData = useMemo<Data[]>(() => {
     const sectors = sectorCompliance.map((s) => s.sector);
     const colors = sectorCompliance.map((s) => sectorComplianceColor(s.pct));
+    const hoverLabel = t('dashboard.plot.hover.compliance_label');
     return [
       {
         type: 'bar',
@@ -521,10 +545,10 @@ export function Dashboard() {
         marker: { color: colors },
         text: sectorCompliance.map((s) => `${s.pct.toFixed(1)}%`),
         textposition: 'outside',
-        hovertemplate: '<b>%{x}</b><br>CUMPLE: %{y:.1f}%<extra></extra>',
+        hovertemplate: `<b>%{x}</b><br>${hoverLabel}: %{y:.1f}%<extra></extra>`,
       },
     ] as unknown as Data[];
-  }, [sectorCompliance]);
+  }, [sectorCompliance, t]);
 
   const sectorChartLayout = useMemo<Partial<Layout>>(
     () => ({
@@ -533,10 +557,10 @@ export function Dashboard() {
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: { text: 'Sector' } },
-      yaxis: { title: { text: '% Cumplimiento' }, range: [0, 105] },
+      xaxis: { title: { text: t('dashboard.plot.axis.sector') } },
+      yaxis: { title: { text: t('dashboard.plot.axis.pct_compliance') }, range: [0, 105] },
     }),
-    [],
+    [t],
   );
 
   const histogramLayoutBase = useMemo<Partial<Layout>>(
@@ -581,7 +605,7 @@ export function Dashboard() {
       layout: {
         ...histogramLayoutBase,
         xaxis: { title: { text: xLabel } },
-        yaxis: { title: { text: 'Frecuencia' } },
+        yaxis: { title: { text: t('dashboard.plot.axis.frequency') } },
         shapes: [shape],
         showlegend: false,
       },
@@ -589,16 +613,31 @@ export function Dashboard() {
   }
 
   const heightHist = useMemo(
-    () => buildHistogram(heightDevs, 'Altura', 'Δ Altura (m)', 1.0),
-    [heightDevs, histogramLayoutBase],
+    () => buildHistogram(
+      heightDevs,
+      t('dashboard.parameter.height'),
+      t('dashboard.plot.axis.delta_height'),
+      1.0,
+    ),
+    [heightDevs, histogramLayoutBase, t],
   );
   const angleHist = useMemo(
-    () => buildHistogram(angleDevs, 'Ángulo', 'Δ Ángulo (°)', 3.0),
-    [angleDevs, histogramLayoutBase],
+    () => buildHistogram(
+      angleDevs,
+      t('dashboard.parameter.angle'),
+      t('dashboard.plot.axis.delta_angle'),
+      3.0,
+    ),
+    [angleDevs, histogramLayoutBase, t],
   );
   const crestHist = useMemo(
-    () => buildHistogram(crestDevs, 'Cresta', 'Δ Cresta (m)', 1.0),
-    [crestDevs, histogramLayoutBase],
+    () => buildHistogram(
+      crestDevs,
+      t('dashboard.parameter.berm'),
+      t('dashboard.plot.axis.delta_crest'),
+      1.0,
+    ),
+    [crestDevs, histogramLayoutBase, t],
   );
 
   if (!results || results.length === 0) {
@@ -609,42 +648,22 @@ export function Dashboard() {
     );
   }
 
-  const GlobalIcon = (
-    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="m9 12 2 2 4-4" />
-    </svg>
-  );
-
-  const ProfilesOkIcon = (
-    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-
-  const ProfilesNoIcon = (
-    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6 6 18" />
-      <path d="m6 6 12 12" />
-    </svg>
-  );
-
   return (
     <div className="space-y-6">
       {/* Summary text */}
       <div className="flex items-center justify-between border-b pb-3 shrink-0" style={{ borderColor: 'var(--color-border)' }}>
         <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          Resumen General de Conciliación
+          {t('dashboard.title')}
         </p>
         <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-secondary)' }}>
-          {totalBenches} Bancos / {nSections} Secciones
+          {t('dashboard.summary.bench_section', { benches: totalBenches, sections: nSections })}
         </span>
       </div>
 
       {/* G10: bench filter */}
       <div className="glass-panel rounded-xl p-4 flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold uppercase tracking-wider mr-1" style={{ color: 'var(--color-text-muted)' }}>
-          Banco:
+          {t('dashboard.bench_filter.label')}
         </span>
         <button
           type="button"
@@ -653,8 +672,9 @@ export function Dashboard() {
             !filterActive ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]'
           }`}
           aria-pressed={!filterActive}
+          aria-label={`${t('dashboard.bench_filter.all')}, ${!filterActive ? 'activado' : 'desactivado'}`}
         >
-          Todos
+          {t('dashboard.bench_filter.all')}
         </button>
         {benchNumbers.map((n) => {
           const selected = filters.bench.includes(n);
@@ -672,6 +692,7 @@ export function Dashboard() {
                 selected ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]'
               }`}
               aria-pressed={selected}
+              aria-label={`Banco ${n}, ${selected ? 'activado' : 'desactivado'}`}
             >
               B{n}
             </button>
@@ -682,14 +703,14 @@ export function Dashboard() {
       {/* Section 1: Global KPI */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <KPICard
-          title="Score Ponderado Global"
+          title={t('dashboard.kpi.global_score')}
           value={globalScore.toFixed(1)}
           valueColor={getValueColor(globalScore)}
           pct={globalScore / 100}
           icon={GlobalIcon}
         />
         <KPICard
-          title="Perfiles CUMPLE"
+          title={t('dashboard.kpi.profiles_ok')}
           value={String(profileCounts.cumple)}
           valueColor="#10b981"
           pct={profileCounts.cumple + profileCounts.noCumple === 0
@@ -698,7 +719,7 @@ export function Dashboard() {
           icon={ProfilesOkIcon}
         />
         <KPICard
-          title="Perfiles NO CUMPLE"
+          title={t('dashboard.kpi.profiles_no')}
           value={String(profileCounts.noCumple)}
           valueColor="#ef4444"
           pct={profileCounts.cumple + profileCounts.noCumple === 0
@@ -711,7 +732,7 @@ export function Dashboard() {
       {/* Section 2: Parameter breakdown */}
       <div className="glass-panel rounded-xl p-5 space-y-4">
         <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-          Desglose por Parámetro (CUMPLE / NO CUMPLE)
+          {t('dashboard.section.parameter_breakdown')}
         </p>
 
         {parameterBreakdown.some((p) => p.cumple + p.noCumple > 0) && (
@@ -727,11 +748,11 @@ export function Dashboard() {
           <table className="w-full text-xs">
             <thead>
               <tr className="text-left" style={{ color: 'var(--color-text-muted)' }}>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider">Parámetro</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">% CUMPLE</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">CUMPLE</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">NO CUMPLE</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">Valor Real Prom.</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider">{t('dashboard.table.parameter')}</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('dashboard.table.pct_cumple')}</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('status.cumple')}</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('status.no_cumple')}</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('dashboard.table.value_avg')}</th>
               </tr>
             </thead>
             <tbody>
@@ -742,7 +763,7 @@ export function Dashboard() {
                 return (
                   <tr key={p.parameter} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
                     <td className="py-2 pr-4 font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                      {parameterLabel(p.parameter)}
+                      {parameterLabel(p.parameter, t)}
                     </td>
                     <td className="py-2 pr-4 text-right tabular-nums" style={{ color: getValueColor(pct) }}>
                       {pct.toFixed(1)}%
@@ -768,7 +789,7 @@ export function Dashboard() {
       {sectorCompliance.length > 0 && (
         <div className="glass-panel rounded-xl p-5 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-            Cumplimiento por Sector
+            {t('dashboard.section.sector_compliance')}
           </p>
           <Plot
             data={sectorChartData}
@@ -782,22 +803,22 @@ export function Dashboard() {
       {/* Section 4: Deviation histograms with tolerance bands */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <HistogramPanel
-          title="Desviación de Altura"
+          title={t('dashboard.section.deviation_height')}
           chart={heightHist}
           config={plotConfig}
-          emptyText="Sin datos de desviación"
+          emptyText={t('dashboard.histogram.no_data')}
         />
         <HistogramPanel
-          title="Desviación de Ángulo"
+          title={t('dashboard.section.deviation_angle')}
           chart={angleHist}
           config={plotConfig}
-          emptyText="Sin datos de desviación"
+          emptyText={t('dashboard.histogram.no_data')}
         />
         <HistogramPanel
-          title="Desviación de Cresta"
+          title={t('dashboard.section.deviation_crest')}
           chart={crestHist}
           config={plotConfig}
-          emptyText="Sin datos de desviación"
+          emptyText={t('dashboard.histogram.no_data')}
         />
       </div>
     </div>
@@ -806,11 +827,14 @@ export function Dashboard() {
 
 // ─── Small UI helpers ────────────────────────────────────────
 
-function parameterLabel(p: 'height' | 'angle' | 'berm'): string {
+function parameterLabel(
+  p: 'height' | 'angle' | 'berm',
+  t: (key: string) => string,
+): string {
   switch (p) {
-    case 'height': return 'Altura';
-    case 'angle':  return 'Ángulo';
-    case 'berm':   return 'Berma';
+    case 'height': return t('dashboard.parameter.height');
+    case 'angle':  return t('dashboard.parameter.angle');
+    case 'berm':   return t('dashboard.parameter.berm');
   }
 }
 
