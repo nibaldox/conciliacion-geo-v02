@@ -55,11 +55,12 @@ describe('comparator', () => {
     expect(sorted[0]!.crestElevation).toBeLessThanOrEqual(sorted[sorted.length - 1]!.crestElevation);
   });
 
-  it('sorts by status: NO_CUMPLE first, then FUERA, then CUMPLE', () => {
+  it('sorts by status: NO_CUMPLE first, then CUMPLE (binary, no FUERA bucket)', () => {
     const sorted = [...benches].sort(comparator('status', 'asc'));
     // First by status rank (presentation order), stable within rank.
+    // FUERA is no longer a presentation bucket — its benches share
+    // the NO_CUMPLE rank.
     expect(sorted[0]!.status).toBe('NO_CUMPLE');
-    expect(sorted[1]!.status).toBe('FUERA');
     // Among CUMPLE, the original order is preserved (stable sort).
   });
 

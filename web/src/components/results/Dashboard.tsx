@@ -1,11 +1,10 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import Plot from 'react-plotly.js';
-import type { Data, Layout, Config } from 'plotly.js';
+import type { Data, Layout, Config, Shape } from 'plotly.js';
 import { useResults, useSections } from '../../api/hooks';
 import { formatPct } from '../../utils/format';
 import { useSession } from '../../stores/session';
-import { worstOfThree } from './ProfileView/domain/status';
 import type { ComparisonResult } from '../../api/types';
 
 // ─── Pure helpers (exported for testing) ─────────────────────
@@ -37,15 +36,238 @@ export function uniqueBenchNumbers(
   return [...set].sort((a, b) => a - b);
 }
 
-// ─── G05: over-excavation / debt area by sector ──────────────
+// ─── Binary compliance scoring (Track 1-WEB) ─────────────────
 //
-// Cross-section area proxy (m²) computed client-side from the
-// crest deviation: a positive `delta_crest` means the real crest
-// sits beyond the design face (over-excavation / overbreak); a
-// negative value means material is missing (debt / underbreak).
-// We scale the horizontal offset by the real bench height to get
-// an approximate face area. Rows with null delta or null height
-// contribute zero. Aggregated per sector.
+// The Streamlit dashboard was redesigned around binary compliance:
+// every bench is either CUMPLE or NO CUMPLE (any "FUERA DE TOLERANCIA"
+// is merged into NO CUMPLE). A per-bench score weights the three
+// parameters (berma=60, ángulo=20, altura=20, max 100). A profile
+// (i.e. a section) CUMPLEs when its average bench score ≥ 70. The
+// global score is the mean of per-profile scores.
+
+/** Maximum bench score when all three parameters CUMPLE. */
+export const BENCH_SCORE_MAX = 100;
+
+/** Per-parameter weights (sum = 100). */
+export const SCORE_WEIGHTS = {
+  berm: 60,
+  angle: 20,
+  height: 20,
+} as const;
+
+/** Threshold above which a profile is considered CUMPLE. */
+export const PROFILE_CUMPLE_THRESHOLD = 70;
+
+/**
+ * Score for a single bench row. Each parameter contributes its
+ * weight if it CUMPLES, 0 otherwise.
+ */
+export function benchScore(row: ComparisonResult): number {
+  let score = 0;
+  if (row.berm_status === 'CUMPLE') score += SCORE_WEIGHTS.berm;
+  if (row.angle_status === 'CUMPLE') score += SCORE_WEIGHTS.angle;
+  if (row.height_status === 'CUMPLE') score += SCORE_WEIGHTS.height;
+  return score;
+}
+
+/** True if a profile (section) meets the CUMPLE threshold. */
+export function profileCumple(score: number): boolean {
+  return score >= PROFILE_CUMPLE_THRESHOLD;
+}
+
+/**
+ * Mean score across all benches of a section. Returns 0 when the
+ * section has no benches.
+ */
+export function profileScore(
+  rows: readonly ComparisonResult[],
+): number {
+  if (rows.length === 0) return 0;
+  let total = 0;
+  for (const r of rows) total += benchScore(r);
+  return total / rows.length;
+}
+
+/**
+ * Per-section (profile) scores keyed by section name. Sections
+ * with zero benches are omitted so the global average only
+ * reflects profiles we actually evaluated.
+ */
+export function computeProfileScores(
+  rows: readonly ComparisonResult[],
+): Map<string, number> {
+  const map = new Map<string, number[]>();
+  for (const r of rows) {
+    const list = map.get(r.section) ?? [];
+    list.push(benchScore(r));
+    map.set(r.section, list);
+  }
+  const out = new Map<string, number>();
+  for (const [section, scores] of map) {
+    const sum = scores.reduce((a, b) => a + b, 0);
+    out.set(section, scores.length === 0 ? 0 : sum / scores.length);
+  }
+  return out;
+}
+
+/**
+ * Global compliance score: average of per-profile scores.
+ * Mirrors Streamlit's `score_global = mean(per-section scores)`.
+ */
+export function computeGlobalScore(
+  rows: readonly ComparisonResult[],
+): number {
+  const profiles = computeProfileScores(rows);
+  if (profiles.size === 0) return 0;
+  let total = 0;
+  for (const v of profiles.values()) total += v;
+  return total / profiles.size;
+}
+
+/**
+ * Counts of CUMPLE vs NO CUMPLE profiles (binary — FUERA is folded
+ * into NO CUMPLE). Used by the global KPI cards.
+ */
+export interface ProfileComplianceCounts {
+  cumple: number;
+  noCumple: number;
+}
+
+export function computeProfileComplianceCounts(
+  rows: readonly ComparisonResult[],
+): ProfileComplianceCounts {
+  const profiles = computeProfileScores(rows);
+  let cumple = 0;
+  let noCumple = 0;
+  for (const score of profiles.values()) {
+    if (profileCumple(score)) cumple += 1;
+    else noCumple += 1;
+  }
+  return { cumple, noCumple };
+}
+
+// ─── Per-parameter breakdown (binary) ────────────────────────
+
+/**
+ * Per-parameter compliance breakdown: how many benches CUMPLE /
+ * NO CUMPLE on each parameter (height, angle, berm). FUERA and
+ * NO CUMPLE are merged.
+ */
+export interface ParameterBreakdown {
+  parameter: 'height' | 'angle' | 'berm';
+  cumple: number;
+  noCumple: number;
+  /** Sum of real values for CUMPLE benches (null-safe). */
+  realSum: number;
+  /** Count of finite real values contributed (nulls excluded). */
+  realCount: number;
+}
+
+function realFor(
+  row: ComparisonResult,
+  parameter: 'height' | 'angle' | 'berm',
+): number | null {
+  if (parameter === 'height') return row.height_real;
+  if (parameter === 'angle') return row.angle_real;
+  return row.berm_real;
+}
+
+export function computeParameterBreakdown(
+  rows: readonly ComparisonResult[],
+): ParameterBreakdown[] {
+  const out: ParameterBreakdown[] = [];
+  const parameters = ['height', 'angle', 'berm'] as const;
+  for (const parameter of parameters) {
+    let cumple = 0;
+    let noCumple = 0;
+    let realSum = 0;
+    let realCount = 0;
+    for (const r of rows) {
+      const status = parameter === 'height'
+        ? r.height_status
+        : parameter === 'angle'
+          ? r.angle_status
+          : r.berm_status;
+      const isCumple = status === 'CUMPLE';
+      if (isCumple) cumple += 1;
+      else noCumple += 1;
+      const real = realFor(r, parameter);
+      if (real != null && Number.isFinite(real)) {
+        realSum += real;
+        realCount += 1;
+      }
+    }
+    out.push({ parameter, cumple, noCumple, realSum, realCount });
+  }
+  return out;
+}
+
+// ─── Sector compliance (% CUMPLE per sector, binary) ─────────
+
+export interface SectorCompliance {
+  sector: string;
+  /** Percentage of benches CUMPLE on the sector (0-100). */
+  pct: number;
+  total: number;
+}
+
+export function computeSectorCompliance(
+  rows: readonly ComparisonResult[],
+): SectorCompliance[] {
+  const map = new Map<string, { cumple: number; total: number }>();
+  for (const r of rows) {
+    const entry = map.get(r.sector) ?? { cumple: 0, total: 0 };
+    entry.total += 1;
+    if (r.height_status === 'CUMPLE' &&
+        r.angle_status === 'CUMPLE' &&
+        r.berm_status === 'CUMPLE') {
+      entry.cumple += 1;
+    }
+    map.set(r.sector, entry);
+  }
+  return [...map.entries()]
+    .map(([sector, { cumple, total }]) => ({
+      sector,
+      total,
+      pct: total === 0 ? 0 : (cumple / total) * 100,
+    }))
+    .sort((a, b) => a.sector.localeCompare(b.sector));
+}
+
+/**
+ * Colour for a sector compliance percentage. Matches the
+ * Streamlit thresholds (green ≥70, orange 50-70, red <50).
+ */
+export function sectorComplianceColor(pct: number): string {
+  if (pct >= 70) return '#10b981'; // emerald
+  if (pct >= 50) return '#f59e0b'; // amber
+  return '#ef4444';                // red
+}
+
+// ─── Deviation histograms ─────────────────────────────────────
+
+/** Numeric deviation/real-value fields used by the histograms. */
+export type HistogramField = 'height_dev' | 'angle_dev' | 'delta_crest';
+
+export function collectField(
+  rows: readonly ComparisonResult[],
+  field: HistogramField,
+): number[] {
+  const out: number[] = [];
+  for (const r of rows) {
+    const v = r[field];
+    if (v != null && Number.isFinite(v)) out.push(v);
+  }
+  return out;
+}
+
+// ─── Legacy helpers (kept for back-compat with tests) ────────
+//
+// `computeAreasBySector`, `collectDeviations`, and
+// `computeStatusCountsBySector` were introduced for the previous
+// stacked-area / FUERA-included dashboard. The current redesign
+// doesn't render them, but the test files still import them, so
+// we keep them exported with their original 3-bucket semantics.
 
 export interface SectorArea {
   sector: string;
@@ -69,16 +291,12 @@ export function computeAreasBySector(
   return [...map.values()].sort((a, b) => a.sector.localeCompare(b.sector));
 }
 
-// ─── G06: deviation distribution ────────────────────────────
-
-/** Numeric deviation fields available on a comparison row. */
 export type DeviationField =
   | 'delta_crest'
   | 'delta_toe'
   | 'height_dev'
   | 'angle_dev';
 
-/** Collect finite, non-null values of a deviation field across rows. */
 export function collectDeviations(
   rows: readonly ComparisonResult[],
   field: DeviationField,
@@ -91,19 +309,36 @@ export function collectDeviations(
   return out;
 }
 
-// ─── G07: status counts by sector ───────────────────────────
-//
-// Each comparison row resolves to a single worst-case status
-// (worstOfThree over height/angle/berm). We count benches per
-// sector and stack CUMPLE / FUERA / NO_CUMPLE. Rows that parse
-// to UNKNOWN (no usable status) are folded into NO_CUMPLE so the
-// stacked totals always equal the number of rows.
-
 export interface SectorStatusCounts {
   sector: string;
   CUMPLE: number;
-  FUERA: number;
   NO_CUMPLE: number;
+}
+
+/** Map a single raw backend status string to its binary bucket.
+ *  FUERA DE TOLERANCIA is folded into NO_CUMPLE. */
+function binaryBucket(
+  raw: string | null | undefined,
+): 'CUMPLE' | 'NO_CUMPLE' {
+  if (raw == null) return 'NO_CUMPLE';
+  const s = raw.trim().toUpperCase();
+  if (s === 'CUMPLE') return 'CUMPLE';
+  // All non-CUMPLE values (FUERA, NO CUMPLE, NO CONSTRUIDO, etc.)
+  // collapse to NO_CUMPLE — the presentation layer is binary.
+  return 'NO_CUMPLE';
+}
+
+/** Pick the worst binary status among the three. NO_CUMPLE wins
+ *  over CUMPLE (strict). Equal → tie. */
+function worstBinary(
+  a: 'CUMPLE' | 'NO_CUMPLE',
+  b: 'CUMPLE' | 'NO_CUMPLE',
+  c: 'CUMPLE' | 'NO_CUMPLE',
+): 'CUMPLE' | 'NO_CUMPLE' {
+  if (a === 'NO_CUMPLE' || b === 'NO_CUMPLE' || c === 'NO_CUMPLE') {
+    return 'NO_CUMPLE';
+  }
+  return 'CUMPLE';
 }
 
 export function computeStatusCountsBySector(
@@ -112,15 +347,20 @@ export function computeStatusCountsBySector(
   const map = new Map<string, SectorStatusCounts>();
   for (const r of rows) {
     const entry =
-      map.get(r.sector) ?? { sector: r.sector, CUMPLE: 0, FUERA: 0, NO_CUMPLE: 0 };
-    const status = worstOfThree(r.height_status, r.angle_status, r.berm_status);
+      map.get(r.sector) ?? { sector: r.sector, CUMPLE: 0, NO_CUMPLE: 0 };
+    const status = worstBinary(
+      binaryBucket(r.height_status),
+      binaryBucket(r.angle_status),
+      binaryBucket(r.berm_status),
+    );
     if (status === 'CUMPLE') entry.CUMPLE += 1;
-    else if (status === 'FUERA') entry.FUERA += 1;
     else entry.NO_CUMPLE += 1;
     map.set(r.sector, entry);
   }
   return [...map.values()].sort((a, b) => a.sector.localeCompare(b.sector));
 }
+
+// ─── UI ──────────────────────────────────────────────────────
 
 interface KPICardProps {
   title: string;
@@ -133,32 +373,30 @@ interface KPICardProps {
 function KPICard({ title, value, valueColor, pct, icon }: KPICardProps) {
   return (
     <div className="glass-card rounded-xl p-5 flex flex-col gap-4 relative overflow-hidden group">
-      {/* Glow Effect */}
-      <div 
+      <div
         className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-opacity duration-500 pointer-events-none"
         style={{ backgroundColor: valueColor }}
       />
-      
+
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
           {title}
         </span>
-        <div 
+        <div
           className="w-9 h-9 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 duration-300"
           style={{ backgroundColor: `${valueColor}15`, color: valueColor }}
         >
           {icon}
         </div>
       </div>
-      
+
       <div className="flex flex-col gap-2">
         <span className="text-3xl font-extrabold tracking-tight" style={{ color: 'var(--color-text-primary)' }}>
           {value}
         </span>
-        
-        {/* Dynamic ambient progress bar */}
+
         <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
-          <div 
+          <div
             className="h-full rounded-full transition-all duration-1000 ease-out"
             style={{ width: `${Math.round(pct * 100)}%`, backgroundColor: valueColor }}
           />
@@ -168,10 +406,11 @@ function KPICard({ title, value, valueColor, pct, icon }: KPICardProps) {
   );
 }
 
+/** Threshold colour mapping (green ≥70, orange 50-70, red <50). */
 function getValueColor(pct: number): string {
-  if (pct > 0.8) return '#10b981'; // Vivid emerald
-  if (pct > 0.6) return '#f59e0b'; // Vivid amber
-  return '#ef4444'; // Vivid red
+  if (pct >= 70) return '#10b981';
+  if (pct >= 50) return '#f59e0b';
+  return '#ef4444';
 }
 
 export function Dashboard() {
@@ -192,146 +431,72 @@ export function Dashboard() {
     [results],
   );
 
-  const areasBySector = useMemo(
-    () => computeAreasBySector(filteredResults),
+  // Binary compliance aggregates
+  const globalScore = useMemo(
+    () => computeGlobalScore(filteredResults),
     [filteredResults],
   );
 
-  const crestDeviations = useMemo(
-    () => collectDeviations(filteredResults, 'delta_crest'),
+  const profileCounts = useMemo(
+    () => computeProfileComplianceCounts(filteredResults),
     [filteredResults],
   );
 
-  const statusBySector = useMemo(
-    () => computeStatusCountsBySector(filteredResults),
+  const parameterBreakdown = useMemo(
+    () => computeParameterBreakdown(filteredResults),
     [filteredResults],
   );
 
-  const stats = useMemo(() => {
-    if (filteredResults.length === 0) {
-      return {
-        total: 0,
-        globalPct: 0,
-        heightPct: 0,
-        anglePct: 0,
-        bermPct: 0,
-        nSections: 0,
-      };
-    }
+  const sectorCompliance = useMemo(
+    () => computeSectorCompliance(filteredResults),
+    [filteredResults],
+  );
 
-    const total = filteredResults.length;
+  // Per-deviation histograms
+  const heightDevs = useMemo(
+    () => collectField(filteredResults, 'height_dev'),
+    [filteredResults],
+  );
+  const angleDevs = useMemo(
+    () => collectField(filteredResults, 'angle_dev'),
+    [filteredResults],
+  );
+  const crestDevs = useMemo(
+    () => collectField(filteredResults, 'delta_crest'),
+    [filteredResults],
+  );
 
-    // Global compliance: all three statuses are CUMPLE
-    const globalOk = filteredResults.filter(
-      (r) =>
-        r.height_status === 'CUMPLE' &&
-        r.angle_status === 'CUMPLE' &&
-        r.berm_status === 'CUMPLE',
-    ).length;
+  const totalBenches = filteredResults.length;
+  const nSections = sections?.length ?? 0;
+  const filterActive = filters.bench.length > 0;
 
-    // Per-parameter compliance
-    const heightOk = filteredResults.filter((r) => r.height_status === 'CUMPLE').length;
-    const angleOk = filteredResults.filter((r) => r.angle_status === 'CUMPLE').length;
-    const bermOk = filteredResults.filter((r) => r.berm_status === 'CUMPLE').length;
+  const plotConfig = useMemo<Partial<Config>>(
+    () => ({ displayModeBar: false, responsive: true }),
+    [],
+  );
 
-    return {
-      total,
-      globalPct: globalOk / total,
-      heightPct: heightOk / total,
-      anglePct: angleOk / total,
-      bermPct: bermOk / total,
-      nSections: sections?.length ?? 0,
-    };
-  }, [filteredResults, sections]);
-
-  // Memoized Plotly data/layout for the 3 charts so Plotly.react
-  // diffing only fires when the underlying memoized inputs change,
-  // not on every render (e.g. on each bench-filter keystroke).
-  const areasData = useMemo<Data[]>(
+  // ── Plotly data ──
+  const parameterChartData = useMemo<Data[]>(
     () => [
       {
         type: 'bar',
-        name: t('dashboard.over_excavation'),
-        x: areasBySector.map((a) => a.sector),
-        y: areasBySector.map((a) => a.overExcavation),
-        marker: { color: '#ef4444' },
-      },
-      {
-        type: 'bar',
-        name: t('dashboard.debt'),
-        x: areasBySector.map((a) => a.sector),
-        y: areasBySector.map((a) => a.debt),
-        marker: { color: '#f59e0b' },
-      },
-    ],
-    [areasBySector, t],
-  );
-  const areasLayout = useMemo<Partial<Layout>>(
-    () => ({
-      barmode: 'stack',
-      height: 320,
-      margin: { l: 50, r: 20, t: 20, b: 40 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: t('dashboard.sector') },
-      yaxis: { title: t('dashboard.area_m2') },
-      legend: { orientation: 'h', y: -0.2 },
-    }),
-    [t],
-  );
-
-  const crestData = useMemo<Data[]>(
-    () => [
-      {
-        type: 'histogram',
-        x: crestDeviations,
-        nbinsx: 15,
-        marker: { color: '#3b82f6' },
-      },
-    ] as unknown as Data[],
-    [crestDeviations],
-  );
-  const crestLayout = useMemo<Partial<Layout>>(
-    () => ({
-      height: 300,
-      margin: { l: 50, r: 20, t: 20, b: 40 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: t('dashboard.crest_delta_m') },
-      yaxis: { title: t('dashboard.frequency') },
-    }),
-    [t],
-  );
-
-  const statusData = useMemo<Data[]>(
-    () => [
-      {
-        type: 'bar',
-        name: t('status.cumple'),
-        x: statusBySector.map((s) => s.sector),
-        y: statusBySector.map((s) => s.CUMPLE),
+        name: 'CUMPLE',
+        x: parameterBreakdown.map((p) => parameterLabel(p.parameter)),
+        y: parameterBreakdown.map((p) => p.cumple),
         marker: { color: '#10b981' },
       },
       {
         type: 'bar',
-        name: t('status.fuera'),
-        x: statusBySector.map((s) => s.sector),
-        y: statusBySector.map((s) => s.FUERA),
-        marker: { color: '#f59e0b' },
-      },
-      {
-        type: 'bar',
-        name: t('status.no_cumple'),
-        x: statusBySector.map((s) => s.sector),
-        y: statusBySector.map((s) => s.NO_CUMPLE),
+        name: 'NO CUMPLE',
+        x: parameterBreakdown.map((p) => parameterLabel(p.parameter)),
+        y: parameterBreakdown.map((p) => p.noCumple),
         marker: { color: '#ef4444' },
       },
     ],
-    [statusBySector, t],
+    [parameterBreakdown],
   );
-  const statusLayout = useMemo<Partial<Layout>>(
+
+  const parameterLayout = useMemo<Partial<Layout>>(
     () => ({
       barmode: 'stack',
       height: 320,
@@ -339,15 +504,102 @@ export function Dashboard() {
       paper_bgcolor: 'rgba(0,0,0,0)',
       plot_bgcolor: 'rgba(0,0,0,0)',
       font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: t('dashboard.sector') },
-      yaxis: { title: t('dashboard.bench_count') },
+      xaxis: { title: { text: 'Parámetro' } },
+      yaxis: { title: { text: 'N° de bancos' } },
       legend: { orientation: 'h', y: -0.2 },
     }),
-    [t],
-  );
-  const plotConfig = useMemo<Partial<Config>>(
-    () => ({ displayModeBar: false, responsive: true }),
     [],
+  );
+
+  const sectorChartData = useMemo<Data[]>(() => {
+    const sectors = sectorCompliance.map((s) => s.sector);
+    const colors = sectorCompliance.map((s) => sectorComplianceColor(s.pct));
+    return [
+      {
+        type: 'bar',
+        x: sectors,
+        y: sectorCompliance.map((s) => s.pct),
+        marker: { color: colors },
+        text: sectorCompliance.map((s) => `${s.pct.toFixed(1)}%`),
+        textposition: 'outside',
+        hovertemplate: '<b>%{x}</b><br>CUMPLE: %{y:.1f}%<extra></extra>',
+      },
+    ] as unknown as Data[];
+  }, [sectorCompliance]);
+
+  const sectorChartLayout = useMemo<Partial<Layout>>(
+    () => ({
+      height: 320,
+      margin: { l: 50, r: 20, t: 20, b: 40 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: 'var(--color-text-secondary)' },
+      xaxis: { title: { text: 'Sector' } },
+      yaxis: { title: { text: '% Cumplimiento' }, range: [0, 105] },
+    }),
+    [],
+  );
+
+  const histogramLayoutBase = useMemo<Partial<Layout>>(
+    () => ({
+      height: 260,
+      margin: { l: 50, r: 20, t: 20, b: 40 },
+      paper_bgcolor: 'rgba(0,0,0,0)',
+      plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: 'var(--color-text-secondary)' },
+    }),
+    [],
+  );
+
+  function buildHistogram(
+    values: readonly number[],
+    title: string,
+    xLabel: string,
+    tolerance: number,
+  ): { data: Data[]; layout: Partial<Layout> } {
+    const shape: Partial<Shape> = {
+      type: 'rect',
+      xref: 'x',
+      yref: 'paper',
+      x0: -tolerance,
+      x1: tolerance,
+      y0: 0,
+      y1: 1,
+      fillcolor: 'rgba(16, 185, 129, 0.15)',
+      line: { color: 'rgba(16, 185, 129, 0.6)', width: 1 },
+      layer: 'below',
+    };
+    return {
+      data: [
+        {
+          type: 'histogram',
+          x: [...values],
+          nbinsx: 15,
+          marker: { color: '#3b82f6' },
+          name: title,
+        },
+      ] as unknown as Data[],
+      layout: {
+        ...histogramLayoutBase,
+        xaxis: { title: { text: xLabel } },
+        yaxis: { title: { text: 'Frecuencia' } },
+        shapes: [shape],
+        showlegend: false,
+      },
+    };
+  }
+
+  const heightHist = useMemo(
+    () => buildHistogram(heightDevs, 'Altura', 'Δ Altura (m)', 1.0),
+    [heightDevs, histogramLayoutBase],
+  );
+  const angleHist = useMemo(
+    () => buildHistogram(angleDevs, 'Ángulo', 'Δ Ángulo (°)', 3.0),
+    [angleDevs, histogramLayoutBase],
+  );
+  const crestHist = useMemo(
+    () => buildHistogram(crestDevs, 'Cresta', 'Δ Cresta (m)', 1.0),
+    [crestDevs, histogramLayoutBase],
   );
 
   if (!results || results.length === 0) {
@@ -358,7 +610,6 @@ export function Dashboard() {
     );
   }
 
-  // Beautiful SVG Icons
   const GlobalIcon = (
     <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="10" />
@@ -366,30 +617,18 @@ export function Dashboard() {
     </svg>
   );
 
-  const HeightIcon = (
+  const ProfilesOkIcon = (
     <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m8 3 4-4 4 4" />
-      <path d="m8 21 4 4 4-4" />
-      <line x1="12" y1="1" x2="12" y2="23" />
+      <path d="M20 6 9 17l-5-5" />
     </svg>
   );
 
-  const AngleIcon = (
+  const ProfilesNoIcon = (
     <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 21H3V3" />
-      <path d="M3 21c7.5-7.5 10.5-12 18-18" />
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
     </svg>
   );
-
-  const BermIcon = (
-    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 17h6l4-10h10" />
-      <path d="m18 3 4 4-4 4" />
-      <line x1="22" y1="7" x2="12" y2="7" />
-    </svg>
-  );
-
-  const filterActive = filters.bench.length > 0;
 
   return (
     <div className="space-y-6">
@@ -399,11 +638,11 @@ export function Dashboard() {
           Resumen General de Conciliación
         </p>
         <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-secondary)' }}>
-          {stats.total} Bancos / {stats.nSections} Secciones
+          {totalBenches} Bancos / {nSections} Secciones
         </span>
       </div>
 
-      {/* G10: bench filter — pills that propagate to every chart below */}
+      {/* G10: bench filter */}
       <div className="glass-panel rounded-xl p-4 flex flex-wrap items-center gap-2">
         <span className="text-xs font-semibold uppercase tracking-wider mr-1" style={{ color: 'var(--color-text-muted)' }}>
           Banco:
@@ -441,124 +680,176 @@ export function Dashboard() {
         })}
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {/* Section 1: Global KPI */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <KPICard
-          title={t('dashboard.kpi_global')}
-          value={formatPct(stats.globalPct)}
-          valueColor={getValueColor(stats.globalPct)}
-          pct={stats.globalPct}
+          title="Score Ponderado Global"
+          value={globalScore.toFixed(1)}
+          valueColor={getValueColor(globalScore)}
+          pct={globalScore / 100}
           icon={GlobalIcon}
         />
         <KPICard
-          title={t('dashboard.kpi_height')}
-          value={formatPct(stats.heightPct)}
-          valueColor={getValueColor(stats.heightPct)}
-          pct={stats.heightPct}
-          icon={HeightIcon}
+          title="Perfiles CUMPLE"
+          value={String(profileCounts.cumple)}
+          valueColor="#10b981"
+          pct={profileCounts.cumple + profileCounts.noCumple === 0
+            ? 0
+            : profileCounts.cumple / (profileCounts.cumple + profileCounts.noCumple)}
+          icon={ProfilesOkIcon}
         />
         <KPICard
-          title={t('dashboard.kpi_angle')}
-          value={formatPct(stats.anglePct)}
-          valueColor={getValueColor(stats.anglePct)}
-          pct={stats.anglePct}
-          icon={AngleIcon}
-        />
-        <KPICard
-          title={t('dashboard.kpi_berm')}
-          value={formatPct(stats.bermPct)}
-          valueColor={getValueColor(stats.bermPct)}
-          pct={stats.bermPct}
-          icon={BermIcon}
+          title="Perfiles NO CUMPLE"
+          value={String(profileCounts.noCumple)}
+          valueColor="#ef4444"
+          pct={profileCounts.cumple + profileCounts.noCumple === 0
+            ? 0
+            : profileCounts.noCumple / (profileCounts.cumple + profileCounts.noCumple)}
+          icon={ProfilesNoIcon}
         />
       </div>
 
-      {/* G05: over-excavation / debt area by sector */}
-      {areasBySector.length > 0 && (
-        <div className="glass-panel rounded-xl p-5 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('dashboard.areas_title')}
-          </p>
-          <Plot
-            data={areasData}
-            layout={areasLayout}
-            config={plotConfig}
-            style={{ width: '100%' }}
-          />
-        </div>
-      )}
-
-      {/* G06: deviation distribution (crest) */}
-      <div className="glass-panel rounded-xl p-5 space-y-3">
-        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('dashboard.crest_dev_title')}
-        </p>
-        {crestDeviations.length > 0 ? (
-          <Plot
-            data={crestData}
-            layout={crestLayout}
-            config={plotConfig}
-            style={{ width: '100%' }}
-          />
-        ) : (
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-            {t('dashboard.no_deviation_data')}
-          </p>
-        )}
-      </div>
-
-      {/* G07: status counts stacked by sector */}
-      {statusBySector.length > 0 && (
-        <div className="glass-panel rounded-xl p-5 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('dashboard.compliance_title')}
-          </p>
-          <Plot
-            data={statusData}
-            layout={statusLayout}
-            config={plotConfig}
-            style={{ width: '100%' }}
-          />
-        </div>
-      )}
-
-      {/* Visual bars & detail statistics */}
+      {/* Section 2: Parameter breakdown */}
       <div className="glass-panel rounded-xl p-5 space-y-4">
         <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('dashboard.breakdown_title')}
+          Desglose por Parámetro (CUMPLE / NO CUMPLE)
         </p>
-        <div className="space-y-4">
-          {([
-            [t('dashboard.kpi_global'), stats.globalPct, GlobalIcon],
-            [t('dashboard.kpi_height'), stats.heightPct, HeightIcon],
-            [t('dashboard.kpi_angle'), stats.anglePct, AngleIcon],
-            [t('dashboard.kpi_berm'), stats.bermPct, BermIcon],
-          ] as const).map(([label, pct, icon]) => (
-            <div key={label} className="space-y-1.5">
-              <div className="flex justify-between items-center text-xs">
-                <div className="flex items-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-                  <span className="w-4 h-4 opacity-70">{icon}</span>
-                  <span className="font-medium">{label}</span>
-                </div>
-                <span className="font-bold" style={{ color: getValueColor(pct) }}>
-                  {formatPct(pct)}
-                </span>
-              </div>
-              <div className="w-full rounded-full h-2 relative overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
-                {/* Ambient glow behind progress bar */}
-                <div 
-                  className="absolute h-full rounded-full blur-[1px] opacity-40 transition-all duration-1000"
-                  style={{ width: `${Math.round(pct * 100)}%`, backgroundColor: getValueColor(pct) }}
-                />
-                <div
-                  className="absolute h-full rounded-full transition-all duration-1000 ease-out"
-                  style={{ width: `${Math.round(pct * 100)}%`, backgroundColor: getValueColor(pct) }}
-                />
-              </div>
-            </div>
-          ))}
+
+        {parameterBreakdown.some((p) => p.cumple + p.noCumple > 0) && (
+          <Plot
+            data={parameterChartData}
+            layout={parameterLayout}
+            config={plotConfig}
+            style={{ width: '100%' }}
+          />
+        )}
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left" style={{ color: 'var(--color-text-muted)' }}>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider">Parámetro</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">% CUMPLE</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">CUMPLE</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">NO CUMPLE</th>
+                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">Valor Real Prom.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {parameterBreakdown.map((p) => {
+                const total = p.cumple + p.noCumple;
+                const pct = total === 0 ? 0 : (p.cumple / total) * 100;
+                const avgReal = p.realCount === 0 ? null : p.realSum / p.realCount;
+                return (
+                  <tr key={p.parameter} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
+                    <td className="py-2 pr-4 font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                      {parameterLabel(p.parameter)}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: getValueColor(pct) }}>
+                      {pct.toFixed(1)}%
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: '#10b981' }}>
+                      {p.cumple}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: '#ef4444' }}>
+                      {p.noCumple}
+                    </td>
+                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>
+                      {avgReal == null ? '—' : formatReal(p.parameter, avgReal)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
+
+      {/* Section 3: Sector compliance */}
+      {sectorCompliance.length > 0 && (
+        <div className="glass-panel rounded-xl p-5 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+            Cumplimiento por Sector
+          </p>
+          <Plot
+            data={sectorChartData}
+            layout={sectorChartLayout}
+            config={plotConfig}
+            style={{ width: '100%' }}
+          />
+        </div>
+      )}
+
+      {/* Section 4: Deviation histograms with tolerance bands */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <HistogramPanel
+          title="Desviación de Altura"
+          chart={heightHist}
+          config={plotConfig}
+          emptyText="Sin datos de desviación"
+        />
+        <HistogramPanel
+          title="Desviación de Ángulo"
+          chart={angleHist}
+          config={plotConfig}
+          emptyText="Sin datos de desviación"
+        />
+        <HistogramPanel
+          title="Desviación de Cresta"
+          chart={crestHist}
+          config={plotConfig}
+          emptyText="Sin datos de desviación"
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Small UI helpers ────────────────────────────────────────
+
+function parameterLabel(p: 'height' | 'angle' | 'berm'): string {
+  switch (p) {
+    case 'height': return 'Altura';
+    case 'angle':  return 'Ángulo';
+    case 'berm':   return 'Berma';
+  }
+}
+
+function formatReal(p: 'height' | 'angle' | 'berm', v: number): string {
+  if (p === 'height') return `${v.toFixed(2)} m`;
+  if (p === 'angle')  return `${v.toFixed(1)}°`;
+  return `${v.toFixed(2)} m`;
+}
+
+interface HistogramPanelProps {
+  title: string;
+  chart: { data: Data[]; layout: Partial<Layout> };
+  config: Partial<Config>;
+  emptyText: string;
+}
+
+function HistogramPanel({ title, chart, config, emptyText }: HistogramPanelProps) {
+  const hasData = chart.data.some((d) => {
+    const x = (d as { x?: unknown }).x;
+    return Array.isArray(x) && x.length > 0;
+  });
+  return (
+    <div className="glass-panel rounded-xl p-5 space-y-3">
+      <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+        {title}
+      </p>
+      {hasData ? (
+        <Plot
+          data={chart.data}
+          layout={chart.layout}
+          config={config}
+          style={{ width: '100%' }}
+        />
+      ) : (
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+          {emptyText}
+        </p>
+      )}
     </div>
   );
 }

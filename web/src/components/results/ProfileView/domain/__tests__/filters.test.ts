@@ -139,8 +139,9 @@ describe('compareByStatusSeverity', () => {
 // ─── ALL_STATUSES_FOR_FILTER ────────────────────────────────
 
 describe('ALL_STATUSES_FOR_FILTER', () => {
-  it('exposes every status exactly once', () => {
-    expect(new Set(ALL_STATUSES_FOR_FILTER).size).toBe(4);
+  it('exposes every status exactly once (binary model — FUERA absent)', () => {
+    expect(new Set(ALL_STATUSES_FOR_FILTER).size).toBe(3);
+    expect(ALL_STATUSES_FOR_FILTER).not.toContain('FUERA');
   });
 });
 

@@ -163,7 +163,9 @@ describe('toBench', () => {
       berm_status: 'CUMPLE',
     });
     const bench = toBench(rawBench, cmp);
-    expect(bench.status).toBe('FUERA');
+    // FUERA DE TOLERANCIA collapses into NO_CUMPLE, so the worst
+    // of (CUMPLE, NO_CUMPLE, CUMPLE) is NO_CUMPLE.
+    expect(bench.status).toBe('NO_CUMPLE');
     expect(bench.matched).toBe(true);
   });
 

@@ -28,7 +28,7 @@ function makeRow(overrides: Partial<ComparisonResult> = {}): ComparisonResult {
 }
 
 describe('computeStatusCountsBySector (G07)', () => {
-  it('stacks CUMPLE / FUERA / NO_CUMPLE per sector (render data)', () => {
+  it('stacks CUMPLE / NO_CUMPLE per sector (render data)', () => {
     const rows = [
       makeRow({ sector: 'Norte', bench_num: 1, height_status: 'CUMPLE' }),
       makeRow({
@@ -41,8 +41,8 @@ describe('computeStatusCountsBySector (G07)', () => {
     ];
     const out = computeStatusCountsBySector(rows);
     expect(out).toEqual([
-      { sector: 'Norte', CUMPLE: 1, FUERA: 1, NO_CUMPLE: 1 },
-      { sector: 'Sur', CUMPLE: 1, FUERA: 0, NO_CUMPLE: 0 },
+      { sector: 'Norte', CUMPLE: 1, NO_CUMPLE: 2 },
+      { sector: 'Sur', CUMPLE: 1, NO_CUMPLE: 0 },
     ]);
   });
 
@@ -59,7 +59,7 @@ describe('computeStatusCountsBySector (G07)', () => {
     const filtered = filterByBench(rows, [2]);
     const out = computeStatusCountsBySector(filtered);
     expect(out).toEqual([
-      { sector: 'Norte', CUMPLE: 0, FUERA: 0, NO_CUMPLE: 1 },
+      { sector: 'Norte', CUMPLE: 0, NO_CUMPLE: 1 },
     ]);
   });
 });

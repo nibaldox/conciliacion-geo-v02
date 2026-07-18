@@ -15,7 +15,9 @@ import type { BenchStatus } from '../types';
 describe('parseBenchStatus', () => {
   it('parses known compliance strings to their canonical bucket', () => {
     expect(parseBenchStatus('CUMPLE')).toBe('CUMPLE');
-    expect(parseBenchStatus('FUERA DE TOLERANCIA')).toBe('FUERA');
+    // Legacy "FUERA DE TOLERANCIA" / "FUERA" collapse to NO_CUMPLE so
+    // the presentation layer treats compliance as binary.
+    expect(parseBenchStatus('FUERA DE TOLERANCIA')).toBe('NO_CUMPLE');
     expect(parseBenchStatus('NO CUMPLE')).toBe('NO_CUMPLE');
     expect(parseBenchStatus('NO CONSTRUIDO')).toBe('NO_CUMPLE');
     expect(parseBenchStatus('FALTA BANCO')).toBe('NO_CUMPLE');
@@ -23,13 +25,14 @@ describe('parseBenchStatus', () => {
     expect(parseBenchStatus('BANCO ADICIONAL')).toBe('NO_CUMPLE');
   });
 
-  it('accepts the shortened "FUERA" form', () => {
-    expect(parseBenchStatus('FUERA')).toBe('FUERA');
+  it('accepts the shortened "FUERA" form and collapses it to NO_CUMPLE', () => {
+    expect(parseBenchStatus('FUERA')).toBe('NO_CUMPLE');
   });
 
   it('normalises whitespace and case', () => {
     expect(parseBenchStatus('  cumple  ')).toBe('CUMPLE');
-    expect(parseBenchStatus('fuera de tolerancia')).toBe('FUERA');
+    // Lower-case legacy string also collapses.
+    expect(parseBenchStatus('fuera de tolerancia')).toBe('NO_CUMPLE');
   });
 
   it('returns UNKNOWN for null, undefined, and empty string', () => {
@@ -55,7 +58,8 @@ describe('worstOfThree', () => {
 
   it('returns the most severe when they differ', () => {
     expect(worstOfThree('CUMPLE', 'CUMPLE', 'NO CUMPLE')).toBe('NO_CUMPLE');
-    expect(worstOfThree('CUMPLE', 'FUERA DE TOLERANCIA', 'CUMPLE')).toBe('FUERA');
+    // Legacy FUERA input collapses to NO_CUMPLE.
+    expect(worstOfThree('CUMPLE', 'FUERA DE TOLERANCIA', 'CUMPLE')).toBe('NO_CUMPLE');
     expect(worstOfThree('NO CUMPLE', 'FUERA DE TOLERANCIA', 'CUMPLE')).toBe('NO_CUMPLE');
   });
 
@@ -71,8 +75,10 @@ describe('worstOfThree', () => {
 
 describe('compareStatus', () => {
   it('returns negative when a is less severe than b', () => {
-    expect(compareStatus('CUMPLE', 'FUERA')).toBeLessThan(0);
+    // FUERA retains a rank in STATUS_SEVERITY (for defensive sorting of
+    // legacy values) but is no longer produced by parseBenchStatus.
     expect(compareStatus('CUMPLE', 'NO_CUMPLE')).toBeLessThan(0);
+    expect(compareStatus('CUMPLE', 'FUERA')).toBeLessThan(0);
   });
 
   it('returns positive when a is more severe than b', () => {
@@ -98,13 +104,17 @@ describe('isBackendStatusString', () => {
 });
 
 describe('STATUS_SEVERITY', () => {
-  it('has a strictly increasing severity across the four statuses', () => {
+  it('ranks CUMPLE < NO_CUMPLE in the binary model', () => {
     expect(STATUS_SEVERITY.UNKNOWN).toBeLessThan(STATUS_SEVERITY.CUMPLE);
-    expect(STATUS_SEVERITY.CUMPLE).toBeLessThan(STATUS_SEVERITY.FUERA);
-    expect(STATUS_SEVERITY.FUERA).toBeLessThan(STATUS_SEVERITY.NO_CUMPLE);
+    expect(STATUS_SEVERITY.CUMPLE).toBeLessThan(STATUS_SEVERITY.NO_CUMPLE);
   });
 
-  it('exposes exactly the four canonical statuses', () => {
+  it('exposes the four-variant BenchStatus keys (FUERA retained defensively)', () => {
+    // FUERA stays in STATUS_SEVERITY as a defensive sentinel rank
+    // even though parseBenchStatus never produces it any more. It
+    // ranks between CUMPLE and NO_CUMPLE so any stray legacy value
+    // (e.g. a fixture that bypasses parsing) still compares
+    // consistently.
     expect(Object.keys(STATUS_SEVERITY).sort()).toEqual(
       ['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN'].sort(),
     );
@@ -122,8 +132,9 @@ describe('STATUS_PRESENTATION_ORDER', () => {
     expect(cumpleIdx).toBeLessThan(unknownIdx);
   });
 
-  it('exhausts all four statuses', () => {
-    expect(new Set(STATUS_PRESENTATION_ORDER).size).toBe(4);
+  it('exhausts the three visible statuses (FUERA is collapsed)', () => {
+    expect(new Set(STATUS_PRESENTATION_ORDER).size).toBe(3);
+    expect(STATUS_PRESENTATION_ORDER).not.toContain('FUERA');
   });
 });
 

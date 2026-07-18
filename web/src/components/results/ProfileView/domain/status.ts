@@ -31,12 +31,22 @@ export function isBackendStatusString(s: string): s is BackendStatusString {
 
 // ─── Parsing ────────────────────────────────────────────────
 
-/** Normalise any backend status string to one of our 4 buckets. */
+/** Normalise any backend status string to one of our 4 buckets.
+ *
+ * The compliance system is now binary at the presentation layer
+ * (CUMPLE / NO_CUMPLE). The legacy "FUERA DE TOLERANCIA" / "FUERA"
+ * strings coming from the backend are collapsed into NO_CUMPLE so
+ * downstream code never sees a FUERA value. The 'FUERA' literal
+ * remains in the BenchStatus union purely as a defensive fallback
+ * for any path that hasn't yet been migrated; it is never produced
+ * by parseBenchStatus or by the API adapter. */
 export function parseBenchStatus(raw: string | null | undefined): BenchStatus {
   if (raw == null) return 'UNKNOWN';
   const s = raw.trim().toUpperCase();
   if (s === 'CUMPLE') return 'CUMPLE';
-  if (s === 'FUERA DE TOLERANCIA' || s === 'FUERA') return 'FUERA';
+  // "FUERA DE TOLERANCIA" and the shortened "FUERA" both collapse to
+  // NO_CUMPLE — the presentation layer treats compliance as binary.
+  if (s === 'FUERA DE TOLERANCIA' || s === 'FUERA') return 'NO_CUMPLE';
   if (
     s === 'NO CUMPLE' ||
     s === 'NO_CONSTRUIDO' ||
@@ -118,10 +128,13 @@ export const STATUS_ICON: Record<BenchStatus, string> = {
 
 /** Order in which statuses should be presented in legends, filters,
  *  and compliance summary cards. Worst first so the eye lands on
- *  the problem. */
+ *  the problem.
+ *
+ *  FUERA is intentionally absent: parseBenchStatus collapses all
+ *  out-of-tolerance backend strings into NO_CUMPLE, so the
+ *  presentation layer never needs to render a FUERA bucket. */
 export const STATUS_PRESENTATION_ORDER: readonly BenchStatus[] = [
   'NO_CUMPLE',
-  'FUERA',
   'CUMPLE',
   'UNKNOWN',
 ] as const;

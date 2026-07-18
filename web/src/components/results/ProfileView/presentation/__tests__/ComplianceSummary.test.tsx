@@ -46,12 +46,11 @@ describe('ComplianceSummary', () => {
     ];
     const { container } = render(<ComplianceSummary benches={benches} />);
     const segments = container.querySelectorAll('[data-status]');
-    // The bar has one segment per non-zero status (3 here), and
-    // the legend has the same three statuses. Filter to bar only.
+    // Binary: FUERA collapses to NO_CUMPLE, so only 2 segments (CUMPLE + NO_CUMPLE)
     const barSegments = Array.from(segments).filter(
       (el) => el.parentElement?.getAttribute('role') === 'img',
     );
-    expect(barSegments).toHaveLength(3);
+    expect(barSegments).toHaveLength(2);
   });
 
   it('shows a per-status legend with icon + count + percentage', () => {
@@ -62,9 +61,8 @@ describe('ComplianceSummary', () => {
       makeBench('NO_CUMPLE', 4),
     ];
     render(<ComplianceSummary benches={benches} />);
-    // 2 CUMPLE = 50%, 1 FUERA = 25%, 1 NO_CUMPLE = 25%
-    expect(screen.getByText('50%')).toBeInTheDocument();
-    expect(screen.getAllByText('25%')).toHaveLength(2);
+    // Binary: 2 CUMPLE = 50%, 2 NO_CUMPLE (1 FUERA + 1 NO_CUMPLE) = 50%
+    expect(screen.getAllByText('50%')).toHaveLength(2);
   });
 
   it('handles empty bench list gracefully', () => {
