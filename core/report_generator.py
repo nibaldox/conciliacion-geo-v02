@@ -252,6 +252,27 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
+    # ── Calcular bounding box de los perfiles para hacer zoom ──
+    all_x, all_y = [], []
+    for sec in sections:
+        origin = np.asarray(sec.origin)
+        az_rad = np.radians(sec.azimuth)
+        direction = np.array([np.sin(az_rad), np.cos(az_rad)])
+        half_len = sec.length / 2.0
+        p1 = origin - direction * half_len
+        p2 = origin + direction * half_len
+        all_x.extend([p1[0], p2[0]])
+        all_y.extend([p1[1], p2[1]])
+
+    if not all_x:
+        return None
+
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
+    # Margen del 15% para que los labels no se corten
+    x_margin = max((x_max - x_min) * 0.15, 20.0)
+    y_margin = max((y_max - y_min) * 0.15, 20.0)
+
     # ── Background: topographic contour lines ──
     if mesh_topo is not None:
         try:
@@ -311,6 +332,10 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
     ax.set_title('Plano de Cumplimiento por Perfil', fontsize=11, fontweight='bold')
     ax.set_aspect('equal', adjustable='box')
     ax.grid(True, alpha=0.2)
+
+    # ── Zoom: limitar ejes al bounding box de los perfiles + margen ──
+    ax.set_xlim(x_min - x_margin, x_max + x_margin)
+    ax.set_ylim(y_min - y_margin, y_max + y_margin)
 
     # Legend
     from matplotlib.lines import Line2D
