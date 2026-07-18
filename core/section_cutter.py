@@ -99,6 +99,22 @@ def cut_mesh_with_section(mesh: trimesh.Trimesh, section: SectionLine) -> Option
         counts[uid] += 1
     unique_elevs /= counts
 
+    # Densificar el perfil con resampling uniforme. La intersección
+    # plano-mesh produce puntos solo en los bordes de los triángulos,
+    # dejando intervalos largos sin nodos intermedios. Esto reduce la
+    # precisión de los cálculos posteriores (piso local, detección de
+    # bancos, áreas de sobre-excavación). Generamos un perfil denso a
+    # intervalos de profile_resolution para garantizar puntos suficientes.
+    from core.config import DETECTION
+    resolution = float(DETECTION.profile_resolution)
+    if len(unique_dists) >= 2 and resolution > 0:
+        d_min = float(unique_dists[0])
+        d_max = float(unique_dists[-1])
+        n_nodes = max(len(unique_dists), int(np.ceil((d_max - d_min) / resolution)) + 1)
+        dense_d = np.linspace(d_min, d_max, n_nodes)
+        dense_e = np.interp(dense_d, unique_dists, unique_elevs)
+        return ProfileResult(distances=dense_d, elevations=dense_e)
+
     return ProfileResult(distances=unique_dists, elevations=unique_elevs)
 
 
