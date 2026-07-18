@@ -4,6 +4,7 @@ import {
   worstOfThree,
   compareStatus,
   isBackendStatusString,
+  BACKEND_STATUS_STRINGS,
   STATUS_SEVERITY,
   STATUS_PRESENTATION_ORDER,
   forEachStatus,
@@ -92,9 +93,26 @@ describe('compareStatus', () => {
 
 describe('isBackendStatusString', () => {
   it('returns true for known strings', () => {
-    for (const s of ['CUMPLE', 'FUERA DE TOLERANCIA', 'NO CUMPLE'] as const) {
+    for (const s of ['CUMPLE', 'NO CUMPLE'] as const) {
       expect(isBackendStatusString(s)).toBe(true);
     }
+  });
+
+  it('returns true for every entry in BACKEND_STATUS_STRINGS', () => {
+    // Defensive check: keep this in sync with the const, so adding a
+    // new raw backend value is a one-line test failure.
+    expect(BACKEND_STATUS_STRINGS.length).toBeGreaterThan(0);
+    for (const s of BACKEND_STATUS_STRINGS) {
+      expect(isBackendStatusString(s)).toBe(true);
+    }
+  });
+
+  it('returns false for "FUERA DE TOLERANCIA" (no longer whitelisted)', () => {
+    // FUERA DE TOLERANCIA is collapsed to NO_CUMPLE by parseBenchStatus
+    // before reaching the type, so it is intentionally not part of
+    // BACKEND_STATUS_STRINGS. isBackendStatusString is a type-narrowing
+    // predicate on raw strings, not a parser.
+    expect(isBackendStatusString('FUERA DE TOLERANCIA')).toBe(false);
   });
 
   it('returns false for unknown strings', () => {

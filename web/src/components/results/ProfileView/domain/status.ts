@@ -13,10 +13,17 @@ export type ComplianceStatus = 'CUMPLE' | 'NO_CUMPLE' | 'UNKNOWN';
 
 // ─── Backend status strings ──────────────────────────────────
 
-/** The seven strings the backend may return in `*_status` fields. */
+/** The seven strings the backend may return in `*_status` fields.
+ *
+ *  Note: 'FUERA DE TOLERANCIA' is intentionally absent. The presentation
+ *  layer treats compliance as binary, so parseBenchStatus collapses
+ *  every out-of-tolerance backend string (including the legacy
+ *  "FUERA DE TOLERANCIA" / "FUERA" forms) into NO_CUMPLE before it
+ *  reaches this type. Anything that still receives a raw FUERA literal
+ *  is operating outside the canonical pipeline and should be migrated
+ *  rather than whitelisted here. */
 export const BACKEND_STATUS_STRINGS = [
   'CUMPLE',
-  'FUERA DE TOLERANCIA',
   'NO CUMPLE',
   'NO CONSTRUIDO',
   'FALTA BANCO',
@@ -26,9 +33,11 @@ export const BACKEND_STATUS_STRINGS = [
 
 export type BackendStatusString = (typeof BACKEND_STATUS_STRINGS)[number];
 
+const BACKEND_STATUS_SET: ReadonlySet<string> = new Set(BACKEND_STATUS_STRINGS);
+
 /** Returns true if the string is one we know how to handle. */
 export function isBackendStatusString(s: string): s is BackendStatusString {
-  return (BACKEND_STATUS_STRINGS as readonly string[]).includes(s);
+  return BACKEND_STATUS_SET.has(s);
 }
 
 // ─── Parsing ────────────────────────────────────────────────

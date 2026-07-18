@@ -347,6 +347,11 @@
     "dxf": "Export DXF",
     "images": "Export Images",
     "error": "Export failed. Check that processed results exist.",
+    "error_excel": "Excel export failed",
+    "error_word": "Word export failed",
+    "error_pdf": "PDF export failed",
+    "error_dxf": "DXF export failed",
+    "error_images": "Images export failed",
     "filter_summary_prefix": "Export reflects current view:",
     "blast_tolerance_label": "blast tolerance",
     "all_benches": "all benches"

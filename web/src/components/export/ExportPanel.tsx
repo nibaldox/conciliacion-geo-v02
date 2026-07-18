@@ -76,13 +76,15 @@ export function ExportPanel() {
 
   const hasProjectInfo = form.project.trim() !== '';
 
-  const baseParams: ExportProjectInfo = { filters: exportFilters };
-  if (hasProjectInfo) {
-    baseParams.project = form.project;
-    baseParams.author = form.author;
-    baseParams.operation = form.operation;
-    baseParams.phase = form.phase;
-  }
+  const baseParams: ExportProjectInfo = hasProjectInfo
+    ? {
+        filters: exportFilters,
+        project: form.project,
+        author: form.author,
+        operation: form.operation,
+        phase: form.phase,
+      }
+    : { filters: exportFilters };
 
   const benchCount = selectedBenchNumbers.length;
   const isBenchFilterActive = benchCount > 0;
@@ -212,11 +214,57 @@ export function ExportPanel() {
         </strong>
       </div>
 
-      {/* Error feedback */}
-      {(exportExcel.isError || exportWord.isError || exportPdf.isError || exportDxf.isError || exportImages.isError) && (
-        <p className="text-xs text-center" style={{ color: 'var(--color-mine-red)' }}>
-          {t('export.error')}
-        </p>
+      {/* Error feedback — one role="alert" per failing export so
+          screen readers announce which action failed (H1). */}
+      {exportExcel.isError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="text-xs text-center"
+          style={{ color: 'var(--color-mine-red)' }}
+        >
+          {t('export.error_excel')}
+        </div>
+      )}
+      {exportWord.isError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="text-xs text-center"
+          style={{ color: 'var(--color-mine-red)' }}
+        >
+          {t('export.error_word')}
+        </div>
+      )}
+      {exportPdf.isError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="text-xs text-center"
+          style={{ color: 'var(--color-mine-red)' }}
+        >
+          {t('export.error_pdf')}
+        </div>
+      )}
+      {exportDxf.isError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="text-xs text-center"
+          style={{ color: 'var(--color-mine-red)' }}
+        >
+          {t('export.error_dxf')}
+        </div>
+      )}
+      {exportImages.isError && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className="text-xs text-center"
+          style={{ color: 'var(--color-mine-red)' }}
+        >
+          {t('export.error_images')}
+        </div>
       )}
     </div>
   );
