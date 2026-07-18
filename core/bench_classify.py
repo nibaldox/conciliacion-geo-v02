@@ -19,6 +19,26 @@ from core.blast_correlation import classify_berm_as_ramp
 from core.config import DETECTION
 
 
+def _extended_toe_distance(b):
+    """Calcula la distancia horizontal del toe extendido de un banco.
+
+    Si el banco tiene un ``floor_elevation`` más bajo que su ``toe_elevation``,
+    la cara se prolonga con su ``face_angle`` hasta llegar al piso. Esta
+    función retorna la posición horizontal donde esa prolongación termina.
+    Se usa para calcular el ancho de berm real entre bancos.
+    """
+    import math
+    floor_elev = getattr(b, 'floor_elevation', 0.0)
+    if floor_elev > 0 and floor_elev < b.toe_elevation:
+        angle_rad = math.radians(float(b.face_angle))
+        if angle_rad > 0.01:
+            delta_z = float(b.toe_elevation) - float(floor_elev)
+            face_dir = 1.0 if b.toe_distance >= b.crest_distance else -1.0
+            delta_d = (delta_z / math.tan(angle_rad)) * face_dir
+            return float(b.toe_distance) + delta_d
+    return float(b.toe_distance)
+
+
 def _is_ramp(d_start: float, d_end: float, e_start: float, e_end: float,
              min_width: float = 6.0, max_slope_deg: float = 15.0) -> bool:
     """Return True when a segment is wide and gently sloped enough to be a ramp."""
@@ -61,6 +81,12 @@ def _compute_berm_widths_from_profile(
 
     For Bench i >= 1:
       berm_width = abs(min(curr_crest, curr_toe) - max(prev_crest, prev_toe))
+
+    The measurement uses the EXTENDED toe position of the current bench when
+    the bench has a local ``floor_elevation`` below its toe (the face is
+    prolonged at ``face_angle`` until the real terrain). This ensures the
+    berm width reflects the real distance left between the extended face
+    and the next crest, not the legacy idealised toe.
     """
     n_benches = len(benches)
     if n_benches == 0:
@@ -76,7 +102,11 @@ def _compute_berm_widths_from_profile(
         b_curr = benches[i]
         b_next = benches[i + 1]
 
-        curr_right = max(b_curr.toe_distance, b_curr.crest_distance)
+        # Usar el toe extendido del banco actual cuando exista piso local.
+        # Esto reduce el ancho de berm porque la cara extendida se acerca
+        # horizontalmente a la crest del banco siguiente.
+        curr_toe_d = _extended_toe_distance(b_curr)
+        curr_right = max(curr_toe_d, b_curr.crest_distance)
         next_left = min(b_next.toe_distance, b_next.crest_distance)
 
         width = float(abs(next_left - curr_right))

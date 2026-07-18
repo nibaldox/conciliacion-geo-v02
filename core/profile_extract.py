@@ -784,6 +784,63 @@ def _finalize_ramp_angles(result: ExtractionResult, benches: list[BenchParams]) 
         result.inter_ramp_angle = benches[0].face_angle
 
 
+def _compute_local_floor_elevations(benches, distances, elevations):
+    """Asigna ``floor_elevation`` a cada banco usando el perfil original.
+
+    Para cada banco, busca el promedio del 10% inferior de las elevaciones
+    del perfil original dentro del tramo entre el toe del banco actual y la
+    crest del banco siguiente (o el final del perfil para el último banco).
+    Este valor representa el piso real bajo cada banco, resistente a
+    outliers pero capaz de capturar derrames o sobre-excavación real.
+    """
+    e_arr = np.asarray(elevations, dtype=float)
+    d_arr = np.asarray(distances, dtype=float)
+    if not benches or d_arr.size == 0:
+        return
+
+    for idx, b in enumerate(benches):
+        toe_d = float(b.toe_distance)
+        if idx + 1 < len(benches):
+            next_start = float(benches[idx + 1].crest_distance)
+        else:
+            idx_end = int(np.searchsorted(d_arr, toe_d))
+            next_start = float(d_arr[-1]) if idx_end < len(d_arr) else toe_d
+
+        d_lo = min(toe_d, next_start)
+        d_hi = max(toe_d, next_start)
+        mask = (d_arr >= d_lo) & (d_arr <= d_hi)
+        if not np.any(mask):
+            local_floor = float(b.toe_elevation)
+        else:
+            segment_e = e_arr[mask]
+            sorted_e = np.sort(segment_e)
+            n_low = max(3, len(sorted_e) // 10)
+            local_floor = float(np.mean(sorted_e[:n_low]))
+
+        b.floor_elevation = local_floor
+
+        if local_floor < b.toe_elevation:
+            b.bench_height = float(abs(b.crest_elevation - local_floor))
+
+
+def _extended_toe_distance(b):
+    """Calcula la distancia horizontal del toe extendido de un banco.
+
+    Si el banco tiene un ``floor_elevation`` más bajo que su ``toe_elevation``,
+    la cara se prolonga con su ``face_angle`` hasta llegar al piso. Esta
+    función retorna la posición horizontal donde esa prolongación termina.
+    Se usa para calcular el ancho de berm real entre bancos.
+    """
+    if b.floor_elevation > 0 and b.floor_elevation < b.toe_elevation:
+        angle_rad = math.radians(float(b.face_angle))
+        if angle_rad > 0.01:
+            delta_z = float(b.toe_elevation) - float(b.floor_elevation)
+            face_dir = 1.0 if b.toe_distance >= b.crest_distance else -1.0
+            delta_d = (delta_z / math.tan(angle_rad)) * face_dir
+            return float(b.toe_distance) + delta_d
+    return float(b.toe_distance)
+
+
 def extract_parameters(distances, elevations, section_name, sector,
                        resolution=DETECTION.profile_resolution,
                        face_threshold=DETECTION.face_threshold,
@@ -837,6 +894,11 @@ def extract_parameters(distances, elevations, section_name, sector,
         benches.append(new_bench)
         bench_num += 1
 
+    # Calcular pisos locales ANTES que los anchos de berm. La extensión
+    # angular de cada banco modifica la posición horizontal del toe, lo
+    # que reduce el ancho de berm real disponible.
+    _compute_local_floor_elevations(benches, distances, elevations)
+
     _compute_berm_widths_from_profile(
         benches, simplified, d_simp, e_simp,
         max_berm_width=max_berm_width,
@@ -867,52 +929,11 @@ def extract_parameters(distances, elevations, section_name, sector,
             benches, list(design_benches), tols, section_name, sector,
         )
 
-    # Cota del piso y crest máxima: se calculan directamente del perfil
-    # original (no del perfil idealizado) para capturar el punto más bajo
-    # real del terreno, que puede ser más profundo que el último toe
-    # detectado (ej: zona de extracción final, fondo del rajo).
+    # Cota del piso y crest máxima globales del perfil completo.
     e_arr = np.asarray(elevations, dtype=float)
-    d_arr = np.asarray(distances, dtype=float)
     if e_arr.size > 0:
         result.floor_elevation = float(np.min(e_arr))
         result.crest_elevation_max = float(np.max(e_arr))
-
-    # Calcular la cota de piso local para CADA banco: la elevación mínima
-    # del perfil original en el tramo [toe_del_banco, límite_inferior].
-    # El límite inferior es el inicio (crest_distance) del siguiente banco,
-    # o el final del perfil para el último banco. Esto permite que cada
-    # banco extienda su cara hasta el terreno real bajo él.
-    if benches and d_arr.size > 0:
-        for idx, b in enumerate(benches):
-            toe_d = float(b.toe_distance)
-            if idx + 1 < len(benches):
-                next_start = float(benches[idx + 1].crest_distance)
-            else:
-                idx_end = int(np.searchsorted(d_arr, toe_d))
-                next_start = float(d_arr[-1]) if idx_end < len(d_arr) else toe_d
-
-            d_lo = min(toe_d, next_start)
-            d_hi = max(toe_d, next_start)
-            mask = (d_arr >= d_lo) & (d_arr <= d_hi)
-            if not np.any(mask):
-                local_floor = float(b.toe_elevation)
-            else:
-                segment_e = e_arr[mask]
-                # Robust floor: mean of the bottom 10% of elevations
-                # in the span. Resistant to single-point outliers (mesh
-                # artifacts, scan noise) while still capturing real
-                # derrames / overbreak below the toe.
-                sorted_e = np.sort(segment_e)
-                n_low = max(3, len(sorted_e) // 10)
-                local_floor = float(np.mean(sorted_e[:n_low]))
-
-            b.floor_elevation = local_floor
-
-            # Ajustar la altura del banco para incluir la extensión hasta
-            # el piso local. Esto hace que bench_height refleje la altura
-            # real desde la crest hasta el fondo del terreno.
-            if local_floor < b.toe_elevation:
-                b.bench_height = float(abs(b.crest_elevation - local_floor))
 
     return result
 
