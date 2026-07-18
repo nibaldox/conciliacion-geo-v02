@@ -343,6 +343,7 @@
     "phase_placeholder": "Project phase",
     "excel": "Export Excel",
     "word": "Export Word",
+    "pdf": "Executive PDF",
     "dxf": "Export DXF",
     "images": "Export Images",
     "error": "Export failed. Check that processed results exist.",

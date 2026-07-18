@@ -624,6 +624,15 @@ export function useExportWord() {
   });
 }
 
+export function useExportPdf() {
+  return useMutation({
+    mutationFn: (params?: ExportProjectInfo) =>
+      client.get('/export/pdf', { params: buildExportQuery(params), responseType: 'blob' }).then(r => {
+        downloadBlob(r.data, 'Reporte_Ejecutivo.pdf');
+      }),
+  });
+}
+
 export function useExportDxf() {
   return useMutation({
     mutationFn: () =>

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import {
   useExportExcel,
   useExportWord,
+  useExportPdf,
   useExportDxf,
   useExportImages,
   type ExportFilters,
@@ -46,6 +47,7 @@ export function ExportPanel() {
   const sessionFilters = useSession((s) => s.filters);
   const exportExcel = useExportExcel();
   const exportWord = useExportWord();
+  const exportPdf = useExportPdf();
   const exportDxf = useExportDxf();
   const exportImages = useExportImages();
 
@@ -88,6 +90,7 @@ export function ExportPanel() {
   const isAnyExporting =
     exportExcel.isPending ||
     exportWord.isPending ||
+    exportPdf.isPending ||
     exportDxf.isPending ||
     exportImages.isPending;
 
@@ -155,7 +158,7 @@ export function ExportPanel() {
       </div>
 
       {/* Export buttons */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         <ExportButton
           label={t('export.excel')}
           icon={<IconDashboard className="w-6 h-6" />}
@@ -169,6 +172,13 @@ export function ExportPanel() {
           loading={exportWord.isPending}
           disabled={isAnyExporting}
           onClick={() => exportWord.mutate(baseParams)}
+        />
+        <ExportButton
+          label={t('export.pdf')}
+          icon={<IconReport className="w-6 h-6" />}
+          loading={exportPdf.isPending}
+          disabled={isAnyExporting}
+          onClick={() => exportPdf.mutate(baseParams)}
         />
         <ExportButton
           label={t('export.dxf')}
@@ -203,7 +213,7 @@ export function ExportPanel() {
       </div>
 
       {/* Error feedback */}
-      {(exportExcel.isError || exportWord.isError || exportDxf.isError || exportImages.isError) && (
+      {(exportExcel.isError || exportWord.isError || exportPdf.isError || exportDxf.isError || exportImages.isError) && (
         <p className="text-xs text-center" style={{ color: 'var(--color-mine-red)' }}>
           {t('export.error')}
         </p>
