@@ -5,8 +5,11 @@ Pure math functions — no Streamlit or Plotly dependencies.
 Receives DataFrames, returns DataFrames and numpy arrays.
 
 Columnas descartadas al procesar (según descripción ENAEX):
-  uniqid, id_rajo, id_malla_opit, id_pozo, numero, camion,
+  id_rajo, id_malla_opit, numero, camion,
   holes_dateUpdated, mes_tronadura
+
+Identificadores preservados (trazabilidad pozos→bancos):
+  uniqid, id_pozo
 """
 import numpy as np
 import pandas as pd
@@ -15,7 +18,7 @@ from core.config import DEFAULTS
 from core.geom_utils import find_df_column
 
 COLS_DROP = [
-    'uniqid', 'id_rajo', 'id_malla_opit', 'id_pozo', 'numero',
+    'id_rajo', 'id_malla_opit', 'numero',
     'camion', 'holes_dateUpdated', 'mes_tronadura',
 ]
 
@@ -112,6 +115,9 @@ def _coerce_typed_columns(df_work: pd.DataFrame) -> None:
     for col in ("Secuencia", "Fila"):
         if col in df_work.columns:
             df_work[col] = pd.to_numeric(df_work[col], errors="coerce").astype("Int64")
+    for col in ("uniqid", "id_pozo"):
+        if col in df_work.columns:
+            df_work[col] = df_work[col].astype(str)
 
 
 def _compute_hole_toes(df_work: pd.DataFrame) -> None:
@@ -218,6 +224,15 @@ def procesar_pozos(
     else:
         resolved = _resolve_column_aliases(df_work)
         df_work = _rename_to_canonical(df_work, resolved)
+
+    # Trazabilidad pozos→bancos en conciliación geométrica:
+    # conservamos ``uniqid`` e ``id_pozo`` para enlazar cada
+    # pozo del reporte de tronadura con su banco reconciliado.
+    # Si el input no trae ``uniqid``, fabricamos uno sintético
+    # a partir del índice de fila (1-based, string).
+    if "uniqid" not in df_work.columns:
+        df_work["uniqid"] = (df_work.index + 1).astype(str)
+
     _coerce_typed_columns(df_work)
 
     df_work["Z_collar"] = df_work["Z_collar"] + BENCH_HEIGHT
