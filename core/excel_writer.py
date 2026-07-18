@@ -125,7 +125,9 @@ def _auto_width(ws: Worksheet) -> None:
 
 
 def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
-                          tolerances: Dict[str, Any], project_info: Dict[str, str]) -> None:
+                          tolerances: Dict[str, Any], project_info: Dict[str, str],
+                          floor_elevation_global: float | None = None,
+                          crest_elevation_max_global: float | None = None) -> None:
     """Create the Resumen sheet."""
     ws = wb.active
     ws.title = "Resumen"
@@ -218,6 +220,35 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
                     value=f"{pct:.1f}%").border = THIN_BORDER
             row += 1
 
+    # Global geometry KPIs. Keep missing values explicit when there are no
+    # real benches in the exported comparisons.
+    row += 1
+    ws.cell(row=row, column=1,
+            value="Geometria Global").font = Font(bold=True, size=12)
+    row += 1
+    global_depth = (
+        crest_elevation_max_global - floor_elevation_global
+        if floor_elevation_global is not None
+        and crest_elevation_max_global is not None
+        else None
+    )
+    global_geometry = [
+        ("Cota Piso Global (m)", floor_elevation_global),
+        ("Cota Cresta Global (m)", crest_elevation_max_global),
+        ("Profundidad Total (m)", global_depth),
+    ]
+    for label, value in global_geometry:
+        ws.cell(row=row, column=1, value=label).border = THIN_BORDER
+        value_cell = ws.cell(
+            row=row,
+            column=2,
+            value=round(value, 1) if value is not None else "N/A",
+        )
+        value_cell.border = THIN_BORDER
+        if value is not None:
+            value_cell.number_format = NUMBER_FORMAT.decimal1
+        row += 1
+
     _auto_width(ws)
 
 
@@ -230,7 +261,8 @@ def _write_bench_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
         "H. Diseno (m)", "H. Real (m)", "Desv. H (m)", "Cumpl. H",
         "A. Diseno (deg)", "A. Real (deg)", "Desv. A (deg)", "Cumpl. A",
         "B. Diseno (m)", "B. Real (m)", "B. Minima (m)", "Cumpl. B",
-        "Delta Cresta (m)", "Delta Pata (m)"
+        "Delta Cresta (m)", "Delta Pata (m)",
+        "Cota Piso (m)", "Altura Total (m)", "Altura Toe (m)"
     ]
     _write_header(ws, 1, headers)
 
@@ -245,11 +277,26 @@ def _write_bench_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
             comp.get('berm_min', 0), comp['berm_status'],
             comp.get('delta_crest', ''), comp.get('delta_toe', ''),
         ]
+        bt = comp.get('bench_real')
+        floor_elevation = getattr(bt, 'floor_elevation', None) if bt is not None else None
+        adjusted_height = getattr(bt, 'bench_height', None) if bt is not None else None
+        toe_height = (
+            abs(bt.crest_elevation - bt.toe_elevation)
+            if bt is not None
+            else None
+        )
+        values.extend([
+            round(floor_elevation, 1) if floor_elevation is not None else "N/A",
+            round(adjusted_height, 1) if adjusted_height is not None else "N/A",
+            round(toe_height, 1) if toe_height is not None else "N/A",
+        ])
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.border = THIN_BORDER
             if col_idx in (8, 12, 16):
                 _apply_status_style(cell)
+            elif col_idx in (19, 20, 21) and isinstance(val, (int, float)):
+                cell.number_format = NUMBER_FORMAT.decimal1
 
     _auto_width(ws)
 
@@ -416,7 +463,34 @@ def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
     try:
         wb = openpyxl.Workbook()
 
-        _write_summary_sheet(wb, comparisons, tolerances, project_info)
+        real_benches = [
+            bench
+            for bench in (comp.get('bench_real') for comp in comparisons)
+            if bench is not None
+        ]
+        floor_values = [
+            floor_elevation
+            for bench in real_benches
+            for floor_elevation in (getattr(bench, 'floor_elevation', None),)
+            if floor_elevation is not None and floor_elevation > 0
+        ]
+        crest_values = [
+            crest_elevation
+            for bench in real_benches
+            for crest_elevation in (getattr(bench, 'crest_elevation', None),)
+            if crest_elevation is not None
+        ]
+        floor_elevation_global = min(floor_values) if floor_values else None
+        crest_elevation_max_global = max(crest_values) if crest_values else None
+
+        _write_summary_sheet(
+            wb,
+            comparisons,
+            tolerances,
+            project_info,
+            floor_elevation_global=floor_elevation_global,
+            crest_elevation_max_global=crest_elevation_max_global,
+        )
         _write_sector_summary(wb, comparisons) # New Executive Summary
         _write_bench_sheet(wb, comparisons)
         _write_interramp_sheet(wb, params_design, params_topo)
