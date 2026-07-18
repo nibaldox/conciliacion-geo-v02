@@ -897,7 +897,14 @@ def extract_parameters(distances, elevations, section_name, sector,
             if not np.any(mask):
                 local_floor = float(b.toe_elevation)
             else:
-                local_floor = float(np.min(e_arr[mask]))
+                segment_e = e_arr[mask]
+                # Robust floor: mean of the bottom 10% of elevations
+                # in the span. Resistant to single-point outliers (mesh
+                # artifacts, scan noise) while still capturing real
+                # derrames / overbreak below the toe.
+                sorted_e = np.sort(segment_e)
+                n_low = max(3, len(sorted_e) // 10)
+                local_floor = float(np.mean(sorted_e[:n_low]))
 
             b.floor_elevation = local_floor
 
