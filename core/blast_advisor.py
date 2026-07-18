@@ -24,6 +24,7 @@ from core.compliance_status import (
     FEASIBILITY_CAUTION,
     FEASIBILITY_INFEASIBLE,
     FEASIBILITY_INSUFFICIENT,
+    STATUS_NO_CUMPLE,
 )
 from core.config import ADVISOR, POWDER_FACTOR
 
@@ -733,3 +734,268 @@ def validate_recommendation(
         "adjusted_feasibility": feasibility,
         "message": message,
     }
+
+
+# -----------------------------------------------------------------------------
+# Causal explanation engine for bench non-compliance
+# -----------------------------------------------------------------------------
+
+
+EXPLAIN_SEVERITY_CRITICAL = "CRITICAL"
+EXPLAIN_SEVERITY_HIGH = "HIGH"
+EXPLAIN_SEVERITY_MEDIUM = "MEDIUM"
+
+# Bench-score thresholds. bench_score is 0-100 where >=70 means CUMPLE.
+_BENCH_SCORE_HIGH_MAX = 60.0
+_BENCH_SCORE_CRIT_MAX = 40.0
+
+# Blast-cause thresholds (industry-typical).
+_PF_HIGH = 0.9
+_PF_LOW = 0.5
+_STEMMING_LOW = 0.7
+_SUBDRILL_HIGH = 2.0
+_BURDEN_HIGH = 4.0
+
+
+def explain_non_compliance(
+    comp_row: dict,
+    blast_context: Optional[dict] = None,
+    tolerances: Optional[dict] = None,
+) -> dict:
+    """Explica por que un banco NO CUMPLE, combinando datos geometricos y de tronadura.
+
+    Parameters
+    ----------
+    comp_row : dict
+        Fila de comparacion geometrica para un banco. Se esperan campos como
+        ``section``, ``bench_num``, ``height_status``, ``angle_status``,
+        ``berm_status``, ``height_real``, ``height_design``, ``height_dev``,
+        ``angle_real``, ``angle_design``, ``angle_dev``, ``berm_real``,
+        ``berm_min`` y ``bench_score`` (0-100).
+    blast_context : dict, optional
+        Contexto de tronadura para el banco (p.ej. el resultado de
+        ``attribute_failure_to_holes``). Se esperan campos ``pf_avg``,
+        ``stemming_ratio_avg``, ``subdrill_avg``, ``burden_avg`` y
+        ``n_holes``. Si es ``None`` el analisis es solo geometrico.
+    tolerances : dict, optional
+        Tolerancias operativas. Reservado para uso futuro (limites
+        geometricos personalizados); no se usa todavia en la salida.
+
+    Returns
+    -------
+    dict
+        Reporte estructurado con claves ``section``, ``bench``, ``bench_score``,
+        ``geometry_issues``, ``blast_causes``, ``recommendations`` y
+        ``severity`` (``CRITICAL`` | ``HIGH`` | ``MEDIUM``).
+    """
+    geometry_issues: List[str] = []
+    blast_causes: List[str] = []
+    recommendations: List[str] = []
+
+    # 1) Geometric deviations --------------------------------------------------
+    _emit_geometry_issues(comp_row, geometry_issues)
+
+    # 2) Blast-related causes (optional) --------------------------------------
+    if blast_context is not None:
+        _emit_blast_causes(blast_context, blast_causes, recommendations)
+    else:
+        blast_causes.append(
+            "Sin contexto de tronadura disponible para este banco; "
+            "analisis limitado a geometria."
+        )
+
+    # 3) Geometry-only recommendations ----------------------------------------
+    _emit_geometry_recommendations(geometry_issues, recommendations)
+
+    # 4) Severity classification ----------------------------------------------
+    bench_score = _extract_bench_score(comp_row)
+    n_holes = _extract_n_holes(blast_context)
+    severity = _classify_severity(bench_score, n_holes)
+
+    return {
+        "section": comp_row.get("section"),
+        "bench": comp_row.get("bench_num", comp_row.get("bench")),
+        "bench_score": bench_score,
+        "geometry_issues": geometry_issues,
+        "blast_causes": blast_causes,
+        "recommendations": recommendations,
+        "severity": severity,
+    }
+
+
+def _emit_geometry_issues(comp_row: dict, geometry_issues: List[str]) -> None:
+    """Append geometric-deviation messages for any NO-CUMPLE status."""
+    if comp_row.get("height_status") == STATUS_NO_CUMPLE:
+        h_real = _safe_float(comp_row.get("height_real"))
+        h_design = _safe_float(comp_row.get("height_design"))
+        h_dev = _safe_float(comp_row.get("height_dev"))
+        if h_dev is None and h_real is not None and h_design is not None:
+            h_dev = h_real - h_design
+        geometry_issues.append(
+            "Altura real {h_r}m vs diseno {h_d}m (Δ {h_dev:+.1f}m)".format(
+                h_r=_nf(h_real),
+                h_d=_nf(h_design),
+                h_dev=h_dev if h_dev is not None else 0.0,
+            )
+        )
+
+    if comp_row.get("angle_status") == STATUS_NO_CUMPLE:
+        a_real = _safe_float(comp_row.get("angle_real"))
+        a_design = _safe_float(comp_row.get("angle_design"))
+        a_dev = _safe_float(comp_row.get("angle_dev"))
+        if a_dev is None and a_real is not None and a_design is not None:
+            a_dev = a_real - a_design
+        geometry_issues.append(
+            "Angulo real {a_r}° vs diseno {a_d}° (Δ {a_dev:+.1f}°)".format(
+                a_r=_nf(a_real),
+                a_d=_nf(a_design),
+                a_dev=a_dev if a_dev is not None else 0.0,
+            )
+        )
+
+    if comp_row.get("berm_status") == STATUS_NO_CUMPLE:
+        b_real = _safe_float(comp_row.get("berm_real"))
+        b_min = _safe_float(comp_row.get("berm_min"))
+        geometry_issues.append(
+            "Berma real {b_r}m vs minimo {b_min}m".format(
+                b_r=_nf(b_real),
+                b_min=_nf(b_min),
+            )
+        )
+
+
+def _emit_blast_causes(
+    blast_context: dict,
+    blast_causes: List[str],
+    recommendations: List[str],
+) -> None:
+    """Append blast-related cause messages and matching recommendations."""
+    pf = _safe_float(blast_context.get("pf_avg"))
+    stemming = _safe_float(blast_context.get("stemming_ratio_avg"))
+    subdrill = _safe_float(blast_context.get("subdrill_avg"))
+    burden = _safe_float(blast_context.get("burden_avg"))
+    n_holes = _safe_float(blast_context.get("n_holes"))
+
+    if n_holes == 0 or (
+        blast_context.get("n_holes") is not None
+        and blast_context.get("n_holes") == 0
+    ):
+        blast_causes.append("Sin pozos de tronadura detectados en este banco")
+        return
+
+    if pf is not None and np.isfinite(pf) and pf > _PF_HIGH:
+        blast_causes.append(
+            f"PF elevado ({pf} kg/m3) puede causar sobre-excavacion"
+        )
+        recommendations.append(
+            "Reducir PF a 0.7-0.8 kg/m3 disminuyendo carga de columna"
+        )
+
+    if pf is not None and np.isfinite(pf) and pf < _PF_LOW:
+        blast_causes.append(
+            f"PF insuficiente ({pf} kg/m3) puede causar fragmentacion pobre"
+        )
+        recommendations.append(
+            "Aumentar PF a 0.6-0.8 kg/m3 ajustando burden o carga de fondo"
+        )
+
+    if stemming is not None and np.isfinite(stemming) and stemming < _STEMMING_LOW:
+        blast_causes.append(
+            f"Stemming insuficiente ({stemming:.0%}) puede causar "
+            "voladura de taco (fly-rock, berma danada)"
+        )
+        recommendations.append(
+            "Aumentar taco a >=70% de la altura del banco"
+        )
+
+    if subdrill is not None and np.isfinite(subdrill) and subdrill > _SUBDRILL_HIGH:
+        blast_causes.append(
+            f"Pasadura excesiva ({subdrill}m) puede causar sobre-rotura del piso"
+        )
+        recommendations.append("Controlar pasadura a <=1.5m")
+
+    if burden is not None and np.isfinite(burden) and burden > _BURDEN_HIGH:
+        blast_causes.append(
+            f"Burden elevado ({burden}m) puede causar poor breakage y toes duros"
+        )
+        recommendations.append("Reducir burden o ajustar spacing para mejorar fragmentacion")
+
+
+def _emit_geometry_recommendations(
+    geometry_issues: List[str], recommendations: List[str]
+) -> None:
+    """Produce geometry-driven recommendations when no blast causes exist."""
+    if not geometry_issues:
+        return
+    if not recommendations:
+        recommendations.append(
+            "Revisar diseno geometrico del banco contra el perfil replanteado"
+        )
+    recommendations.append(
+        "Verificar replanteo topografico y marcacion de limites de banco"
+    )
+
+
+def _classify_severity(bench_score: Optional[float], n_holes: Optional[float]) -> str:
+    """Map bench score and blast availability to a severity tier.
+
+    - CRITICAL: bench_score < 40 OR n_holes == 0 (no blast data)
+    - HIGH: bench_score in [40, 60)
+    - MEDIUM: bench_score in [60, 70)  (still failing the >=70 CUMPLE threshold)
+    """
+    if bench_score is None or not np.isfinite(bench_score):
+        # If we cannot score the bench but there is no blast data, escalate.
+        if n_holes is None or n_holes == 0:
+            return EXPLAIN_SEVERITY_CRITICAL
+        return EXPLAIN_SEVERITY_HIGH
+
+    if bench_score < _BENCH_SCORE_CRIT_MAX or (n_holes is not None and n_holes == 0):
+        return EXPLAIN_SEVERITY_CRITICAL
+    if bench_score < _BENCH_SCORE_HIGH_MAX:
+        return EXPLAIN_SEVERITY_HIGH
+    return EXPLAIN_SEVERITY_MEDIUM
+
+
+def _extract_bench_score(comp_row: dict) -> Optional[float]:
+    score = comp_row.get("bench_score")
+    if score is None:
+        return None
+    try:
+        v = float(score)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(v):
+        return None
+    return v
+
+
+def _extract_n_holes(blast_context: Optional[dict]) -> Optional[float]:
+    if not blast_context:
+        return None
+    raw = blast_context.get("n_holes")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nf(value: Optional[float], default: str = "?") -> str:
+    """Format a finite numeric value to 2 decimals; otherwise return ``default``."""
+    if value is None:
+        return default
+    return f"{value:.2f}"
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    """Coerce ``value`` to ``float``; return ``None`` if not finite/coercible."""
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(v):
+        return None
+    return v
