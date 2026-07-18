@@ -58,6 +58,8 @@ def _collect_profile_pairs(section_names: list) -> dict[str, tuple]:
 def render_tab_export(config: dict) -> None:
     _render_excel_export(config)
     st.divider()
+    _render_pdf_export(config)
+    st.divider()
     _render_images_export(config)
     st.divider()
     _render_word_report(config)
@@ -245,3 +247,41 @@ def _render_dxf_export() -> None:
         )
 
     widgets.success(f"✅ {n_exported} perfiles exportados a DXF 3D exitosamente")
+
+
+def _render_pdf_export(config: dict) -> None:
+    """Render the executive PDF export section."""
+    from core.pdf_report import generate_pdf_report
+
+    widgets.section_header(
+        "📄 Exportar Reporte Ejecutivo PDF",
+        description="Reporte unificado en PDF con resumen ejecutivo, profundidad del rajo, top desviaciones y gráfico de cumplimiento.",
+    )
+
+    if not widgets.generate_button("📥 Generar PDF Ejecutivo"):
+        return
+
+    with widgets.spinner("Generando PDF..."):
+        import io
+        import tempfile
+
+        project_info = _project_info(config)
+        tmp_path = tempfile.mktemp(suffix=".pdf")
+        generate_pdf_report(
+            st.session_state.comparison_results,
+            [{"section_name": s.name} for s in st.session_state.get('sections', [])],
+            tmp_path,
+            project_info=project_info,
+        )
+        with open(tmp_path, "rb") as f:
+            pdf_bytes = f.read()
+
+        widgets.download_button(
+            "⬇️ Descargar PDF Ejecutivo",
+            pdf_bytes,
+            file_name="Conciliacion_Geotecnica.pdf",
+            mime="application/pdf",
+            type="primary",
+        )
+
+    widgets.success("✅ PDF ejecutivo generado exitosamente")
