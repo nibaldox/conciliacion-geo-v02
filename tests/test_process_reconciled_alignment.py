@@ -229,8 +229,9 @@ class TestApiExposesBothShapes:
         assert "reconciled_topo_legacy" in data
         legacy = data["reconciled_design_legacy"]
         assert set(legacy.keys()) == {"distances", "elevations"}
-        assert len(legacy["distances"]) == 4  # 2 benches * (crest + toe)
-        assert len(legacy["elevations"]) == 4
+        # 2 benches * (crest + toe) = 4, + potential floor extension points
+        assert len(legacy["distances"]) >= 4
+        assert len(legacy["elevations"]) == len(legacy["distances"])
         # Sorted ascending by distance
         dists = legacy["distances"]
         assert all(dists[i] <= dists[i + 1] for i in range(len(dists) - 1))

@@ -184,7 +184,7 @@ def _reconciled_profile_to_dict(prof) -> dict:
     }
 
 
-def _legacy_reconciled_to_dict(benches) -> dict:
+def _legacy_reconciled_to_dict(benches, floor_elevation: float | None = None) -> dict:
     """Streamlit-equivalent reconciled polyline as flat ``(distances, elevations)``
     arrays.
 
@@ -197,7 +197,8 @@ def _legacy_reconciled_to_dict(benches) -> dict:
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        distances, elevations = build_reconciled_profile(benches)
+        distances, elevations = build_reconciled_profile(
+            benches, floor_elevation=floor_elevation)
     return {
         "distances": distances.tolist(),
         "elevations": elevations.tolist(),
@@ -526,7 +527,8 @@ def _build_profile_payload_sync(
                 floor_elevation=design_floor,
             )
             result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
-            result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(benches_d)
+            result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(
+                benches_d, floor_elevation=design_floor)
 
     topo_extraction = db.get_extraction(session_id, sec.name, "topo")
     if topo_extraction:
@@ -537,7 +539,8 @@ def _build_profile_payload_sync(
                 floor_elevation=topo_floor,
             )
             result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
-            result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(benches_t)
+            result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(
+                benches_t, floor_elevation=topo_floor)
             result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
 
     if topo_floor is not None:
