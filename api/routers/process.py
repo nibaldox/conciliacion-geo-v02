@@ -156,6 +156,7 @@ def _dict_to_bench(d: dict) -> BenchParams:
         effective_berm_width=float(d.get("effective_berm_width", 0.0)),
         spill_start_distance=float(d.get("spill_start_distance", 0.0)),
         spill_start_elevation=float(d.get("spill_start_elevation", 0.0)),
+        floor_elevation=float(d.get("floor_elevation", 0.0)),
     )
 
 
