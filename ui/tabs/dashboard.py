@@ -56,21 +56,39 @@ def render_tab_dashboard(config: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_global_kpi(results) -> None:
-    """Tarjeta grande con el cumplimiento global y promedio."""
-    total_eval = 0
-    total_cumple = 0
+    """Tarjeta grande con el cumplimiento global.
 
+    El cumplimiento global es el promedio de los scores por perfil
+    (section_score), donde cada perfil ya tiene un score ponderado
+    (berma=60, ángulo=20, altura=20).
+    """
+    # Agrupar scores por sección
+    section_scores: dict[str, list[float]] = {}
     for r in results:
-        for key in ('height_status', 'angle_status', 'berm_status'):
-            s = r.get(key)
-            if s and s != "-":
-                total_eval += 1
-                if s == "CUMPLE":
-                    total_cumple += 1
+        sec_name = r.get('section', '')
+        if sec_name not in section_scores:
+            section_scores[sec_name] = []
+        if r.get('type') == 'MATCH':
+            section_scores[sec_name].append(r.get('bench_score', 0))
 
-    pct = (total_cumple / total_eval * 100) if total_eval > 0 else 0
+    # Score por sección = promedio de bench_score de sus bancos
+    per_section_scores: list[float] = []
+    for sec_name, scores in section_scores.items():
+        if scores:
+            per_section_scores.append(sum(scores) / len(scores))
+
+    # Score global = promedio simple de los scores por sección
+    global_score = (sum(per_section_scores) / len(per_section_scores)
+                    if per_section_scores else 0)
+    pct = global_score  # Ya está en escala 0-100
+
+    # Contadores binarios para las tarjetas (cumple/no cumple por perfil)
+    total_cumple = sum(1 for s in per_section_scores if s >= 70)
+    no_cumple = len(per_section_scores) - total_cumple
 
     st.subheader("📊 Cumplimiento Global")
+    st.caption(f"Promedio ponderado de {len(per_section_scores)} perfiles "
+               f"(berma=60, ángulo=20, altura=20)")
 
     cols = st.columns([1, 1, 1])
     color = "green" if pct >= 70 else "orange" if pct >= 50 else "red"
@@ -81,8 +99,8 @@ def _render_global_kpi(results) -> None:
             f"background:rgba({0 if pct < 70 else 0},{153 if pct >= 70 else 140},{0 if pct >= 70 else 60},0.1); "
             f"border-radius:12px; border:2px solid {color};'>"
             f"<div style='font-size:3rem; font-weight:800; color:{color};'>"
-            f"{pct:.1f}%</div>"
-            f"<div style='font-size:0.9rem; color:#888;'>Cumplimiento</div>"
+            f"{pct:.1f}</div>"
+            f"<div style='font-size:0.9rem; color:#888;'>Score Global / 100</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -93,19 +111,18 @@ def _render_global_kpi(results) -> None:
             f"background:rgba(0,100,0,0.08); border-radius:12px;'>"
             f"<div style='font-size:2.2rem; font-weight:700; color:green;'>"
             f"{total_cumple}</div>"
-            f"<div style='font-size:0.9rem; color:#888;'>Parámetros CUMPLE</div>"
+            f"<div style='font-size:0.9rem; color:#888;'>Perfiles CUMPLE (≥70)</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
     with cols[2]:
-        no_cumple = total_eval - total_cumple
         st.markdown(
             f"<div style='text-align:center; padding:1.2rem; "
             f"background:rgba(180,0,0,0.08); border-radius:12px;'>"
             f"<div style='font-size:2.2rem; font-weight:700; color:#B22222;'>"
             f"{no_cumple}</div>"
-            f"<div style='font-size:0.9rem; color:#888;'>Parámetros NO CUMPLE</div>"
+            f"<div style='font-size:0.9rem; color:#888;'>Perfiles NO CUMPLE</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
