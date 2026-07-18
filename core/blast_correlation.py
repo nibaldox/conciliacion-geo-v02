@@ -317,6 +317,202 @@ def compute_powder_factor(
     return out
 
 
+def attribute_failure_to_holes(
+    comp_row: dict,
+    df_pozos: pd.DataFrame,
+    section,
+    tolerancia_z: float = 2.0,
+) -> Optional[dict]:
+    """Identifica los pozos de tronadura que afectaron un banco específico.
+
+    Filtra los pozos proyectados en la sección cuyo ``Z_toe`` cae dentro del
+    rango de elevación del banco (incluida la tolerancia vertical) y cuyo
+    ``dist_along`` cae entre la cresta y el pie del banco. Devuelve ``None``
+    cuando no hay datos de pozos o el banco real no existe.
+    """
+    # Importación local para evitar dependencias circulares en consumidores que
+    # cargan correlación y cálculo de tronadura durante la inicialización.
+    from core.calculo_tronadura import proyectar_pozos_en_seccion
+
+    if (
+        not isinstance(comp_row, dict)
+        or df_pozos is None
+        or not isinstance(df_pozos, pd.DataFrame)
+        or df_pozos.empty
+        or section is None
+    ):
+        return None
+
+    bench_real = comp_row.get("bench_real")
+    if bench_real is None:
+        return None
+
+    try:
+        section_name = str(comp_row["section"])
+        crest_elevation = float(bench_real.crest_elevation)
+        toe_elevation = float(bench_real.toe_elevation)
+        crest_distance = float(bench_real.crest_distance)
+        toe_distance = float(bench_real.toe_distance)
+        bench_num = int(bench_real.bench_number)
+        tolerance = abs(float(tolerancia_z))
+    except (KeyError, AttributeError, TypeError, ValueError):
+        return None
+
+    if not all(math.isfinite(value) for value in (
+        crest_elevation,
+        toe_elevation,
+        crest_distance,
+        toe_distance,
+        tolerance,
+    )):
+        return None
+
+    projected = proyectar_pozos_en_seccion(
+        df_pozos,
+        origin=getattr(section, "origin"),
+        azimuth=float(getattr(section, "azimuth", 0.0)),
+        length=float(getattr(section, "length", 200.0)),
+    )
+
+    z_min = min(crest_elevation, toe_elevation) - tolerance
+    z_max = max(crest_elevation, toe_elevation) + tolerance
+    distance_min = min(crest_distance, toe_distance) - tolerance
+    distance_max = max(crest_distance, toe_distance) + tolerance
+
+    if projected.empty or "Z_toe" not in projected or "dist_along" not in projected:
+        affected = projected.iloc[0:0].copy()
+    else:
+        z_toe = pd.Series(
+            pd.to_numeric(projected["Z_toe"], errors="coerce"),
+            index=projected.index,
+            dtype=float,
+        )
+        dist_along = pd.Series(
+            pd.to_numeric(projected["dist_along"], errors="coerce"),
+            index=projected.index,
+            dtype=float,
+        )
+        affected = projected.loc[
+            (z_toe >= z_min)
+            & (z_toe <= z_max)
+            & (dist_along >= distance_min)
+            & (dist_along <= distance_max)
+        ].copy()
+
+    if affected.empty:
+        return {
+            "section_name": section_name,
+            "bench_num": bench_num,
+            "n_holes": 0,
+            "holes": [],
+            "pf_avg": 0.0,
+            "stemming_ratio_avg": 0.0,
+            "burden_avg": 0.0,
+            "spacing_avg": 0.0,
+            "subdrill_avg": 0.0,
+            "kg_total": 0.0,
+            "kg_per_meter_avg": 0.0,
+        }
+
+    bench_height = getattr(bench_real, "bench_height", None)
+    try:
+        bench_height = float(bench_height)
+    except (TypeError, ValueError):
+        bench_height = abs(crest_elevation - toe_elevation)
+    if not math.isfinite(bench_height) or bench_height <= 0:
+        bench_height = abs(crest_elevation - toe_elevation)
+
+    enriched = compute_powder_factor(
+        affected,
+        height_fallback_m=bench_height if bench_height > 0 else None,
+    )
+
+    def _numeric_value(row: pd.Series, candidates) -> Optional[float]:
+        for column in candidates:
+            if column not in row.index:
+                continue
+            try:
+                value = float(row[column])
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value):
+                return value
+        return None
+
+    def _identifier_value(value):
+        if value is None:
+            return None
+        try:
+            if pd.isna(value):
+                return None
+        except (TypeError, ValueError):
+            pass
+        return value.item() if isinstance(value, np.generic) else value
+
+    kg_col = kilos_column(enriched)
+    holes: List[dict] = []
+    for _, row in enriched.iterrows():
+        hole: dict = {}
+        for identifier in ("uniqid", "id_pozo"):
+            if identifier in row.index:
+                value = _identifier_value(row[identifier])
+                if value is not None:
+                    hole[identifier] = value
+
+        pf = _numeric_value(row, ("PF", "pf_vol_kgm3"))
+        burden = _numeric_value(
+            row, ("burden", "Burden", "Burden_Real", "burden_est_m")
+        )
+        spacing = _numeric_value(
+            row, ("spacing", "Esp", "Espaciamiento", "esp_est_m")
+        )
+        subdrill = _numeric_value(row, ("subdrill", "pasadura", "Pasadura"))
+        if subdrill is None:
+            z_collar = _numeric_value(row, ("Z_collar",))
+            z_toe_value = _numeric_value(row, ("Z_toe",))
+            if z_collar is not None and z_toe_value is not None and bench_height > 0:
+                subdrill = (z_collar - bench_height) - z_toe_value
+
+        hole.update({
+            "PF": pf,
+            "stemming_ratio": _numeric_value(row, ("stemming_ratio",)),
+            "burden": burden,
+            "spacing": spacing,
+            "subdrill": subdrill,
+            "kg_per_meter": _numeric_value(row, ("kg_per_meter",)),
+            "X": _numeric_value(row, ("X",)),
+            "Y": _numeric_value(row, ("Y",)),
+            "Z_collar": _numeric_value(row, ("Z_collar",)),
+            "Z_toe": _numeric_value(row, ("Z_toe",)),
+        })
+        holes.append(hole)
+
+    def _average(key: str) -> float:
+        values = [hole[key] for hole in holes if hole.get(key) is not None]
+        return float(sum(values) / len(values)) if values else 0.0
+
+    if kg_col:
+        kg_total = float(
+            pd.to_numeric(enriched[kg_col], errors="coerce").fillna(0.0).sum()
+        )
+    else:
+        kg_total = 0.0
+
+    return {
+        "section_name": section_name,
+        "bench_num": bench_num,
+        "n_holes": len(holes),
+        "holes": holes,
+        "pf_avg": _average("PF"),
+        "stemming_ratio_avg": _average("stemming_ratio"),
+        "burden_avg": _average("burden"),
+        "spacing_avg": _average("spacing"),
+        "subdrill_avg": _average("subdrill"),
+        "kg_total": kg_total,
+        "kg_per_meter_avg": _average("kg_per_meter"),
+    }
+
+
 def aggregate_powder_factor_by_group(
     df_pozos: pd.DataFrame,
     group_by: str,
@@ -780,6 +976,7 @@ def split_campaign(blast_df: pd.DataFrame, campaign_start_date: str | None) -> d
 __all__ = [
     "BlastCorrelationRow",
     "aggregate_powder_factor_by_group",
+    "attribute_failure_to_holes",
     "classify_berm_as_ramp",
     "compute_blast_geotech_correlation",
     "compute_monthly_trend",
