@@ -10,7 +10,9 @@ Produces an A4-portrait PDF with five sections:
 
     1. Portada (cover): title, project, author, date.
     2. Resumen Ejecutivo: global compliance score + per-parameter compliance
-       breakdown (CUMPLE / FUERA DE TOLERANCIA / NO CUMPLE) and % de Logro.
+       breakdown (CUMPLE / NO CUMPLE) and % de Logro. FUERA DE TOLERANCIA
+       from upstream comparison data is merged into NO CUMPLE so the
+       report surface is strictly binary.
     3. Profundidad del Rajo: cota piso global, cota cresta global and
        profundidad total, computed from ``bench_real.floor_elevation`` and
        ``bench_real.crest_elevation`` across all MATCH comparisons.
@@ -24,9 +26,11 @@ Design notes
   the Platypus ``flowables`` pipeline (``Paragraph``, ``Spacer``,
   ``Table``, ``Image``, ``PageBreak``) so it gracefully paginates when
   the project has many sections.
-* Chart embedding reuses ``core.report_generator.create_compliance_pie_charts``
-  so the PDF and Word reports stay visually consistent. matplotlib is
-  forced to the headless ``Agg`` backend before any pyplot call.
+* Chart embedding is rendered locally via ``_binary_compliance_donuts``
+  (matplotlib → PNG → ``ImageReader`` → embedded in the PDF) so the
+  binary CUMPLE / NO CUMPLE view used by the rest of the report is
+  preserved in the chart. matplotlib is forced to the headless ``Agg``
+  backend before any pyplot call.
 * Defensive: the function tolerates missing fields (``None``, empty
   ``comparisons``, ``df_pozos=None``, no MATCH comps) and substitutes
   safe placeholders instead of raising. This matters because the same
@@ -65,10 +69,8 @@ from reportlab.platypus import (  # noqa: E402
 
 from core.compliance_status import (
     STATUS_CUMPLE,
-    STATUS_FUERA,
     STATUS_NO_CUMPLE,
 )
-from core.report_generator import create_compliance_pie_charts
 
 
 # ---------------------------------------------------------------------------
@@ -79,15 +81,15 @@ PAGE_MARGIN = 2 * cm
 
 # Compliance category colours match the donut chart palette so the pie
 # embedded in the PDF and the per-row status badge are visually aligned.
+# NOTE: Binary compliance (CUMPLE / NO CUMPLE). FUERA DE TOLERANCIA is
+# merged into NO CUMPLE for all user-facing surfaces in this report.
 COLOR_CUMPLE = colors.HexColor("#7FBF7F")  # soft green
-COLOR_FUERA = colors.HexColor("#FFD27F")  # soft amber
 COLOR_NO_CUMPLE = colors.HexColor("#F08C8C")  # soft red
 COLOR_HEADER_BG = colors.HexColor("#1F3A5F")  # deep navy
 COLOR_ALT_ROW = colors.HexColor("#F2F4F8")  # very light grey
 
 STATUS_COLOR_MAP = {
     STATUS_CUMPLE: COLOR_CUMPLE,
-    STATUS_FUERA: COLOR_FUERA,
     STATUS_NO_CUMPLE: COLOR_NO_CUMPLE,
 }
 
@@ -208,8 +210,6 @@ def _compute_global_score(comparisons: List[Dict[str, Any]]) -> tuple[float, str
     score = (ok / total * 100) if total else 0.0
     if score >= 90:
         status = STATUS_CUMPLE
-    elif score >= 70:
-        status = STATUS_FUERA
     else:
         status = STATUS_NO_CUMPLE
     return score, status
@@ -287,7 +287,11 @@ def _top5_height_deviations(comparisons: List[Dict[str, Any]]) -> List[Dict[str,
 
 
 def _compliance_breakdown(comparisons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Per-parameter CUMPLE / FUERA / NO CUMPLE breakdown over MATCH comps."""
+    """Per-parameter CUMPLE / NO CUMPLE breakdown over MATCH comps.
+
+    Binary compliance: FUERA DE TOLERANCIA counts roll up into NO CUMPLE
+    so the user-facing report only shows two categories.
+    """
     match_comps = [c for c in comparisons if c.get("type") == "MATCH"]
     specs = [
         ("height_status", "Altura de Banco", "height_real", "m"),
@@ -296,10 +300,15 @@ def _compliance_breakdown(comparisons: List[Dict[str, Any]]) -> List[Dict[str, A
     ]
     out: List[Dict[str, Any]] = []
     for key, label, real_field, unit in specs:
-        n_ok = sum(1 for c in match_comps if c.get(key) == STATUS_CUMPLE)
-        n_ft = sum(1 for c in match_comps if c.get(key) == STATUS_FUERA)
-        n_nok = sum(1 for c in match_comps if c.get(key) == STATUS_NO_CUMPLE)
-        total = n_ok + n_ft + n_nok
+        n_ok = sum(
+            1 for c in match_comps if c.get(key) == STATUS_CUMPLE
+        )
+        # Merge FUERA DE TOLERANCIA into NO CUMPLE for the binary view.
+        n_no = sum(
+            1 for c in match_comps
+            if c.get(key) in (STATUS_NO_CUMPLE, "FUERA DE TOLERANCIA")
+        )
+        total = n_ok + n_no
         pct = (n_ok / total * 100) if total else 0.0
 
         real_values = [
@@ -317,8 +326,7 @@ def _compliance_breakdown(comparisons: List[Dict[str, Any]]) -> List[Dict[str, A
             {
                 "label": label,
                 "ok": n_ok,
-                "fuera": n_ft,
-                "no_cumple": n_nok,
+                "no_cumple": n_no,
                 "total": total,
                 "pct": pct,
                 "avg_str": avg_str,
@@ -387,12 +395,11 @@ def _compliance_table(
     col_widths: List[float],
     styles: Dict[str, ParagraphStyle],
 ) -> Table:
-    """Per-parameter compliance breakdown table (6 cols)."""
+    """Per-parameter compliance breakdown table (5 cols, binary)."""
     data: List[List[Any]] = [
         [
             Paragraph("Parámetro", styles["cell_bold"]),
             Paragraph(STATUS_CUMPLE, styles["cell_center"]),
-            Paragraph("Fuera de Tolerancia", styles["cell_center"]),
             Paragraph(STATUS_NO_CUMPLE, styles["cell_center"]),
             Paragraph("% Logro", styles["cell_center"]),
             Paragraph("Valor Prom. (Real)", styles["cell_center"]),
@@ -403,7 +410,6 @@ def _compliance_table(
             [
                 Paragraph(row["label"], styles["cell"]),
                 Paragraph(str(row["ok"]), styles["cell_center"]),
-                Paragraph(str(row["fuera"]), styles["cell_center"]),
                 Paragraph(str(row["no_cumple"]), styles["cell_center"]),
                 Paragraph(f"{row['pct']:.1f}%", styles["cell_center"]),
                 Paragraph(row["avg_str"], styles["cell_center"]),
@@ -424,8 +430,7 @@ def _compliance_table(
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                 # Colour the count columns by category
                 ("TEXTCOLOR", (1, 1), (1, -1), COLOR_CUMPLE),
-                ("TEXTCOLOR", (2, 1), (2, -1), COLOR_FUERA),
-                ("TEXTCOLOR", (3, 1), (3, -1), COLOR_NO_CUMPLE),
+                ("TEXTCOLOR", (2, 1), (2, -1), COLOR_NO_CUMPLE),
             ]
         )
     )
@@ -476,8 +481,6 @@ def _top5_table(
                         parent=styles["cell_center"],
                         textColor=(
                             COLOR_NO_CUMPLE
-                            if abs(r["delta"]) >= 2.0
-                            else COLOR_FUERA
                             if abs(r["delta"]) >= 1.0
                             else COLOR_CUMPLE
                         ),
@@ -522,40 +525,107 @@ def _top5_table(
 def _pie_chart_image_bytes(comparisons: List[Dict[str, Any]]) -> Optional[io.BytesIO]:
     """Return the PNG bytes of the compliance donut chart, or ``None``.
 
-    Reuses ``create_compliance_pie_charts`` (the same renderer the Word
-    report uses) so both reports are visually consistent. Any exception
-    during rendering is swallowed and reported as ``None`` — better a
-    working PDF without chart than a 500 from the API.
+    Renders a binary (CUMPLE / NO CUMPLE) donut row — one chart per
+    parameter — so the PDF is consistent with the binary compliance view.
+    ``FUERA DE TOLERANCIA`` counts are merged into NO CUMPLE inside the
+    chart so only two colours appear (green / red). Any exception during
+    rendering is swallowed and reported as ``None`` — better a working
+    PDF without chart than a 500 from the API.
     """
+    return _binary_compliance_donuts(comparisons)
+
+
+def _binary_compliance_donuts(
+    comparisons: List[Dict[str, Any]],
+) -> Optional[io.BytesIO]:
+    """Render the per-parameter binary compliance donut chart to PNG."""
     try:
-        buf = create_compliance_pie_charts(comparisons)
+        keys = ("height_status", "angle_status", "berm_status")
+        titles = ("Altura de Banco", "Ángulo de Cara", "Ancho de Berma")
+        category_colors = {
+            STATUS_CUMPLE: "#7FBF7F",      # soft green
+            STATUS_NO_CUMPLE: "#F08C8C",   # soft red
+        }
+        category_order = [STATUS_CUMPLE, STATUS_NO_CUMPLE]
+
+        match_comps = [c for c in comparisons if c.get("type") == "MATCH"]
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        for idx, (key, title) in enumerate(zip(keys, titles)):
+            ax = axes[idx]
+            n_ok = sum(1 for c in match_comps if c.get(key) == STATUS_CUMPLE)
+            # Merge FUERA DE TOLERANCIA into NO CUMPLE for the binary view.
+            n_no = sum(
+                1 for c in match_comps
+                if c.get(key) in (STATUS_NO_CUMPLE, "FUERA DE TOLERANCIA")
+            )
+            counts = {cat: n_ok if cat == STATUS_CUMPLE else n_no
+                      for cat in category_order}
+
+            labels_to_show: List[str] = []
+            sizes: List[int] = []
+            colors_to_show: List[str] = []
+            for cat in category_order:
+                val = counts[cat]
+                if val > 0:
+                    labels_to_show.append(f"{cat}\n({val})")
+                    sizes.append(val)
+                    colors_to_show.append(category_colors[cat])
+
+            if sum(sizes) > 0:
+                wedges, _texts, autotexts = ax.pie(
+                    sizes,
+                    labels=labels_to_show,
+                    autopct="%1.1f%%",
+                    startangle=90,
+                    colors=colors_to_show,
+                    wedgeprops={"width": 0.38, "edgecolor": "white",
+                                "linewidth": 1.5},
+                    textprops={"fontsize": 9, "weight": "bold"},
+                )
+                for at in autotexts:
+                    at.set_color("black")
+                    at.set_fontsize(8)
+
+                total = sum(sizes)
+                pct = (counts[STATUS_CUMPLE] / total * 100) if total > 0 else 0
+                ax.text(
+                    0, 0, f"{pct:.0f}%\nLogro",
+                    ha="center", va="center",
+                    fontsize=10, weight="bold",
+                )
+                ax.set_title(title, fontsize=11, weight="bold", pad=10)
+            else:
+                ax.text(0.5, 0.5, "Sin Datos", ha="center", va="center")
+                ax.axis("off")
+
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
         return buf
     except Exception:
-        # matplotlib may fail on systems without a writable temp dir or
-        # without a font cache. Fall back to a hand-rolled single pie.
+        plt.close("all")
         return _fallback_pie_bytes(comparisons)
 
 
 def _fallback_pie_bytes(comparisons: List[Dict[str, Any]]) -> Optional[io.BytesIO]:
-    """Last-resort single-pie chart with height-status counts."""
+    """Last-resort single-pie chart with binary height-status counts."""
     try:
         match_comps = [c for c in comparisons if c.get("type") == "MATCH"]
-        counts = {
-            STATUS_CUMPLE: sum(
-                1 for c in match_comps if c.get("height_status") == STATUS_CUMPLE
-            ),
-            STATUS_FUERA: sum(
-                1 for c in match_comps if c.get("height_status") == STATUS_FUERA
-            ),
-            STATUS_NO_CUMPLE: sum(
-                1 for c in match_comps if c.get("height_status") == STATUS_NO_CUMPLE
-            ),
-        }
+        n_ok = sum(
+            1 for c in match_comps if c.get("height_status") == STATUS_CUMPLE
+        )
+        # Merge FUERA DE TOLERANCIA into NO CUMPLE for the binary view.
+        n_no = sum(
+            1 for c in match_comps
+            if c.get("height_status") in (STATUS_NO_CUMPLE, "FUERA DE TOLERANCIA")
+        )
+        counts = {STATUS_CUMPLE: n_ok, STATUS_NO_CUMPLE: n_no}
         labels = [k for k, v in counts.items() if v > 0]
         sizes = [counts[k] for k in labels]
         colors_map = {
             STATUS_CUMPLE: "#7FBF7F",
-            STATUS_FUERA: "#FFD27F",
             STATUS_NO_CUMPLE: "#F08C8C",
         }
         pie_colors = [colors_map[k] for k in labels]
@@ -688,8 +758,7 @@ def _build_executive_summary(
             breakdown,
             col_widths=[
                 4.5 * cm,
-                2.4 * cm,
-                3.6 * cm,
+                2.6 * cm,
                 3.0 * cm,
                 2.4 * cm,
                 3.5 * cm,
