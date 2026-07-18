@@ -19,7 +19,6 @@ from core.blast_correlation import (
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.compliance_status import (
     STATUS_CUMPLE,
-    STATUS_FUERA,
     STATUS_NO_CUMPLE,
 )
 from core.config import DEFAULTS
@@ -230,10 +229,9 @@ def create_section_plot(params_design, params_topo, distances_d, elevations_d, d
 def create_compliance_pie_charts(comparisons):
     """Create a row of donut charts (one per parameter) of compliance breakdown.
 
-    Categories follow the tripartite status emitted by
-    `param_extractor._evaluate_status` and `compare_design_vs_asbuilt`:
-    CUMPLE / FUERA DE TOLERANCIA / NO CUMPLE. The `berm_status` is binary in
-    the pipeline, so its FUERA DE TOLERANCIA slice is always zero.
+    The dashboard is binary: CUMPLE vs NO CUMPLE. The legacy FUERA DE TOLERANCIA
+    category produced upstream is merged into NO CUMPLE here so the report
+    shows only two slices per chart.
     """
     keys = ['height_status', 'angle_status', 'berm_status']
     labels = ['Altura de Banco', 'Ángulo de Cara', 'Ancho de Berma']
@@ -241,17 +239,24 @@ def create_compliance_pie_charts(comparisons):
     # Soft, high-contrast palette (readable on screen and printed).
     category_colors = {
         STATUS_CUMPLE:        '#7FBF7F',  # soft green
-        STATUS_FUERA:         '#FFD27F',  # soft amber
         STATUS_NO_CUMPLE:     '#F08C8C',  # soft red
     }
-    category_order = [STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE]
+    category_order = [STATUS_CUMPLE, STATUS_NO_CUMPLE]
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
     match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
     for idx, (key, title) in enumerate(zip(keys, labels)):
         ax = axes[idx]
-        counts = {cat: sum(1 for c in match_comps if c[key] == cat) for cat in category_order}
+        # Binary split: anything that is not CUMPLE (including legacy
+        # FUERA DE TOLERANCIA) is bucketed into NO CUMPLE so the chart
+        # renders only the two categories exposed in the dashboard.
+        n_ok = sum(1 for c in match_comps if c[key] == STATUS_CUMPLE)
+        n_nok = sum(
+            1 for c in match_comps
+            if c[key] != STATUS_CUMPLE
+        )
+        counts = {STATUS_CUMPLE: n_ok, STATUS_NO_CUMPLE: n_nok}
 
         labels_to_show, sizes, colors_to_show = [], [], []
         for cat in category_order:
@@ -400,22 +405,25 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             doc.add_paragraph(f"(Error al generar gráficos de torta: {e})")
 
         doc.add_paragraph("Resumen por parámetro:")
-        # Ternary table: CUMPLE + FUERA DE TOLERANCIA + NO CUMPLE = Total.
-        # % Logro is CUMPLE / Total * 100. The last column shows the
-        # average real value for the evaluated section (real height in m,
-        # real face angle in degrees, real berm width in m).
-        table = doc.add_table(rows=1, cols=6)
+        # Tabla binaria: CUMPLE + NO CUMPLE = Total. % Logro es
+        # CUMPLE / Total * 100. Cualquier valor que no sea CUMPLE
+        # (incluyendo el legacy FUERA DE TOLERANCIA emitido aguas
+        # arriba) se cuenta como NO CUMPLE para mantener coherencia
+        # con el dashboard binario. La última columna muestra el
+        # valor promedio real para la sección evaluada (altura real
+        # en m, ángulo de cara real en grados, ancho de berma real
+        # en m).
+        table = doc.add_table(rows=1, cols=5)
         table.style = 'Table Grid'
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Parámetro'
         hdr_cells[1].text = STATUS_CUMPLE
-        hdr_cells[2].text = 'Fuera de Tolerancia'
-        hdr_cells[3].text = STATUS_NO_CUMPLE
-        hdr_cells[4].text = '% Logro'
-        hdr_cells[5].text = 'Valor Promedio (Real)'
+        hdr_cells[2].text = STATUS_NO_CUMPLE
+        hdr_cells[3].text = '% Logro'
+        hdr_cells[4].text = 'Valor Promedio (Real)'
 
         for col_idx, h in enumerate(['Parámetro', STATUS_CUMPLE,
-                                     'Fuera de Tolerancia', STATUS_NO_CUMPLE,
+                                     STATUS_NO_CUMPLE,
                                      '% Logro', 'Valor Promedio (Real)']):
             for paragraph in hdr_cells[col_idx].paragraphs:
                 for run in paragraph.runs:
@@ -433,9 +441,12 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         for key, label, real_field, unit in param_avg_specs:
             row_cells = table.add_row().cells
             n_ok = sum(1 for c in match_comps if c[key] == STATUS_CUMPLE)
-            n_ft = sum(1 for c in match_comps if c[key] == STATUS_FUERA)
-            n_nok = sum(1 for c in match_comps if c[key] == STATUS_NO_CUMPLE)
-            total = n_ok + n_ft + n_nok
+            # Fusionar cualquier estado distinto de CUMPLE (incluyendo
+            # el legacy FUERA DE TOLERANCIA) en la columna NO CUMPLE.
+            n_nok = sum(
+                1 for c in match_comps if c[key] != STATUS_CUMPLE
+            )
+            total = n_ok + n_nok
             pct = (n_ok / total * 100) if total > 0 else 0
 
             real_values = [c[real_field] for c in match_comps
@@ -448,10 +459,9 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 
             row_cells[0].text = label
             row_cells[1].text = str(n_ok)
-            row_cells[2].text = str(n_ft)
-            row_cells[3].text = str(n_nok)
-            row_cells[4].text = f"{pct:.1f}%"
-            row_cells[5].text = avg_str
+            row_cells[2].text = str(n_nok)
+            row_cells[3].text = f"{pct:.1f}%"
+            row_cells[4].text = avg_str
             for cell in row_cells:
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
