@@ -26,15 +26,15 @@ def get_profile_controls():
     with ctrl_cols[1]:
         show_areas = st.checkbox(
             "Mostrar Áreas",
-            value=False, key="show_areas",
+            value=True, key="show_areas",
             help="Rellena áreas de sobre-excavación y deuda de material")
         show_spill_areas = st.checkbox(
             "Mostrar Área de Derrame",
-            value=True, key="show_spill_areas",
+            value=False, key="show_spill_areas",
             help="Muestra el área del material de derrame en la base de los bancos")
         show_sector_areas = st.checkbox(
             "🎯 Sectores coloreados por desviación",
-            value=True, key="profile_show_sector_areas",
+            value=False, key="profile_show_sector_areas",
             help="Rellena el área entre diseño y topografía clasificada por sector: rojo=sobre-excavación, amarillo=deuda, verde=cumple.")
 
     with ctrl_cols[2]:
@@ -46,7 +46,7 @@ def get_profile_controls():
     with ctrl_cols[3]:
         show_pozos = st.checkbox(
             "Mostrar Pozos de Tronadura",
-            value=True, key="show_pozos_profile",
+            value=False, key="show_pozos_profile",
             help="Superpone los pozos de perforación y tronadura")
         blast_tolerance = None
         if show_pozos and st.session_state.get('blast_df_clean') is not None:
