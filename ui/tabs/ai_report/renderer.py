@@ -59,20 +59,49 @@ def _build_ai_request(
     """Build the AIRequest payload from session state and filters."""
     df_pozos = st.session_state.get(StateKey.BLAST_DF_CLEAN)
     sections = st.session_state.get(StateKey.SECTIONS) or []
+    config = st.session_state.get("config", {})
+    tolerances = config.get("tolerances", {})
+    project_info = {
+        "project": st.session_state.get(StateKey.PROJECT_NAME, "Sin nombre"),
+        "operation": config.get("operation", "N/A"),
+    }
     blast_trend = compute_blast_trend_metadata(df_pozos, sections, comparisons)
     metadata = build_metadata(
         comparisons=comparisons,
         filters_active=filters_active,
         blast_trend=blast_trend,
-        project_name=st.session_state.get(StateKey.PROJECT_NAME, "Sin nombre"),
+        project_name=project_info["project"],
         active_section=st.session_state.get(StateKey.ACTIVE_SECTION, "global"),
         notes=notes,
     )
+
+    # ── Construir DataFrame unificado para el LLM ──
+    from core.unified_dataframe import build_unified_dataframe, dataframe_to_markdown
+
+    params_design = st.session_state.get("params_design") or []
+    params_topo = st.session_state.get("params_topo") or []
+    unified_df = build_unified_dataframe(
+        comparisons=comparisons,
+        params_design=params_design,
+        params_topo=params_topo,
+        df_pozos=df_pozos,
+        sections=sections,
+        tolerances=tolerances,
+        project_info=project_info,
+    )
+    unified_markdown = dataframe_to_markdown(unified_df)
+
     prompt_text = build_prompt(
         notes=notes,
         sections=[str(s) for s in (filters_active or {}).get("section") or []],
         filters=filters_active or {},
         blast_trend=blast_trend,
+    )
+    # Inyectar la tabla unificada en el prompt
+    prompt_text = (
+        prompt_text
+        + "\n\n---\n\n**DATOS COMPLETOS DEL PROYECTO (DataFrame unificado):**\n\n"
+        + unified_markdown
     )
     return AIRequest(
         results={"comparisons": comparisons},
@@ -124,6 +153,33 @@ def render_tab_ai(config: dict) -> None:
     if n_filtered == 0:
         render_zero_filter_warning()
         return
+
+    # ── Preview del DataFrame unificado ──
+    with st.expander("📊 DataFrame unificado (datos que se envían al LLM)", expanded=False):
+        from core.unified_dataframe import build_unified_dataframe, dataframe_to_markdown
+        df_pozos = st.session_state.get(StateKey.BLAST_DF_CLEAN)
+        sections = st.session_state.get(StateKey.SECTIONS) or []
+        params_design = st.session_state.get("params_design") or []
+        params_topo = st.session_state.get("params_topo") or []
+        tolerances = config.get("tolerances", {})
+        project_info_df = {
+            "project": st.session_state.get(StateKey.PROJECT_NAME, "Sin nombre"),
+            "operation": config.get("operation", "N/A"),
+        }
+        try:
+            unified_df = build_unified_dataframe(
+                comparisons=filtered,
+                params_design=params_design,
+                params_topo=params_topo,
+                df_pozos=df_pozos,
+                sections=sections,
+                tolerances=tolerances,
+                project_info=project_info_df,
+            )
+            st.dataframe(unified_df, use_container_width=True, hide_index=True)
+            st.caption(f"DataFrame con {len(unified_df)} filas y {len(unified_df.columns)} columnas")
+        except Exception as exc:
+            st.warning(f"No se pudo construir el DataFrame: {exc}")
 
     if not render_generate_button():
         return

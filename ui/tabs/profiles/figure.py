@@ -60,14 +60,10 @@ def build_profile_figure(
 
     fig = go.Figure()
 
-    # Los perfiles crudos (diseño + topografía) solo se muestran cuando
-    # el perfil conciliado está oculto. Cuando el conciliado está activo,
-    # los crudos se omiten para mantener la vista limpia.
-    if not show_reconciled:
-        fig.add_trace(go.Scatter(
-            x=pd_prof.distances, y=pd_prof.elevations,
-            mode='lines', name='Diseño',
-            line=dict(color='royalblue', width=2)))
+    fig.add_trace(go.Scatter(
+        x=pd_prof.distances, y=pd_prof.elevations,
+        mode='lines', name='Diseño',
+        line=dict(color='royalblue', width=2)))
 
     if i < len(area_fill_design):
         a_over, a_under, d_i, z_ref_i, z_eval_i = area_fill_design[i]
@@ -94,8 +90,7 @@ def build_profile_figure(
             mode='lines', name='Topografía Real',
             line=dict(color='forestgreen', width=2),
             showlegend=True))
-    elif not show_reconciled:
-        # Solo mostrar la topografía cruda cuando el conciliado está oculto
+    else:
         fig.add_trace(go.Scatter(
             x=pt_prof.distances, y=pt_prof.elevations,
             mode='lines', name='Topografía Real',
