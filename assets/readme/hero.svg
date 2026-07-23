@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="360" viewBox="0 0 1200 360"
+     role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">Conciliación Geotécnica — Geotechnical reconciliation for open-pit mining</title>
+  <desc id="hero-desc">Tool that compares 3D design surfaces against as-built topography, generating cross-section profiles with bench compliance evaluation.</desc>
+
+  <defs>
+    <linearGradient id="bg-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="100%" stop-color="#1E293B"/>
+    </linearGradient>
+    <pattern id="grid-pattern" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#334155" stroke-width="0.5" opacity="0.3"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="360" rx="24" fill="url(#bg-grad)"/>
+  <rect width="1200" height="360" rx="24" fill="url(#grid-pattern)"/>
+
+  <!-- ── Left: Title block (58%) ── -->
+  <g transform="translate(56, 48)">
+    <!-- Category eyebrow -->
+    <text x="0" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="15" fill="#F59E0B" font-weight="600" letter-spacing="2">
+      GEOTECHNICAL ENGINEERING · OPEN-PIT MINING
+    </text>
+
+    <!-- Project name -->
+    <text x="0" y="58" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="56" fill="#F1F5F9" font-weight="800">
+      Conciliación Geotécnica
+    </text>
+
+    <!-- Value proposition -->
+    <text x="0" y="108" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="22" fill="#94A3B8" font-weight="400">
+      Compare 3D design surfaces vs as-built topography.
+    </text>
+    <text x="0" y="140" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="22" fill="#94A3B8" font-weight="400">
+      Evaluate bench compliance. Integrate drill &amp; blast.
+    </text>
+
+    <!-- Stats row -->
+    <g transform="translate(0, 188)">
+      <text x="0" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="42" fill="#F1F5F9" font-weight="700">1,577</text>
+      <text x="0" y="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="13" fill="#64748B" font-weight="500">TESTS PASSING</text>
+
+      <text x="140" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="42" fill="#F1F5F9" font-weight="700">6</text>
+      <text x="140" y="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="13" fill="#64748B" font-weight="500">EXPORT FORMATS</text>
+
+      <text x="260" y="0" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+            font-size="42" fill="#F1F5F9" font-weight="700">3D</text>
+      <text x="260" y="22" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+            font-size="13" fill="#64748B" font-weight="500">MESH FORMATS</text>
+    </g>
+  </g>
+
+  <!-- ── Right: Native proof — bench cross-section diagram (42%) ── -->
+  <g transform="translate(640, 36)">
+    <!-- Diagram label -->
+    <text x="0" y="14" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="12" fill="#64748B" font-weight="600" letter-spacing="1.5">
+      CROSS-SECTION PROFILE
+    </text>
+
+    <!-- Design line (dashed blue) -->
+    <path d="M 10 60 L 10 110 L 60 110 L 60 160 L 110 160 L 110 210 L 160 210 L 160 260 L 500 260"
+          fill="none" stroke="#3B82F6" stroke-width="2" stroke-dasharray="6 4" opacity="0.7"/>
+
+    <!-- As-built line (solid green) -->
+    <path d="M 10 62 L 10 108 L 62 108 L 62 158 L 112 158 L 112 205 L 158 205 L 158 255 L 500 255"
+          fill="none" stroke="#22C55E" stroke-width="3"/>
+
+    <!-- Compliance markers -->
+    <circle cx="62" cy="108" r="5" fill="#22C55E"/>
+    <text x="74" y="104" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="13" fill="#22C55E" font-weight="600">B1 ✓</text>
+
+    <circle cx="112" cy="158" r="5" fill="#22C55E"/>
+    <text x="124" y="154" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="13" fill="#22C55E" font-weight="600">B2 ✓</text>
+
+    <circle cx="158" cy="205" r="5" fill="#EF4444"/>
+    <text x="170" y="201" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="13" fill="#EF4444" font-weight="600">B3 ✗</text>
+
+    <!-- Floor extension -->
+    <path d="M 158 255 L 200 280" fill="none" stroke="#F59E0B" stroke-width="2" stroke-dasharray="4 3"/>
+    <text x="206" y="284" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="11" fill="#F59E0B">floor</text>
+
+    <!-- Elevations axis -->
+    <text x="0" y="55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="10" fill="#475569">3150</text>
+    <text x="0" y="160" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="10" fill="#475569">3100</text>
+    <text x="0" y="265" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="10" fill="#475569">3050</text>
+
+    <!-- Legend -->
+    <g transform="translate(0, 300)">
+      <line x1="0" y1="0" x2="20" y2="0" stroke="#3B82F6" stroke-width="2" stroke-dasharray="6 4" opacity="0.7"/>
+      <text x="26" y="4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" fill="#94A3B8">Design</text>
+
+      <line x1="90" y1="0" x2="110" y2="0" stroke="#22C55E" stroke-width="3"/>
+      <text x="116" y="4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="12" fill="#94A3B8">As-built</text>
+    </g>
+  </g>
+
+  <!-- ── Bottom: badge strip ── -->
+  <g transform="translate(56, 330)">
+    <rect x="0" y="-10" width="130" height="20" rx="10" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+    <text x="65" y="4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="11" fill="#94A3B8" font-weight="500" text-anchor="middle">Python 3.12+</text>
+
+    <rect x="140" y="-10" width="90" height="20" rx="10" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+    <text x="185" y="4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="11" fill="#94A3B8" font-weight="500" text-anchor="middle">React 19</text>
+
+    <rect x="240" y="-10" width="95" height="20" rx="10" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+    <text x="287" y="4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="11" fill="#94A3B8" font-weight="500" text-anchor="middle">FastAPI</text>
+
+    <rect x="345" y="-10" width="75" height="20" rx="10" fill="#1E293B" stroke="#334155" stroke-width="1"/>
+    <text x="382" y="4" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="11" fill="#94A3B8" font-weight="500" text-anchor="middle">PWA</text>
+  </g>
+</svg>

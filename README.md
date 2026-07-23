@@ -1,425 +1,214 @@
-# Conciliación Geotécnica — Diseño vs As-Built
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%"
+       alt="Conciliación Geotécnica — geotechnical reconciliation tool for open-pit mining: compares 3D design surfaces against as-built topography and evaluates bench compliance">
+</p>
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com)
-[![React 19](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178C6)](https://www.typescriptlang.org)
-[![PWA](https://img.shields.io/badge/PWA-ready-5A29E4)](https://web.dev/progressive-web-apps/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-847%20passed-brightgreen)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-95%25%20(v2)-brightgreen)](tests/)
-[![Build Status](https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/build.yml/badge.svg)](https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/build.yml)
+<p align="center">
+  <a href="https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/ci.yml"><img src="https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/deploy-frontend.yml"><img src="https://github.com/nibaldox/conciliacion-geo-v02/actions/workflows/deploy-frontend.yml/badge.svg" alt="Deploy"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green" alt="License: MIT"></a>
+  <a href="https://nibaldox.github.io/conciliacion-geo-v02/"><img src="https://img.shields.io/badge/Live%20Demo-GitHub%20Pages-blue" alt="Live Demo"></a>
+</p>
 
-> **Open-source geotechnical reconciliation for open-pit mining.** Compare
-> 3D design surfaces vs as-built topography, generate cross-sections,
-> evaluate compliance against configurable tolerances, integrate
-> Drill & Blast data with quantitative stability analysis (FS planar,
-> health score, alert system), export professional Excel/Word/DXF
-> reports. All in your browser.
->
-> *Conciliación geotécnica open-source para minería a cielo abierto.
-> Compara superficies 3D de diseño vs topografía real, genera
-> secciones, evalúa cumplimiento contra tolerancias, e integra
-> tronadura con análisis cuantitativo de estabilidad.*
-
-[Live demo](https://nibaldox.github.io/conciliacion-geo-v02/) ·
-[Architecture](ARCHITECTURE.md) ·
-[Deploy guide](web/DEPLOY.md) ·
-[Contributing](CONTRIBUTING.md)
+<p align="center">
+  <a href="https://nibaldox.github.io/conciliacion-geo-v02/">🌐 Live Demo</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 ---
 
-## ⚡ Try it now — no signup
+> Open-source geotechnical reconciliation for open-pit mining. Compare
+> 3D design surfaces vs as-built topography, generate cross-sections,
+> evaluate bench compliance against configurable tolerances, integrate
+> drill &amp; blast data, and export professional reports — all in your browser.
+
+---
+
+<p align="center">
+  <img src="./assets/readme/section-what.svg" width="100%" alt="What it does">
+</p>
+
+## Pipeline
+
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="Pipeline: load 3D mesh, cut cross-sections, detect benches via RDP, evaluate compliance, export reports">
+</p>
+
+## Real outputs
+
+The tool is used on real mining projects. These are actual screenshots from the webapp:
+
+| 3D profiles viewer | Compliance dashboard |
+|:---:|:---:|
+| <img src="./imgs/01-perfiles-3d.png" width="100%" alt="3D cross-section profiles viewer showing design vs as-built surfaces"> | <img src="./imgs/03-dashboard.png" width="100%" alt="Compliance dashboard with binary CUMPLE/NO CUMPLE evaluation and weighted score"> |
+
+| Profile grid | |
+|:---:|:---:|
+| <img src="./imgs/02-grillla-perfiles.png" width="100%" alt="Grid of cross-section profiles with bench detection and reconciled lines"> | |
+
+## Features
+
+**Core reconciliation**
+- Multi-format mesh support — STL, OBJ, PLY, DXF
+- Auto-section generation — by line, by polyline, or click-on-3D-map
+- RDP + Hungarian matching — robust bench/berm/face detection with no double-counting
+- Reconciled profile — idealized geometry with per-bench floor extension and angular transitions
+- Binary compliance — **CUMPLE / NO CUMPLE** with weighted score (berm 60 + angle 20 + height 20; pass ≥ 70)
+
+**Drill &amp; Blast integration**
+- Powder Factor dual — volumetric (kg/m³) and massic (g/ton) with real vertical height
+- Blast-hole traceability — `attribute_failure_to_holes()` links failing benches to specific drill holes
+- Causal engine — `explain_non_compliance()` explains *why* a bench failed (PF excess, stemming deficit, etc.)
+- PF→damage regression model with confidence intervals
+- Blast advisor with operational recommendation engine
+
+**Geotechnical stability**
+- Planar factor of safety (Hoek-Bray 1981)
+- RMR/GSI lookup from CSV with Hoek-Brown strength estimation
+- Health score 0–100 with traffic-light categories
+- Categorized alert system (overhang, catch bench, toppling, wedge risk)
+
+**Reports** — 6 formats, all binary compliance
+- **Excel** — bench-by-bench parameters + KPIs
+- **Word** — executive report with pie charts + compliance plan view
+- **PDF** — unified executive PDF (reportlab)
+- **DXF** — 3D polylines for CAD import
+- **PNG ZIP** — section images
+- **AI** — LLM-powered narrative report with unified DataFrame context
+
+---
+
+<p align="center">
+  <img src="./assets/readme/section-use.svg" width="100%" alt="How to use">
+</p>
+
+## Try it now — no signup
 
 The hosted demo is **free, public, and requires no account**:
 
-1. Open the [live site](https://nibaldox.github.io/conciliacion-geo-v02/)
-2. Click **🎮 Try with sample data**
-3. Browse the dashboard, 3D viewer, and exported reports
-4. (Optional) Click **Empezar** to upload your own `.stl`
+1. Open the [**live site**](https://nibaldox.github.io/conciliacion-geo-v02/)
+2. Click **"Try with sample data"**
+3. Browse the dashboard, 3D viewer, profile analysis, and exported reports
 
-The frontend is hosted on GitHub Pages (free). The backend runs on
-Render.com (free tier) only when you upload your own data.
+Frontend is on GitHub Pages (free). Backend runs on Render.com free tier (cold start ~30s).
 
----
+## Run locally
 
-## ✨ Features
-
-### Core reconciliation
-- **Multi-format mesh support** — STL, OBJ, PLY, DXF
-- **Auto-section generation** — by start/end line, by polyline file, or click-on-map
-- **3D native interactions** — select and edit cross-section paths directly on the 3D terrain viewer
-- **Asymmetric profiles & rich graphs** — configure independent up/down profile lengths and view live reconciliation data (Delta Crest, Delta Toe) directly on interactive 2D profile graphs
-- **RDP + Hungarian matching** — robust bench / berm / face detection with no double-counting
-- **Compliance dashboard** — CUMPLE / FUERA / NO CUMPLE per sector, parameter, bench
-- **Excel / Word / DXF exports** — formatted reports ready for engineering review
-
-### Drill & Blast integration
-- **Powder Factor dual** — volumétrico (kg/m³) **y másico (g/ton)** con altura vertical real por pozo (`H = longitud × cos(inclinación)`), k-NN fallback si no hay burden/espaciamiento
-- **PF sin pasadura** (`pf_g_per_ton_net`) — normalizado al banco de diseño, descuenta la sobreperforación bajo el piso
-- **Densidad de roca configurable** — ρ global (t/m³) y **por dominio geotécnico** (sector), con fallback de altura por sesión; recalcula el g/ton en vivo
-- **6 ratios derivados** — stemming/burden, subdrilling/burden, S/B, kg/m, coupling, collar deviation
-- **Catálogo ENAEX** — Pirex-930/920/950/970, Enaline, parser de diámetro `"10 5/8"` → 270 mm
-- **Modelo cuantitativo PF→daño** — β₁, p-valor, R², IC 95%, confianza (HIGH/MEDIUM/LOW/INSUFFICIENT)
-- **Motor de recomendaciones** — ΔPF objetivo con factibilidad y restricciones operacionales
-- **Heatmap 2D IDW** — densidad de energía integrada en Z, con sliders de resolución y σ
-- **Tendencia temporal** de PF/daño y comparativa pre/post campaña
-
-### Geotechnical stability
-- **Detección de precursores de falla** — overhangs, rock bridges, catch bench effectiveness, wedge (diedros agudos), toppling, consistencia de ángulos, anisotropía de caras
-- **Factor de seguridad planar** — Hoek-Bray 1981 con cohesión, fricción, presión de poros
-- **RMR/GSI lookup** desde CSV geomecánico con estimación Hoek-Brown de (c, φ)
-- **Health score semáforo** — 0-100 con categorías GREEN/YELLOW/ORANGE/RED
-- **Alert system categorizado** — OVERHANG_CRITICAL, CATCH_BENCH_INADEQUATE, TOPPLING_RISK, WEDGE_RISK, ANGLE_INCONSISTENT
-
-### Platform
-- **🌐 Bilingual UI** — Spanish (default) + English, switchable from the header
-- **📱 PWA** — installable, works offline, sub-330 KB initial bundle
-- **🎮 Demo mode** — pre-computed synthetic pit, 4 benches, 5 sections, 40 compliance rows, no upload needed
-- **🔓 Open source, MIT** — your data stays in your session, no hidden telemetry
-
----
-
-## 🚀 Two ways to run it
-
-The project ships **two complete user interfaces** that share the
-same `core/` domain logic:
-
-### 1. Web app (recommended for sharing) — `web/`
-
-Modern React 19 + FastAPI architecture, deployed for free on
-GitHub Pages + Render.com. See [web/DEPLOY.md](web/DEPLOY.md)
-for the full guide.
+**Prerequisites:** Python 3.10+, Node.js 20+, `libspatialindex-dev` (Linux: `sudo apt install libspatialindex-dev`)
 
 ```bash
-# Backend
+git clone https://github.com/nibaldox/conciliacion-geo-v02.git
+cd conciliacion-geo-v02
+
+# Backend (terminal 1)
 pip install -e .
 uvicorn api.main:app --reload --port 8000
 
-# Frontend (separate terminal)
-cd web && npm install && npm run dev    # → http://localhost:5173
+# Frontend (terminal 2)
+cd web && npm install && npm run dev   # → http://localhost:5173
 ```
 
-> **Troubleshooting (Linux):** Si `npm run dev` falla con
-> `Cannot find module '@rollup/rollup-linux-x64-gnu'`, ejecuta
-> `npm install @rollup/rollup-linux-x64-gnu@^4.34.0 --save-dev`.
-> Rollup es nativo, necesita el binario específico para tu plataforma.
-> Ver `package.json#optionalDependencies` para todas las plataformas
-> soportadas.
+Or run both together: `bash dev.sh`
 
-```
-
-### 2. Streamlit (the maintainer uses this daily) — `app.py`
-
-Single-file Streamlit app, no separate backend. The maintainer uses it
-for real work, so it's **protected** (not forbidden): bug fixes and
-additive improvements are welcome, but refactors or changes to existing
-flows need explicit approval. See [CONTRIBUTING.md](CONTRIBUTING.md).
+<details>
+<summary><b>Streamlit (alternative UI)</b></summary>
 
 ```bash
 pip install -r requirements.txt
-streamlit run app.py                        # → http://localhost:8501
+streamlit run app.py   # → http://localhost:8501
 ```
 
-Both interfaces call the same `core/` library (mesh cutting,
-parameter extraction, comparison, export) so results are
-identical.
+The maintainer uses Streamlit daily for real projects. It's an **alpha preview** where new
+features land first before being ported to React. Bug fixes welcome; refactors need approval.
 
----
+</details>
 
-## 📸 Screenshots
+<details>
+<summary><b>Troubleshooting: Rollup native binary (Linux)</b></summary>
 
-The legacy Streamlit UI has screenshots in [`printscr/`](printscr/)
-that show the four-step workflow. The new React webapp is
-visually richer (3D Cesium viewer, drag-to-edit bench editor,
-compliance dashboard with traffic-light colour coding); we're
-in the process of capturing fresh screenshots — PRs welcome.
-
-| Dashboard overview (Streamlit, legacy) | Profile analysis (Streamlit, legacy) |
-|:--:|:--:|
-| ![dashboard](printscr/dashboard-overview.png) | ![profile](printscr/profile-analysis.png) |
-
-| Section definition (Streamlit, legacy) | Parameter settings (Streamlit, legacy) |
-|:--:|:--:|
-| ![sections](printscr/section-definition.png) | ![params](printscr/parameter-settings.png) |
-
----
-
-## 🏗️ Architecture
-
-```
-                            ┌────────────────────────────┐
-                            │   GitHub Pages (static)    │
-                            │   nibaldox.github.io/...   │
-                            │   • React 19 + Vite 6      │
-                            │   • CesiumJS 1.140 (lazy)  │
-                            │   • Plotly 2.35 (lazy)     │
-                            │   • PWA + Workbox SW       │
-                            │   • i18n ES/EN             │
-                            │   • 330 KB initial bundle  │
-                            └─────────┬──────────────────┘
-                                      │ HTTPS + CORS allowlist
-                                      ▼
-                            ┌────────────────────────────┐
-                            │   Render.com (Docker)      │
-                            │   FastAPI + uvicorn        │
-                            │   • /api/v1/* routers      │
-                            │   • SQLite sessions        │
-                            │   • Health probes          │
-                            │   • Slowapi rate limit     │
-                            └─────────┬──────────────────┘
-                                      │
-                                      ▼
-                            ┌────────────────────────────┐
-                            │   core/  (shared domain)   │
-                            │   • mesh_handler           │
-                            │   • section_cutter         │
-                            │   • param_extractor        │
-                            │   • excel_writer           │
-                            │   • report_generator       │
-                            │   • blast_correlation      │
-                            └────────────────────────────┘
-```
-
-For the full breakdown see [ARCHITECTURE.md](ARCHITECTURE.md).
-For deploy step-by-step see [web/DEPLOY.md](web/DEPLOY.md).
-
----
-
-## 🧪 Running tests
+If `npm run dev` fails with `Cannot find module '@rollup/rollup-linux-x64-gnu'`, run:
 
 ```bash
-pytest tests/ -v                             # 847 backend tests (3 skipped), 95% coverage on core/ai_v2/
-python test_pipeline.py                      # end-to-end pipeline
-cd web && npm run build                      # TypeScript + Vite build
-cd web && npm run lint                       # ESLint
-
-# Coverage breakdown (current snapshot, June 2026)
-python -m coverage run -m pytest tests/ --tb=short
-python -m coverage report --include="core/*.py"
+npm install @rollup/rollup-linux-x64-gnu@^4.34.0 --save-dev
 ```
 
-Coverage highlights (all core/ files ≥ 87%):
+Rollup ships per-platform native binaries. See `package.json#optionalDependencies`.
 
-| File | Stmts | Cover |
-|------|-------|-------|
-| `core/alert_system.py` | 45 | 100% |
-| `core/column_utils.py` | 11 | 100% |
-| `core/compliance_status.py` | 18 | 100% |
-| `core/geology.py` | 73 | 100% |
-| `core/param_extractor.py` (shim) | 6 | 100% |
-| `core/profile_extract.py` | 175 | 98% |
-| `core/excel_writer.py` | 318 | 98% |
-| `core/calculo_tronadura.py` | 143 | 98% |
-| `core/geom_utils.py` | 48 | 98% |
-| `core/report_generator.py` | 402 | 98% |
-| `core/section_cutter.py` | 117 | 97% |
-| `core/blast_metrics.py` | 203 | 97% |
-| `core/config.py` | 126 | 97% |
-| `core/explosive_properties.py` | 56 | 96% |
-| `core/profile_compliance.py` | 118 | 96% |
-| `core/blast_correlation.py` | 190 | 95% |
-| `core/profile_simplify.py` | 65 | 94% |
-| `core/blast_advisor.py` | 172 | 91% |
-| `core/blast_model.py` | 137 | 88% |
-| `core/mesh_handler.py` | 103 | 87% |
-
-The frontend has no unit tests yet — Playwright is installed but
-not wired into CI. PRs adding Vitest + RTL would be very welcome.
+</details>
 
 ---
 
-## 🛠️ Project structure
+## Architecture
 
 ```
-core/             ← domain logic, imported by BOTH interfaces
-  mesh_handler.py                (load_mesh, decimate_mesh, mesh_to_plotly, DXF loader)
-  section_cutter.py              (cut_mesh_with_section, generate_perpendicular_sections)
-  param_extractor.py             (compat shim: re-exports from the 4 modules below)
-  profile_simplify.py            (RDP + toe projection)
-  profile_extract.py             (ReconciledPoint/Profile, BenchParams, ExtractionResult)
-  bench_classify.py              (berm width + leading/trailing berm)
-  bench_hazards.py               (overhang, rock bridge, wedge, toppling, anisotropy)
-  profile_compliance.py          (compare_design_vs_asbuilt, build_reconciled_profile)
-  calculo_tronadura.py           (coordinate correction X=Lat, Y=Lon; collar/toe geometry; procesar_pozos)
-  blast_correlation.py           (Drill & Blast ↔ geotech correlation, signed deviations, powder factor g/ton)
-  blast_metrics.py               (PF, stemming ratio, kg/m, altura de carga, Kuznetsov X₅₀)
-  blast_model.py                 (PF→damage regression, pasadura↔toe correlation, IDW profile)
-  blast_advisor.py               (recommend_pf_adjustment, validate_recommendation)
-  stability_analysis.py          (FS planar Hoek-Bray, health score 0-100)
-  alert_system.py                (categorized alerts: OVERHANG_CRITICAL, TOPPLING_RISK, etc.)
-  geology.py                     (RMR/GSI lookup + Hoek-Brown strength estimation)
-  explosive_properties.py        (ENAEX catalogue: Pirex/Enaline + diameter parser)
-  column_utils.py                (shared column candidate lists for CSV ingestion)
-  compliance_status.py           (single source of truth: STATUS_CUMPLE, STATUS_FUERA, ...)
-  excel_writer.py
-  report_generator.py            (Word report + PNG ZIP)
-  geom_utils.py
-  ai_v2/                        (LLM agent v2 — provider-agnostic, async, 95% coverage)
-  breaklines.py                  (breakline detection for section generation)
-  config.py                      (frozen dataclasses with all defaults: tolerances, explosives)
-
-api/              ← FastAPI backend (modular, /api/v1/*)
-  routers/        (meshes, sections, process, export, settings)
-  middleware*.py  (request id, structured log, rate limit)
-  main.py         (app factory + lifespan + health probes)
-
-web/              ← React 19 + Vite 6 + CesiumJS frontend
-  src/components/  (wizard steps, demo, landing, ui primitives)
-  src/locales/     (es.json, en.json)
-  src/api/         (axios client, TanStack Query hooks)
-  public/demo/     (synthetic STLs + precomputed.json for demo mode)
-  DEPLOY.md        (step-by-step deploy guide)
-
-app.py / ui/      ← LEGACY Streamlit UI (do not modify)
-docs/             ← additional documentation
-  BLAST_DATA_AUDIT.md            (31 mejoras para el módulo de tronadura)
-  SLOPE_STABILITY_AUDIT.md       (31 mejoras geotécnicas)
-  BLAST_ADVISOR.md               (API reference del motor de recomendaciones)
-  CLEAN_CODE_AUDIT.md            (auditoría clean code + clean architecture)
-scripts/          ← one-off generators (demo data, etc.)
-tests/            ← pytest suite for core/ + api/ (847 tests)
-ARCHITECTURE.md   ← architecture overview
-AGENTS.md         ← entry point for AI agents
-CONTRIBUTING.md   ← contribution guide
-CODE_OF_CONDUCT.md
-LICENSE           ← MIT
+  GitHub Pages (static)              Render.com (Docker)
+  ┌──────────────────┐              ┌──────────────────┐
+  │ React 19 + Vite  │   /api/v1    │ FastAPI + uvicorn│
+  │ CesiumJS (lazy)  │ ◄──────────► │ SQLite sessions  │
+  │ Plotly (lazy)    │   HTTPS+CORS │ core/ domain     │
+  │ PWA + i18n ES/EN │              └────────┬─────────┘
+  └──────────────────┘                       │
+                                   ┌─────────▼──────────┐
+                                   │ core/ (shared)     │
+                                   │ mesh_handler       │
+                                   │ section_cutter     │
+                                   │ profile_extract    │
+                                   │ profile_compliance │
+                                   │ blast_correlation  │
+                                   │ blast_advisor      │
+                                   │ report_generator   │
+                                   └────────────────────┘
 ```
+
+Both the React webapp and the Streamlit UI call the same `core/` domain logic, so results are identical. Full breakdown: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
-## 🌐 Internationalization
+## Testing
 
-UI strings live in `web/src/locales/{es,en}.json`. To add a new
-key:
+```bash
+pytest tests/ -v --tb=short --ignore=tests/test_openblast.py   # 1,233 backend tests
+python test_pipeline.py                                          # end-to-end synthetic
+cd web && npm run test                                           # 344 frontend tests (vitest)
+cd web && npm run build                                          # TypeScript + Vite build
+```
 
-1. Add it to BOTH `es.json` and `en.json` under the right namespace
-   (`nav`, `common`, `demo`, `step1`..`step4`, `compliance`,
-   `tooltip`, `shortcuts`, `landing`)
-2. Use it in the component: `const { t } = useTranslation(); t('key')`
-3. For counts, use ICU plurals: `t('common.n_sections', { count: n })`
-   with `_one` / `_other` keys
-
-The language is persisted in `localStorage` and the `<html lang>`
-attribute is kept in sync (for screen readers).
-
----
-
-## 🔭 Observability (opt-in)
-
-All telemetry is **off by default** — the site ships zero
-observability unless you opt in. See [web/DEPLOY.md](web/DEPLOY.md)
-for setup.
-
-| Tool | What | Env var |
+| Suite | Count | Status |
 |---|---|---|
-| Sentry (frontend) | JS errors, perf, replays on error | `VITE_SENTRY_DSN` |
-| Sentry (backend) | Python exceptions, slow requests | `SENTRY_DSN` |
-| Plausible / CF / etc. | Privacy-friendly page views | `VITE_ANALYTICS_URL` |
-| UptimeRobot | Is `/api/v1/health` 200 every 5 min? | (no env var — set up at uptimerobot.com) |
-
-Mesh file names never leave your server (`send_default_pii=False`
-on the backend; query strings are stripped before Sentry reports
-on the frontend).
+| Backend (pytest) | 1,233 | ✅ passing (8 skipped) |
+| Frontend (vitest) | 344 | ✅ passing |
+| `npm run build` | — | ✅ 0 errors |
+| **Total** | **1,577** | ✅ |
 
 ---
 
-## 🤝 Contributing
+## Project structure
 
-We love PRs! See [CONTRIBUTING.md](CONTRIBUTING.md) for the full
-guide. Highlights:
-
-- **Streamlit (`app.py`, `ui/`) is protected** — the maintainer
-  uses it daily, so bug fixes and additive improvements are welcome but
-  refactors need explicit approval. New features go in `web/` and `api/`
-  (additive).
-- **`core/` is shared domain logic** — both interfaces depend on
-  it. Changes to `core/` are welcome but should preserve the
-  public API of the legacy-stable modules in `core/__init__.py`.
-- **Both locales, always** — when adding a UI string, add it to
-  BOTH `es.json` and `en.json`.
-- **Conventional commits** (`feat:`, `fix:`, `refactor:`, `test:`,
-  `docs:`, `chore:`). No `Co-Authored-By:`. No AI attribution.
-- **The maintainer triages fast** if your PR description is clear
-  and you've filled in the PR template.
-
-Our [Code of Conduct](CODE_OF_CONDUCT.md) is Contributor Covenant
-2.1.
-
-## 📐 Using the Drill & Blast pipeline programmatically
-
-The blast analysis can be used outside Streamlit (e.g. from a
-Jupyter notebook or a batch script):
-
-```python
-import pandas as pd
-from core.calculo_tronadura import procesar_pozos
-from core.blast_metrics import enrich_blast_dataframe
-from core.blast_model import fit_powder_factor_damage_model
-from core.blast_advisor import recommend_pf_adjustment, format_recommendation_text
-
-# 1. Load your blast hole CSV/XLSX (ENAEX, Datamine, etc.)
-df = pd.read_excel("enaex_pozos_tronadura_2026.xlsx", sheet_name="Data")
-
-# 2. Process holes: project collar→toe, derive coordinates
-df_clean, *_ = procesar_pozos(df)
-
-# 3. Enrich with PF, stemming ratio, kg/m, etc.
-df_enriched = enrich_blast_dataframe(df_clean)
-
-# 4. Fit damage model from observed deviations
-model = fit_powder_factor_damage_model(
-    pf=df_enriched["pf_vol_avg"],
-    damage=df_enriched["delta_crest"],
-)
-
-# 5. Get actionable recommendation
-rec = recommend_pf_adjustment(model, current_pf=0.55, target_overbreak_m=0.5)
-print(format_recommendation_text(rec, section_name="NORTE_4200"))
-# → "Reducir PF de 0.55 a 0.38 kg/m³ (-31%) proyecta acotar sobre-excavación..."
 ```
-
-For stability analysis (requires RMR CSV or default parameters):
-
-```python
-from core.param_extractor import extract_parameters
-from core.stability_analysis import (
-    compute_section_health_score,
-    compute_planar_factor_of_safety,
-    aggregate_section_alerts,
-)
-
-# Run reconciliation as usual
-result = extract_parameters(distances, elevations, section_name="SEC_01")
-
-# Health score 0-100 with traffic-light category
-health = compute_section_health_score("SEC_01", result.benches)
-print(f"{health.health_category}: {health.health_score:.0f}/100")
-print(health.recommended_action)
-
-# Get all alerts with categorized severity
-report = aggregate_section_alerts("SEC_01", result.benches)
-for alert in report.alerts:
-    print(f"[{alert.level}] {alert.message} → {alert.action}")
+core/          ← domain logic (shared by both UIs)
+api/           ← FastAPI backend (/api/v1/*)
+web/           ← React 19 + Vite 6 + CesiumJS frontend
+app.py + ui/   ← Streamlit alpha preview (maintainer's daily driver)
+electron/      ← Portable AppImage bundle
+tests/         ← pytest + vitest
 ```
 
 ---
 
-## 📜 License
+## Contributing
 
-[MIT](LICENSE) — do what you want, just keep the copyright
-notice. If you build something cool on top of this, we'd love
-to hear about it.
+PRs welcome! See [CONTRIBUTING.md](CONTRIBUTING.md). Highlights:
 
----
+- **`core/` is shared** — both interfaces depend on it; preserve the public API
+- **Streamlit (`app.py`, `ui/`) is protected** — bug fixes welcome, refactors need approval
+- **Both locales always** — add UI strings to BOTH `es.json` and `en.json`
+- **Conventional commits** — `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
 
-## 🙋 Maintainer
+## License
 
-- **Nibaldo Aviles** ([@nibaldox](https://github.com/nibaldox)) —
-  geotechnical engineer who needed this for real projects and
-  decided to share.
+[MIT](LICENSE) — do what you want, just keep the copyright notice.
 
-## 🌟 Star history
+## Maintainer
 
-If this saved you a few days of work, a star on GitHub helps
-others find it. ⭐
+**Nibaldo Aviles** ([@nibaldox](https://github.com/nibaldox)) — geotechnical engineer who built this for real mining projects and decided to share.

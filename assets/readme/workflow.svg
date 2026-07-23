@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1200" height="200" viewBox="0 0 1200 200"
+     role="img" aria-labelledby="wf-title wf-desc">
+  <title id="wf-title">Pipeline: from 3D meshes to compliance reports</title>
+  <desc id="wf-desc">Five-stage flow: load STL/OBJ mesh, cut cross-sections, detect benches via RDP, evaluate compliance, export reports.</desc>
+
+  <rect width="1200" height="200" rx="18" fill="#0F172A"/>
+
+  <!-- Stage 1: Load -->
+  <g transform="translate(40, 60)">
+    <rect x="0" y="0" width="180" height="80" rx="12" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+    <text x="90" y="32" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="16" fill="#F59E0B" font-weight="600" text-anchor="middle">1 · LOAD</text>
+    <text x="90" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="13" fill="#94A3B8" text-anchor="middle">STL · OBJ · DXF</text>
+  </g>
+
+  <!-- Arrow -->
+  <path d="M 228 100 L 262 100" stroke="#475569" stroke-width="2" fill="none"/>
+  <path d="M 256 94 L 262 100 L 256 106" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- Stage 2: Cut -->
+  <g transform="translate(270, 60)">
+    <rect x="0" y="0" width="180" height="80" rx="12" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+    <text x="90" y="32" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="16" fill="#3B82F6" font-weight="600" text-anchor="middle">2 · CUT</text>
+    <text x="90" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="13" fill="#94A3B8" text-anchor="middle">cross-sections</text>
+  </g>
+
+  <!-- Arrow -->
+  <path d="M 458 100 L 492 100" stroke="#475569" stroke-width="2" fill="none"/>
+  <path d="M 486 94 L 492 100 L 486 106" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- Stage 3: Detect -->
+  <g transform="translate(500, 60)">
+    <rect x="0" y="0" width="180" height="80" rx="12" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+    <text x="90" y="32" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="16" fill="#A855F7" font-weight="600" text-anchor="middle">3 · DETECT</text>
+    <text x="90" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="13" fill="#94A3B8" text-anchor="middle">RDP + Hungarian</text>
+  </g>
+
+  <!-- Arrow -->
+  <path d="M 688 100 L 722 100" stroke="#475569" stroke-width="2" fill="none"/>
+  <path d="M 716 94 L 722 100 L 716 106" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- Stage 4: Evaluate -->
+  <g transform="translate(730, 60)">
+    <rect x="0" y="0" width="180" height="80" rx="12" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+    <text x="90" y="32" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="16" fill="#22C55E" font-weight="600" text-anchor="middle">4 · EVALUATE</text>
+    <text x="90" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="13" fill="#94A3B8" text-anchor="middle">CUMPLE / NO CUMPLE</text>
+  </g>
+
+  <!-- Arrow -->
+  <path d="M 918 100 L 952 100" stroke="#475569" stroke-width="2" fill="none"/>
+  <path d="M 946 94 L 952 100 L 946 106" stroke="#475569" stroke-width="2" fill="none"/>
+
+  <!-- Stage 5: Export -->
+  <g transform="translate(960, 60)">
+    <rect x="0" y="0" width="180" height="80" rx="12" fill="#1E293B" stroke="#334155" stroke-width="1.5"/>
+    <text x="90" y="32" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          font-size="16" fill="#06B6D4" font-weight="600" text-anchor="middle">5 · EXPORT</text>
+    <text x="90" y="56" font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+          font-size="13" fill="#94A3B8" text-anchor="middle">Excel·Word·PDF·DXF</text>
+  </g>
+</svg>
