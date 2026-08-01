@@ -49,39 +49,52 @@ def normalize_inclination(
         Inclination in degrees.
     convention : InclinationConvention
         The convention the input values use. ``dip_from_horizontal``
-        converts with ``90 - value``.
+        converts with ``90 - magnitude``.
+
+    Magnitude/orientation separation (audit H-04): the sign of the input
+    is treated as an orientation hint, NOT part of the magnitude. The
+    magnitude is absolutized BEFORE any convention conversion, so a
+    -65° dip converts to 25° from vertical (never 155°); the orientation
+    sign is preserved in ``meta["orientation_sign"]`` (array of -1/0/+1)
+    for callers to persist.
 
     Returns
     -------
     (normalized, metadata) where metadata records the input convention,
-    the number of negative values absolutized (sign used as orientation
-    hint) and the number of values rejected as out of range [0, 90]°
-    (returned as NaN).
+    the conversion applied, the per-value orientation sign (0 for NaN),
+    the number of negative values absolutized and the number of values
+    rejected as out of range [0, 90]° (returned as NaN).
     """
     out = pd.to_numeric(values, errors="coerce").astype(float)
     conv = InclinationConvention(convention)
     meta: dict = {"convention": conv.value, "conversion": "none"}
 
+    # 1) Separate orientation sign from magnitude BEFORE conversion (H-04).
+    orientation = np.sign(out.values)
+    magnitude = out.abs()
+
+    # 2) Convert the (sign-agnostic) magnitude to the canonical convention.
     if conv is InclinationConvention.DIP_FROM_HORIZONTAL:
-        out = 90.0 - out
+        magnitude = 90.0 - magnitude
         meta["conversion"] = "dip->90-dip"
 
     negative = (out < 0) & out.notna()
     n_neg = int(negative.sum())
     if n_neg:
-        out = out.abs()
         meta["negative_wrapped"] = n_neg
         meta["conversion"] = (
             meta["conversion"] + "+abs" if meta["conversion"] != "none" else "abs"
         )
+    meta["orientation_sign"] = orientation.tolist()
+    meta["orientation_field"] = "incl_orientation"
 
-    out_of_range = (out > INCL_VALID_RANGE_DEG[1]) & out.notna()
+    out_of_range = (magnitude > INCL_VALID_RANGE_DEG[1]) & magnitude.notna()
     n_rejected = int(out_of_range.sum())
     if n_rejected:
-        out = out.where(~out_of_range)
+        magnitude = magnitude.where(~out_of_range)
         meta["rejected_out_of_range"] = n_rejected
 
-    return out, meta
+    return magnitude, meta
 
 
 def normalize_azimuth(

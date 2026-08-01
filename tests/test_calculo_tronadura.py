@@ -251,6 +251,65 @@ class TestInclinationConvention:
         assert out_e["Y_toe"].iloc[0] == pytest.approx(0.0, abs=1e-9)
 
 
+class TestInclinationConventionExplicit:
+    """H-05: no silent angular-convention assumption; persistent warning."""
+
+    def test_default_config_emits_persistent_warning(self):
+        df = _make_valid_hole(incl=10.0)
+        out, *_ = procesar_pozos(df)
+        assert out["Incl_convention"].iloc[0] == "from_vertical"
+        assert out["Incl_convention_source"].iloc[0] == "default_config"
+        assert bool(out["incl_convention_warning"].iloc[0]) is True
+
+    def test_explicit_convention_no_warning(self):
+        df = _make_valid_hole(incl=10.0)
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical")
+        assert out["Incl_convention_source"].iloc[0] == "explicit"
+        assert bool(out["incl_convention_warning"].iloc[0]) is False
+
+    def test_data_declared_convention_used(self):
+        df = _make_valid_hole(incl=60.0)
+        df["Incl_convention"] = "dip_from_horizontal"
+        out, *_ = procesar_pozos(df)
+        assert out["Incl"].iloc[0] == 30.0
+        assert out["Incl_convention_source"].iloc[0] == "data"
+
+    def test_orientation_column_persisted(self):
+        df = pd.concat(
+            [_make_valid_hole(incl=65.0, label="POS"), _make_valid_hole(incl=-65.0, label="NEG")],
+            ignore_index=True,
+        )
+        df["Incl_convention"] = "dip_from_horizontal"
+        out, *_ = procesar_pozos(df)
+        assert out.loc[out["label_pozo"] == "POS", "Incl"].iloc[0] == 25.0
+        assert out.loc[out["label_pozo"] == "NEG", "Incl"].iloc[0] == 25.0
+        assert out.loc[out["label_pozo"] == "POS", "incl_orientation"].iloc[0] == 1
+        assert out.loc[out["label_pozo"] == "NEG", "incl_orientation"].iloc[0] == -1
+
+
+class TestZAmbiguous:
+    """H-07: generic column names are never silently treated as collar."""
+
+    def test_generic_z_raises(self):
+        df = _make_valid_hole()
+        df = df.rename(columns={"Nombre_Banco": "Z"})
+        with pytest.raises(ValueError, match="sem[áa]ntica"):
+            procesar_pozos(df)
+
+    def test_generic_elevation_raises(self):
+        df = _make_valid_hole()
+        df = df.rename(columns={"Nombre_Banco": "Elevation"})
+        with pytest.raises(ValueError, match="sem[áa]ntica"):
+            procesar_pozos(df)
+
+    def test_ambiguous_with_explicit_semantic_ok(self):
+        df = _make_valid_hole()
+        df = df.rename(columns={"Nombre_Banco": "Z"})
+        out, *_ = procesar_pozos(df, z_collar_semantic="collar_elevation")
+        assert out["Z_collar"].iloc[0] == 4200.0
+        assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
+
+
 class TestProyectarPozosEnSeccion:
     """Tests for proyectar_pozos_en_seccion — blast-hole projection onto a section."""
 

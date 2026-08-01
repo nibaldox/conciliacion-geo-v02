@@ -29,20 +29,27 @@ COLS_DROP = [
     'camion', 'holes_dateUpdated', 'mes_tronadura',
 ]
 
-BENCH_HEIGHT = 15.0
+# Legacy alias for the configured default bench height (H-06): the
+# productive paths resolve the height from the event or the visible
+# configuration; this constant exists only for backward-compatible
+# callers/tests of the original +15 m transformation.
+BENCH_HEIGHT = DEFAULTS.blast_default_bench_height
 
 # Semantics of the elevation source column (spec §4.2). ``bench_elevation``
 # means the column holds the target bench elevation (Nombre_Banco) and the
 # collar sits BENCH_HEIGHT above it; ``collar_elevation`` means the column
 # already holds the real collar elevation (no transformation).
+# Generic names (Z, Elevation, Elev, Cota) are deliberately NOT classified:
+# their meaning cannot be guaranteed, so they block the pipeline (H-07).
 _Z_BENCH_ALIASES = {"nombre_banco", "banco", "banco_cota", "cota_banco", "bench", "bench_elev"}
-_Z_COLLAR_ALIASES = {"cota_collar", "collar_elev", "z", "z_collar", "elevation", "elev", "cota", "rl_collar"}
+_Z_COLLAR_ALIASES = {"cota_collar", "collar_elev", "z_collar", "rl_collar", "collar_z", "z_collar_real", "cota_collar_real"}
+_Z_AMBIGUOUS_ALIASES = {"z", "elevation", "elev", "cota", "altura", "nivel", "rango"}
 
 
 _CANONICAL_COLUMN_ALIASES: dict[str, list[str]] = {
     "X": ["Latitud_Geo", "Latitud", "X", "Este"],
     "Y": ["Longitud_Geo", "Longitud", "Y", "Norte"],
-    "Z_collar": ["Nombre_Banco", "Banco", "Cota_Collar", "Z", "Altura_Collar", "Elevacion_Collar"],
+    "Z_collar": ["Nombre_Banco", "Banco", "Cota_Collar", "Z", "Altura_Collar", "Elevacion_Collar", "Elevation", "Elev", "Cota"],
     "Incl": ["Inclinacion_real", "Inclinacion", "Inclination"],
     "Az": ["Azimuth_real", "Azimuth", "Azimut"],
     "Len": ["longitud_real", "Longitud", "Length", "Profundidad"],
@@ -162,6 +169,13 @@ def _resolve_z_collar_semantic(source_col: str | None, explicit: str | None) -> 
         return "bench_elevation"
     if key in _Z_COLLAR_ALIASES:
         return "collar_elevation"
+    if key in _Z_AMBIGUOUS_ALIASES:
+        raise ValueError(
+            f"La columna de elevación '{source_col}' es ambigua (puede ser cota "
+            "de banco, piso o diseño): no se determina su semántica y no se "
+            "convierte a collar automáticamente (H-07). Especifique "
+            "z_collar_semantic='bench_elevation' o 'collar_elevation'."
+        )
     raise ValueError(
         f"No se pudo determinar la semántica de la columna de elevación "
         f"'{source_col}': no sé si es cota de banco o cota real de collar. "
@@ -221,7 +235,7 @@ def procesar_pozos(
     *,
     bench_height_m: float | None = None,
     z_collar_semantic: str | None = None,
-    incl_convention: InclinationConvention | str = InclinationConvention.FROM_VERTICAL,
+    incl_convention: InclinationConvention | str | None = None,
     az_convention: AzimuthConvention | str = AzimuthConvention.FROM_NORTH_CW,
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
@@ -305,14 +319,33 @@ def procesar_pozos(
 
     _coerce_typed_columns(df_work)
 
-    # Canonical inclination / azimuth normalization (spec §4.1).
-    incl_conv = InclinationConvention(incl_convention)
+    # Canonical inclination / azimuth normalization (spec §4.1, H-05).
+    # The inclination convention must be explicit: explicit argument,
+    # data-declared column, or the visible config default (which emits a
+    # persistent warning flag). It is never silently assumed.
     az_conv = AzimuthConvention(az_convention)
     if "Incl" in df_work.columns:
         df_work["Incl_original"] = df_work["Incl"]
-        incl_norm, _ = normalize_inclination(df_work["Incl"], incl_conv)
+        if incl_convention is not None:
+            incl_conv = InclinationConvention(incl_convention)
+            source, warning = "explicit", False
+        elif "Incl_convention" in df_work.columns:
+            incl_conv = InclinationConvention(df_work["Incl_convention"].iloc[0])
+            source, warning = "data", False
+        else:
+            incl_conv = InclinationConvention(DEFAULTS.blast_default_incl_convention)
+            source, warning = "default_config", True
+        incl_norm, incl_meta = normalize_inclination(df_work["Incl"], incl_conv)
         df_work["Incl"] = incl_norm
         df_work["Incl_convention"] = incl_conv.value
+        df_work["Incl_convention_source"] = source
+        df_work["incl_convention_warning"] = bool(warning)
+        orientation = np.asarray(incl_meta.get("orientation_sign", [0] * len(df_work)))
+        df_work["incl_orientation"] = np.where(
+            pd.to_numeric(df_work["Incl_original"], errors="coerce").notna(),
+            orientation,
+            0,
+        )
         df_work["incl_anomaly"] = np.where(
             pd.to_numeric(df_work["Incl_original"], errors="coerce") < 0,
             "negative_wrapped",

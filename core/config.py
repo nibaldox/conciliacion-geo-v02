@@ -2,7 +2,7 @@
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -78,6 +78,11 @@ class PipelineDefaults:
     blast_correlation_pasadura_optimal: tuple = (0.5, 1.5)  # meters
     blast_default_bench_height: float = 15.0   # meters — used for pasadura
     blast_temporal_filter_days: int = 7       # days — blast must precede topo by >= N days
+    # Angular convention used when the input data does not declare one
+    # (audit H-05). Using this default emits a persistent data-quality
+    # warning flag on every processed hole; events must declare their
+    # convention explicitly to clear it.
+    blast_default_incl_convention: str = "from_vertical"
 
 
 @dataclass(frozen=True)

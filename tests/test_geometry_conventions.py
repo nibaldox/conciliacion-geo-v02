@@ -29,11 +29,21 @@ class TestNormalizeInclination:
         assert out.tolist() == pytest.approx([90.0, 60.0, 30.0, 0.0])
         assert meta["conversion"] == "dip->90-dip"
 
+    def test_negative_dip_magnitude_and_orientation(self):
+        """H-04: -65° dip = magnitude 65 + orientation flag, NOT 155° (out of range)."""
+        v = pd.Series([-65.0, 65.0, -30.0, 0.0])
+        out, meta = normalize_inclination(v, InclinationConvention.DIP_FROM_HORIZONTAL)
+        assert out.tolist() == pytest.approx([25.0, 25.0, 60.0, 90.0])
+        assert "orientation_sign" in meta
+        assert list(meta["orientation_sign"]) == [-1, 1, -1, 0]
+        assert "orientation_field" in meta
+
     def test_negative_values_recorded_and_absolutized(self):
         v = pd.Series([-10.0, -5.0, 0.0, 10.0])
         out, meta = normalize_inclination(v, InclinationConvention.FROM_VERTICAL)
         assert out.tolist() == pytest.approx([10.0, 5.0, 0.0, 10.0])
         assert meta["negative_wrapped"] == 2
+        assert list(meta["orientation_sign"]) == [-1, -1, 0, 1]
 
     def test_out_of_range_nan(self):
         v = pd.Series([120.0, -90.0, 10.0])
