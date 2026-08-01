@@ -255,6 +255,8 @@ def _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0,
                 "Tipo_Explosivo": explosive,
                 "Nombre_Malla_Original": malla,
                 "fecha_tronadura": "2026-05-01",
+                # Migración §2.2: altura de banco declarada explícitamente.
+                "bench_height_m": 15.0,
             })
     return pd.DataFrame(rows[:n])
 
@@ -623,7 +625,8 @@ class TestComputePowderFactorGPerTon:
         assert out["pf_g_per_ton"].iloc[0] == pytest.approx(expected_pf, rel=1e-6)
 
     def test_fallback_when_longitud_missing(self):
-        """When longitud_real is NaN, height falls back to BLAST.height_fallback_m."""
+        """When longitud_real is NaN, height_real only falls back under an
+        AUTHORISED assumption (never silently)."""
         from core.config import BLAST
         df = pd.DataFrame([{
             "Kilos_Cargados_real": 100.0,
@@ -633,9 +636,16 @@ class TestComputePowderFactorGPerTon:
             "Inclinacion_real": 0.0,
             "Nombre_Malla_Original": "M1",
             "Tipo_Explosivo": "ANFO",
+            "bench_height_m": 15.0,
         }])
-        out = compute_powder_factor(df)
+        blocked = compute_powder_factor(df)
+        assert pd.isna(blocked["height_real_m"].iloc[0])
+        out = compute_powder_factor(
+            df, height_fallback_m=BLAST.height_fallback_m, allow_bench_height_assumption=True
+        )
         assert out["height_real_m"].iloc[0] == pytest.approx(BLAST.height_fallback_m)
+        # bench height comes from the event column (PROVIDED, no flag); the
+        # assumption applies only to height_real, which is what we asserted.
         expected = 100000.0 / (4.0 * 5.0 * BLAST.height_fallback_m * BLAST.rock_density_tm3)
         assert out["pf_g_per_ton"].iloc[0] == pytest.approx(expected, rel=1e-6)
 
@@ -663,6 +673,7 @@ class TestComputePowderFactorGPerTon:
             "Inclinacion_real": 0.0,
             "Nombre_Malla_Original": "M1",
             "Tipo_Explosivo": "ANFO",
+            "bench_height_m": 15.0,
         }])
         out = compute_powder_factor(df)
         assert out["pf_vol_kgm3"].iloc[0] == pytest.approx(0.6667, abs=1e-3)
@@ -715,6 +726,7 @@ class TestComputePowderFactorGPerTonNet:
             "Z_toe": 997.0,
             "Nombre_Malla_Original": "M1",
             "Tipo_Explosivo": "ANFO",
+            "bench_height_m": 15.0,
         }])
         out = compute_powder_factor(df)
         assert out["height_real_m"].iloc[0] == pytest.approx(18.0)
@@ -734,6 +746,7 @@ class TestComputePowderFactorGPerTonNet:
             "Inclinacion_real": 0.0,
             "Nombre_Malla_Original": "M1",
             "Tipo_Explosivo": "ANFO",
+            "bench_height_m": 15.0,
         }])
         out = compute_powder_factor(df)
         assert out["height_net_m"].iloc[0] == pytest.approx(out["height_real_m"].iloc[0])
@@ -755,6 +768,7 @@ class TestComputePowderFactorGPerTonNet:
             "Z_toe": 1001.0,  # pasadura = (1015-15) - 1001 = -1 → clamped to 0
             "Nombre_Malla_Original": "M1",
             "Tipo_Explosivo": "ANFO",
+            "bench_height_m": 15.0,
         }])
         out = compute_powder_factor(df)
         assert out["height_net_m"].iloc[0] == pytest.approx(15.0)

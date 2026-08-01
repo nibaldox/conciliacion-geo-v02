@@ -274,6 +274,9 @@ def compute_powder_factor(
     height_fallback_m: Optional[float] = None,
     boundary_polygon: Optional[list] = None,
     boundary_polygons: Optional[dict] = None,
+    bench_height_m: Optional[float] = None,
+    bench_height_source: str = "event_provided",
+    allow_bench_height_assumption: bool = False,
 ) -> pd.DataFrame:
     """Compute powder factor for each blast-hole row.
 
@@ -415,15 +418,95 @@ def compute_powder_factor(
     out['area_status'] = area_status.astype(str)
     out['domain_area_m2'] = domain_area
 
-    # H-06: bench height is an event attribute — per-row bench_height_m
-    # column when present (from procesar_pozos), else the visible config
-    # default. Never a silent magic constant.
+    # Fase 1.1 cierre §2.2: bench height with full provenance — never a
+    # silent 15 m fallback. Resolution order: per-row bench_height_m
+    # column (validated dataset attribute) > caller-provided
+    # bench_height_m (event value) > authorised explicit assumption
+    # (visible config value, flagged) > MISSING (blocked).
     if "bench_height_m" in out.columns:
-        bench_h = pd.to_numeric(out["bench_height_m"], errors="coerce").where(
-            pd.to_numeric(out["bench_height_m"], errors="coerce") > 0
+        bh_col = pd.to_numeric(out["bench_height_m"], errors="coerce")
+        bench_h = bh_col.where(bh_col > 0)
+        bh_status = pd.Series("PROVIDED", index=out.index)
+        bh_source = pd.Series("data_column", index=out.index)
+        bh_message = pd.Series("", index=out.index)
+        bh_assumed = pd.Series(False, index=out.index)
+        invalid = bench_h.isna() & bh_col.notna()
+        bh_status.loc[invalid] = "INVALID"
+        bh_message.loc[invalid] = (
+            "Altura de banco inválida (≤0 o no numérica): indicadores "
+            "dependientes bloqueados"
         )
+        missing = bh_col.isna()
+        bh_status.loc[missing] = "MISSING"
+        bh_message.loc[missing] = (
+            "Altura de banco ausente en la columna del evento: indicadores "
+            "dependientes bloqueados (sin supuesto silencioso)"
+        )
+        bh_assumed.loc[missing] = True
+    elif bench_height_m is not None:
+        try:
+            bh_val = float(bench_height_m)
+            is_nan = np.isnan(bh_val)
+        except (TypeError, ValueError):
+            bh_val, is_nan = np.nan, True
+        if is_nan:
+            bench_h = pd.Series(np.nan, index=out.index)
+            bh_status = pd.Series("MISSING", index=out.index)
+            bh_source = pd.Series(bench_height_source, index=out.index)
+            bh_message = pd.Series(
+                "Altura de banco ausente: indicadores dependientes bloqueados "
+                "(sin supuesto silencioso). Declare bench_height_m o autorice el "
+                "supuesto explícito.",
+                index=out.index,
+            )
+            bh_assumed = pd.Series(True, index=out.index)
+        elif bh_val > 0:
+            bench_h = pd.Series(bh_val, index=out.index)
+            bh_status = pd.Series(
+                "DERIVED" if bench_height_source == "derived_from_surfaces" else "PROVIDED",
+                index=out.index,
+            )
+            bh_source = pd.Series(bench_height_source, index=out.index)
+            bh_message = pd.Series("", index=out.index)
+            bh_assumed = pd.Series(False, index=out.index)
+        else:
+            bench_h = pd.Series(np.nan, index=out.index)
+            bh_status = pd.Series("INVALID", index=out.index)
+            bh_source = pd.Series(bench_height_source, index=out.index)
+            bh_message = pd.Series(
+                "Altura de banco inválida (≤0): indicadores dependientes bloqueados",
+                index=out.index,
+            )
+            bh_assumed = pd.Series(True, index=out.index)
+    elif allow_bench_height_assumption:
+        bench_h = pd.Series(float(DEFAULTS.blast_default_bench_height), index=out.index)
+        bh_status = pd.Series("EXPLICIT_ASSUMPTION", index=out.index)
+        bh_source = pd.Series("default_assumption_config", index=out.index)
+        bh_message = pd.Series(
+            f"Supuesto explícito autorizado: altura de banco = "
+            f"{DEFAULTS.blast_default_bench_height} m (configuración visible). "
+            "Declare bench_height_m para limpiar el supuesto.",
+            index=out.index,
+        )
+        bh_assumed = pd.Series(True, index=out.index)
     else:
-        bench_h = float(DEFAULTS.blast_default_bench_height)
+        bench_h = pd.Series(np.nan, index=out.index)
+        bh_status = pd.Series("MISSING", index=out.index)
+        bh_source = pd.Series("", index=out.index)
+        bh_message = pd.Series(
+            "Altura de banco ausente: indicadores dependientes bloqueados "
+            "(sin supuesto silencioso). Declare bench_height_m o autorice el "
+            "supuesto explícito.",
+            index=out.index,
+        )
+        bh_assumed = pd.Series(True, index=out.index)
+
+    out['bench_height_m'] = bench_h
+    out['bench_height_status'] = bh_status
+    out['bench_height_source'] = bh_source
+    out['bench_height_assumption_flag'] = bh_assumed
+    out['bench_height_validation_message'] = bh_message
+    height_blocked = bench_h.isna()
 
     denom_vol = burden_est * esp_est * bench_h
     pf_vol = np.where(denom_vol > 0, kilos / denom_vol, np.nan)
@@ -444,10 +527,16 @@ def compute_powder_factor(
         else pd.Series([np.nan] * len(out), index=out.index)
     )
 
-    height_real = pd.Series(
-        float(BLAST.height_fallback_m if height_fallback_m is None else height_fallback_m),
-        index=out.index,
-    )
+    # §2.2: the real vertical height only exists from valid length/inclination;
+    # the config fallback is only usable under an authorised assumption.
+    if allow_bench_height_assumption:
+        fb = BLAST.height_fallback_m if height_fallback_m is None else height_fallback_m
+        height_real = pd.Series(
+            float(fb) if fb > 0 else np.nan,
+            index=out.index,
+        )
+    else:
+        height_real = pd.Series(np.nan, index=out.index)
     valid_h = length_vals.notna() & incl_vals.notna() & (length_vals > 0) & (incl_vals >= 0)
     height_real.loc[valid_h] = length_vals[valid_h] * np.cos(np.radians(incl_vals[valid_h]))
     out['height_real_m'] = height_real
@@ -477,16 +566,18 @@ def compute_powder_factor(
     # design bench height) for all holes — this metric is therefore the
     # design-bench-normalised powder factor, complementary to the primary
     # ``pf_g_per_ton`` which uses the full real hole length.
-    bench_h_for_pasadura = float(
-        BLAST.height_fallback_m if height_fallback_m is None else height_fallback_m
-    )
     height_net = height_real.copy()
     pasadura_valid = pd.Series(False, index=out.index)
     if {'Z_collar', 'Z_toe'}.issubset(out.columns):
-        pasadura_raw = pd.to_numeric(_pasadura(out, bench_h_for_pasadura), errors='coerce')
+        # §2.2: pasadura uses the RESOLVED per-row bench height (provenance),
+        # never a silent 15 m constant.
+        pasadura_raw = pd.to_numeric(_pasadura(out, bench_h), errors='coerce')
         valid_pas = pasadura_raw.notna() & (pasadura_raw >= 0) & np.isfinite(pasadura_raw)
         pasadura_valid = valid_pas.fillna(False)
         height_net = height_real - pasadura_raw.where(pasadura_valid, 0.0).fillna(0.0)
+    # §2.2: when the bench height is blocked (NaN), height_net stays blocked —
+    # no silent "pasadura=0" pass-through.
+    height_net = height_net.where(bench_h.notna())
     height_net = height_net.where(height_net > 0, np.nan)
     out['height_net_m'] = height_net
 
@@ -901,8 +992,12 @@ def compute_signed_deviations(
     }
 
 
-def _pasadura(df: pd.DataFrame, bench_height: float) -> pd.Series:
-    """Sub-drill depth (m): collar minus bench floor minus toe."""
+def _pasadura(df: pd.DataFrame, bench_height) -> pd.Series:
+    """Sub-drill depth (m): collar minus bench floor minus toe.
+
+    ``bench_height`` may be a float (event value) or a per-row Series
+    (resolved with provenance, §2.2); NaN heights propagate as NaN.
+    """
     return (df["Z_collar"] - bench_height) - df["Z_toe"]
 
 

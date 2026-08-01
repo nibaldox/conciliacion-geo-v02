@@ -360,12 +360,26 @@ def procesar_pozos(
     # Elevation transformation driven by the column semantic (spec §4.2).
     semantic = _resolve_z_collar_semantic(z_src, z_collar_semantic)
     if semantic == "bench_elevation":
-        bench_h = float(
-            DEFAULTS.blast_default_bench_height if bench_height_m is None else bench_height_m
-        )
+        if bench_height_m is not None and float(bench_height_m) > 0:
+            bench_h = float(bench_height_m)
+            bh_status, bh_source, bh_assumed = "PROVIDED", "event_provided", False
+            bh_message = ""
+        else:
+            # Fase 1.1 cierre §2.2: the legacy default is only applied as a
+            # VISIBLE explicit assumption (flagged), never silently.
+            bench_h = float(DEFAULTS.blast_default_bench_height)
+            bh_status, bh_source, bh_assumed = "EXPLICIT_ASSUMPTION", "default_assumption_config", True
+            bh_message = (
+                f"Supuesto explícito declarado: altura de banco = {bench_h} m "
+                "(configuración visible). Declare bench_height_m para limpiar el supuesto."
+            )
         df_work["Z_collar"] = df_work["Z_collar"] + bench_h
         df_work["Z_collar_semantic"] = "bench_elevation_plus_height"
         df_work["bench_height_m"] = bench_h
+        df_work["bench_height_status"] = bh_status
+        df_work["bench_height_source"] = bh_source
+        df_work["bench_height_assumption_flag"] = bh_assumed
+        df_work["bench_height_validation_message"] = bh_message
     else:
         df_work["Z_collar_semantic"] = "collar_elevation"
 

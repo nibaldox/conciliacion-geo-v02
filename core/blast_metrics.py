@@ -47,21 +47,24 @@ def _col_or_nan(df: pd.DataFrame, candidates: tuple) -> pd.Series:
 
 def _resolve_bench_height(
     df: pd.DataFrame,
-    fallback_m: float,
+    fallback_m: Optional[float] = None,
 ) -> pd.Series:
-    """Per-row bench height (H-06): event column, else explicit config fallback.
+    """Per-row bench height with provenance (Fase 1.1 cierre §2.2).
 
-    The bench height is an attribute of the event, never a magic
-    constant: when the processed frame carries ``bench_height_m`` (from
-    :func:`core.calculo_tronadura.procesar_pozos`) it is used per row;
-    invalid (<=0) event values become NaN (explicit invalid data, never
-    silently replaced). When the column is absent the caller's
-    ``fallback_m`` (a visible configuration value) applies to all rows.
+    Resolution order (never a silent 15 m fallback):
+      1. ``bench_height_m`` column (validated event/dataset attribute);
+      2. the caller-provided ``fallback_m`` (event value);
+      3. NaN — height MISSING/INVALID, callers must block dependent
+         physical indicators.
+
+    Invalid event heights (<= 0, NaN) stay NaN (explicit invalid data).
     """
     if "bench_height_m" in df.columns:
         bh = pd.to_numeric(df["bench_height_m"], errors="coerce")
         return bh.where(bh > 0)
-    return pd.Series(float(fallback_m), index=df.index, dtype=float)
+    if fallback_m is not None and float(fallback_m) > 0:
+        return pd.Series(float(fallback_m), index=df.index, dtype=float)
+    return pd.Series(np.nan, index=df.index, dtype=float)
 
 
 def compute_stemming_ratio(df: pd.DataFrame) -> pd.Series:
@@ -79,20 +82,17 @@ def compute_subdrilling_ratio(df: pd.DataFrame, bench_height: Optional[float] = 
 
     pasadura = (Z_collar - bench_height) - Z_toe.
 
-    ``bench_height`` (H-06) is resolved per row from the event's
-    ``bench_height_m`` column when present; otherwise falls back to the
-    caller value or ``BLAST.height_fallback_m`` (visible configuration).
-    Invalid event heights produce NaN (explicit), never a silent default.
+    ``bench_height`` (Fase 1.1 cierre §2.2) is resolved per row from the
+    event's ``bench_height_m`` column when present, else from the
+    caller-provided event value; never from a silent default. Invalid or
+    missing heights produce NaN (blocked), never a silent 15 m.
     """
     burden = _col_or_nan(df, _BURDEN_CANDIDATES)
     if "Z_collar" not in df.columns or "Z_toe" not in df.columns:
         return pd.Series([np.nan] * len(df), index=df.index, dtype=float)
     z_collar = pd.to_numeric(df["Z_collar"], errors="coerce")
     z_toe = pd.to_numeric(df["Z_toe"], errors="coerce")
-    bh = _resolve_bench_height(
-        df,
-        float(BLAST.height_fallback_m if bench_height is None else bench_height),
-    )
+    bh = _resolve_bench_height(df, bench_height)
     pasadura = (z_collar - bh) - z_toe
     out = pd.Series([np.nan] * len(df), index=df.index, dtype=float)
     valid = burden.notna() & pasadura.notna() & (burden > 0)
@@ -333,10 +333,7 @@ def compute_kuznetsov_x50(
         return nan
     kilos = pd.to_numeric(df[kg_col], errors="coerce")
 
-    bh = _resolve_bench_height(
-        df,
-        float(BLAST.height_fallback_m if bench_height is None else bench_height),
-    )
+    bh = _resolve_bench_height(df, bench_height)
     volume_per_hole = burden * esp * bh
     valid_v = volume_per_hole > 0
     if not valid_v.any():
@@ -400,10 +397,7 @@ def compute_ispu(
     energy_mj = pd.to_numeric(blast_df["energy_mj"], errors="coerce")
     kilos = pd.to_numeric(blast_df[kg_col], errors="coerce")
 
-    bh = _resolve_bench_height(
-        blast_df,
-        float(BLAST.height_fallback_m if bench_height is None else bench_height),
-    )
+    bh = _resolve_bench_height(blast_df, bench_height)
     volume = burden * esp * bh
     if isinstance(ucs_mpa, pd.Series):
         ucs = pd.to_numeric(ucs_mpa, errors="coerce").reindex(blast_df.index)

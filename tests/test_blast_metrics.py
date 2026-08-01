@@ -42,6 +42,9 @@ def _proc_row(**overrides):
         "Kilos_Cargados_real": 300.0,
         "Tipo_Explosivo": "ANFO",
         "energy_mj": 300.0 * 3.72,
+        # Migración §2.2: la altura de banco se declara explícitamente en el
+        # fixture (nunca 15 m silencioso).
+        "bench_height_m": 15.0,
     }
     base.update(overrides)
     return pd.DataFrame([base])

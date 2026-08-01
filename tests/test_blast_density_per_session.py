@@ -127,22 +127,30 @@ def test_powder_factor_none_density_uses_blast_default():
 
 
 def test_height_fallback_used_when_geometry_missing():
-    """When longitud_real is NaN, height_fallback_m drives the PF denominator."""
+    """When longitud_real is NaN, height_real only falls back under an
+    AUTHORISED assumption (§2.2) — never silently."""
     base = {
         "Kilos_Cargados_real": [120.0],
         "Inclinacion_real": [0.0],
         "Burden": [4.0],
         "Esp": [5.0],
         "Nombre_Malla_Original": ["M1"],
+        "bench_height_m": [15.0],
     }
     df_no_len = pd.DataFrame({**base, "longitud_real": [np.nan]})
+
+    # Without an authorised assumption the height-dependent PF is blocked.
+    pf_blocked = compute_powder_factor(df_no_len.copy())["pf_g_per_ton"].iloc[0]
+    assert pd.isna(pf_blocked)
 
     # Custom fallback → PF derived from that height; None → BLAST default.
     custom_h = 20.0
     pf_custom = compute_powder_factor(
-        df_no_len.copy(), height_fallback_m=custom_h
+        df_no_len.copy(), height_fallback_m=custom_h, allow_bench_height_assumption=True
     )["pf_g_per_ton"].iloc[0]
-    pf_default = compute_powder_factor(df_no_len.copy())["pf_g_per_ton"].iloc[0]
+    pf_default = compute_powder_factor(
+        df_no_len.copy(), allow_bench_height_assumption=True
+    )["pf_g_per_ton"].iloc[0]
 
     # PF ∝ 1/H → ratio == default_h / custom_h.
     assert pf_custom / pf_default == pytest.approx(
