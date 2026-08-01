@@ -13,7 +13,15 @@ context: |
 project:
   name: conciliacion-geo-v02
   type: hybrid-monolith
-  detected_at: 2026-07-10
+  detected_at: 2026-07-30
+
+artifact_store:
+  mode: hybrid           # engram + filesystem (both writes succeed per change artifact)
+  engram_project: conciliacion-geo-v02
+  engram_scope: project
+  delivery_strategy: auto-chain
+  chain_strategy: feature-branch-chain
+  auto_execution: true  # orchestrator/user opted out of confirmations for this run
 
 testing:
   strict_tdd: false
