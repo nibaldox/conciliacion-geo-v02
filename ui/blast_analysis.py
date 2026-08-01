@@ -51,7 +51,9 @@ def _project_one(
     Single-loop kernel shared by both public projectors. Returns the
     canonical row dict with keys: ``section_name``, ``num_pozos``,
     ``total_kg``, ``pf_vol_avg_kgm3``, ``pf_area_avg_kgm2``,
-    ``energy_total_mj``, ``n_pf_valid``, ``projected_df``.
+    ``pf_g_per_ton_avg``, ``pf_g_per_ton_net_avg``,
+    ``pf_g_per_ton_inf_avg``, ``energy_total_mj``, ``n_pf_valid``,
+    ``projected_df``.
     """
     proj = proyectar_pozos_en_seccion(
         df,
@@ -69,6 +71,9 @@ def _project_one(
             'total_kg': 0.0,
             'pf_vol_avg_kgm3': float('nan'),
             'pf_area_avg_kgm2': float('nan'),
+            'pf_g_per_ton_avg': float('nan'),
+            'pf_g_per_ton_net_avg': float('nan'),
+            'pf_g_per_ton_inf_avg': float('nan'),
             'energy_total_mj': 0.0,
             'n_pf_valid': 0,
             'projected_df': proj,
@@ -89,6 +94,9 @@ def _project_one(
         'total_kg': total_kg,
         'pf_vol_avg_kgm3': pf_row.get('pf_vol_avg'),
         'pf_area_avg_kgm2': pf_row.get('pf_area_avg'),
+        'pf_g_per_ton_avg': pf_row.get('pf_g_per_ton_avg'),
+        'pf_g_per_ton_net_avg': pf_row.get('pf_g_per_ton_net_avg'),
+        'pf_g_per_ton_inf_avg': pf_row.get('pf_g_per_ton_inf_avg'),
         'energy_total_mj': pf_row.get('energy_total_mj', 0.0) or 0.0,
         'n_pf_valid': int(pf_row.get('n_pf_valid', 0) or 0),
         'projected_df': proj,

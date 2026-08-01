@@ -131,6 +131,7 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
 
     corr_data = []
     pf_available = False
+    pf_gt_available = False
     for row in kernel_rows:
         sec_name = row["section_name"]
         avg_over_break = float(sec_over_grouped.get(sec_name, 0.0) or 0.0)
@@ -138,11 +139,17 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
         pf_vol = row["pf_vol_avg_kgm3"]
         if pf_vol is not None and not (isinstance(pf_vol, float) and np.isnan(pf_vol)):
             pf_available = True
+        pf_gt = row.get("pf_g_per_ton_avg")
+        if pf_gt is not None and not (isinstance(pf_gt, float) and np.isnan(pf_gt)):
+            pf_gt_available = True
         corr_data.append({
             "Sección": sec_name,
             "Kg_Explosivo": row["total_kg"],
             "Pozos_Cercanos": row["num_pozos"],
             "PF_Vol_kgm3": pf_vol,
+            "PF_g_ton": row.get("pf_g_per_ton_avg"),
+            "PF_g_ton_net": row.get("pf_g_per_ton_net_avg"),
+            "PF_g_ton_inf": row.get("pf_g_per_ton_inf_avg"),
             "Energía_MJ": row["energy_total_mj"],
             "Sobre-excavación_Media_m": avg_over_break,
             "Deuda/Relleno_Media_m": avg_under_break,
@@ -156,7 +163,12 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
 
     st.dataframe(df_corr, width="stretch")
 
-    if pf_available:
+    if pf_gt_available:
+        x_col = "PF_g_ton"
+        x_label = "Powder Factor (g/ton)"
+        x_caption_metric = "powder factor (g/ton)"
+        x_fallback = False
+    elif pf_available:
         x_col = "PF_Vol_kgm3"
         x_label = "Powder Factor Volumétrico (kg/m³)"
         x_caption_metric = "powder factor (kg/m³)"

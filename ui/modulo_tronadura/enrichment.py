@@ -17,6 +17,7 @@ from core.drill_hardness_processor import (
     enrich_blast_with_hardness,
     load_drilling_csv,
 )
+from core.blast_correlation import compute_powder_factor
 from core.blast_metrics import enrich_blast_dataframe
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,14 @@ def enrich_processed(
     df_clean: pd.DataFrame,
     hardness_bytes: bytes | None = None,
 ) -> pd.DataFrame:
-    """Apply post-processing enrichment (blast metrics + optional hardness)."""
+    """Apply post-processing enrichment (powder factor + metrics + optional hardness).
+
+    Adds the per-hole powder-factor columns (``pf_g_per_ton``,
+    ``pf_g_per_ton_net``, ``pf_g_per_ton_inf``, ``area_influence_m2``,
+    ``pf_vol_kgm3``, ``pf_area_kgm2``, ``energy_mj``, …) so the processed
+    dataframe and hover tooltips can surface the g(exp)/ton values.
+    """
+    df_clean = compute_powder_factor(df_clean)
     df_clean = enrich_blast_dataframe(df_clean)
 
     if hardness_bytes is not None:

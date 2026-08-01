@@ -32,6 +32,7 @@ _COLLAR_HOVERTEMPLATE = (
     "Azimut: %{customdata[9]:.0f}°<br>"
     "%{customdata[11]}<br>"
     "%{customdata[12]}<br>"
+    "%{customdata[14]}<br>"
     "<extra></extra>"
 )
 
@@ -83,7 +84,7 @@ def _build_collar_customdata(df: pd.DataFrame, kg_col: str | None):
     """Return customdata array for collar hovertemplate enrichment."""
     n = len(df)
     if n == 0:
-        return np.empty((0, 14), dtype=object)
+        return np.empty((0, 15), dtype=object)
 
     malla_col = find_df_column(df, ["Nombre_Malla_Original", "malla"], raise_error=False)
 
@@ -169,9 +170,18 @@ def _build_collar_customdata(df: pd.DataFrame, kg_col: str | None):
         else np.array([""] * n, dtype=object)
     )
 
+    if "pf_g_per_ton_inf" in df.columns:
+        pf_inf = pd.to_numeric(df["pf_g_per_ton_inf"], errors="coerce")
+        pf_strings = np.array([
+            "PF (área inf.): " + (f"{float(v):.0f} g/ton" if pd.notna(v) else "—")
+            for v in pf_inf
+        ], dtype=object)
+    else:
+        pf_strings = np.array([""] * n, dtype=object)
+
     return np.column_stack([
         label, expl, kilos, diam, length, taco, altura, kgpm,
-        incl, az, diam_inch, dureza_strings, tasa_strings, malla,
+        incl, az, diam_inch, dureza_strings, tasa_strings, malla, pf_strings,
     ])
 
 
@@ -227,8 +237,8 @@ def _plot_discrete_traces(
             line_custom = np.repeat(sub_custom[mask], 3, axis=0)
             collar_custom = sub_custom[mask]
         else:
-            line_custom = np.empty((0, 14))
-            collar_custom = np.empty((0, 14))
+            line_custom = np.empty((0, 15))
+            collar_custom = np.empty((0, 15))
 
         fig.add_trace(go.Scatter3d(
             x=m_x, y=m_y, z=m_z,
@@ -359,6 +369,10 @@ def build_three_d_figure(
             colors = df[kg_col].values.astype(float)
             title = "kg"
             charge_bounds = dict(cmin=0.0, cmax=1000.0)
+        elif color_by == "Factor de Carga (g/ton)":
+            pf_col = "pf_g_per_ton_inf" if "pf_g_per_ton_inf" in df.columns else "pf_g_per_ton"
+            colors = pd.to_numeric(df[pf_col], errors="coerce").fillna(0).astype(float).values
+            title = "g/ton"
         elif color_by == "Diámetro (mm)" and "Diam_mm" in df.columns:
             colors = df["Diam_mm"].values.astype(float)
             title = "mm"
@@ -667,6 +681,8 @@ def build_color_options(df: pd.DataFrame) -> list[str]:
 
     if kg_col:
         options.append("Carga Explosiva (Kg)")
+    if "pf_g_per_ton_inf" in df.columns or "pf_g_per_ton" in df.columns:
+        options.append("Factor de Carga (g/ton)")
     if malla_col:
         options.append("Mallas de Tronadura (Grid)")
     if poligono_col:
