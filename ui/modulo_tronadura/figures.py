@@ -16,6 +16,7 @@ from ui.ref_lines import add_ref_lines_3d
 
 _COLLAR_HOVERTEMPLATE = (
     "<b>%{customdata[0]}</b><br>"
+    "Malla: %{customdata[13]}<br>"
     "X: %{x:.1f}<br>"
     "Y: %{y:.1f}<br>"
     "Z (collar): %{z:.1f}<br>"
@@ -45,7 +46,7 @@ _COLOR_CYCLE = [
 ]
 
 _ALL_COLORSCALES = [
-    "Inferno", "Hot", "Viridis", "Plasma", "Magma", "Cividis",
+    "Turbo", "Inferno", "Hot", "Viridis", "Plasma", "Magma", "Cividis",
     "Rainbow", "Jet", "Earth", "YlOrRd", "RdBu", "Spectral",
     "Balance", "Electric", "Bluered", "Greens", "Reds", "Blues",
 ]
@@ -82,7 +83,9 @@ def _build_collar_customdata(df: pd.DataFrame, kg_col: str | None):
     """Return customdata array for collar hovertemplate enrichment."""
     n = len(df)
     if n == 0:
-        return np.empty((0, 13), dtype=object)
+        return np.empty((0, 14), dtype=object)
+
+    malla_col = find_df_column(df, ["Nombre_Malla_Original", "malla"], raise_error=False)
 
     label = (
         _safe_str(df["label_pozo"]).values
@@ -160,9 +163,15 @@ def _build_collar_customdata(df: pd.DataFrame, kg_col: str | None):
     else:
         tasa_strings = np.array([""] * n, dtype=object)
 
+    malla = (
+        _safe_str(df[malla_col]).values
+        if malla_col and malla_col in df.columns
+        else np.array([""] * n, dtype=object)
+    )
+
     return np.column_stack([
         label, expl, kilos, diam, length, taco, altura, kgpm,
-        incl, az, diam_inch, dureza_strings, tasa_strings,
+        incl, az, diam_inch, dureza_strings, tasa_strings, malla,
     ])
 
 
@@ -188,6 +197,7 @@ def _plot_discrete_traces(
         mask = (df[category_col].astype(str) == val_name).values
         df_sub = df[mask]
         color = _COLOR_CYCLE[idx % len(_COLOR_CYCLE)]
+        legend_name = f"{label_prefix}: {val_name}"
 
         n_s = len(df_sub)
         m_x = np.empty(n_s * 3, dtype=object)
@@ -217,14 +227,15 @@ def _plot_discrete_traces(
             line_custom = np.repeat(sub_custom[mask], 3, axis=0)
             collar_custom = sub_custom[mask]
         else:
-            line_custom = np.empty((0, 13))
-            collar_custom = np.empty((0, 13))
+            line_custom = np.empty((0, 14))
+            collar_custom = np.empty((0, 14))
 
         fig.add_trace(go.Scatter3d(
             x=m_x, y=m_y, z=m_z,
             mode="lines",
             line=dict(color=color, width=2),
-            name=f"Trayectorias {val_name}",
+            name=legend_name,
+            legendgroup=legend_name,
             customdata=line_custom,
             hovertemplate=_COLLAR_HOVERTEMPLATE,
             showlegend=False,
@@ -236,7 +247,8 @@ def _plot_discrete_traces(
             z=df_sub["Z_collar"].values,
             mode="markers",
             marker=dict(size=4, color=color),
-            name=f"{label_prefix}: {val_name}",
+            name=legend_name,
+            legendgroup=legend_name,
             customdata=collar_custom,
             hovertemplate=_COLLAR_HOVERTEMPLATE,
         ))
@@ -281,7 +293,7 @@ def build_three_d_figure(
     y_lines,
     z_lines,
     color_by: str,
-    sel_colorscale: str = "Inferno",
+    sel_colorscale: str = "Turbo",
     *,
     design_mesh_trace=None,
     topo_mesh_trace=None,
@@ -342,9 +354,11 @@ def build_three_d_figure(
             showlegend=True,
         ))
 
+        charge_bounds: dict = {}
         if color_by == "Carga Explosiva (Kg)" and kg_col:
             colors = df[kg_col].values.astype(float)
             title = "kg"
+            charge_bounds = dict(cmin=0.0, cmax=1000.0)
         elif color_by == "Diámetro (mm)" and "Diam_mm" in df.columns:
             colors = df["Diam_mm"].values.astype(float)
             title = "mm"
@@ -373,6 +387,7 @@ def build_three_d_figure(
             colorscale=sel_colorscale,
             showscale=True,
             colorbar=dict(title=title, x=1.0, len=0.6),
+            **charge_bounds,
         )
 
         fig.add_trace(go.Scatter3d(
