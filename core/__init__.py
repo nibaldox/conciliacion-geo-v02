@@ -13,6 +13,9 @@ from core.param_extractor import (
 )
 from core.excel_writer import export_results
 from core.report_generator import generate_word_report, generate_section_images_zip
+from core.topo_reconciliation import (
+    reconcile_grid, reconcile_by_holes, grid_from_mesh, classify_delta_z, grid_metrics,
+)
 
 __all__ = [
     'load_mesh', 'get_mesh_bounds', 'mesh_to_plotly', 'decimate_mesh',
@@ -20,4 +23,6 @@ __all__ = [
     'cut_both_surfaces', 'extract_parameters', 'build_reconciled_profile_v2',
     'compare_design_vs_asbuilt', 'build_reconciled_profile',
     'generate_word_report', 'generate_section_images_zip',
+    'reconcile_grid', 'reconcile_by_holes', 'grid_from_mesh',
+    'classify_delta_z', 'grid_metrics',
 ]
