@@ -87,6 +87,9 @@ def render_three_d_tab(df_clean: pd.DataFrame) -> None:
     if show_energy_grid and get_last_idw_grid() is not None:
         _render_idw_download()
 
+    from ui.modulo_tronadura.tabular import render_explosive_quality
+    render_explosive_quality(df_filtered)
+
     with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
         st.dataframe(df_filtered, width="stretch")
 

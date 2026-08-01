@@ -73,7 +73,7 @@ Not re-exported (import from the submodule): anything in `core.geom_utils`, `cor
 
 - `core/calculo_tronadura.py` — coordinate correction: `X=Latitud_Geo`, `Y=Longitud_Geo`, `Z_collar=Nombre_Banco+15m`; toe from `Inclinacion_real`/`Azimuth_real`/`longitud_real`.
 - `core/blast_correlation.py` + `core/blast_metrics.py` — projects blast holes onto cross-sections, computes PF / stemming ratio / kg/m, classifies berms as ramps.
-- Legacy UI lives in `ui/modulo_tronadura.py` + `ui/tabs/blast_correlation.py` (off-limits with `app.py`/`ui/`).
+- Legacy UI lives in `ui/modulo_tronadura.py` + `ui/tabs/blast_correlation.py` (`app.py`/`ui/` off-limits except `ui/modulo_tronadura/` — see the H-10 exception).
 
 ### Pipeline
 
@@ -159,6 +159,8 @@ Key detection defaults: `face_threshold=40°`, `berm_threshold=20°`, `max_berm_
 - Ramp detection is partial (width range 15-42m). The "Rampas" Excel sheet may need manual input.
 - Sections near mesh edges can produce incomplete profiles with no user warning.
 - **`app.py` (root) and `ui/` are off-limits** — the maintainer uses them daily for real work. `CONTRIBUTING.md` mentions `core/` and `cli.py` too, but in practice those are shared domain where changes happen; the rule that actually holds is: changes to `core/` are welcome if they preserve the legacy stable API re-exported by `core/__init__.py`. New work goes into `web/` and `api/`, additive only.
+  - **Documented exception (audit H-10)**: `ui/modulo_tronadura/` is the maintainer-approved active Streamlit UI for the drill & blast module (all recent PF/halo/tronadura features ship there at the maintainer's request). Constraint: it must remain an **adapter/presentation layer only** — all domain logic (geometry, physics, powder factor, Voronoi, provenance) lives in `core/`; the module only calls core functions and renders Plotly/Streamlit. New domain logic must never be added inside `ui/`.
+- **Audit contract (Fase 1.1)**: sensitive magnitudes carry `value + unit + status + source + assumptions + warnings` from data read to UI/export (see `explosive_*` provenance columns and `incl_convention_warning`). Invariants enforced by tests: clipped Voronoi area sums ≤ domain; dimensionless fractions are never named kg/m³; unknown explosives never fall back to ANFO; bench height is an event attribute.
 - **Streamlit file watcher**: `fileWatcherType = "poll"` is set in `.streamlit/config.toml` to avoid `inotify` ENOSPC; don't switch to default `auto` on systems with many small files.
 - **Electron portable build requires two steps**: `pyinstaller conciliacion-api.spec` → `electron-builder` in `electron/`. The `VITE_PWA=false` env var is mandatory during the web build step or the SW will break the AppImage.
 - **Test counts shift**: ~1,202 collected (backend, with `--ignore`) / 1,233 with openblast. README.md has a testing table (1,233 backend + 344 frontend) — update it in PRs that add or remove tests.

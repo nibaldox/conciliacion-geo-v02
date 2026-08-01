@@ -40,6 +40,53 @@ from ui.modulo_tronadura.state import (
 logger = logging.getLogger(__name__)
 
 
+def render_explosive_quality(df_clean: pd.DataFrame) -> None:
+    """H-08: explosive provenance (status/source/RWS) visible in the UI.
+
+    Shows a persistent data-quality summary and a per-hole provenance
+    table. Unknown products surface an explicit warning — never a
+    silent ANFO fallback.
+    """
+    if df_clean is None or df_clean.empty or "explosive_status" not in df_clean.columns:
+        return
+
+    df = df_clean.copy()
+    status_counts = df["explosive_status"].value_counts().to_dict()
+    unknown = int(status_counts.get("UNKNOWN", 0))
+    family = int(status_counts.get("FAMILY_MATCH", 0))
+    unvalidated = int(status_counts.get("UNVALIDATED_REFERENCE", 0))
+
+    warnings: list[str] = []
+    if unknown:
+        warnings.append(f"**{unknown} pozos** con explosivo **DESCONOCIDO** (sin propiedades asignadas; energía y RWS = NaN)")
+    if family:
+        warnings.append(f"**{family} pozos** con producto por **coincidencia de familia** (valores del grado base)")
+    if unvalidated:
+        warnings.append(f"**{unvalidated} pozos** con producto de **referencia no validada** (falta ficha técnica oficial; RWS estimado)")
+
+    with st.expander("🧪 Calidad de datos de explosivos (procedencia)", expanded=False):
+        col_a, col_b = st.columns(2)
+        col_a.markdown("**Estado por producto:**")
+        col_a.dataframe(
+            df.assign(_n=1).groupby(["Tipo_Explosivo", "explosive_status"])["_n"].count()
+            .rename("pozos").reset_index(),
+            width="stretch",
+        )
+        col_b.markdown("**Advertencias:**")
+        if warnings:
+            for w in warnings:
+                col_b.markdown(f"- ⚠️ {w}")
+        else:
+            col_b.success("✅ Todos los productos tienen propiedades validadas.")
+        st.markdown("**Detalle por pozo (estado, fuente, RWS):**")
+        detail_cols = [
+            c for c in ("label_pozo", "Tipo_Explosivo", "explosive_status",
+                        "explosive_source", "explosive_rws", "explosive_rws_is_estimated")
+            if c in df.columns
+        ]
+        st.dataframe(df[detail_cols], width="stretch")
+
+
 def render_correlation_tab(df_clean: pd.DataFrame) -> None:
     """Render the "🔬 Correlación Geotécnica" tab."""
     df_filtered = df_clean.copy()
