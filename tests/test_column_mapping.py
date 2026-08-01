@@ -197,6 +197,34 @@ class TestApplyMapping:
         result = apply_mapping(df, mapping)
         assert result["X"].dtype.kind in "fc"  # float or complex
 
+    def test_string_fields_stay_string(self):
+        """Tipo_Explosivo / Tipo_Pozo must NOT be coerced to float.
+
+        Regression: these canonical fields were declared with the default
+        dtype "float", so mapped values like "Pirex-930" became NaN and the
+        hover tooltip showed "?" instead of the explosive name.
+        """
+        df = pd.DataFrame({
+            "Easting": [100.0, 200.0],
+            "Northing": [50.0, 60.0],
+            "Elevation": [1000.0, 1010.0],
+            "Dip": [5.0, 10.0],
+            "Heading": [45.0, 90.0],
+            "Length": [10.0, 12.0],
+            "Nombre": ["Pirex-930", "Pirex-920"],
+            "Hole_Type": ["Production", "Production"],
+        })
+        mapping: dict[str, str | None] = {
+            "X": "Easting", "Y": "Northing", "Z_collar": "Elevation",
+            "Incl": "Dip", "Az": "Heading", "Len": "Length",
+            "Tipo_Explosivo": "Nombre", "Tipo_Pozo": "Hole_Type",
+        }
+        result = apply_mapping(df, mapping)
+        assert result["Tipo_Explosivo"].tolist() == ["Pirex-930", "Pirex-920"]
+        assert result["Tipo_Pozo"].tolist() == ["Production", "Production"]
+        assert result["Tipo_Explosivo"].dtype.kind == "O"  # object/string
+        assert result["Tipo_Explosivo"].isna().sum() == 0
+
     def test_invalid_mapping_raises(self):
         df = self._make_df()
         mapping: dict[str, str | None] = {"X": "Easting"}  # missing required

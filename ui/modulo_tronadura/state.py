@@ -67,7 +67,6 @@ def set_blast_processed(value: bool) -> None:
 
 
 def reset_blast_processed_state() -> None:
-    set_blast_cached_name("")
     set_blast_df(None)
     clear_blast_lines()
     set_blast_processed(False)

@@ -48,7 +48,7 @@ CANONICAL_FIELDS: tuple[CanonicalField, ...] = (
     CanonicalField("Burden",         False, "Burden",                     "m",  ("Burden", "Burden_Real", "Burden_diseno", "B")),
     CanonicalField("Esp",            False, "Espaciamiento",              "m",  ("Espaciamiento", "Espaciamiento_Real", "Spacing", "S", "Esp")),
     CanonicalField("Diam_mm",        False, "Diámetro perforación",       "mm", ("Diametro", "Diametro_pozo", "Diameter", "D_mm", "Diam_mm")),
-    CanonicalField("Tipo_Explosivo", False, "Tipo de explosivo",          "",   ("Tipo_Explosivo", "Explosivo", "Explosive_Type", "Nombre", "nombre")),
+    CanonicalField("Tipo_Explosivo", False, "Tipo de explosivo",          "",   ("Tipo_Explosivo", "Explosivo", "Explosive_Type", "Nombre", "nombre"), dtype="str"),
     CanonicalField("Taco_m",         False, "Taco (stemming)",            "m",  ("Taco", "Stemming", "stemming_real", "Taco_m")),
     CanonicalField("Secuencia",      False, "Secuencia de detonación",    "",   ("Secuencia", "Secuencia_Iniciacion", "Detonador_Nro", "Sequence")),
     CanonicalField("Retardo_ms",     False, "Retardo",                    "ms", ("Retardo_ms", "Delay_ms", "Tiempo_Retardo")),
@@ -56,7 +56,7 @@ CANONICAL_FIELDS: tuple[CanonicalField, ...] = (
     CanonicalField("Carga_Fondo_kg",     False, "Carga de fondo",          "kg", ("Carga_Fondo_kg", "Kilos_Fondo", "Bottom_Charge")),
     CanonicalField("Carga_Columna_kg",   False, "Carga de columna",        "kg", ("Carga_Columna_kg", "Kilos_Columna", "Column_Charge")),
     CanonicalField("Longitud_Carga_m",   False, "Longitud cargada",        "m",  ("Longitud_Carga_m", "Charge_Length")),
-    CanonicalField("Tipo_Pozo",      False, "Tipo de pozo",               "",   ("Tipo_Pozo", "Hole_Type")),
+    CanonicalField("Tipo_Pozo",      False, "Tipo de pozo",               "",   ("Tipo_Pozo", "Hole_Type"), dtype="str"),
     CanonicalField("Az_Diseno",      False, "Azimut de diseño",           "°",  ("Azimuth_Diseno", "Design_Azimuth", "Az_Diseno")),
     CanonicalField("Incl_Diseno",    False, "Inclinación de diseño",      "°",  ("Inclinacion_Diseno", "Design_Dip", "Incl_Diseno")),
 )
