@@ -5,6 +5,7 @@ import logging
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 from core.config import DEFAULTS
@@ -14,6 +15,8 @@ from ui.modulo_tronadura.figures import (
     build_energy_grid,
     build_energy_surface_trace,
     build_line_arrays,
+    build_pf_halo_rings_3d_trace,
+    build_pf_halo_rings_trace,
     build_three_d_figure,
     get_available_colorscales,
     is_discrete_color_option,
@@ -55,13 +58,14 @@ def render_three_d_tab(df_clean: pd.DataFrame) -> None:
     )
 
     with st.expander("🎨 Opciones de Visualización 3D", expanded=True):
-        color_by, sel_colorscale, show_energy_grid, show_design_mesh, show_topo_mesh = _render_3d_options(df_clean)
+        color_by, sel_colorscale, show_energy_grid, show_pf_heatmap, show_design_mesh, show_topo_mesh = _render_3d_options(df_clean)
 
     x_lines, y_lines, z_lines = build_line_arrays(df_filtered)
 
     design_mesh_trace = _get_design_mesh_trace(show_design_mesh)
     topo_mesh_trace = _get_topo_mesh_trace(show_topo_mesh)
     energy_surface_trace = _get_energy_surface_trace(df_filtered, show_energy_grid)
+    pf_heatmap_trace = _get_pf_heatmap_trace(df_filtered, show_pf_heatmap)
 
     fig = build_three_d_figure(
         df_filtered,
@@ -73,8 +77,12 @@ def render_three_d_tab(df_clean: pd.DataFrame) -> None:
         design_mesh_trace=design_mesh_trace,
         topo_mesh_trace=topo_mesh_trace,
         energy_surface_trace=energy_surface_trace,
+        pf_heatmap_trace=pf_heatmap_trace,
     )
     st.plotly_chart(fig, width="stretch")
+
+    if show_pf_heatmap:
+        _render_pf_halo_2d(df_filtered)
 
     if show_energy_grid and get_last_idw_grid() is not None:
         _render_idw_download()
@@ -170,7 +178,7 @@ def _render_filters_and_apply(df_clean: pd.DataFrame) -> pd.DataFrame:
     return df_filtered
 
 
-def _render_3d_options(df_clean: pd.DataFrame) -> tuple[str, str, bool, bool, bool]:
+def _render_3d_options(df_clean: pd.DataFrame) -> tuple[str, str, bool, bool, bool, bool]:
     col_v1, col_v2, col_v3 = st.columns(3)
 
     color_options = build_color_options(df_clean)
@@ -190,6 +198,7 @@ def _render_3d_options(df_clean: pd.DataFrame) -> tuple[str, str, bool, bool, bo
     )
 
     show_energy_grid = col_v3.checkbox("⚡ Mostrar Densidad de Energía 3D (IDW)", value=False)
+    show_pf_heatmap = col_v3.checkbox("🔋 Halo de Energía por Pozo (g/ton)", value=False)
 
     show_design_mesh = False
     show_topo_mesh = False
@@ -204,7 +213,7 @@ def _render_3d_options(df_clean: pd.DataFrame) -> tuple[str, str, bool, bool, bo
         if has_t_mesh:
             show_topo_mesh = col_m2.checkbox("🟢 Mostrar Topografía Real (As-Built Transparente)", value=False)
 
-    return color_by, sel_colorscale, show_energy_grid, show_design_mesh, show_topo_mesh
+    return color_by, sel_colorscale, show_energy_grid, show_pf_heatmap, show_design_mesh, show_topo_mesh
 
 
 def _get_design_mesh_trace(show_design_mesh: bool):
@@ -258,6 +267,88 @@ def _get_energy_surface_trace(df_filtered: pd.DataFrame, show_energy_grid: bool)
         "Energy_kg_m2": energy_grid["Energy_kg_m2"],
     })
     return build_energy_surface_trace(energy_grid)
+
+
+def _get_pf_col(df: pd.DataFrame) -> str | None:
+    """Resolve the powder-factor column: Voronoi g/ton first, then classic."""
+    if "pf_g_per_ton_inf" in df.columns:
+        return "pf_g_per_ton_inf"
+    if "pf_g_per_ton" in df.columns:
+        return "pf_g_per_ton"
+    return None
+
+
+def _get_pf_heatmap_trace(df_filtered: pd.DataFrame, show_pf_heatmap: bool):
+    if not show_pf_heatmap:
+        return None
+
+    pf_col = _get_pf_col(df_filtered)
+    if pf_col is None:
+        st.info("ℹ️ No hay columna de factor de carga (g/ton) — procesa el archivo para calcularlo.")
+        return None
+
+    if len(df_filtered) < 1:
+        return None
+
+    _, _, _, search_radius = get_idw_grid_params()
+    return build_pf_halo_rings_3d_trace(df_filtered, pf_col, search_radius=search_radius)
+
+
+def _render_pf_halo_2d(df_filtered: pd.DataFrame) -> None:
+    """Render the 2-D per-hole halo-ring chart below the 3D figure."""
+    pf_col = _get_pf_col(df_filtered)
+    if pf_col is None:
+        return
+
+    _, _, _, search_radius = get_idw_grid_params()
+    trace = build_pf_halo_rings_trace(df_filtered, pf_col, search_radius=search_radius)
+    if trace is None or len(trace.x) == 0:
+        return
+
+    label_col = (
+        "label_pozo"
+        if "label_pozo" in df_filtered.columns
+        else ("id_pozo" if "id_pozo" in df_filtered.columns else None)
+    )
+    hover = "X: %{x:.1f} m<br>Y: %{y:.1f} m<br><extra></extra>"
+    if label_col is not None:
+        hovertemplate = (
+            "<b>%{customdata}</b><br>X: %{x:.1f} m<br>Y: %{y:.1f} m<br><extra></extra>"
+        )
+    else:
+        hovertemplate = hover
+    collar_trace = go.Scattergl(
+        x=df_filtered["X"],
+        y=df_filtered["Y"],
+        mode="markers",
+        marker=dict(
+            size=6,
+            color="#111111",
+            line=dict(width=1, color="white"),
+        ),
+        name="Pozos",
+        customdata=(
+            df_filtered[label_col].astype(str).values
+            if label_col is not None
+            else None
+        ),
+        hovertemplate=hovertemplate,
+        showlegend=True,
+    )
+
+    fig_2d = go.Figure([trace, collar_trace])
+    fig_2d.update_layout(
+        height=520,
+        margin=dict(l=0, r=0, t=40, b=0),
+        title=dict(
+            text="🔋 Halos de Energía por Pozo — Factor de Carga (g/ton)",
+            font=dict(size=14),
+        ),
+        xaxis_title="Este (m)",
+        yaxis_title="Norte (m)",
+        yaxis=dict(scaleanchor="x", scaleratio=1),
+    )
+    st.plotly_chart(fig_2d, width="stretch")
 
 
 def _render_idw_download() -> None:

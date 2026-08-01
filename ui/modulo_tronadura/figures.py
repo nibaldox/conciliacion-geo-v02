@@ -308,6 +308,7 @@ def build_three_d_figure(
     design_mesh_trace=None,
     topo_mesh_trace=None,
     energy_surface_trace=None,
+    pf_heatmap_trace=None,
     ref_lines_z_value: float | None = None,
 ) -> go.Figure:
     """Build the 3D blast-hole visualization figure.
@@ -330,6 +331,8 @@ def build_three_d_figure(
         fig.add_trace(topo_mesh_trace)
     if energy_surface_trace is not None:
         fig.add_trace(energy_surface_trace)
+    if pf_heatmap_trace is not None:
+        fig.add_trace(pf_heatmap_trace)
 
     if color_by == "Mallas de Tronadura (Grid)" and malla_col:
         unique_vals = sorted(df[malla_col].dropna().astype(str).unique().tolist())
@@ -373,6 +376,7 @@ def build_three_d_figure(
             pf_col = "pf_g_per_ton_inf" if "pf_g_per_ton_inf" in df.columns else "pf_g_per_ton"
             colors = pd.to_numeric(df[pf_col], errors="coerce").fillna(0).astype(float).values
             title = "g/ton"
+            charge_bounds = dict(cmin=0.0, cmax=200.0)
         elif color_by == "Diámetro (mm)" and "Diam_mm" in df.columns:
             colors = df["Diam_mm"].values.astype(float)
             title = "mm"
@@ -434,19 +438,19 @@ def build_three_d_figure(
 # Energy grid / surface
 # ---------------------------------------------------------------------------
 
-def build_energy_grid(
+def _idw_field(
     df: pd.DataFrame,
-    kg_col: str | None,
+    values: np.ndarray,
     grid_nx: int,
     grid_ny: int,
     grid_nz: int,
     search_radius: float,
 ) -> dict:
-    """Compute the IDW energy grid from collar-toe segments.
+    """Shared IDW kernel: accumulate ``values`` of nearby holes on a 3-D grid.
 
-    Returns a dict with ``X, Y, Z, Energy_kg_m2`` arrays plus helper
-    fields ``xs, ys, Z_collar_mean, E_xy, E_max`` needed by the surface
-    trace builder.
+    Each grid point sums the value of every hole weighted by a gaussian
+    of the distance to the closest point on the collar→toe segment, so
+    the field peaks at the hole and decays with distance from it.
     """
     grid_nx = max(2, min(50, int(grid_nx)))
     grid_ny = max(2, min(50, int(grid_ny)))
@@ -459,11 +463,20 @@ def build_energy_grid(
     V = T - C
     V_len_sq = np.sum(V**2, axis=1)
     V_len_sq[V_len_sq == 0] = 1e-6
-    Q = df[kg_col].fillna(0).values if kg_col else np.ones(len(df))
+    Q = np.asarray(values, dtype=float)
 
     x_min, x_max = float(C[:, 0].min()), float(C[:, 0].max())
     y_min, y_max = float(C[:, 1].min()), float(C[:, 1].max())
     z_min, z_max = float(T[:, 2].min()), float(C[:, 2].max())
+
+    # Degenerate extents (e.g. a single hole): pad so the field still has
+    # spatial spread around the holes.
+    if x_max - x_min < 1e-9:
+        x_min, x_max = x_min - search_radius, x_max + search_radius
+    if y_max - y_min < 1e-9:
+        y_min, y_max = y_min - search_radius, y_max + search_radius
+    if z_max - z_min < 1e-9:
+        z_min, z_max = z_min - search_radius, z_max + search_radius
 
     xs = np.linspace(x_min, x_max, grid_nx)
     ys = np.linspace(y_min, y_max, grid_ny)
@@ -483,20 +496,226 @@ def build_energy_grid(
         energies[i] = float(np.sum(Q * weights))
 
     Z_collar_mean = float(df["Z_collar"].mean())
-    E_xy = energies.reshape(grid_nx, grid_ny, grid_nz).sum(axis=2)
+    # np.meshgrid default 'xy' indexing flattens in (y, x, z) order, so the
+    # integrated field must be reshaped as (grid_ny, grid_nx) for Plotly
+    # Surface (rows = y, columns = x).
+    E_xy = energies.reshape(grid_ny, grid_nx, grid_nz).sum(axis=2)
     E_max = float(E_xy.max()) if E_xy.max() > 0 else 1.0
 
     return {
         "X": points[:, 0].copy(),
         "Y": points[:, 1].copy(),
         "Z": points[:, 2].copy(),
-        "Energy_kg_m2": energies.copy(),
+        "values": energies.copy(),
         "xs": xs,
         "ys": ys,
         "Z_collar_mean": Z_collar_mean,
         "E_xy": E_xy,
         "E_max": E_max,
     }
+
+
+def build_energy_grid(
+    df: pd.DataFrame,
+    kg_col: str | None,
+    grid_nx: int,
+    grid_ny: int,
+    grid_nz: int,
+    search_radius: float,
+) -> dict:
+    """Compute the IDW energy grid from collar-toe segments.
+
+    Returns a dict with ``X, Y, Z, Energy_kg_m2`` arrays plus helper
+    fields ``xs, ys, Z_collar_mean, E_xy, E_max`` needed by the surface
+    trace builder.
+    """
+    if kg_col and kg_col in df.columns:
+        values = df[kg_col].fillna(0).values
+    else:
+        values = np.ones(len(df))
+    field = _idw_field(df, values, grid_nx, grid_ny, grid_nz, search_radius)
+    field["Energy_kg_m2"] = field.pop("values")
+    return field
+
+
+def build_pf_halo_rings_3d_trace(
+    df: pd.DataFrame,
+    value_col: str | None,
+    search_radius: float = 30.0,
+    levels: int = 2,
+    ring_points: int = 32,
+    cap_gton: float = 200.0,
+    max_holes: int = 4000,
+) -> go.Scatter3d | None:
+    """3-D per-hole halo rings (Turbo): concentric rings around the hole axis.
+
+    Every hole draws its own set of concentric rings at radii σ/4, σ/2
+    and σ (σ = search_radius) on horizontal planes at ``levels`` depths
+    along the collar→toe segment. Each ring is coloured with the hole's
+    powder factor times the gaussian decay ``exp(-r²/2σ²)``, so the
+    energy peaks on the hole axis and fades with distance — every hole
+    keeps an independent halo.
+
+    ``Scatter3d`` line traces support per-point colorscales, so the
+    rings render as continuous circles (unlike the 2-D dotted rings).
+
+    When the dataframe holds more than ``max_holes`` rows, a uniform
+    sample is drawn to keep the trace light.
+
+    Returns None when the dataframe is empty or the value column is
+    missing.
+    """
+    if df is None or df.empty or not value_col or value_col not in df.columns:
+        return None
+
+    if len(df) > max_holes:
+        idx = np.linspace(0, len(df) - 1, max_holes).astype(int)
+        df = df.iloc[idx]
+
+    sigma = float(search_radius) if search_radius > 0 else 30.0
+    radii = np.array([0.25, 0.5, 1.0]) * sigma
+    weights = np.exp(-(radii ** 2) / (2.0 * sigma ** 2))
+    pf = pd.to_numeric(df[value_col], errors="coerce").fillna(0).values.astype(float)
+
+    C = df[["X", "Y", "Z_collar"]].values.astype(float)
+    T = df[["X_toe", "Y_toe", "Z_toe"]].values.astype(float)
+    t_frac = np.linspace(0.0, 1.0, int(levels))
+    n_ring = int(ring_points)
+
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    colors: list[float] = []
+
+    for i in range(len(df)):
+        base = C[i]
+        seg = T[i] - C[i]
+        for tf in t_frac:
+            p0 = base + tf * seg
+            for r, w in zip(radii, weights):
+                ang = np.linspace(0.0, 2.0 * np.pi, n_ring, endpoint=True)
+                xs.extend((p0[0] + r * np.cos(ang)).tolist())
+                ys.extend((p0[1] + r * np.sin(ang)).tolist())
+                zs.extend([float(p0[2])] * n_ring)
+                colors.extend([float(pf[i] * w)] * n_ring)
+
+    return go.Scatter3d(
+        x=xs,
+        y=ys,
+        z=zs,
+        mode="lines",
+        line=dict(
+            width=3,
+            color=colors,
+            colorscale="Turbo",
+            cmin=0.0,
+            cmax=float(cap_gton),
+            colorbar=dict(
+                title=dict(
+                    text="PF por pozo<br>(g/ton)",
+                    font=dict(size=11),
+                    side="right",
+                ),
+                x=1.12,
+                len=0.6,
+                thickness=18,
+            ),
+        ),
+        opacity=0.9,
+        name="Halos de Energía por Pozo (g/ton)",
+        hovertemplate=(
+            "X: %{x:.1f} m<br>"
+            "Y: %{y:.1f} m<br>"
+            "Z: %{z:.1f} m<br>"
+            "<extra></extra>"
+        ),
+        showlegend=True,
+    )
+
+
+def build_pf_halo_rings_trace(
+    df: pd.DataFrame,
+    value_col: str | None,
+    search_radius: float = 30.0,
+    ring_points: int = 48,
+    cap_gton: float = 200.0,
+    max_holes: int = 4000,
+) -> go.Scattergl | None:
+    """Per-hole independent halo rings in 2D (Turbo palette).
+
+    Every hole draws its own set of concentric dotted rings at radii
+    σ/4, σ/2 and σ (σ = search_radius). Each ring point is coloured
+    with the hole's powder factor times the gaussian decay
+    ``exp(-r²/2σ²)``, so each halo reads as an independent per-hole
+    energy field that fades with distance from the hole centre — holes
+    never merge into a single global field.
+
+    ``Scattergl`` is used because 2-D line traces cannot carry a
+    per-point colorscale; the dense dotted rings render as circles.
+
+    When the dataframe holds more than ``max_holes`` rows, a uniform
+    sample is drawn to keep the trace light.
+
+    Returns None when the dataframe is empty or the value column is
+    missing.
+    """
+    if df is None or df.empty or not value_col or value_col not in df.columns:
+        return None
+
+    if len(df) > max_holes:
+        idx = np.linspace(0, len(df) - 1, max_holes).astype(int)
+        df = df.iloc[idx]
+
+    sigma = float(search_radius) if search_radius > 0 else 30.0
+    radii = np.array([0.25, 0.5, 1.0]) * sigma
+    weights = np.exp(-(radii ** 2) / (2.0 * sigma ** 2))
+    pf = pd.to_numeric(df[value_col], errors="coerce").fillna(0).values.astype(float)
+
+    xs: list[float] = []
+    ys: list[float] = []
+    colors: list[float] = []
+    n_ring = int(ring_points)
+    coords = df[["X", "Y"]].values.astype(float)
+
+    for i in range(len(df)):
+        cx, cy = coords[i, 0], coords[i, 1]
+        for r, w in zip(radii, weights):
+            ang = np.linspace(0.0, 2.0 * np.pi, n_ring, endpoint=False)
+            xs.extend((cx + r * np.cos(ang)).tolist())
+            ys.extend((cy + r * np.sin(ang)).tolist())
+            colors.extend([float(pf[i] * w)] * n_ring)
+
+    return go.Scattergl(
+        x=xs,
+        y=ys,
+        mode="markers",
+        marker=dict(
+            size=3,
+            color=colors,
+            colorscale="Turbo",
+            cmin=0.0,
+            cmax=float(cap_gton),
+            colorbar=dict(
+                title=dict(
+                    text="PF por pozo<br>(g/ton)",
+                    font=dict(size=11),
+                    side="right",
+                ),
+                x=1.0,
+                len=0.6,
+                thickness=18,
+            ),
+        ),
+        opacity=0.85,
+        name="Halos de Energía por Pozo (g/ton)",
+        hovertemplate=(
+            "PF: %{marker.color:.0f} g/ton<br>"
+            "X: %{x:.1f} m<br>"
+            "Y: %{y:.1f} m<br>"
+            "<extra></extra>"
+        ),
+        showlegend=True,
+    )
 
 
 def build_energy_surface_trace(energy_grid: dict) -> go.Surface:
