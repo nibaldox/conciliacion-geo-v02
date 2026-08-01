@@ -136,6 +136,10 @@ class ExplosiveEnergy:
     source of truth for the per-grade Pirex emulsion values consumed by
     :mod:`core.explosive_properties` (formerly hardcoded there in
     parallel ``PIREX_ENERGY_MJ_KG`` / ``PIREX_DENSITY_G_CM3`` dicts).
+
+    The ``energy_mj_per_kg`` / ``density_g_per_cm3`` lookups delegate to
+    :func:`core.explosive_properties.resolve_explosive` (spec §4.4):
+    unknown products return ``None`` — never a silent ANFO fallback.
     """
     anfo_energy: float = 3.72
     emulsion_energy: float = 2.78
@@ -160,27 +164,30 @@ class ExplosiveEnergy:
         'Pirex-970': 1.25,
     })
 
-    def energy_mj_per_kg(self, explosive_type: str) -> float:
-        """Return MJ/kg for a given explosive type string (case-insensitive)."""
-        et = (explosive_type or '').strip().upper()
-        if 'HEAVY' in et or 'H-ANFO' in et:
-            return self.heavy_anfo_energy
-        if 'EMULSION' in et or 'BULK' in et or 'EMUL' in et:
-            return self.bulk_emulsion_energy
-        if 'ANFO' in et:
-            return self.anfo_energy
-        return self.anfo_energy
+    def _resolve(self, explosive_type: str):
+        """Lazy import to avoid a circular dependency (registry imports this)."""
+        from core.explosive_properties import resolve_explosive
+        return resolve_explosive(explosive_type)
 
-    def density_g_per_cm3(self, explosive_type: str) -> float:
-        """Return density (g/cm³) for a given explosive type string (case-insensitive)."""
-        et = (explosive_type or '').strip().upper()
-        if 'HEAVY' in et or 'H-ANFO' in et:
-            return self.heavy_anfo_density
-        if 'EMULSION' in et or 'BULK' in et or 'EMUL' in et:
-            return self.bulk_emulsion_density
-        if 'ANFO' in et:
-            return self.anfo_density
-        return self.anfo_density
+    def energy_mj_per_kg(self, explosive_type: str) -> Optional[float]:
+        """Return MJ/kg for a known explosive type, or None if unknown.
+
+        No silent ANFO fallback (spec §4.4): an unrecognised product
+        returns None so callers surface an explicit UNKNOWN state.
+        """
+        prod = self._resolve(explosive_type)
+        return prod.energy_mj_kg if prod else None
+
+    def density_g_per_cm3(self, explosive_type: str) -> Optional[float]:
+        """Return density (g/cm³) for a known explosive type, or None if unknown."""
+        prod = self._resolve(explosive_type)
+        return prod.density_g_cm3 if prod else None
+
+    def explosive_status(self, explosive_type: str) -> str:
+        """Explicit product state: VALIDATED | UNVALIDATED_REFERENCE |
+        FAMILY_MATCH | UNKNOWN | MISSING."""
+        from core.explosive_properties import get_explosive_status
+        return get_explosive_status(explosive_type)
 
 
 @dataclass(frozen=True)

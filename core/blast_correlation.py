@@ -325,10 +325,9 @@ def compute_powder_factor(
     if 'Tipo_Explosivo' in out.columns:
         mj_per_kg = out['Tipo_Explosivo'].apply(EXPLOSIVE.energy_mj_per_kg)
     else:
-        mj_per_kg = pd.Series(
-            [EXPLOSIVE.energy_mj_per_kg('') for _ in range(len(out))],
-            index=out.index,
-        )
+        mj_per_kg = pd.Series([None] * len(out), index=out.index, dtype=object)
+    # Unknown products resolve to None (spec §4.4) → NaN energy, never ANFO.
+    mj_per_kg = pd.to_numeric(mj_per_kg, errors='coerce')
     out['energy_mj'] = kilos * mj_per_kg
 
     out = enrich_blast_dataframe(out)

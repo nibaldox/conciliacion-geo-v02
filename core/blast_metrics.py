@@ -156,9 +156,12 @@ def compute_decoupling_ratio(
     kg_per_m.loc[valid_l] = kilos[valid_l] / length[valid_l]
 
     if "Tipo_Explosivo" in df.columns:
-        rho_e = df["Tipo_Explosivo"].apply(EXPLOSIVE.density_g_per_cm3)
+        rho_e = pd.to_numeric(
+            df["Tipo_Explosivo"].apply(EXPLOSIVE.density_g_per_cm3),
+            errors="coerce",
+        )
     else:
-        rho_e = pd.Series([EXPLOSIVE.density_g_per_cm3("")] * n, index=df.index, dtype=float)
+        rho_e = pd.Series(np.nan, index=df.index, dtype=float)
 
     diameter_m = diam / 1000.0
     hole_area_m2 = (np.pi / 4.0) * (diameter_m ** 2)
@@ -258,10 +261,9 @@ def compute_kuznetsov_x50(
         if "Tipo_Explosivo" in df.columns:
             mj_per_kg = df["Tipo_Explosivo"].apply(EXPLOSIVE.energy_mj_per_kg)
         else:
-            mj_per_kg = pd.Series(
-                [EXPLOSIVE.energy_mj_per_kg("")] * n, index=df.index, dtype=float
-            )
-        explosive_energy_mj_kg = mj_per_kg
+            mj_per_kg = pd.Series(np.nan, index=df.index, dtype=float)
+        # Unknown products resolve to None (spec §4.4) → NaN, never ANFO.
+        explosive_energy_mj_kg = pd.to_numeric(mj_per_kg, errors="coerce")
 
     e_cal_per_g = pd.to_numeric(explosive_energy_mj_kg, errors="coerce") * _MJ_PER_KG_TO_CAL_PER_G
 

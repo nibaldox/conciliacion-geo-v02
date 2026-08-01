@@ -206,15 +206,33 @@ class TestExplosiveEnergy:
         assert EXPLOSIVE.energy_mj_per_kg("Bulk Emulsion") == pytest.approx(3.05)
         assert EXPLOSIVE.energy_mj_per_kg("Emuline 8000") == pytest.approx(3.05)
 
-    def test_unknown_type_falls_back_to_anfo(self):
-        assert EXPLOSIVE.energy_mj_per_kg("mystery") == pytest.approx(3.72)
-        assert EXPLOSIVE.energy_mj_per_kg("") == pytest.approx(3.72)
-        assert EXPLOSIVE.energy_mj_per_kg(None) == pytest.approx(3.72)
+    def test_pirex_grades_known(self):
+        """Pirex grades must resolve to their own values (spec §4.4), not ANFO."""
+        assert EXPLOSIVE.energy_mj_per_kg("Pirex-920") == pytest.approx(2.95)
+        assert EXPLOSIVE.energy_mj_per_kg("Pirex-930") == pytest.approx(3.05)
+        assert EXPLOSIVE.energy_mj_per_kg("Pirex-950") == pytest.approx(3.15)
+        assert EXPLOSIVE.energy_mj_per_kg("Pirex-970") == pytest.approx(3.25)
+
+    def test_unknown_type_returns_none(self):
+        """Unknown products return None (explicit state), never ANFO (spec §4.4)."""
+        assert EXPLOSIVE.energy_mj_per_kg("mystery") is None
+        assert EXPLOSIVE.energy_mj_per_kg("") is None
+        assert EXPLOSIVE.energy_mj_per_kg(None) is None
+        assert EXPLOSIVE.energy_mj_per_kg("Pirex-999") is None
 
     def test_density_lookup(self):
         assert EXPLOSIVE.density_g_per_cm3("ANFO") == pytest.approx(0.80)
         assert EXPLOSIVE.density_g_per_cm3("Heavy ANFO") == pytest.approx(1.05)
         assert EXPLOSIVE.density_g_per_cm3("Bulk Emulsion") == pytest.approx(1.15)
+        assert EXPLOSIVE.density_g_per_cm3("Pirex-930") == pytest.approx(1.20)
+        assert EXPLOSIVE.density_g_per_cm3("Pirex-970") == pytest.approx(1.25)
+        assert EXPLOSIVE.density_g_per_cm3("Pirex-999") is None
+
+    def test_explosive_status(self):
+        assert EXPLOSIVE.explosive_status("ANFO") == "VALIDATED"
+        assert EXPLOSIVE.explosive_status("Pirex-930") == "UNVALIDATED_REFERENCE"
+        assert EXPLOSIVE.explosive_status("Pirex-999") == "UNKNOWN"
+        assert EXPLOSIVE.explosive_status("") == "MISSING"
 
 
 def _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0,

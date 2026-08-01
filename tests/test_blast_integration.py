@@ -411,21 +411,18 @@ class TestBackwardsCompat:
         assert signed[16] == 0.0  # rock_density_used (default 0)
 
     def test_explosive_energy_handles_unknown_types_gracefully(self):
-        """EXPLOSIVE.energy_mj_per_kg nunca lanza; retorna fallback para tipos desconocidos."""
-        # Tipos desconocidos deben retornar valor por defecto (ANFO)
+        """EXPLOSIVE.energy_mj_per_kg nunca lanza; productos desconocidos → None (spec §4.4)."""
+        # Tipos desconocidos NO deben retornar el valor ANFO (sin fallback silencioso)
         unknown_types = ["", "UNKNOWN", "MysteryExplosive", None, "XYZ-123"]
 
         for et in unknown_types:
             energy = EXPLOSIVE.energy_mj_per_kg(et)
-            # Nunca retorna NaN ni None
-            assert np.isfinite(energy)
-            # Debe ser el valor fallback (ANFO)
-            assert energy == pytest.approx(EXPLOSIVE.anfo_energy)
+            # Estado explícito: None (desconocido), nunca un valor ANFO encubierto
+            assert energy is None
+            assert EXPLOSIVE.explosive_status(et) == "UNKNOWN" or EXPLOSIVE.explosive_status(et) == "MISSING"
 
-            # Mismo test para density
             density = EXPLOSIVE.density_g_per_cm3(et)
-            assert np.isfinite(density)
-            assert density == pytest.approx(EXPLOSIVE.anfo_density)
+            assert density is None
 
     def test_advisor_defaults_are_immutable(self):
         """ADVISOR es frozen=True; intentar mutar debe lanzar FrozenInstanceError."""
