@@ -16,6 +16,13 @@ import pandas as pd
 from datetime import timedelta
 from core.config import DEFAULTS
 from core.geom_utils import find_df_column
+from core.geometry_conventions import (
+    AzimuthConvention,
+    InclinationConvention,
+    normalize_azimuth,
+    normalize_inclination,
+    normalize_vector_components,
+)
 
 COLS_DROP = [
     'id_rajo', 'id_malla_opit', 'numero',
@@ -24,11 +31,18 @@ COLS_DROP = [
 
 BENCH_HEIGHT = 15.0
 
+# Semantics of the elevation source column (spec §4.2). ``bench_elevation``
+# means the column holds the target bench elevation (Nombre_Banco) and the
+# collar sits BENCH_HEIGHT above it; ``collar_elevation`` means the column
+# already holds the real collar elevation (no transformation).
+_Z_BENCH_ALIASES = {"nombre_banco", "banco", "banco_cota", "cota_banco", "bench", "bench_elev"}
+_Z_COLLAR_ALIASES = {"cota_collar", "collar_elev", "z", "z_collar", "elevation", "elev", "cota", "rl_collar"}
+
 
 _CANONICAL_COLUMN_ALIASES: dict[str, list[str]] = {
     "X": ["Latitud_Geo", "Latitud", "X", "Este"],
     "Y": ["Longitud_Geo", "Longitud", "Y", "Norte"],
-    "Z_collar": ["Nombre_Banco", "Banco", "Cota_Collar", "Z"],
+    "Z_collar": ["Nombre_Banco", "Banco", "Cota_Collar", "Z", "Altura_Collar", "Elevacion_Collar"],
     "Incl": ["Inclinacion_real", "Inclinacion", "Inclination"],
     "Az": ["Azimuth_real", "Azimuth", "Azimut"],
     "Len": ["longitud_real", "Longitud", "Length", "Profundidad"],
@@ -120,21 +134,54 @@ def _coerce_typed_columns(df_work: pd.DataFrame) -> None:
             df_work[col] = df_work[col].astype(str)
 
 
-def _compute_hole_toes(df_work: pd.DataFrame) -> None:
-    """Add X_toe / Y_toe / Z_toe columns using Incl/Az/Length vector math.
+def _resolve_z_collar_semantic(source_col: str | None, explicit: str | None) -> str:
+    """Classify the elevation column semantics (spec §4.2).
 
-    The toe is ``BENCH_HEIGHT + offset`` where the offset is the
-    directional vector of length L along the inclined hole.
+    Returns 'bench_elevation' (column holds target bench elevation, add
+    bench height) or 'collar_elevation' (column already holds the real
+    collar elevation, no transformation).
+
+    When the source column name is not recognised and no explicit
+    semantic is given, raises ValueError: the pipeline must stop and ask
+    for confirmation instead of guessing.
     """
-    incl_rad = np.radians(df_work["Incl"].values.astype(float))
-    az_rad = np.radians(df_work["Az"].values.astype(float))
+    if explicit is not None:
+        if explicit not in ("bench_elevation", "collar_elevation"):
+            raise ValueError(
+                f"z_collar_semantic inválido: {explicit!r}. Use 'bench_elevation' "
+                "o 'collar_elevation'."
+            )
+        return explicit
+    if source_col is None:
+        raise ValueError(
+            "No se pudo determinar la semántica de la columna de elevación: "
+            "no hay columna fuente. Especifique z_collar_semantic."
+        )
+    key = source_col.strip().lower()
+    if key in _Z_BENCH_ALIASES:
+        return "bench_elevation"
+    if key in _Z_COLLAR_ALIASES:
+        return "collar_elevation"
+    raise ValueError(
+        f"No se pudo determinar la semántica de la columna de elevación "
+        f"'{source_col}': no sé si es cota de banco o cota real de collar. "
+        "Especifique z_collar_semantic='bench_elevation' o 'collar_elevation'."
+    )
+
+
+def _compute_hole_toes(df_work: pd.DataFrame) -> None:
+    """Add X_toe / Y_toe / Z_toe columns using canonical Incl/Az/Length.
+
+    ``Incl`` / ``Az`` must already be normalized (see
+    :func:`core.geometry_conventions`). The unit vector points from the
+    collar to the toe (downwards along the hole axis), so the toe is
+    ``collar + length × dir``.
+    """
     length = df_work["Len"].values.astype(float)
-    dz = -length * np.cos(incl_rad)
-    dx = length * np.sin(incl_rad) * np.sin(az_rad)
-    dy = length * np.sin(incl_rad) * np.cos(az_rad)
-    df_work["X_toe"] = df_work["X"] + dx
-    df_work["Y_toe"] = df_work["Y"] + dy
-    df_work["Z_toe"] = df_work["Z_collar"] + dz
+    vx, vy, vz = normalize_vector_components(df_work["Incl"], df_work["Az"])
+    df_work["X_toe"] = df_work["X"] + length * vx
+    df_work["Y_toe"] = df_work["Y"] + length * vy
+    df_work["Z_toe"] = df_work["Z_collar"] + length * vz
 
 
 def _build_scatter_lines(
@@ -171,16 +218,36 @@ def _build_scatter_lines(
 def procesar_pozos(
     df: pd.DataFrame,
     column_map: dict[str, str | None] | None = None,
+    *,
+    bench_height_m: float | None = None,
+    z_collar_semantic: str | None = None,
+    incl_convention: InclinationConvention | str = InclinationConvention.FROM_VERTICAL,
+    az_convention: AzimuthConvention | str = AzimuthConvention.FROM_NORTH_CW,
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
-    Coordinate correction applied:
+    Coordinate handling (spec §4.2):
         X = Latitud_Geo  (East)
         Y = Longitud_Geo (North)
-        Z = Nombre_Banco + BENCH_HEIGHT (Collar elevation)
+        Z = elevation column, transformed only when its semantic is
+            known:
+            - bench_elevation (e.g. Nombre_Banco): the column holds the
+              target bench elevation; the collar sits ``bench_height_m``
+              metres above it (default 15 m, configurable per event).
+              The applied height is recorded in ``bench_height_m`` and
+              the transformation in ``Z_collar_semantic``.
+            - collar_elevation (e.g. Cota_Collar): the column already
+              holds the real collar elevation; no transformation.
+            Ambiguous source names raise ValueError (the pipeline stops
+            instead of guessing) unless ``z_collar_semantic`` is given.
 
-    Nombre_Banco indicates the target bench elevation; the actual collar
-    (drilling start) is BENCH_HEIGHT metres above it, on the upper bench.
+    Inclination / azimuth (spec §4.1): every input is normalized to the
+    canonical convention — inclination = deviation from vertical (0 =
+    vertical), azimuth = degrees clockwise from North. The original
+    values and the convention applied are preserved in ``Incl_original``
+    / ``Az_original`` / ``Incl_convention`` / ``Az_convention``; negative
+    inclinations (sign-as-orientation) are absolutized and flagged in
+    ``incl_anomaly``.
 
     Then computes the toe (bottom) of each hole using:
         Inclinacion_real : deviation from vertical in degrees (0 = vertical)
@@ -191,7 +258,9 @@ def procesar_pozos(
     -------
     df_clean : pd.DataFrame
         Cleaned DataFrame with added columns:
-        'X', 'Y', 'Z_collar', 'X_toe', 'Y_toe', 'Z_toe'.
+        'X', 'Y', 'Z_collar', 'X_toe', 'Y_toe', 'Z_toe',
+        'Z_collar_semantic', ('bench_height_m' when bench semantic),
+        'Incl_original', 'Az_original', 'Incl_convention', 'Az_convention'.
         When present in the input, also captures:
         'Burden', 'Esp', 'Diam_mm', 'Tipo_Explosivo', 'Taco_m',
         'Secuencia', 'Retardo_ms', 'Fila', 'Carga_Fondo_kg',
@@ -215,14 +284,15 @@ def procesar_pozos(
             df_work["fecha_tronadura"], errors="coerce"
         ).dt.date
 
-    # If the caller provided an explicit column mapping (from the
-    # column-mapper UI), apply it directly. Otherwise, fall back to the
-    # legacy alias-based auto-detection.
+    # The elevation source column is captured BEFORE any rename so the
+    # bench/collar semantics can be classified (spec §4.2).
     if column_map is not None:
+        z_src = column_map.get("Z_collar")
         from core.column_mapping import apply_mapping
         df_work = apply_mapping(df_work, column_map)
     else:
         resolved = _resolve_column_aliases(df_work)
+        z_src = resolved.get("Z_collar")
         df_work = _rename_to_canonical(df_work, resolved)
 
     # Trazabilidad pozos→bancos en conciliación geométrica:
@@ -235,7 +305,37 @@ def procesar_pozos(
 
     _coerce_typed_columns(df_work)
 
-    df_work["Z_collar"] = df_work["Z_collar"] + BENCH_HEIGHT
+    # Canonical inclination / azimuth normalization (spec §4.1).
+    incl_conv = InclinationConvention(incl_convention)
+    az_conv = AzimuthConvention(az_convention)
+    if "Incl" in df_work.columns:
+        df_work["Incl_original"] = df_work["Incl"]
+        incl_norm, _ = normalize_inclination(df_work["Incl"], incl_conv)
+        df_work["Incl"] = incl_norm
+        df_work["Incl_convention"] = incl_conv.value
+        df_work["incl_anomaly"] = np.where(
+            pd.to_numeric(df_work["Incl_original"], errors="coerce") < 0,
+            "negative_wrapped",
+            "",
+        )
+    if "Az" in df_work.columns:
+        df_work["Az_original"] = df_work["Az"]
+        az_norm, _ = normalize_azimuth(df_work["Az"], az_conv)
+        df_work["Az"] = az_norm
+        df_work["Az_convention"] = az_conv.value
+
+    # Elevation transformation driven by the column semantic (spec §4.2).
+    semantic = _resolve_z_collar_semantic(z_src, z_collar_semantic)
+    if semantic == "bench_elevation":
+        bench_h = float(
+            DEFAULTS.blast_default_bench_height if bench_height_m is None else bench_height_m
+        )
+        df_work["Z_collar"] = df_work["Z_collar"] + bench_h
+        df_work["Z_collar_semantic"] = "bench_elevation_plus_height"
+        df_work["bench_height_m"] = bench_h
+    else:
+        df_work["Z_collar_semantic"] = "collar_elevation"
+
     df_work = df_work.dropna(subset=["X", "Y", "Z_collar", "Incl", "Az", "Len"])
     df_work = df_work[df_work["Len"] > 0]
 

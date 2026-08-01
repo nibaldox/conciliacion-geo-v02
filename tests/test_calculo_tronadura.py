@@ -19,6 +19,7 @@ from core.calculo_tronadura import (
     procesar_pozos,
     proyectar_pozos_en_seccion,
 )
+from core.geometry_conventions import InclinationConvention
 
 
 def _make_valid_hole(
@@ -153,6 +154,101 @@ class TestProcesarPozos:
         out, *_ = procesar_pozos(df)
         assert "Banco_Original" in out.columns
         assert out["Banco_Original"].iloc[0] == 4185.0
+
+
+class TestZCollarsemantics:
+    """Spec §4.2: bench elevation vs real collar elevation must be distinct."""
+
+    def test_collar_elevation_column_not_transformed(self):
+        df = _make_valid_hole()
+        df["Cota_Collar"] = df["Nombre_Banco"]
+        df = df.drop(columns=["Nombre_Banco"])
+        out, *_ = procesar_pozos(df)
+        assert out["Z_collar"].iloc[0] == 4200.0
+        assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
+        assert "bench_height_m" not in out.columns
+
+    def test_bench_elevation_transformed_with_record(self):
+        df = _make_valid_hole(banco=4000.0)
+        out, *_ = procesar_pozos(df)
+        assert out["Z_collar"].iloc[0] == 4000.0 + BENCH_HEIGHT
+        assert out["Z_collar_semantic"].iloc[0] == "bench_elevation_plus_height"
+        assert out["bench_height_m"].iloc[0] == BENCH_HEIGHT
+
+    def test_bench_height_parameterizable_per_event(self):
+        df = _make_valid_hole(banco=4000.0)
+        out, *_ = procesar_pozos(df, bench_height_m=12.0)
+        assert out["Z_collar"].iloc[0] == 4012.0
+        assert out["bench_height_m"].iloc[0] == 12.0
+
+    def test_explicit_column_map_collar_semantic(self):
+        df = _make_valid_hole()
+        df = df.rename(columns={"Nombre_Banco": "Cota_Collar"})
+        mapping = {
+            "X": "Latitud_Geo", "Y": "Longitud_Geo", "Z_collar": "Cota_Collar",
+            "Incl": "Inclinacion_real", "Az": "Azimuth_real", "Len": "longitud_real",
+        }
+        out, *_ = procesar_pozos(df, column_map=mapping)
+        assert out["Z_collar"].iloc[0] == 4200.0
+        assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
+
+    def test_ambiguous_column_name_raises(self):
+        df = _make_valid_hole()
+        df = df.rename(columns={"Nombre_Banco": "Altura_Collar"})
+        with pytest.raises(ValueError, match="sem[áa]ntica"):
+            procesar_pozos(df)
+
+    def test_explicit_semantic_overrides_ambiguous_name(self):
+        df = _make_valid_hole()
+        df = df.rename(columns={"Nombre_Banco": "Altura_Collar"})
+        out, *_ = procesar_pozos(df, z_collar_semantic="bench_elevation")
+        assert out["Z_collar"].iloc[0] == 4200.0 + BENCH_HEIGHT
+
+
+class TestInclinationConvention:
+    """Spec §4.1: canonical inclination = deviation from vertical, 0 = vertical."""
+
+    def test_original_values_and_convention_recorded(self):
+        df = _make_valid_hole(incl=10.0, az=15.0)
+        out, *_ = procesar_pozos(df)
+        assert out["Incl_original"].iloc[0] == 10.0
+        assert out["Az_original"].iloc[0] == 15.0
+        assert out["Incl_convention"].iloc[0] == "from_vertical"
+        assert out["Az_convention"].iloc[0] == "from_north_cw"
+
+    def test_negative_inclination_wrapped_with_flag(self):
+        df = _make_valid_hole(incl=-10.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
+        out, *_ = procesar_pozos(df)
+        assert out["Incl"].iloc[0] == 10.0
+        assert out["Incl_original"].iloc[0] == -10.0
+        assert out["incl_anomaly"].iloc[0] == "negative_wrapped"
+        assert out["Z_toe"].iloc[0] == pytest.approx(4015.0 - 10.0 * np.cos(np.radians(10.0)))
+
+    def test_dip_from_horizontal_convention(self):
+        df = _make_valid_hole(incl=60.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
+        out, *_ = procesar_pozos(
+            df, incl_convention=InclinationConvention.DIP_FROM_HORIZONTAL
+        )
+        assert out["Incl"].iloc[0] == 30.0
+        assert out["Incl_convention"].iloc[0] == "dip_from_horizontal"
+        assert out["Z_toe"].iloc[0] == pytest.approx(4015.0 - 10.0 * np.cos(np.radians(30.0)))
+
+    def test_azimuth_wrapped_to_360(self):
+        df = _make_valid_hole(incl=90.0, az=370.0, length=5.0, lat=0.0, lon=0.0, banco=4000.0)
+        out, *_ = procesar_pozos(df)
+        assert out["Az"].iloc[0] == 10.0
+        assert out["Y_toe"].iloc[0] == pytest.approx(5.0 * np.sin(np.radians(90.0)) * np.cos(np.radians(10.0)))
+
+    def test_toe_consistent_with_azimuth_sign(self):
+        """az=0 (North) moves the toe +Y; az=90 (East) moves it +X."""
+        df_n = _make_valid_hole(incl=90.0, az=0.0, length=5.0, lat=0.0, lon=0.0, banco=4000.0)
+        df_e = _make_valid_hole(incl=90.0, az=90.0, length=5.0, lat=0.0, lon=0.0, banco=4000.0)
+        out_n, *_ = procesar_pozos(df_n)
+        out_e, *_ = procesar_pozos(df_e)
+        assert out_n["Y_toe"].iloc[0] == pytest.approx(5.0)
+        assert out_n["X_toe"].iloc[0] == pytest.approx(0.0, abs=1e-9)
+        assert out_e["X_toe"].iloc[0] == pytest.approx(5.0)
+        assert out_e["Y_toe"].iloc[0] == pytest.approx(0.0, abs=1e-9)
 
 
 class TestProyectarPozosEnSeccion:

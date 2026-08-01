@@ -179,6 +179,18 @@ class TestCollarDeviation:
         out = compute_collar_deviation(df)
         assert pd.isna(out).all()
 
+    def test_design_dip_from_horizontal(self):
+        """Design dip=80° from horizontal == design deviation 10° from vertical."""
+        df = _proc_row(Az=0.0, Incl=10.0, Az_Diseno=0.0, Incl_Diseno=80.0)
+        out = compute_collar_deviation(df, design_incl_convention="dip_from_horizontal")
+        assert out.iloc[0] == pytest.approx(0.0, abs=1e-6)
+
+    def test_design_dip_requires_explicit_convention(self):
+        """Same design dip treated as from-vertical gives a large angle (not silent)."""
+        df = _proc_row(Az=0.0, Incl=10.0, Az_Diseno=0.0, Incl_Diseno=80.0)
+        out = compute_collar_deviation(df)
+        assert out.iloc[0] == pytest.approx(70.0, abs=1e-6)
+
     def test_does_not_raise_when_minimal(self):
         df = pd.DataFrame({"X": [0.0, 1.0]})
         out = compute_collar_deviation(df)

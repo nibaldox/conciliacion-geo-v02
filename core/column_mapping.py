@@ -41,7 +41,7 @@ class CanonicalField:
 CANONICAL_FIELDS: tuple[CanonicalField, ...] = (
     CanonicalField("X",              True,  "Coordenada Este",            "m",  ("Latitud_Geo", "Easting", "X", "Este", "East", "X_collar")),
     CanonicalField("Y",              True,  "Coordenada Norte",           "m",  ("Longitud_Geo", "Northing", "Y", "Norte", "North", "Y_collar")),
-    CanonicalField("Z_collar",       True,  "Cota collar del pozo",       "m",  ("Nombre_Banco", "Banco", "Cota_Collar", "Z", "Elevation", "Collar_Elev", "Z_collar")),
+    CanonicalField("Z_collar",       True,  "Cota collar del pozo",       "m",  ("Nombre_Banco", "Banco", "Cota_Collar", "Z", "Elevation", "Collar_Elev", "Z_collar", "Altura_Collar", "Elevacion_Collar")),
     CanonicalField("Incl",           True,  "Inclinación desde vertical", "°",  ("Inclinacion_real", "Dip", "Inclinacion", "Inclination", "Incl", "Dip_deg", "Dip_Deg", "Incl_deg", "Pendiente")),
     CanonicalField("Az",             True,  "Azimut (desde Norte)",       "°",  ("Azimuth_real", "Heading", "Azimuth", "Azimut", "Az", "Bearing", "Heading_deg", "Azimuth_deg", "Direction", "Dir_Az")),
     CanonicalField("Len",            True,  "Longitud perforada",         "m",  ("longitud_real", "Length", "Profundidad", "Drill_Length", "Len", "Depth", "Hole_Length")),

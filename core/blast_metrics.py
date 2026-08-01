@@ -179,21 +179,36 @@ def compute_decoupling_ratio(
     return {"volume_load_kgm3": volume_load_kgm3, "coupling_ratio": coupling_ratio}
 
 
-def compute_collar_deviation(df: pd.DataFrame) -> pd.Series:
+def compute_collar_deviation(
+    df: pd.DataFrame,
+    design_incl_convention: str = "from_vertical",
+) -> pd.Series:
     """3D angle (degrees) between the as-built and design hole vectors.
 
     Requires design columns ``Az_Diseno`` and ``Incl_Diseno``. When
     those columns are absent the function returns a Series of NaN (it
     does not raise) so callers can still pipe the output safely.
+
+    Both the as-built and the design inclination are normalized to the
+    canonical convention (deviation from vertical, 0 = vertical) before
+    the angle is computed. Design sources that report dip from the
+    horizontal (e.g. a ``Design_Dip`` column) must pass
+    ``design_incl_convention="dip_from_horizontal"``; the original
+    values are never reinterpreted silently (spec §4.1).
     """
     n = len(df)
     if "Az_Diseno" not in df.columns or "Incl_Diseno" not in df.columns:
         return pd.Series([np.nan] * n, index=df.index, dtype=float)
 
+    from core.geometry_conventions import InclinationConvention, normalize_inclination
+
     az_r = _col_or_nan(df, _AZ_CANDIDATES)
     incl_r = _col_or_nan(df, _INCL_CANDIDATES)
     az_d = pd.to_numeric(df["Az_Diseno"], errors="coerce")
-    incl_d = pd.to_numeric(df["Incl_Diseno"], errors="coerce")
+    incl_d, _ = normalize_inclination(
+        pd.to_numeric(df["Incl_Diseno"], errors="coerce"),
+        InclinationConvention(design_incl_convention),
+    )
 
     az_r_rad = np.radians(az_r)
     incl_r_rad = np.radians(incl_r)
