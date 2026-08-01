@@ -83,6 +83,10 @@ class PipelineDefaults:
     # warning flag on every processed hole; events must declare their
     # convention explicitly to clear it.
     blast_default_incl_convention: str = "from_vertical"
+    # Voronoi conservation tolerance (Fase 1.1 cierre §2.1): the assigned
+    # influence area must match the event domain within this percent;
+    # beyond it the Voronoi-based powder factor is blocked.
+    voronoi_conservation_tolerance_pct: float = 2.0
 
 
 @dataclass(frozen=True)

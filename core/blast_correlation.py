@@ -137,11 +137,143 @@ _LENGTH_CANDIDATES = ('longitud_real', 'Len', 'Longitud', 'Length', 'Profundidad
 _INCLINATION_CANDIDATES = ('Inclinacion_real', 'Incl', 'Inclinacion', 'Inclination')
 
 
+def _assign_voronoi_global(
+    df: pd.DataFrame,
+    *,
+    group_col: Optional[str] = None,
+    boundary_polygon: Optional[list] = None,
+    boundary_polygons: Optional[dict] = None,
+) -> dict:
+    """Global Voronoi assignment with conservation diagnostics (§2.1).
+
+    Strategy: compute the Voronoi cells ONCE over all holes of the event
+    and clip them against a single event domain (``boundary_polygon`` or
+    the collar bounding box). Per-malla polygons (``boundary_polygons``
+    dict) are accepted only when they are pairwise non-overlapping and
+    cover all holes; overlaps and gaps are detected and reported.
+
+    Returns a dict with area_m2 / area_status / domain_area_m2 Series
+    aligned to ``df.index`` plus method, messages, assigned_area,
+    residual_m2, residual_pct and conservation_ok.
+    """
+    n = len(df)
+    nan_area = pd.Series([np.nan] * n, index=df.index, dtype=float)
+    messages: list[str] = []
+
+    if boundary_polygons is not None and group_col is not None:
+        # Strategy 2 (validated): per-malla independent polygons.
+        try:
+            import shapely.geometry as sg
+            from shapely.ops import unary_union
+        except ImportError:
+            messages.append("boundary_polygons requiere shapely; se usa dominio global")
+            boundary_polygons = None
+        if boundary_polygons is not None:
+            polys = {str(k): sg.Polygon([(float(x), float(y)) for x, y in v])
+                     for k, v in boundary_polygons.items()}
+            overlap_ok = True
+            keys = list(polys)
+            for i in range(len(keys)):
+                for j in range(i + 1, len(keys)):
+                    inter = polys[keys[i]].intersection(polys[keys[j]])
+                    if not inter.is_empty and inter.area > 1e-6:
+                        overlap_ok = False
+                        messages.append(
+                            f"polígonos de mallas superpuestos: {keys[i]} ∩ {keys[j]} "
+                            f"= {inter.area:.2f} m²"
+                        )
+            union = unary_union(list(polys.values()))
+            union_area = float(union.area)
+            sum_areas = float(sum(p.area for p in polys.values()))
+            if sum_areas - union_area > 1e-6:
+                messages.append(
+                    f"polígonos de mallas solapados en la unión: "
+                    f"{sum_areas - union_area:.2f} m²"
+                )
+            # Gap detection: the event bbox (all collars) vs the union of
+            # malla polygons — informative, not a conservation failure.
+            x0c, y0c = df[["X", "Y"]].min()
+            x1c, y1c = df[["X", "Y"]].max()
+            hull = sg.box(float(x0c), float(y0c), float(x1c), float(y1c))
+            gap = float(hull.area) - union_area
+            if gap > 1e-6:
+                messages.append(
+                    f"huecos entre polígonos de mallas: {gap:.2f} m² sin asignar"
+                )
+            # Assign each hole to its malla's polygon and clip per-malla.
+            areas = nan_area.copy()
+            status = pd.Series("invalid", index=df.index, dtype=object)
+            for malla_name, poly in polys.items():
+                mask = df[group_col].astype(str) == str(malla_name)
+                if not mask.any():
+                    messages.append(f"malla {malla_name} sin pozos")
+                    continue
+                rep = compute_influence_area_report(
+                    df.loc[mask], boundary_polygon=boundary_polygons[malla_name],
+                )
+                areas.loc[mask] = rep["area_m2"]
+                status.loc[mask] = rep["area_status"]
+            domain = union_area
+            method = "per_malla_polygon"
+            assigned = float(areas.sum())
+            if not overlap_ok:
+                domain = sum_areas
+                messages.append("dominio definido como suma de polígonos (solapados)")
+            conservation_ok = overlap_ok and abs(assigned - domain) <= domain * (
+                DEFAULTS.voronoi_conservation_tolerance_pct / 100.0
+            )
+            return _voronoi_result(areas, status, domain, assigned, method, messages,
+                                   conservation_ok)
+        # fall through to the global path when shapely is missing
+
+    # Strategy 1 (default): ONE Voronoi over the whole event, one domain.
+    rep = compute_influence_area_report(df, boundary_polygon=boundary_polygon)
+    method = "global_polygon" if boundary_polygon is not None else "global_bbox"
+    domain = float(rep["domain_area_m2"].iloc[0]) if "domain_area_m2" in rep.columns else np.nan
+    assigned = float(rep["area_m2"].sum())
+    if np.isnan(domain):
+        messages.append("dominio no disponible (shapely ausente o sin suficientes sitios)")
+        return _voronoi_result(rep["area_m2"], rep["area_status"], np.nan, assigned,
+                               method, messages, False)
+    holes_out = int((rep["area_status"] == "invalid").sum())
+    if holes_out:
+        messages.append(f"pozos fuera del dominio o celdas inválidas: {holes_out}")
+    residual = assigned - domain
+    residual_pct = residual / domain * 100.0 if domain > 0 else np.nan
+    conservation_ok = abs(residual_pct) <= DEFAULTS.voronoi_conservation_tolerance_pct
+    if not conservation_ok:
+        messages.append(
+            f"conservación Voronoi falla: asignado {assigned:.2f} m² vs dominio "
+            f"{domain:.2f} m² ({residual_pct:+.2f}%) — PF por área de influencia "
+            "bloqueado"
+        )
+    return _voronoi_result(rep["area_m2"], rep["area_status"], domain, assigned,
+                           method, messages, conservation_ok)
+
+
+def _voronoi_result(areas, status, domain, assigned, method, messages, ok) -> dict:
+    """Assemble the conservation diagnostics dict (§2.1)."""
+    residual = (assigned - domain) if np.isfinite(domain) else np.nan
+    residual_pct = residual / domain * 100.0 if np.isfinite(domain) and domain > 0 else np.nan
+    return {
+        "area_m2": areas,
+        "area_status": status,
+        "domain_area_m2": float(domain) if np.isfinite(domain) else np.nan,
+        "method": method,
+        "messages": " | ".join(messages) if messages else "",
+        "assigned_area": assigned,
+        "residual_m2": residual,
+        "residual_pct": residual_pct,
+        "conservation_ok": bool(ok),
+    }
+
+
 def compute_powder_factor(
     df_pozos: pd.DataFrame,
     rock_density_tm3: Optional[float] = None,
     height_fallback_m: Optional[float] = None,
     boundary_polygon: Optional[list] = None,
+    boundary_polygons: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Compute powder factor for each blast-hole row.
 
@@ -255,15 +387,27 @@ def compute_powder_factor(
             _, s = _knn_spacing(gdf)
             esp_est.loc[gdf.index] = s
 
-        # H-02: the operational frame consumes the SAME validated Voronoi
-        # report (clipped, duplicate-split) that is exposed to the user.
-        rep = compute_influence_area_report(
-            gdf, boundary_polygon=boundary_polygon,
-        )
-        influence_area.loc[gdf.index] = rep["area_m2"]
-        area_status.loc[gdf.index] = rep["area_status"]
-        if "domain_area_m2" in rep.columns:
-            domain_area.loc[gdf.index] = rep["domain_area_m2"]
+    # Fase 1.1 cierre §2.1: the Voronoi influence area is computed ONCE on
+    # the whole event (global domain), never per-malla against the same
+    # polygon — otherwise mallas reuse the same surface and the assigned
+    # area exceeds the event domain. `malla_id` remains a per-hole
+    # attribute. Per-malla polygons are supported only when explicitly
+    # provided AND validated as pairwise non-overlapping.
+    voronoi_result = _assign_voronoi_global(
+        out,
+        group_col=group_col if group_col else None,
+        boundary_polygon=boundary_polygon,
+        boundary_polygons=boundary_polygons,
+    )
+    influence_area = voronoi_result["area_m2"]
+    area_status = voronoi_result["area_status"]
+    domain_area = voronoi_result["domain_area_m2"]
+    out['voronoi_method'] = voronoi_result["method"]
+    out['voronoi_validation_messages'] = voronoi_result["messages"]
+    out['assigned_area_m2'] = float(voronoi_result["assigned_area"])
+    out['area_residual_m2'] = float(voronoi_result["residual_m2"])
+    out['area_residual_pct'] = float(voronoi_result["residual_pct"])
+    out['voronoi_conservation_ok'] = bool(voronoi_result["conservation_ok"])
 
     out['burden_est_m'] = burden_est
     out['esp_est_m'] = esp_est
@@ -318,6 +462,13 @@ def compute_powder_factor(
     denom_gt_inf = influence_area * height_real * rho_rock
     pf_gt_inf = np.where(denom_gt_inf > 0, (kilos * 1000.0) / denom_gt_inf, np.nan)
     out['pf_g_per_ton_inf'] = pd.Series(pf_gt_inf, index=out.index)
+
+    # §2.1: when the Voronoi conservation check fails, the influence-area
+    # powder factor is BLOCKED (NaN) — never reported as reliable.
+    if "voronoi_conservation_ok" in out.columns:
+        ok_mask = out["voronoi_conservation_ok"].astype(bool)
+        if not ok_mask.all():
+            out.loc[~ok_mask, "pf_g_per_ton_inf"] = np.nan
 
     # Per-mass powder factor normalised by the bench height EXCLUDING sub-drill
     # ("sin pasadura"). H_net is the vertical hole extent WITHIN the bench
