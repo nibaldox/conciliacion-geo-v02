@@ -15,7 +15,7 @@ Geotechnical reconciliation for open-pit mine slopes. Compares 3D design vs as-b
 pip install -e .                      # editable install (uses pyproject.toml)
 pip install -r requirements-api.txt   # API-only deps
 
-pytest tests/ -v --tb=short                                # all unit tests (~772 collected; --ignore=tests/test_openblast.py if openblast pkg missing)
+pytest tests/ -v --tb=short                                # all unit tests (~1,202 collected; pass --ignore=tests/test_openblast.py if openblast pkg missing — CI always uses it)
 pytest tests/test_param_extractor.py::TestParamExtractor::test_extract_parameters -v
 python test_pipeline.py                                     # synthetic end-to-end
 
@@ -28,7 +28,7 @@ cd web && npx tsc --noEmit                                 # typecheck
 cd web && npm run build                                    # tsc + vite build (PWA on)
 VITE_PWA=false npm run build                               # build without service worker (electron bundle) — set env BEFORE the command
 cd web && npm run test                                     # vitest (100% domain coverage required on src/components/results/ProfileView/domain)
-cd web && npm run test:e2e                                 # playwright (needs API + web running)
+cd web && npx playwright test                            # e2e (web/e2e/; needs API + web running; no npm script — run npx directly)
 cd web && npm run lint                                     # ESLint
 
 python cli.py --design diseno.stl --topo topo.stl --auto --start "1000,2000" --end "1500,2000" --n 10 --azimuth 0 --length 200
@@ -48,25 +48,26 @@ from core.mesh_handler import load_mesh                        # wrong
 | Layer | Dir | Entrypoint |
 |-------|-----|------------|
 | Domain (shared) | `core/` | `__init__.py` re-exports the legacy stable API only (see "Import rules") |
-| API (FastAPI) | `api/` | `api/main.py` — routers: meshes, sections, process, export, settings, ai |
+| API (FastAPI) | `api/` | `api/main.py` — routers: meshes, sections, process, blast, export, settings, mapping, ai |
 | Web frontend (active dev) | `web/` | Vite + React 19, proxies `/api` → `:8000`, PWA |
 | Streamlit (LEGACY, OFF-LIMITS) | `app.py` + `ui/` | Maintainer uses these daily; PRs touching them will be rejected |
 | Electron portable bundle | `electron/` | PyInstaller API sidecar + web build → AppImage / Windows installer |
 | Blast simulator (optional) | `openblast/` | Needed only for `tests/test_openblast.py` (skip with `--ignore`) |
 
-**Key core modules**: `mesh_handler`, `section_cutter`, `param_extractor` (compat shim → `profile_simplify`, `profile_extract`, `bench_classify`, `profile_compliance`), `excel_writer`, `report_generator`, `calculo_tronadura`, `blast_correlation`, `blast_metrics`, `blast_model`, `blast_advisor`, `stability_analysis`, `alert_system`, `geology`, `explosive_properties`, `column_utils`, `compliance_status`, `geom_utils`, `breaklines`, `ai_v2/` (replaces retired `ai_reporter`/`ai_service`), `config`.
+**Key core modules**: `mesh_handler`, `section_cutter`, `param_extractor` (compat shim → `profile_simplify`, `profile_extract`, `bench_classify`, `profile_compliance`), `excel_writer`, `report_generator`, `pdf_report`, `unified_dataframe`, `calculo_tronadura`, `blast_correlation`, `blast_metrics`, `blast_model`, `blast_advisor`, `stability_analysis`, `alert_system`, `geology`, `explosive_properties`, `column_utils`, `compliance_status`, `geom_utils`, `breaklines`, `drill_hardness`, `drill_compliance`, `ai_v2/` (replaces retired `ai_reporter`/`ai_service`), `config` — not exhaustive; `core/__init__.py` `__all__` is the authority on what's public.
 **Tests**: pytest, `pythonpath="."` in `pyproject.toml`.
 
 ### Import rules — gotcha
 
-`core/__init__.py` re-exports only the **legacy/stable** public API. Newer helpers must be imported from the submodule directly:
+`core/__init__.py` re-exports a curated stable API; **check its `__all__` before importing from a submodule**. Currently re-exported (among others): `load_mesh`, `SectionLine`, `cut_mesh_with_section`, `extract_parameters`, `compare_design_vs_asbuilt`, `export_results`, `generate_word_report`, `generate_section_images_zip`, and **both** `build_reconciled_profile` and `build_reconciled_profile_v2` (the v2 wrapper has been re-exported for a while — `core.param_extractor` itself re-exports from `core.profile_compliance`).
 
 ```python
-from core import build_reconciled_profile          # OK — legacy (emits DeprecationWarning, tuple output)
-from core.param_extractor import build_reconciled_profile_v2   # OK — required, NOT in core.__init__
+from core import build_reconciled_profile_v2   # OK — re-exported; always returns ReconciledProfile
+from core import build_reconciled_profile      # OK but legacy: return_v2=False (the default) emits DeprecationWarning
+from core.geom_utils import azimuth_to_direction   # required — NOT in core.__init__.__all__
 ```
 
-Other symbols you must import from the submodule: `azimuth_to_direction`, `generate_sections_along_crest`, `compute_local_azimuth`, anything in `core.geom_utils`, anything under `core.ai_v2`. Canonical examples: `api/routers/process.py` and `core/report_generator.py`.
+Not re-exported (import from the submodule): anything in `core.geom_utils`, `core.ai_v2`, `generate_sections_along_crest`, `compute_local_azimuth`, all of `api/routers/`. Canonical examples: `api/routers/process.py` and `core/report_generator.py`.
 
 ### Drill & Blast (Tronadura)
 
@@ -100,17 +101,24 @@ Mounted under `/api/v1/*`. Session via `X-Session-ID` header (auto-generated if 
 
 ---
 
-## CI (`.github/workflows/ci.yml`)
+## CI (`.github/workflows/`)
 
-On push to main/develop or PR to main — 4 parallel jobs:
-1. **Backend tests**: Python 3.12, `libspatialindex-dev` system dep, `pytest tests/` + `python test_pipeline.py`
-2. **Frontend build**: Node 20, `npm ci` → `tsc --noEmit` → `npm run build`
-3. **Docker build**: builds both `Dockerfile-api` + `Dockerfile-web` (main only)
-4. **Docker Compose smoke test**: healthcheck polls `/api/v1/health` up to 60s for `healthy` status
+**`ci.yml`** — on push to main/develop or PR to main — 4 jobs:
+1. **Backend tests**: Python 3.12, `libspatialindex-dev` system dep, `python -m pytest tests/ -v --tb=short --ignore=tests/test_openblast.py` (openblast tests never run in CI) + `python test_pipeline.py`
+2. **Frontend build**: Node 20, `npm ci` → `npx tsc --noEmit` → `npm run build`
+3. **Docker build** (main only, `needs: [backend-tests, frontend-build]` — sequential, not parallel): builds `Dockerfile-api` + `Dockerfile-web`
+4. **Docker Compose smoke test**: `docker compose up -d`, polls container `conciliacion-geo-v02-api-1` health up to ~60s for `healthy`, then curls `http://localhost:8000/api/v1/health`
 
-**GitHub Pages deploy** (`.github/workflows/deploy-frontend.yml`): on push to `web/**` of main, builds with env vars (`VITE_BASE`, `VITE_API_URL`, `VITE_SENTRY_DSN`, `VITE_ANALYTICS_URL`, `VITE_RELEASE`), then copies `dist/index.html` → `dist/404.html` for SPA routing fallback.
+All jobs set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true`.
 
-Note: CI does **not** run frontend `npm run test` (vitest) or `npm run test:e2e` (playwright). Run those locally before pushing UI changes.
+Other workflows:
+- **`deploy-frontend.yml`**: GitHub Pages on push to `web/**` of main (+ `workflow_dispatch`). Builds with `VITE_BASE` (default `/conciliacion-geo-v02/`, override via repo `vars`/`secrets`), `VITE_API_URL=https://conciliacion-api-ewbb.onrender.com`, `VITE_SENTRY_DSN`, `VITE_ANALYTICS_URL`, `VITE_RELEASE`; copies `dist/index.html` → `dist/404.html` for SPA routing fallback.
+- **`build.yml`**: verify-only job (Python 3.14 + `libspatialindex-dev` + PyInstaller spec build) on push/PR.
+- **`build-portable.yml`**: manual (`workflow_dispatch`), matrix Windows + Ubuntu — PyInstaller sidecar + electron-builder → portable bundles.
+- **`release.yml`**: on tag `v*` — builds portable artifacts and drafts a release.
+- **`deploy.yml`**: manual scaffold (staging/production over SSH), main only — body is a TODO placeholder.
+
+Note: CI does **not** run frontend `npm run test` (vitest) or Playwright e2e (`web/e2e/`). Run those locally before pushing UI changes.
 
 ---
 
@@ -145,14 +153,13 @@ Key detection defaults: `face_threshold=40°`, `berm_threshold=20°`, `max_berm_
 - `.gitignore` excludes `.stl`, `.xlsx`, `.db`, `data/`, `dist/`, `web/dist/`, `web/node_modules/`, `electron/dist/`, `*.AppImage`. Test meshes and outputs won't commit.
 - **API session store is SQLite** (`api/database.py`) — single-machine only. Render free tier restarts wipe it; ephemeral by design (`render.yaml` documents this).
 - Berm detection can produce unrealistic widths (>50m) on flat areas. Partially filtered by `max_berm_width=50`.
-- **Reconciled profile API split**:
-  - `core.param_extractor.build_reconciled_profile(...)` — legacy tuple output, emits `DeprecationWarning`.
-  - `core.param_extractor.build_reconciled_profile_v2(benches, source="topo")` — returns a rich `ReconciledProfile` with `ReconciledPoint` entries. Berms are explicit horizontal segments via a `berm_top` point; ramps (`is_ramp=True`) skip the berm corner and emit a `ramp` point.
-  - The v2 helper is **not** re-exported from `core/__init__.py` — import it from `core.param_extractor` directly.
+- **Reconciled profile API split** (both re-exported from `core` — see "Import rules"):
+  - `build_reconciled_profile(benches, *, source, return_v2=False, profile, floor_elevation)` — legacy tuple output is the **default** and emits `DeprecationWarning` (scheduled for removal after 2 release cycles); with `return_v2=True` it behaves like the v2 wrapper.
+  - `build_reconciled_profile_v2(benches, *, source="topo", profile, floor_elevation)` — always returns a rich `ReconciledProfile` with `ReconciledPoint` entries. Berms are explicit horizontal segments via a `berm_top` point; ramps (`is_ramp=True`) skip the berm corner and emit a `ramp` point. With `profile` supplied, face segments follow the actual profile curvature instead of a straight crest-toe line.
 - Ramp detection is partial (width range 15-42m). The "Rampas" Excel sheet may need manual input.
 - Sections near mesh edges can produce incomplete profiles with no user warning.
 - **`app.py` (root) and `ui/` are off-limits** — the maintainer uses them daily for real work. `CONTRIBUTING.md` mentions `core/` and `cli.py` too, but in practice those are shared domain where changes happen; the rule that actually holds is: changes to `core/` are welcome if they preserve the legacy stable API re-exported by `core/__init__.py`. New work goes into `web/` and `api/`, additive only.
 - **Streamlit file watcher**: `fileWatcherType = "poll"` is set in `.streamlit/config.toml` to avoid `inotify` ENOSPC; don't switch to default `auto` on systems with many small files.
 - **Electron portable build requires two steps**: `pyinstaller conciliacion-api.spec` → `electron-builder` in `electron/`. The `VITE_PWA=false` env var is mandatory during the web build step or the SW will break the AppImage.
-- **Test counts shift**: ~772 collected as of writing. The `633/633` badge in `README.md` is stale; update it (and the count in coverage tables) in PRs that add tests.
+- **Test counts shift**: ~1,202 collected (backend, with `--ignore`) / 1,233 with openblast. README.md has a testing table (1,233 backend + 344 frontend) — update it in PRs that add or remove tests.
 - **`openblast` is an optional dependency** — `tests/test_openblast.py` errors at collection if the simulator package isn't installed. Use `--ignore=tests/test_openblast.py` to skip in that case.
