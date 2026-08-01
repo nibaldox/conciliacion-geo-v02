@@ -402,7 +402,7 @@ def predict_damage_for_pf(model: dict, target_pf: float) -> dict:
 def compute_pasadura_toe_correlation(
     blast_df: pd.DataFrame,
     comparisons: List[dict],
-    bench_height: float = 15.0,
+    bench_height: Optional[float] = None,
     tolerance: float = 5.0,
 ) -> dict:
     """Test the hypothesis ``short pasadura -> high |delta_toe|`` per bench.
@@ -562,7 +562,7 @@ def compute_pasadura_toe_correlation(
 def compute_stemming_crest_correlation(
     blast_df: pd.DataFrame,
     comparisons: List[dict],
-    bench_height: float = 15.0,
+    bench_height: Optional[float] = None,
     taco_column: Optional[str] = None,
 ) -> dict:
     """Test the hypothesis ``short stemming -> high |delta_crest|`` per bench.

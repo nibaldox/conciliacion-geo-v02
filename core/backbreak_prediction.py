@@ -208,7 +208,7 @@ def predict_backbreak(
     rock_factor: Any = 1.0,
     *,
     alpha: float = 0.05,
-    bench_height_m: Any = 15.0,
+    bench_height_m: Any = None,
     defaults: Optional[BackbreakDefaults] = None,
 ) -> BackbreakPrediction:
     """Return a :class:`BackbreakPrediction` for the supplied design point.
@@ -358,6 +358,6 @@ def predict_backbreak_from_design(
         model=model,
         rock_factor=design.get("rock_factor", 1.0),
         alpha=alpha,
-        bench_height_m=design.get("bench_height_m", 15.0),
+        bench_height_m=design.get("bench_height_m"),
         defaults=defaults,
     )

@@ -41,12 +41,38 @@ class TestAreaReport:
         assert out["area_m2"].sum() == pytest.approx(domain, rel=1e-6)
 
     def test_duplicate_collars_share_cell(self):
+        """H-03: duplicate collars SPLIT the shared cell area (never duplicated)."""
         df = _grid_df(n_side=3)
         df = pd.concat([df, df.iloc[[0]]], ignore_index=True)  # duplicate collar
         out = compute_influence_area_report(df)
         dup = out.tail(1)
-        assert dup["area_status"].iloc[0] in ("duplicate_shared", "voronoi_cell")
+        assert dup["area_status"].iloc[0] == "duplicate_shared"
         assert dup["area_m2"].iloc[0] == pytest.approx(out.iloc[0]["area_m2"], rel=1e-6)
+        # The shared cell is counted ONCE: original + duplicate = same cell
+        # area as the non-duplicated corner cell (H-2-2).
+        corner = out.loc[out["label"] == "H-2-2"]
+        assert out.iloc[0]["area_m2"] + dup["area_m2"].iloc[0] == pytest.approx(
+            corner["area_m2"].iloc[0], rel=1e-6
+        )
+
+    def test_duplicates_area_conservation(self):
+        """H-03: sum of assigned areas equals the domain even with duplicates."""
+        df = _grid_df(n_side=5)
+        df = pd.concat([df, df.iloc[[0]], df.iloc[[1]]], ignore_index=True)
+        out = compute_influence_area_report(df)
+        domain = (4 * 6.0) ** 2
+        assert out["area_m2"].sum() == pytest.approx(domain, rel=1e-6)
+
+    def test_duplicates_share_cell_series_api(self):
+        """H-03: the bare-Series API splits the area the same way."""
+        from core.blast_metrics import compute_influence_area_m2
+        df = _grid_df(n_side=3)
+        df = pd.concat([df, df.iloc[[0]]], ignore_index=True)
+        out = compute_influence_area_m2(df)
+        assert out.iloc[-1] == pytest.approx(out.iloc[0], rel=1e-6)
+        # original + duplicate = same as the non-duplicated corner cell
+        corner = out.iloc[8]  # H-2-2 corner, not duplicated
+        assert out.iloc[0] + out.iloc[-1] == pytest.approx(corner, rel=1e-6)
 
     def test_invalid_cells_reported(self):
         df = _grid_df(n_side=3)
@@ -76,3 +102,57 @@ class TestAreaReport:
         poly = shapely.geometry.Polygon(polygon)
         assert out["area_m2"].sum() <= poly.area + 1e-6
         assert out["area_m2"].sum() > 0
+
+
+class TestOperationalIntegration:
+    """H-02: compute_powder_factor must consume the validated Voronoi areas."""
+
+    def test_operational_and_report_areas_identical(self):
+        from core.blast_correlation import compute_powder_factor
+
+        df = _grid_df(n_side=4)
+        df["Kilos_Cargados_real"] = 300.0
+        df["Nombre_Banco"] = 4000.0
+        df["Inclinacion_real"] = 0.0
+        df["Azimuth_real"] = 0.0
+        df["longitud_real"] = 12.0
+        out = compute_powder_factor(df)
+        rep = compute_influence_area_report(df.rename(columns={"X": "X", "Y": "Y"}))
+        assert out["area_influence_m2"].to_numpy() == pytest.approx(
+            rep["area_m2"].to_numpy(), rel=1e-9
+        )
+
+    def test_status_propagated_to_operational_frame(self):
+        from core.blast_correlation import compute_powder_factor
+
+        df = _grid_df(n_side=4)
+        df["Kilos_Cargados_real"] = 300.0
+        df["Nombre_Banco"] = 4000.0
+        df["Inclinacion_real"] = 0.0
+        df["Azimuth_real"] = 0.0
+        df["longitud_real"] = 12.0
+        out = compute_powder_factor(df)
+        assert "area_status" in out.columns
+        assert "domain_area_m2" in out.columns
+        assert set(out["area_status"].unique()) <= {
+            "voronoi_cell", "edge_clipped", "duplicate_shared",
+        }
+
+    def test_powder_factor_with_duplicates_uses_split_areas(self):
+        from core.blast_correlation import compute_powder_factor
+
+        df = _grid_df(n_side=3)
+        df = pd.concat([df, df.iloc[[0]]], ignore_index=True)
+        df["Kilos_Cargados_real"] = 300.0
+        df["Nombre_Banco"] = 4000.0
+        df["Inclinacion_real"] = 0.0
+        df["Azimuth_real"] = 0.0
+        df["longitud_real"] = 12.0
+        out = compute_powder_factor(df)
+        dup_area = out["area_influence_m2"].iloc[-1]
+        orig_area = out["area_influence_m2"].iloc[0]
+        assert dup_area == pytest.approx(orig_area, rel=1e-9)
+        # pf uses the split area -> both rows share the same pf
+        assert out["pf_g_per_ton_inf"].iloc[0] == pytest.approx(
+            out["pf_g_per_ton_inf"].iloc[-1], rel=1e-9
+        )

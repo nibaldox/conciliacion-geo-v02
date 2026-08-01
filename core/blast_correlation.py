@@ -30,7 +30,7 @@ from core.compliance_status import (
 from core.config import BLAST, DEFAULTS, EXPLOSIVE, RAMP
 from core.blast_metrics import (
     ROCK_DENSITY_DEFAULT_TM3,
-    compute_influence_area_m2,
+    compute_influence_area_report,
     enrich_blast_dataframe,
 )
 
@@ -141,6 +141,7 @@ def compute_powder_factor(
     df_pozos: pd.DataFrame,
     rock_density_tm3: Optional[float] = None,
     height_fallback_m: Optional[float] = None,
+    boundary_polygon: Optional[list] = None,
 ) -> pd.DataFrame:
     """Compute powder factor for each blast-hole row.
 
@@ -229,8 +230,6 @@ def compute_powder_factor(
             group_col = cand
             break
 
-    bench_h = float(DEFAULTS.blast_default_bench_height)
-
     if group_col and group_col in out.columns:
         groups = out.groupby(out[group_col].astype(str), dropna=False)
     else:
@@ -240,6 +239,8 @@ def compute_powder_factor(
     burden_est = pd.Series([np.nan] * len(out), index=out.index)
     esp_est = pd.Series([np.nan] * len(out), index=out.index)
     influence_area = pd.Series([np.nan] * len(out), index=out.index)
+    area_status = pd.Series("invalid", index=out.index, dtype=object)
+    domain_area = pd.Series(np.nan, index=out.index, dtype=float)
 
     for _, gdf in (groups if group_col else [(None, out)]):
         if 'Burden' in gdf.columns and gdf['Burden'].notna().any():
@@ -254,11 +255,31 @@ def compute_powder_factor(
             _, s = _knn_spacing(gdf)
             esp_est.loc[gdf.index] = s
 
-        influence_area.loc[gdf.index] = compute_influence_area_m2(gdf)
+        # H-02: the operational frame consumes the SAME validated Voronoi
+        # report (clipped, duplicate-split) that is exposed to the user.
+        rep = compute_influence_area_report(
+            gdf, boundary_polygon=boundary_polygon,
+        )
+        influence_area.loc[gdf.index] = rep["area_m2"]
+        area_status.loc[gdf.index] = rep["area_status"]
+        if "domain_area_m2" in rep.columns:
+            domain_area.loc[gdf.index] = rep["domain_area_m2"]
 
     out['burden_est_m'] = burden_est
     out['esp_est_m'] = esp_est
     out['area_influence_m2'] = influence_area
+    out['area_status'] = area_status.astype(str)
+    out['domain_area_m2'] = domain_area
+
+    # H-06: bench height is an event attribute — per-row bench_height_m
+    # column when present (from procesar_pozos), else the visible config
+    # default. Never a silent magic constant.
+    if "bench_height_m" in out.columns:
+        bench_h = pd.to_numeric(out["bench_height_m"], errors="coerce").where(
+            pd.to_numeric(out["bench_height_m"], errors="coerce") > 0
+        )
+    else:
+        bench_h = float(DEFAULTS.blast_default_bench_height)
 
     denom_vol = burden_est * esp_est * bench_h
     pf_vol = np.where(denom_vol > 0, kilos / denom_vol, np.nan)

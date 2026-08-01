@@ -292,6 +292,16 @@ class TestComputePowderFactor:
         assert compute_powder_factor(df_heavy)["energy_mj"].iloc[0] == pytest.approx(340.0, abs=1e-3)
         assert compute_powder_factor(df_emul)["energy_mj"].iloc[0] == pytest.approx(305.0, abs=1e-3)
 
+    def test_bench_height_from_event_column(self):
+        """H-06: pf_vol uses the per-event bench height (12 m), not a literal 15."""
+        df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0)
+        out = compute_powder_factor(df)
+        assert out["pf_vol_kgm3"].iloc[0] == pytest.approx(300.0 / (5.0 * 6.0 * 15.0), rel=1e-3)
+        df["bench_height_m"] = 12.0
+        out12 = compute_powder_factor(df)
+        assert out12["pf_vol_kgm3"].iloc[0] == pytest.approx(300.0 / (5.0 * 6.0 * 12.0), rel=1e-3)
+        assert out12["pf_vol_kgm3"].iloc[0] != out["pf_vol_kgm3"].iloc[0]
+
     def test_returns_nan_gracefully(self):
         """With only 1 row and no group column, B/S estimation is impossible → NaN."""
         df = pd.DataFrame(

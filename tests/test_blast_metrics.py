@@ -134,11 +134,28 @@ class TestDecouplingRatio:
         hole_area = (math.pi / 4.0) * (0.2 ** 2)
         rho_e_kgm3 = 0.80 * 1000.0
         expected_vl = kg_per_m / (hole_area * rho_e_kgm3)
+        # H-09: the physical output is the dimensionless fill fraction
+        assert out["hole_fill_fraction"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
+        # legacy alias keeps the same value (deprecated)
         assert out["volume_load_kgm3"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
         # Standard coupling: D_c = sqrt(4 q_l / (pi rho_e)); R_c = D_c / D_h
         d_c = math.sqrt(4.0 * kg_per_m / (math.pi * rho_e_kgm3))
         assert out["equivalent_charge_diameter_m"].iloc[0] == pytest.approx(d_c, rel=1e-3)
         assert out["coupling_ratio"].iloc[0] == pytest.approx(d_c / 0.2, rel=1e-3)
+
+    def test_fill_fraction_is_dimensionless(self):
+        """H-09: the fraction is a pure ratio, always in [0, ~1] for real charges."""
+        df = _proc_row(Diam_mm=200.0, Len=15.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
+        out = compute_decoupling_ratio(df)
+        v = out["hole_fill_fraction"].iloc[0]
+        assert 0.0 < v <= 1.0
+        assert "kg/m³" not in str(out["hole_fill_fraction"].dtype)
+
+    def test_legacy_alias_deprecation_warning(self):
+        """H-09: consuming the legacy alias emits an explicit DeprecationWarning."""
+        df = _proc_row(Diam_mm=200.0, Len=15.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
+        with pytest.warns(DeprecationWarning, match="volume_load_kgm3"):
+            enrich_blast_dataframe(df)
 
     def test_analytical_case_spec(self):
         """Spec §4.6 analytic case: q_l=30 kg/m, rho_e=1200 kg/m3, D_h=250 mm."""
@@ -163,6 +180,7 @@ class TestDecouplingRatio:
         df = _proc_row().drop(columns=["Diam_mm"])
         out = compute_decoupling_ratio(df)
         assert pd.isna(out["volume_load_kgm3"]).all()
+        assert pd.isna(out["hole_fill_fraction"]).all()
         assert pd.isna(out["coupling_ratio"]).all()
 
     def test_default_rock_density_constant(self):
@@ -207,6 +225,34 @@ class TestCollarDeviation:
         out = compute_collar_deviation(df)
         assert len(out) == 2
         assert pd.isna(out).all()
+
+
+class TestSubdrillingRatio:
+    def test_basic(self):
+        df = _proc_row(Len=17.0, Incl=0.0, Burden=5.0, Diam_mm=200.0)
+        df["Z_collar"] = 4000.0 + 15.0
+        df["Z_toe"] = 4000.0 + 15.0 - 17.0
+        out = compute_subdrilling_ratio(df)
+        pasadura = (4015.0 - 15.0) - 3998.0
+        assert out.iloc[0] == pytest.approx(pasadura / 5.0)
+
+    def test_bench_height_from_event_column(self):
+        """H-06: bench height resolved from the event column, not a literal."""
+        df = _proc_row(Len=17.0, Incl=0.0, Burden=5.0, Diam_mm=200.0)
+        df["Z_collar"] = 4000.0 + 12.0
+        df["Z_toe"] = 4000.0 + 12.0 - 17.0
+        df["bench_height_m"] = 12.0
+        out = compute_subdrilling_ratio(df)
+        pasadura = (4012.0 - 12.0) - 3995.0
+        assert out.iloc[0] == pytest.approx(pasadura / 5.0)
+
+    def test_invalid_bench_height_gives_nan(self):
+        df = _proc_row(Len=17.0, Incl=0.0, Burden=5.0)
+        df["Z_collar"] = 4015.0
+        df["Z_toe"] = 3998.0
+        df["bench_height_m"] = -3.0
+        out = compute_subdrilling_ratio(df)
+        assert pd.isna(out.iloc[0])
 
 
 class TestKuznetsovX50:
@@ -263,6 +309,15 @@ class TestKuznetsovX50:
         a = compute_kuznetsov_x50(df, rock_factor=10.0).iloc[0]
         b = compute_kuznetsov_x50(df, rock_factor=12.0).iloc[0]
         assert b > a  # higher A -> larger X50
+
+    def test_bench_height_from_event_column(self):
+        """H-06: bench height resolved from the event column (12 m)."""
+        df = _proc_row(Burden=8.0, Esp=10.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
+        df["bench_height_m"] = 12.0
+        out = compute_kuznetsov_x50(df)
+        V = 8.0 * 10.0 * 12.0
+        expected = 11.0 * (V / 300.0) ** 0.8 * 300.0 ** (1.0 / 6.0)
+        assert out.iloc[0] == pytest.approx(expected, rel=1e-3)
 
 
 class TestISPU:
@@ -466,20 +521,23 @@ class TestComputeInfluenceArea:
         assert areas.notna().all()
         assert areas.median() == pytest.approx(64.0, rel=0.05)
 
-    def test_edge_cells_capped(self):
-        """Edge (infinite) cells must be bounded by the Q1-based cap."""
+    def test_edge_cells_bounded_by_domain(self):
+        """H-02: cells are clipped to the domain, so max area <= domain area."""
         areas = compute_influence_area_m2(self._grid(n=5, spacing=10.0))
-        q1 = areas.quantile(0.25)
-        assert areas.max() <= q1 * 3.0 + 1e-6
-        assert q1 == pytest.approx(100.0, rel=0.05)
+        domain = (4 * 10.0) ** 2
+        assert areas.max() <= domain + 1e-6
+        assert areas.sum() == pytest.approx(domain, rel=1e-6)
 
-    def test_duplicate_collars_share_cell(self):
+    def test_duplicate_collars_split_cell(self):
+        """H-03: duplicates SPLIT the shared cell (sum of areas = domain)."""
         df = self._grid(n=5, spacing=10.0)
         df2 = pd.concat([df, df.iloc[:3]], ignore_index=True)
         areas = compute_influence_area_m2(df2)
         assert len(areas) == len(df2)
         assert areas.isna().sum() == 0
         assert areas.iloc[0] == areas.iloc[len(df)]  # duplicate shares cell area
+        domain = (4 * 10.0) ** 2
+        assert areas.sum() == pytest.approx(domain, rel=1e-6)
 
     def test_fewer_than_4_returns_nan(self):
         df3 = pd.DataFrame({"X": [0.0, 1.0, 2.0], "Y": [0.0, 0.0, 1.0]})
@@ -490,4 +548,66 @@ class TestComputeInfluenceArea:
         assert compute_influence_area_m2(pd.DataFrame({"A": [1.0] * 5})).isna().all()
         df = self._grid(n=3)
         df.loc[0, "X"] = np.nan
-        assert compute_influence_area_m2(df).isna().all()
+        areas = compute_influence_area_m2(df)
+        assert pd.isna(areas.iloc[0])  # only the invalid row is NaN
+        assert areas.iloc[1:].notna().all()  # the rest still computed
+
+
+class TestExplosiveProvenance:
+    """H-08: status/source/RWS provenance must reach the operational frame."""
+
+    def _frame(self, explosive: str):
+        df = _proc_row(Kilos_Cargados_real=300.0, Len=15.0, Tipo_Explosivo=explosive)
+        return enrich_blast_dataframe(df)
+
+    def test_validated_anfo(self):
+        out = self._frame("ANFO")
+        assert out["explosive_status"].iloc[0] == "VALIDATED"
+        assert out["explosive_rws"].iloc[0] == pytest.approx(1.0)
+        assert bool(out["explosive_rws_is_estimated"].iloc[0]) is False
+        assert bool(out["explosive_assumption_flag"].iloc[0]) is False
+        assert out["explosive_source"].iloc[0]
+
+    def test_unvalidated_reference_pirex(self):
+        out = self._frame("Pirex-930")
+        assert out["explosive_status"].iloc[0] == "UNVALIDATED_REFERENCE"
+        assert out["explosive_rws"].iloc[0] == pytest.approx(3.05 / 3.72, rel=1e-6)
+        assert bool(out["explosive_rws_is_estimated"].iloc[0]) is True
+        assert bool(out["explosive_assumption_flag"].iloc[0]) is True
+
+    def test_unknown_product_no_silent_anfo(self):
+        df = _proc_row(Kilos_Cargados_real=300.0, Len=15.0, Tipo_Explosivo="Mystery-X")
+        df = df.drop(columns=["energy_mj"])  # let it be computed from the product
+        out = enrich_blast_dataframe(df)
+        assert out["explosive_status"].iloc[0] == "UNKNOWN"
+        assert pd.isna(out["explosive_rws"].iloc[0])
+        assert bool(out["explosive_assumption_flag"].iloc[0]) is True
+
+    def test_missing_column_no_columns(self):
+        df = _proc_row(Kilos_Cargados_real=300.0, Len=15.0).drop(columns=["Tipo_Explosivo"])
+        out = enrich_blast_dataframe(df)
+        assert "explosive_status" not in out.columns
+
+    def test_provenance_reaches_powder_factor(self):
+        from core.blast_correlation import compute_powder_factor
+
+        df = pd.DataFrame([{
+            "X": 0.0, "Y": 0.0, "Z_collar": 4015.0, "Incl": 0.0, "Az": 0.0, "Len": 15.0,
+            "Burden": 5.0, "Esp": 6.0, "Kilos_Cargados_real": 300.0,
+            "Tipo_Explosivo": "Pirex-930", "Nombre_Banco": 4000.0,
+        }])
+        out = compute_powder_factor(df)
+        assert out["explosive_status"].iloc[0] == "UNVALIDATED_REFERENCE"
+        assert bool(out["explosive_rws_is_estimated"].iloc[0]) is True
+
+    def test_unknown_product_energy_nan_in_powder_factor(self):
+        from core.blast_correlation import compute_powder_factor
+
+        df = pd.DataFrame([{
+            "X": 0.0, "Y": 0.0, "Z_collar": 4015.0, "Incl": 0.0, "Az": 0.0, "Len": 15.0,
+            "Burden": 5.0, "Esp": 6.0, "Kilos_Cargados_real": 300.0,
+            "Tipo_Explosivo": "Mystery-X", "Nombre_Banco": 4000.0,
+        }])
+        out = compute_powder_factor(df)
+        assert out["explosive_status"].iloc[0] == "UNKNOWN"
+        assert pd.isna(out["energy_mj"].iloc[0])

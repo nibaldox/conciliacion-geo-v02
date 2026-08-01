@@ -14,13 +14,14 @@ so callers can apply the full enrichment in one call.
 """
 from __future__ import annotations
 
+import warnings
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from core.column_utils import KILOS_CANDIDATES, first_present_column
-from core.config import EXPLOSIVE
+from core.config import BLAST, EXPLOSIVE
 
 
 STEMMING_RATIO_OPTIMAL = (0.7, 1.0)
@@ -44,6 +45,25 @@ def _col_or_nan(df: pd.DataFrame, candidates: tuple) -> pd.Series:
     return pd.to_numeric(df[col], errors="coerce")
 
 
+def _resolve_bench_height(
+    df: pd.DataFrame,
+    fallback_m: float,
+) -> pd.Series:
+    """Per-row bench height (H-06): event column, else explicit config fallback.
+
+    The bench height is an attribute of the event, never a magic
+    constant: when the processed frame carries ``bench_height_m`` (from
+    :func:`core.calculo_tronadura.procesar_pozos`) it is used per row;
+    invalid (<=0) event values become NaN (explicit invalid data, never
+    silently replaced). When the column is absent the caller's
+    ``fallback_m`` (a visible configuration value) applies to all rows.
+    """
+    if "bench_height_m" in df.columns:
+        bh = pd.to_numeric(df["bench_height_m"], errors="coerce")
+        return bh.where(bh > 0)
+    return pd.Series(float(fallback_m), index=df.index, dtype=float)
+
+
 def compute_stemming_ratio(df: pd.DataFrame) -> pd.Series:
     """Stemming/Burden ratio. Optimal range 0.7-1.0 (Konya)."""
     burden = _col_or_nan(df, _BURDEN_CANDIDATES)
@@ -54,17 +74,26 @@ def compute_stemming_ratio(df: pd.DataFrame) -> pd.Series:
     return out
 
 
-def compute_subdrilling_ratio(df: pd.DataFrame, bench_height: float = 15.0) -> pd.Series:
+def compute_subdrilling_ratio(df: pd.DataFrame, bench_height: Optional[float] = None) -> pd.Series:
     """Sub-drilling/Burden ratio. Optimal range 0.2-0.4.
 
     pasadura = (Z_collar - bench_height) - Z_toe.
+
+    ``bench_height`` (H-06) is resolved per row from the event's
+    ``bench_height_m`` column when present; otherwise falls back to the
+    caller value or ``BLAST.height_fallback_m`` (visible configuration).
+    Invalid event heights produce NaN (explicit), never a silent default.
     """
     burden = _col_or_nan(df, _BURDEN_CANDIDATES)
     if "Z_collar" not in df.columns or "Z_toe" not in df.columns:
         return pd.Series([np.nan] * len(df), index=df.index, dtype=float)
     z_collar = pd.to_numeric(df["Z_collar"], errors="coerce")
     z_toe = pd.to_numeric(df["Z_toe"], errors="coerce")
-    pasadura = (z_collar - float(bench_height)) - z_toe
+    bh = _resolve_bench_height(
+        df,
+        float(BLAST.height_fallback_m if bench_height is None else bench_height),
+    )
+    pasadura = (z_collar - bh) - z_toe
     out = pd.Series([np.nan] * len(df), index=df.index, dtype=float)
     valid = burden.notna() & pasadura.notna() & (burden > 0)
     out.loc[valid] = pasadura[valid] / burden[valid]
@@ -131,9 +160,14 @@ def compute_decoupling_ratio(
     Returns
     -------
     dict
-        ``volume_load_kgm3`` : fill fraction of the hole volume occupied
-            by explosive (kg per m of hole / (hole area × ρ_e)) —
-            legacy metric, dimensionless despite its name.
+        ``hole_fill_fraction`` : dimensionless fill fraction of the hole
+            volume occupied by explosive (kg per m of hole /
+            (hole area × ρ_e)) — the physical, correctly named output
+            (H-09).
+        ``volume_load_kgm3`` : DEPRECATED alias of the same value (the
+            name suggests kg/m³ but the magnitude is a fraction); kept
+            for backward compatibility and emitted with a
+            DeprecationWarning.
         ``equivalent_charge_diameter_m`` : D_c = sqrt(4·q_l/(π·ρ_e))
             where q_l is the linear charge density (kg/m) and ρ_e the
             explosive density (kg/m³) — the diameter of an equivalent
@@ -145,6 +179,7 @@ def compute_decoupling_ratio(
     n = len(df)
     nan = pd.Series([np.nan] * n, index=df.index, dtype=float)
     empty = {
+        "hole_fill_fraction": nan.copy(),
         "volume_load_kgm3": nan.copy(),
         "equivalent_charge_diameter_m": nan.copy(),
         "coupling_ratio": nan.copy(),
@@ -191,6 +226,7 @@ def compute_decoupling_ratio(
     coupling.loc[valid_c] = d_c[valid_c] / diameter_m[valid_c]
 
     return {
+        "hole_fill_fraction": volume_load_kgm3,
         "volume_load_kgm3": volume_load_kgm3,
         "equivalent_charge_diameter_m": d_c,
         "coupling_ratio": coupling,
@@ -257,7 +293,7 @@ def compute_collar_deviation(
 def compute_kuznetsov_x50(
     df: pd.DataFrame,
     explosive_energy_mj_kg: Optional[pd.Series] = None,
-    bench_height: float = 15.0,
+    bench_height: Optional[float] = None,
     rock_factor: float = 11.0,
     rws: Optional[pd.Series] = None,
 ) -> pd.Series:
@@ -297,7 +333,11 @@ def compute_kuznetsov_x50(
         return nan
     kilos = pd.to_numeric(df[kg_col], errors="coerce")
 
-    volume_per_hole = burden * esp * float(bench_height)
+    bh = _resolve_bench_height(
+        df,
+        float(BLAST.height_fallback_m if bench_height is None else bench_height),
+    )
+    volume_per_hole = burden * esp * bh
     valid_v = volume_per_hole > 0
     if not valid_v.any():
         return nan
@@ -332,7 +372,7 @@ def compute_ispu(
     blast_df: pd.DataFrame,
     ucs_mpa: Optional[float] = pd.NA,
     rock_density_tm3: float = ROCK_DENSITY_DEFAULT_TM3,
-    bench_height: float = 15.0,
+    bench_height: Optional[float] = None,
 ) -> pd.Series:
     """ISPU (Índice Schwimmbeck / Powder Utilization) per hole.
 
@@ -360,7 +400,11 @@ def compute_ispu(
     energy_mj = pd.to_numeric(blast_df["energy_mj"], errors="coerce")
     kilos = pd.to_numeric(blast_df[kg_col], errors="coerce")
 
-    volume = burden * esp * float(bench_height)
+    bh = _resolve_bench_height(
+        blast_df,
+        float(BLAST.height_fallback_m if bench_height is None else bench_height),
+    )
+    volume = burden * esp * bh
     if isinstance(ucs_mpa, pd.Series):
         ucs = pd.to_numeric(ucs_mpa, errors="coerce").reindex(blast_df.index)
     else:
@@ -436,71 +480,48 @@ def compute_influence_area_m2(
     df: pd.DataFrame,
     max_area_factor: float = 3.0,
     clip_radius_factor: float = 2.0,
+    boundary_polygon: Optional[list] = None,
 ) -> pd.Series:
     """Per-hole Voronoi (Thiessen) influence area in m².
 
-    Each hole's area of influence is the 2-D Voronoi cell of its collar
-    position (X, Y). Cells whose ridges extend to infinity (holes on the
-    convex hull) are closed by projecting their infinite ridge rays to a
-    radius of ``clip_radius_factor × point spread`` from the region
-    centroid, and the resulting polygon area is capped at
-    ``max_area_factor × median(cell area)`` to avoid absurd edge cells.
+    Operational API (H-02): delegates to
+    :func:`compute_influence_area_report` so the areas consumed by the
+    powder-factor pipeline are ALWAYS the same validated, clipped values
+    that the report exposes — single source of truth.
 
-    Holes sharing the same collar coordinates share the cell of their
-    unique location. Returns NaN for inputs with fewer than 4 distinct
-    collars (Qhull needs at least 4 sites) or non-finite coordinates.
+    Each hole's area of influence is the 2-D Voronoi cell of its collar
+    position (X, Y), clipped to the collar bounding box (or to
+    ``boundary_polygon`` when provided). Cells whose ridges extend to
+    infinity (holes on the convex hull) are closed by projecting their
+    infinite ridge rays and flagged as estimates. Duplicate collars
+    SPLIT the shared cell area among the group members (H-03) so the sum
+    of assigned areas never exceeds the domain. Returns NaN for inputs
+    with fewer than 4 distinct collars or non-finite coordinates.
 
     Parameters
     ----------
     df : DataFrame with ``X`` / ``Y`` columns (collar East/North).
     max_area_factor : float
-        Cap factor over the median cell area (default 3×).
+        Legacy cap factor (kept for backward compatibility; the current
+        pipeline clips cells to the domain instead).
     clip_radius_factor : float
-        Multiplier of the point spread used to close infinite ridges.
+        Multiplier of the local point spread used to close infinite
+        ridges before clipping.
+    boundary_polygon : list[(x, y)], optional
+        Real blast polygon; cells are intersected with it when shapely
+        is available.
 
     Returns
     -------
     pd.Series
         Influence area per hole in m², aligned with ``df.index``.
     """
-    n = len(df)
-    nan = pd.Series([np.nan] * n, index=df.index, dtype=float)
-    if n < 4 or "X" not in df.columns or "Y" not in df.columns:
-        return nan
-    coords = df[["X", "Y"]].to_numpy(dtype=float)
-    if not np.isfinite(coords).all():
-        return nan
-
-    uniq, inverse = np.unique(coords, axis=0, return_inverse=True)
-    if len(uniq) < 4:
-        return nan
-
-    try:
-        from scipy.spatial import QhullError, Voronoi, cKDTree
-        vor = Voronoi(uniq)
-        # Local spacing: median distance to the 3 nearest neighbours. The
-        # infinite-ridge clip radius scales with this instead of the global
-        # point spread so edge cells stay proportional to the local grid.
-        tree = cKDTree(uniq)
-        dists, _ = tree.query(uniq, k=min(4, len(uniq)))
-        if dists.ndim == 1:
-            nn_med = float(np.median(dists[1:]))
-        else:
-            nn_med = float(np.median(dists[:, 1:]))
-        radius = max(nn_med * clip_radius_factor, 1.0)
-        regions, vertices = _voronoi_finite_polygons_2d(vor, radius)
-        areas = np.array([_polygon_area(vertices[r]) for r in regions], dtype=float)
-    except (QhullError, ValueError, IndexError):
-        return nan
-
-    if len(areas) == 0:
-        return nan
-    # Cap absurd edge cells against the first quartile of cell areas (the
-    # median itself can be inflated when most holes sit on the hull).
-    ref = float(np.percentile(areas, 25))
-    if ref > 0:
-        areas = np.minimum(areas, ref * max_area_factor)
-    return pd.Series(areas[inverse], index=df.index, dtype=float)
+    return compute_influence_area_report(
+        df,
+        boundary_polygon=boundary_polygon,
+        max_area_factor=max_area_factor,
+        clip_radius_factor=clip_radius_factor,
+    )["area_m2"]
 
 
 def compute_influence_area_report(
@@ -634,6 +655,9 @@ def compute_influence_area_report(
                 st = "edge_clipped"
             else:
                 st = "voronoi_cell"
+        # H-03: duplicate collars SPLIT the shared cell so the sum of
+        # assigned areas never exceeds the domain.
+        a = a / float(counts[site])
         report.loc[idx, "area_m2"] = a
         report.loc[idx, "area_status"] = st
 
@@ -646,7 +670,6 @@ def compute_influence_area_report(
         report["domain_area_m2"] = float(domain_area)
         report["clip_warning"] = clip_warning
     return report
-
 
 def _bottom_column_ratio(df: pd.DataFrame) -> Optional[pd.Series]:
     if "Carga_Fondo_kg" not in df.columns or "Carga_Columna_kg" not in df.columns:
@@ -718,7 +741,16 @@ def enrich_blast_dataframe(
 
     if first_present_column(out, _DIAM_CANDIDATES) is not None:
         decoupling = compute_decoupling_ratio(out)
+        out["hole_fill_fraction"] = decoupling["hole_fill_fraction"]
+        # H-09: legacy alias, physically misnamed (fraction, not kg/m³);
+        # deprecated with an explicit warning.
         out["volume_load_kgm3"] = decoupling["volume_load_kgm3"]
+        warnings.warn(
+            "volume_load_kgm3 is deprecated (H-09): the value is a dimensionless "
+            "fill fraction. Use hole_fill_fraction.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         out["equivalent_charge_diameter_m"] = decoupling["equivalent_charge_diameter_m"]
         out["coupling_ratio"] = decoupling["coupling_ratio"]
 
@@ -753,4 +785,55 @@ def enrich_blast_dataframe(
             pd.to_numeric(out[first_present_column(out, _TACO_CANDIDATES)], errors="coerce"),
         )
 
+    _add_explosive_provenance(out)
+
     return out
+
+
+def _add_explosive_provenance(df: pd.DataFrame) -> None:
+    """Explosive provenance columns (audit H-08): status, source, RWS flags.
+
+    Adds (when ``Tipo_Explosivo`` is present):
+    - ``explosive_status``: VALIDATED | UNVALIDATED_REFERENCE |
+      FAMILY_MATCH | UNKNOWN | MISSING (never a silent ANFO fallback).
+    - ``explosive_source``: where the product data comes from (datasheet
+      reference, industrial standard, ...).
+    - ``explosive_rws``: RWS relative to ANFO when available; when the
+      product has no official RWS, the energy-ratio estimate.
+    - ``explosive_rws_is_estimated``: True when the RWS above is an
+      energy-ratio estimate, not a datasheet value.
+    - ``explosive_assumption_flag``: True when the product is unknown,
+      family-matched, or the RWS had to be estimated — downstream
+      consumers must treat the physical magnitudes as provisional.
+    """
+    if "Tipo_Explosivo" not in df.columns:
+        return
+    from core.explosive_properties import (
+        get_explosive_rws,
+        get_explosive_status,
+        resolve_explosive,
+    )
+
+    names = df["Tipo_Explosivo"].astype(str)
+    status = names.map(get_explosive_status)
+    df["explosive_status"] = status
+
+    def _source(n: str) -> str:
+        prod = resolve_explosive(n)
+        return prod.source if prod else ""
+
+    df["explosive_source"] = names.map(_source)
+
+    energy = pd.to_numeric(
+        names.map(EXPLOSIVE.energy_mj_per_kg), errors="coerce"
+    )
+    official_rws = names.map(get_explosive_rws)
+    estimated_rws = energy / EXPLOSIVE.anfo_energy
+    rws_est_flag = official_rws.isna() & status.notna() & status.isin(
+        ["VALIDATED", "UNVALIDATED_REFERENCE", "FAMILY_MATCH"]
+    )
+    df["explosive_rws"] = official_rws.where(official_rws.notna(), estimated_rws)
+    df["explosive_rws_is_estimated"] = rws_est_flag.fillna(False)
+    df["explosive_assumption_flag"] = (
+        status.isin(["UNKNOWN", "MISSING", "FAMILY_MATCH"]) | rws_est_flag
+    ).fillna(True)
