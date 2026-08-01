@@ -28,8 +28,6 @@ SUBDRILLING_RATIO_OPTIMAL = (0.2, 0.4)
 SPACING_BURDEN_RATIO_OPTIMAL = (1.0, 1.5)
 ROCK_DENSITY_DEFAULT_TM3 = 2.7
 
-_MJ_PER_KG_TO_CAL_PER_G = 1000.0 / 4.184
-
 _LENGTH_CANDIDATES = ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
 _DIAM_CANDIDATES = ("Diam_mm", "Diametro", "Diametro_pozo", "Diametro_perforacion", "D_mm")
 _BURDEN_CANDIDATES = ("Burden", "Burden_Real", "Burden_diseno", "B")
@@ -128,18 +126,29 @@ def compute_decoupling_ratio(
     well_kg_col: Optional[str] = None,
     rock_density_tm3: float = ROCK_DENSITY_DEFAULT_TM3,
 ) -> dict:
-    """In-hole volumetric charge density and coupling ratio.
+    """In-hole volumetric charge density and standard coupling ratio (spec §4.6).
 
     Returns
     -------
     dict
-        ``volume_load_kgm3`` : kg of explosive per m^3 of hole volume
-        ``coupling_ratio``   : volume_load_kgm3 / rock_density (relative
-                               charge density vs intact rock).
+        ``volume_load_kgm3`` : fill fraction of the hole volume occupied
+            by explosive (kg per m of hole / (hole area × ρ_e)) —
+            legacy metric, dimensionless despite its name.
+        ``equivalent_charge_diameter_m`` : D_c = sqrt(4·q_l/(π·ρ_e))
+            where q_l is the linear charge density (kg/m) and ρ_e the
+            explosive density (kg/m³) — the diameter of an equivalent
+            full column with the same linear density.
+        ``coupling_ratio`` : R_c = D_c / D_h, the standard decoupling
+            ratio (1.0 = fully coupled, <1 = decoupled). D_h is the
+            drilled hole diameter in metres.
     """
     n = len(df)
     nan = pd.Series([np.nan] * n, index=df.index, dtype=float)
-    empty = {"volume_load_kgm3": nan.copy(), "coupling_ratio": nan.copy()}
+    empty = {
+        "volume_load_kgm3": nan.copy(),
+        "equivalent_charge_diameter_m": nan.copy(),
+        "coupling_ratio": nan.copy(),
+    }
 
     diam = _col_or_nan(df, _DIAM_CANDIDATES)
     if not diam.notna().any():
@@ -171,12 +180,21 @@ def compute_decoupling_ratio(
     valid = kg_per_m.notna() & (hole_area_m2 > 0) & (rho_e_kgm3 > 0)
     volume_load_kgm3.loc[valid] = kg_per_m[valid] / (hole_area_m2[valid] * rho_e_kgm3[valid])
 
-    rho_rock_kgm3 = float(rock_density_tm3) * 1000.0
-    coupling_ratio = pd.Series([np.nan] * n, index=df.index, dtype=float)
-    valid_c = volume_load_kgm3.notna() & (rho_rock_kgm3 > 0)
-    coupling_ratio.loc[valid_c] = volume_load_kgm3[valid_c] / rho_rock_kgm3
+    # Standard coupling (spec §4.6): D_c = sqrt(4·q_l/(π·ρ_e)); R_c = D_c/D_h.
+    d_c = pd.Series([np.nan] * n, index=df.index, dtype=float)
+    valid_dc = kg_per_m.notna() & (kg_per_m > 0) & (rho_e_kgm3 > 0)
+    d_c.loc[valid_dc] = np.sqrt(
+        (4.0 * kg_per_m[valid_dc]) / (np.pi * rho_e_kgm3[valid_dc])
+    )
+    coupling = pd.Series([np.nan] * n, index=df.index, dtype=float)
+    valid_c = d_c.notna() & (diameter_m > 0)
+    coupling.loc[valid_c] = d_c[valid_c] / diameter_m[valid_c]
 
-    return {"volume_load_kgm3": volume_load_kgm3, "coupling_ratio": coupling_ratio}
+    return {
+        "volume_load_kgm3": volume_load_kgm3,
+        "equivalent_charge_diameter_m": d_c,
+        "coupling_ratio": coupling,
+    }
 
 
 def compute_collar_deviation(
@@ -241,19 +259,31 @@ def compute_kuznetsov_x50(
     explosive_energy_mj_kg: Optional[pd.Series] = None,
     bench_height: float = 15.0,
     rock_factor: float = 11.0,
+    rws: Optional[pd.Series] = None,
 ) -> pd.Series:
-    """Kuznetsov mean fragment size X50 (cm) per hole (Konya & Walter 1991).
+    """Kuznetsov mean fragment size X50 (cm) per hole — auxiliary estimator.
 
-    Formula
+    Formula (Kuznetsov 1973, as compiled by Konya & Walter 1991)
     -------
-    X50 = A * (V/Q)^0.8 * Q^(1/6) * (E/115)^(-0.633)
+    X50 = A * (V/Q)^0.8 * Q^(1/6) * RWS^(-0.633)
 
     where V = volume broken per hole (m^3) = Burden * Esp * bench_h,
-    Q = mass of explosive (kg) per hole, E = explosive specific energy
-    in cal/g, and A is a rock-structure factor (~10-12 for medium rock).
-    The ``explosive_energy_mj_kg`` argument is in MJ/kg (the same unit
-    that :func:`core.config.ExplosiveEnergy.energy_mj_per_kg` returns);
-    the function converts it to cal/g internally.
+    Q = mass of explosive (kg) per hole, RWS = relative weight strength
+    of the explosive relative to ANFO (= 1.0 for ANFO), and A is a
+    rock-structure factor (~10-12 for medium rock).
+
+    RWS handling (spec §4.5):
+    - ``rws`` (explicit, ANFO-relative) is used when provided.
+    - Otherwise RWS is ESTIMATED as the ratio of the product's specific
+      energy to ANFO's (3.72 MJ/kg). This is an explicit estimate — the
+      project has no official RWS datasheet values yet — and never a
+      silent ANFO fallback: unknown products produce NaN, not ANFO.
+
+    Units: V in m³, Q in kg, RWS dimensionless, X50 in cm.
+    Valid range: empirical, typically V/Q in 2-8 m³/kg, A in 7-13.
+    Limitations: single Kuznetsov mean size — no Rosin-Rammler index;
+      auxiliary fragmentation estimator only, not an energy-field
+      validator (spec §4.5).
     """
     n = len(df)
     nan = pd.Series([np.nan] * n, index=df.index, dtype=float)
@@ -272,26 +302,28 @@ def compute_kuznetsov_x50(
     if not valid_v.any():
         return nan
 
-    if explosive_energy_mj_kg is None:
-        if "Tipo_Explosivo" in df.columns:
-            mj_per_kg = df["Tipo_Explosivo"].apply(EXPLOSIVE.energy_mj_per_kg)
-        else:
-            mj_per_kg = pd.Series(np.nan, index=df.index, dtype=float)
-        # Unknown products resolve to None (spec §4.4) → NaN, never ANFO.
-        explosive_energy_mj_kg = pd.to_numeric(mj_per_kg, errors="coerce")
+    if rws is not None:
+        rws_series = pd.to_numeric(rws, errors="coerce")
+    else:
+        if explosive_energy_mj_kg is None:
+            if "Tipo_Explosivo" in df.columns:
+                mj_per_kg = df["Tipo_Explosivo"].apply(EXPLOSIVE.energy_mj_per_kg)
+            else:
+                mj_per_kg = pd.Series(np.nan, index=df.index, dtype=float)
+            # Unknown products resolve to None (spec §4.4) → NaN, never ANFO.
+            explosive_energy_mj_kg = pd.to_numeric(mj_per_kg, errors="coerce")
+        rws_series = pd.to_numeric(explosive_energy_mj_kg, errors="coerce") / 3.72
 
-    e_cal_per_g = pd.to_numeric(explosive_energy_mj_kg, errors="coerce") * _MJ_PER_KG_TO_CAL_PER_G
-
-    valid = valid_v & kilos.notna() & (kilos > 0) & e_cal_per_g.notna() & (e_cal_per_g > 0)
+    valid = valid_v & kilos.notna() & (kilos > 0) & rws_series.notna() & (rws_series > 0)
     out = pd.Series([np.nan] * n, index=df.index, dtype=float)
     if not valid.any():
         return out
 
     v = volume_per_hole[valid]
     q = kilos[valid]
-    e = e_cal_per_g[valid]
+    r = rws_series[valid]
     ratio_vq = v / q
-    x50 = float(rock_factor) * (ratio_vq ** 0.8) * (q ** (1.0 / 6.0)) * ((e / 115.0) ** (-0.633))
+    x50 = float(rock_factor) * (ratio_vq ** 0.8) * (q ** (1.0 / 6.0)) * (r ** (-0.633))
     out.loc[valid] = x50
     return out
 
@@ -542,6 +574,7 @@ def enrich_blast_dataframe(
     if first_present_column(out, _DIAM_CANDIDATES) is not None:
         decoupling = compute_decoupling_ratio(out)
         out["volume_load_kgm3"] = decoupling["volume_load_kgm3"]
+        out["equivalent_charge_diameter_m"] = decoupling["equivalent_charge_diameter_m"]
         out["coupling_ratio"] = decoupling["coupling_ratio"]
 
     if "Az_Diseno" in out.columns and "Incl_Diseno" in out.columns:

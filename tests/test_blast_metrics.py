@@ -135,9 +135,19 @@ class TestDecouplingRatio:
         rho_e_kgm3 = 0.80 * 1000.0
         expected_vl = kg_per_m / (hole_area * rho_e_kgm3)
         assert out["volume_load_kgm3"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
-        assert out["coupling_ratio"].iloc[0] == pytest.approx(
-            expected_vl / (ROCK_DENSITY_DEFAULT_TM3 * 1000.0), rel=1e-3
-        )
+        # Standard coupling: D_c = sqrt(4 q_l / (pi rho_e)); R_c = D_c / D_h
+        d_c = math.sqrt(4.0 * kg_per_m / (math.pi * rho_e_kgm3))
+        assert out["equivalent_charge_diameter_m"].iloc[0] == pytest.approx(d_c, rel=1e-3)
+        assert out["coupling_ratio"].iloc[0] == pytest.approx(d_c / 0.2, rel=1e-3)
+
+    def test_analytical_case_spec(self):
+        """Spec §4.6 analytic case: q_l=30 kg/m, rho_e=1200 kg/m3, D_h=250 mm."""
+        df = _proc_row(Diam_mm=250.0, Len=10.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="Pirex-930")
+        out = compute_decoupling_ratio(df)
+        d_c = math.sqrt(4.0 * 30.0 / (math.pi * 1200.0))  # 0.178 m
+        assert out["equivalent_charge_diameter_m"].iloc[0] == pytest.approx(d_c, rel=1e-3)
+        assert out["coupling_ratio"].iloc[0] == pytest.approx(d_c / 0.25, rel=1e-3)
+        assert 0.71 < out["coupling_ratio"].iloc[0] < 0.72
 
     def test_with_heavy_anfo(self):
         df = _proc_row(Diam_mm=250.0, Len=10.0, Kilos_Cargados_real=400.0, Tipo_Explosivo="Heavy ANFO")
@@ -147,6 +157,7 @@ class TestDecouplingRatio:
         rho_e_kgm3 = 1.05 * 1000.0
         expected_vl = kg_per_m / (hole_area * rho_e_kgm3)
         assert out["volume_load_kgm3"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
+        assert out["equivalent_charge_diameter_m"].iloc[0] > 0
 
     def test_missing_diameter(self):
         df = _proc_row().drop(columns=["Diam_mm"])
@@ -199,21 +210,37 @@ class TestCollarDeviation:
 
 
 class TestKuznetsovX50:
-    def test_basic(self):
-        # Use larger V to push X50 comfortably into the typical 10-50 cm range.
+    def test_basic_anfo(self):
+        """Kuznetsov (Konya & Walter 1991) with RWS relative to ANFO (1.0)."""
         df = _proc_row(Burden=8.0, Esp=10.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
         out = compute_kuznetsov_x50(df)
         V, Q = 8.0 * 10.0 * 15.0, 300.0
-        E = 3.72 * 1000.0 / 4.184
-        expected = 11.0 * (V / Q) ** 0.8 * Q ** (1.0 / 6.0) * (E / 115.0) ** (-0.633)
+        expected = 11.0 * (V / Q) ** 0.8 * Q ** (1.0 / 6.0) * (1.0) ** (-0.633)
         assert out.iloc[0] == pytest.approx(expected, rel=1e-3)
 
     def test_in_range(self):
-        """Typical X50 for medium-rock D&B should fall in 10-50 cm range."""
+        """Plausible X50 for medium rock V/Q~4: 50-120 cm (RWS=1 scale)."""
         df = _proc_row(Burden=8.0, Esp=10.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
         out = compute_kuznetsov_x50(df)
         val = out.iloc[0]
-        assert 10.0 <= val <= 50.0, f"X50={val} cm outside typical 10-50 cm range"
+        assert 50.0 <= val <= 120.0, f"X50={val} cm outside plausible range"
+
+    def test_higher_rws_smaller_x50(self):
+        """More energetic explosive (higher RWS) -> finer fragmentation."""
+        df = _proc_row(Burden=8.0, Esp=10.0, Kilos_Cargados_real=300.0)
+        rws_low = pd.Series([0.8] * len(df), index=df.index)
+        rws_high = pd.Series([1.2] * len(df), index=df.index)
+        a = compute_kuznetsov_x50(df, rws=rws_low).iloc[0]
+        b = compute_kuznetsov_x50(df, rws=rws_high).iloc[0]
+        assert b < a
+
+    def test_pirex_energy_ratio_used_as_rws_estimate(self):
+        """Pirex-930 (3.05 MJ/kg) has lower RWS than ANFO -> coarser X50."""
+        df_anfo = _proc_row(Burden=8.0, Esp=10.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
+        df_pirex = _proc_row(Burden=8.0, Esp=10.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="Pirex-930")
+        x_anfo = compute_kuznetsov_x50(df_anfo).iloc[0]
+        x_pirex = compute_kuznetsov_x50(df_pirex).iloc[0]
+        assert x_pirex > x_anfo
 
     def test_missing_burden(self):
         df = _proc_row().drop(columns=["Burden"])
