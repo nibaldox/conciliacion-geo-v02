@@ -503,6 +503,151 @@ def compute_influence_area_m2(
     return pd.Series(areas[inverse], index=df.index, dtype=float)
 
 
+def compute_influence_area_report(
+    df: pd.DataFrame,
+    boundary_polygon: Optional[list] = None,
+    max_area_factor: float = 3.0,
+    clip_radius_factor: float = 2.0,
+) -> pd.DataFrame:
+    """Per-hole Voronoi influence area with provenance (spec §4.8).
+
+    Unlike :func:`compute_influence_area_m2` (which returns a bare
+    Series), this reports how each area was obtained:
+
+    - ``voronoi_cell``: full 2-D Voronoi cell of a unique interior site
+      (real, exact).
+    - ``edge_clipped``: cell on the convex hull whose infinite ridges
+      were closed with the heuristic clip radius (estimate).
+    - ``capped``: cell area capped by ``max_area_factor × Q1`` to avoid
+      absurd edge cells (estimate).
+    - ``duplicate_shared``: hole sharing collar coordinates with another
+      (the shared cell area is assigned to each copy).
+    - ``clipped_to_blast_polygon``: cell intersected with the real blast
+      polygon (needs shapely; requires ``boundary_polygon``).
+    - ``invalid``: NaN area (fewer than 4 distinct collars, non-finite
+      coordinates, or Qhull failure).
+
+    ``boundary_polygon`` is a list of (x, y) vertices of the blast
+    polygon. When provided and shapely is available, cells are
+    intersected with it and the report includes ``domain_area_m2`` (the
+    polygon area) so callers can verify ``sum(area) <= domain``. When
+    shapely is unavailable the polygon is ignored and a warning is
+    recorded in ``clip_warning``.
+
+    Returns
+    -------
+    pd.DataFrame aligned with ``df.index`` with columns ``area_m2``,
+    ``area_status`` and (only when ``boundary_polygon`` is given)
+    ``domain_area_m2`` / ``clip_warning``.
+    """
+    n = len(df)
+    report = df.copy()
+    report["area_m2"] = np.nan
+    report["area_status"] = "invalid"
+
+    if n < 4 or "X" not in df.columns or "Y" not in df.columns:
+        return report
+    coords = df[["X", "Y"]].to_numpy(dtype=float)
+    finite = np.isfinite(coords).all(axis=1)
+    if int(finite.sum()) < 4:
+        return report
+    coords_f = coords[finite]
+
+    uniq, inverse = np.unique(coords_f, axis=0, return_inverse=True)
+    if len(uniq) < 4:
+        return report
+
+    try:
+        from scipy.spatial import QhullError, Voronoi, cKDTree
+        vor = Voronoi(uniq)
+        tree = cKDTree(uniq)
+        dists, _ = tree.query(uniq, k=min(4, len(uniq)))
+        if dists.ndim == 1:
+            nn_med = float(np.median(dists[1:]))
+        else:
+            nn_med = float(np.median(dists[:, 1:]))
+        radius = max(nn_med * clip_radius_factor, 1.0)
+        regions, vertices = _voronoi_finite_polygons_2d(vor, radius)
+        raw_areas = np.array([_polygon_area(vertices[r]) for r in regions], dtype=float)
+    except (QhullError, ValueError, IndexError):
+        return report
+
+    cell_polys = [vertices[r] for r in regions]
+
+    hull_idx: set = set()
+    try:
+        from scipy.spatial import ConvexHull
+        hull = ConvexHull(uniq)
+        hull_idx = set(hull.vertices.tolist())
+    except Exception:  # noqa: BLE001 — degenerate hull
+        pass
+
+    counts = np.bincount(inverse, minlength=len(uniq))
+
+    clip_warning = ""
+    domain_area = None
+    polys_for_clip = None
+    clip_status_label = "clipped_to_blast_polygon"
+
+    try:
+        import shapely.geometry as sg
+        if boundary_polygon is not None and len(boundary_polygon) >= 3:
+            poly = sg.Polygon([(float(x), float(y)) for x, y in boundary_polygon])
+            if poly.area <= 0:
+                raise ValueError("degenerate blast polygon")
+        else:
+            # Default evaluation domain: the collar bounding box, so the
+            # reported areas can be verified against it (spec §4.8).
+            xmin, ymin = uniq.min(axis=0)
+            xmax, ymax = uniq.max(axis=0)
+            poly = sg.box(xmin, ymin, xmax, ymax)
+            clip_status_label = "edge_clipped"
+        domain_area = float(poly.area)
+        polys_for_clip = [sg.Polygon(p) for p in cell_polys]
+    except ImportError:
+        clip_warning = "shapely_unavailable"
+        if boundary_polygon is not None:
+            clip_warning = "polygon_clip_unavailable: shapely not installed"
+    except Exception as exc:  # noqa: BLE001
+        clip_warning = f"polygon_clip_unavailable: {exc}"
+
+    finite_idx = np.flatnonzero(finite)
+    finite_labels = report.index[finite]  # actual index labels (may be non-contiguous)
+    for site in range(len(uniq)):
+        mask = inverse == site
+        idx = finite_labels[mask]
+        if polys_for_clip is not None and not polys_for_clip[site].is_empty:
+            clipped = polys_for_clip[site].intersection(poly)
+            if clipped.is_empty or clipped.area <= 0:
+                continue  # stays invalid
+            a = float(clipped.area)
+            if poly.contains(polys_for_clip[site]):
+                # Cell fully inside the domain: untouched by the clip.
+                st = clip_status_label if boundary_polygon is not None else "voronoi_cell"
+            else:
+                st = clip_status_label
+        else:
+            a = float(raw_areas[site])
+            if not np.isfinite(a) or a <= 0:
+                continue
+            if site in hull_idx:
+                st = "edge_clipped"
+            else:
+                st = "voronoi_cell"
+        report.loc[idx, "area_m2"] = a
+        report.loc[idx, "area_status"] = st
+
+    if counts[inverse].max() > 1:
+        dup = counts[inverse] > 1
+        idx = finite_labels[dup]
+        report.loc[idx, "area_status"] = "duplicate_shared"
+
+    if domain_area is not None:
+        report["domain_area_m2"] = float(domain_area)
+        report["clip_warning"] = clip_warning
+    return report
+
+
 def _bottom_column_ratio(df: pd.DataFrame) -> Optional[pd.Series]:
     if "Carga_Fondo_kg" not in df.columns or "Carga_Columna_kg" not in df.columns:
         return None

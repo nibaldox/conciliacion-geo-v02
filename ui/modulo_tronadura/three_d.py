@@ -197,8 +197,8 @@ def _render_3d_options(df_clean: pd.DataFrame) -> tuple[str, str, bool, bool, bo
         disabled=colorscale_disabled,
     )
 
-    show_energy_grid = col_v3.checkbox("⚡ Mostrar Densidad de Energía 3D (IDW)", value=False)
-    show_pf_heatmap = col_v3.checkbox("🔋 Halo de Energía por Pozo (g/ton)", value=False)
+    show_energy_grid = col_v3.checkbox("🌡️ Campo Suavizado de Factor de Carga 3D (IDW)", value=False)
+    show_pf_heatmap = col_v3.checkbox("🔋 Halo Espacial de Factor de Carga por Pozo (g/ton)", value=False)
 
     show_design_mesh = False
     show_topo_mesh = False
@@ -341,7 +341,7 @@ def _render_pf_halo_2d(df_filtered: pd.DataFrame) -> None:
         height=520,
         margin=dict(l=0, r=0, t=40, b=0),
         title=dict(
-            text="🔋 Halos de Energía por Pozo — Factor de Carga (g/ton)",
+            text="🔋 Halos Espaciales de Factor de Carga por Pozo (g/ton)",
             font=dict(size=14),
         ),
         xaxis_title="Este (m)",
@@ -368,7 +368,7 @@ def _render_idw_download() -> None:
         file_name="energy_idw.csv",
         mime="text/csv",
         key="download_idw_grid",
-        help=f"Grilla {len(idw_df)} puntos (X, Y, Z, energía kg/m²).",
+        help=f"Grilla {len(idw_df)} puntos (X, Y, Z, PF suavizado kg/m²).",
     )
     st.caption(
         f"Grilla IDW con {len(idw_df)} puntos calculados. "
@@ -376,11 +376,11 @@ def _render_idw_download() -> None:
     )
 
     st.caption(
-        "💡 **Heatmap de densidad de energía IDW (integrada en Z)**: cada celda "
+        "💡 **Campo suavizado de factor de carga (kernel gaussiano IDW, integrado en Z)**: cada celda "
         "del plano horizontal resume la suma ponderada gaussiana (σ = radio de "
         "búsqueda) de la carga explosiva de los pozos cercanos, sumada en toda "
         "la columna vertical. El color va de **amarillo (baja)** a **rojo intenso "
-        "(alta)**; las zonas rojas indican **concentración de energía** y son "
+        "(alta)**; las zonas rojas indican **concentración de carga** y son "
         "candidatas a revisión (potencial sobre-excavación). La escala arranca "
         "en 0 kg/m² (sin compresión de outliers)."
     )

@@ -622,7 +622,7 @@ def build_pf_halo_rings_3d_trace(
             ),
         ),
         opacity=0.9,
-        name="Halos de Energía por Pozo (g/ton)",
+        name="Halos Espaciales de Factor de Carga por Pozo (g/ton)",
         hovertemplate=(
             "X: %{x:.1f} m<br>"
             "Y: %{y:.1f} m<br>"
@@ -707,7 +707,7 @@ def build_pf_halo_rings_trace(
             ),
         ),
         opacity=0.85,
-        name="Halos de Energía por Pozo (g/ton)",
+        name="Halos Espaciales de Factor de Carga por Pozo (g/ton)",
         hovertemplate=(
             "PF: %{marker.color:.0f} g/ton<br>"
             "X: %{x:.1f} m<br>"
@@ -734,10 +734,10 @@ def build_energy_surface_trace(energy_grid: dict) -> go.Surface:
         cmax=E_max,
         showscale=True,
         opacity=0.55,
-        name="Heatmap densidad energía (kg/m²)",
+        name="Campo Suavizado de Factor de Carga (kg/m²)",
         colorbar=dict(
             title=dict(
-                text="Densidad Energía<br>integrada en Z<br>(kg/m²)",
+                text="PF Suavizado<br>integrado en Z<br>(kg/m²)",
                 font=dict(size=11),
                 side="right",
             ),

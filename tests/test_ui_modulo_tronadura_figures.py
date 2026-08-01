@@ -63,7 +63,7 @@ class TestBuildPfHaloRings3D:
         assert cs[0][0] == 0.0 and cs[-1][0] == 1.0  # Turbo (cold->warm)
         assert trace.line.cmin == 0.0
         assert trace.line.cmax == 200.0  # capped
-        assert trace.name == "Halos de Energía por Pozo (g/ton)"
+        assert trace.name == "Halos Espaciales de Factor de Carga por Pozo (g/ton)"
         assert "g/ton" in trace.line.colorbar.title.text
 
     def test_missing_column_or_empty_returns_none(self):
