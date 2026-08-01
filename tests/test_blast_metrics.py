@@ -20,6 +20,7 @@ from core.blast_metrics import (
     compute_altura_carga_m,
     compute_collar_deviation,
     compute_decoupling_ratio,
+    compute_influence_area_m2,
     compute_ispu,
     compute_kg_per_meter,
     compute_kuznetsov_x50,
@@ -413,3 +414,41 @@ class TestComputeAlturaCarga:
         df = _proc_row().drop(columns=["Taco_m"])
         out = enrich_blast_dataframe(df)
         assert "altura_carga_m" not in out.columns
+
+
+class TestComputeInfluenceArea:
+    def _grid(self, n=7, spacing=8.0):
+        xs, ys = np.meshgrid(np.arange(n) * spacing, np.arange(n) * spacing)
+        return pd.DataFrame({"X": xs.ravel(), "Y": ys.ravel()})
+
+    def test_interior_cells_exact_on_grid(self):
+        """7×7 grid at 8 m spacing → interior Voronoi cells are 64 m²."""
+        areas = compute_influence_area_m2(self._grid())
+        assert areas.notna().all()
+        assert areas.median() == pytest.approx(64.0, rel=0.05)
+
+    def test_edge_cells_capped(self):
+        """Edge (infinite) cells must be bounded by the Q1-based cap."""
+        areas = compute_influence_area_m2(self._grid(n=5, spacing=10.0))
+        q1 = areas.quantile(0.25)
+        assert areas.max() <= q1 * 3.0 + 1e-6
+        assert q1 == pytest.approx(100.0, rel=0.05)
+
+    def test_duplicate_collars_share_cell(self):
+        df = self._grid(n=5, spacing=10.0)
+        df2 = pd.concat([df, df.iloc[:3]], ignore_index=True)
+        areas = compute_influence_area_m2(df2)
+        assert len(areas) == len(df2)
+        assert areas.isna().sum() == 0
+        assert areas.iloc[0] == areas.iloc[len(df)]  # duplicate shares cell area
+
+    def test_fewer_than_4_returns_nan(self):
+        df3 = pd.DataFrame({"X": [0.0, 1.0, 2.0], "Y": [0.0, 0.0, 1.0]})
+        assert compute_influence_area_m2(df3).isna().all()
+        assert compute_influence_area_m2(pd.DataFrame({"X": [], "Y": []})).isna().all()
+
+    def test_missing_or_nonfinite_coords(self):
+        assert compute_influence_area_m2(pd.DataFrame({"A": [1.0] * 5})).isna().all()
+        df = self._grid(n=3)
+        df.loc[0, "X"] = np.nan
+        assert compute_influence_area_m2(df).isna().all()

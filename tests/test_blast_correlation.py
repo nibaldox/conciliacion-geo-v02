@@ -151,17 +151,18 @@ class TestBlastCorrelationRowBackwardsCompat:
             sector="Principal", rock_density_used=3.1,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 16
+        assert len(signed) == 17
         assert signed[4] == 0.7 and signed[5] == -0.4
         assert signed[6] == 2 and signed[7] == 1
         assert signed[8] == 0.45
         assert signed[9] == 2.1
         assert signed[10] == 120.0
         assert signed[11] == 130.0  # pf_g_per_ton_net_avg
-        assert signed[12] == 400.0
-        assert signed[13] == 3
-        assert signed[14] == "Principal"  # sector
-        assert signed[15] == 3.1  # rock_density_used
+        assert signed[12] == 0.0  # pf_g_per_ton_inf_avg (default)
+        assert signed[13] == 400.0  # energy_total_mj
+        assert signed[14] == 3  # n_pf_valid
+        assert signed[15] == "Principal"  # sector
+        assert signed[16] == 3.1  # rock_density_used
 
     def test_new_fields_default_to_zero(self):
         row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
@@ -346,15 +347,16 @@ class TestBlastCorrelationRowPF:
             sector="Norte", rock_density_used=2.9,
         )
         signed = row.as_signed_tuple()
-        assert len(signed) == 16
+        assert len(signed) == 17
         assert signed[8] == 0.42
         assert signed[9] == 2.5
         assert signed[10] == 110.0
         assert signed[11] == 115.0  # pf_g_per_ton_net_avg
-        assert signed[12] == 900.0
-        assert signed[13] == 5
-        assert signed[14] == "Norte"  # sector
-        assert signed[15] == 2.9  # rock_density_used
+        assert signed[12] == 0.0  # pf_g_per_ton_inf_avg (default)
+        assert signed[13] == 900.0  # energy_total_mj
+        assert signed[14] == 5  # n_pf_valid
+        assert signed[15] == "Norte"  # sector
+        assert signed[16] == 2.9  # rock_density_used
 
     def test_correlation_function_populates_pf(self):
         """compute_blast_geotech_correlation should fill PF fields when data allows."""
@@ -748,3 +750,33 @@ class TestComputePowderFactorGPerTonNet:
         # procesar_pozos derives Z_collar/Z_toe, so net is finite and > 0.
         assert not pd.isna(agg["pf_g_per_ton_net_avg"])
         assert agg["pf_g_per_ton_net_avg"] > 0
+
+
+class TestPowderFactorInfluenceArea:
+    def test_compute_adds_influence_columns(self):
+        """compute_powder_factor must expose area_influence_m2 + pf_g_per_ton_inf."""
+        df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, n=25)
+        processed = procesar_pozos(df)[0]
+        out = compute_powder_factor(processed)
+        assert "area_influence_m2" in out.columns
+        assert "pf_g_per_ton_inf" in out.columns
+        assert out["area_influence_m2"].notna().sum() > 0
+        assert out["pf_g_per_ton_inf"].notna().sum() > 0
+        valid = out["pf_g_per_ton_inf"].dropna()
+        assert (valid > 0).all()
+
+    def test_aggregate_includes_influence_avg(self):
+        df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
+        processed = procesar_pozos(df)[0]
+        out = compute_powder_factor(processed)
+        from core.calculo_tronadura import proyectar_pozos_en_seccion
+        proj = proyectar_pozos_en_seccion(
+            processed, origin=np.array([0.0, 0.0]), azimuth=90.0,
+            length=200.0, tolerance=50.0,
+        )
+        proj_labeled = proj.copy()
+        proj_labeled["section_name"] = "S1"
+        agg = aggregate_powder_factor_by_group(out, "section_name", "S1", proj_labeled)
+        assert "pf_g_per_ton_inf_avg" in agg
+        assert "pf_g_per_ton_inf_weighted" in agg
+        assert agg["pf_g_per_ton_inf_avg"] > 0 or pd.isna(agg["pf_g_per_ton_inf_avg"])

@@ -329,6 +329,131 @@ def compute_ispu(
     return out
 
 
+def _polygon_area(verts: np.ndarray) -> float:
+    """Shoelace-formula area of a polygon given its ordered vertices."""
+    if verts is None or len(verts) < 3:
+        return 0.0
+    x = verts[:, 0]
+    y = verts[:, 1]
+    return 0.5 * abs(float(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1))))
+
+
+def _voronoi_finite_polygons_2d(vor, radius: float) -> tuple:
+    """Close infinite Voronoi ridges with far points at ``radius``.
+
+    Adapted from the SciPy cookbook recipe. Returns ``(regions, vertices)``
+    where every region is a finite closed polygon and ``vertices`` is the
+    (possibly extended) vertex array.
+    """
+    new_regions: list[list[int]] = []
+    new_vertices = vor.vertices.tolist()
+    center = vor.points.mean(axis=0)
+    all_ridges: dict[int, list[tuple[int, int, int]]] = {}
+    for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices):
+        all_ridges.setdefault(p1, []).append((p2, v1, v2))
+        all_ridges.setdefault(p2, []).append((p1, v1, v2))
+
+    for p1, region_idx in enumerate(vor.point_region):
+        vertices = vor.regions[region_idx]
+        if all(v >= 0 for v in vertices):
+            new_regions.append(vertices)
+            continue
+        ridges = all_ridges[p1]
+        new_region = [v for v in vertices if v >= 0]
+        for p2, v1, v2 in ridges:
+            if v2 < 0:
+                v1, v2 = v2, v1
+            if v1 >= 0:
+                continue
+            t = vor.points[p2] - vor.points[p1]
+            t /= np.linalg.norm(t)
+            n = np.array([-t[1], t[0]])
+            midpoint = vor.points[[p1, p2]].mean(axis=0)
+            direction = np.sign(np.dot(midpoint - center, n)) * n
+            if np.all(direction == 0):
+                direction = n
+            far_point = vor.vertices[v2] + direction * radius
+            new_region.append(len(new_vertices))
+            new_vertices.append(far_point.tolist())
+        vs = np.asarray([new_vertices[v] for v in new_region])
+        c = vs.mean(axis=0)
+        angles = np.arctan2(vs[:, 1] - c[1], vs[:, 0] - c[0])
+        new_region = [v for _, v in sorted(zip(angles, new_region))]
+        new_regions.append(new_region)
+    return new_regions, np.asarray(new_vertices)
+
+
+def compute_influence_area_m2(
+    df: pd.DataFrame,
+    max_area_factor: float = 3.0,
+    clip_radius_factor: float = 2.0,
+) -> pd.Series:
+    """Per-hole Voronoi (Thiessen) influence area in m².
+
+    Each hole's area of influence is the 2-D Voronoi cell of its collar
+    position (X, Y). Cells whose ridges extend to infinity (holes on the
+    convex hull) are closed by projecting their infinite ridge rays to a
+    radius of ``clip_radius_factor × point spread`` from the region
+    centroid, and the resulting polygon area is capped at
+    ``max_area_factor × median(cell area)`` to avoid absurd edge cells.
+
+    Holes sharing the same collar coordinates share the cell of their
+    unique location. Returns NaN for inputs with fewer than 4 distinct
+    collars (Qhull needs at least 4 sites) or non-finite coordinates.
+
+    Parameters
+    ----------
+    df : DataFrame with ``X`` / ``Y`` columns (collar East/North).
+    max_area_factor : float
+        Cap factor over the median cell area (default 3×).
+    clip_radius_factor : float
+        Multiplier of the point spread used to close infinite ridges.
+
+    Returns
+    -------
+    pd.Series
+        Influence area per hole in m², aligned with ``df.index``.
+    """
+    n = len(df)
+    nan = pd.Series([np.nan] * n, index=df.index, dtype=float)
+    if n < 4 or "X" not in df.columns or "Y" not in df.columns:
+        return nan
+    coords = df[["X", "Y"]].to_numpy(dtype=float)
+    if not np.isfinite(coords).all():
+        return nan
+
+    uniq, inverse = np.unique(coords, axis=0, return_inverse=True)
+    if len(uniq) < 4:
+        return nan
+
+    try:
+        from scipy.spatial import QhullError, Voronoi, cKDTree
+        vor = Voronoi(uniq)
+        # Local spacing: median distance to the 3 nearest neighbours. The
+        # infinite-ridge clip radius scales with this instead of the global
+        # point spread so edge cells stay proportional to the local grid.
+        tree = cKDTree(uniq)
+        dists, _ = tree.query(uniq, k=min(4, len(uniq)))
+        if dists.ndim == 1:
+            nn_med = float(np.median(dists[1:]))
+        else:
+            nn_med = float(np.median(dists[:, 1:]))
+        radius = max(nn_med * clip_radius_factor, 1.0)
+        regions, vertices = _voronoi_finite_polygons_2d(vor, radius)
+        areas = np.array([_polygon_area(vertices[r]) for r in regions], dtype=float)
+    except (QhullError, ValueError, IndexError):
+        return nan
+
+    if len(areas) == 0:
+        return nan
+    # Cap absurd edge cells against the first quartile of cell areas (the
+    # median itself can be inflated when most holes sit on the hull).
+    ref = float(np.percentile(areas, 25))
+    if ref > 0:
+        areas = np.minimum(areas, ref * max_area_factor)
+    return pd.Series(areas[inverse], index=df.index, dtype=float)
+
+
 def _bottom_column_ratio(df: pd.DataFrame) -> Optional[pd.Series]:
     if "Carga_Fondo_kg" not in df.columns or "Carga_Columna_kg" not in df.columns:
         return None

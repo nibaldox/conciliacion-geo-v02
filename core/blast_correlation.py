@@ -28,7 +28,11 @@ from core.compliance_status import (
     STATUS_RAMPA_OK,
 )
 from core.config import BLAST, DEFAULTS, EXPLOSIVE, RAMP
-from core.blast_metrics import ROCK_DENSITY_DEFAULT_TM3, enrich_blast_dataframe
+from core.blast_metrics import (
+    ROCK_DENSITY_DEFAULT_TM3,
+    compute_influence_area_m2,
+    enrich_blast_dataframe,
+)
 
 
 def _coerce_finite(value) -> float:
@@ -70,6 +74,7 @@ class BlastCorrelationRow:
     pf_area_avg_kgm2: float = 0.0
     pf_g_per_ton_avg: float = 0.0
     pf_g_per_ton_net_avg: float = 0.0
+    pf_g_per_ton_inf_avg: float = 0.0
     energy_total_mj: float = 0.0
     n_pf_valid: int = 0
     sector: str = ""
@@ -92,6 +97,7 @@ class BlastCorrelationRow:
             self.pf_area_avg_kgm2,
             self.pf_g_per_ton_avg,
             self.pf_g_per_ton_net_avg,
+            self.pf_g_per_ton_inf_avg,
             self.energy_total_mj,
             self.n_pf_valid,
             self.sector,
@@ -189,6 +195,9 @@ def compute_powder_factor(
         pf_area_kgm2: float or NaN
         pf_g_per_ton: float or NaN
         pf_g_per_ton_net: float or NaN (g/ton, bench height excluding sub-drill)
+        pf_g_per_ton_inf: float or NaN (g/ton, using the per-hole Voronoi
+            influence area ``area_influence_m2`` instead of Burden × Esp)
+        area_influence_m2: float or NaN (Voronoi/Thiessen cell area per hole)
         energy_mj: float (always computed if Kilos + Tipo_Explosivo available)
         burden_est_m: float (resolved Burden)
         esp_est_m: float (resolved Espaciamiento)
@@ -230,6 +239,7 @@ def compute_powder_factor(
 
     burden_est = pd.Series([np.nan] * len(out), index=out.index)
     esp_est = pd.Series([np.nan] * len(out), index=out.index)
+    influence_area = pd.Series([np.nan] * len(out), index=out.index)
 
     for _, gdf in (groups if group_col else [(None, out)]):
         if 'Burden' in gdf.columns and gdf['Burden'].notna().any():
@@ -244,8 +254,11 @@ def compute_powder_factor(
             _, s = _knn_spacing(gdf)
             esp_est.loc[gdf.index] = s
 
+        influence_area.loc[gdf.index] = compute_influence_area_m2(gdf)
+
     out['burden_est_m'] = burden_est
     out['esp_est_m'] = esp_est
+    out['area_influence_m2'] = influence_area
 
     denom_vol = burden_est * esp_est * bench_h
     pf_vol = np.where(denom_vol > 0, kilos / denom_vol, np.nan)
@@ -278,6 +291,12 @@ def compute_powder_factor(
     denom_gt = burden_est * esp_est * height_real * rho_rock
     pf_gt = np.where(denom_gt > 0, (kilos * 1000.0) / denom_gt, np.nan)
     out['pf_g_per_ton'] = pd.Series(pf_gt, index=out.index)
+
+    # Per-mass powder factor using the per-hole Voronoi influence area
+    # (area_influence_m2) instead of the nominal Burden × Esp pattern area.
+    denom_gt_inf = influence_area * height_real * rho_rock
+    pf_gt_inf = np.where(denom_gt_inf > 0, (kilos * 1000.0) / denom_gt_inf, np.nan)
+    out['pf_g_per_ton_inf'] = pd.Series(pf_gt_inf, index=out.index)
 
     # Per-mass powder factor normalised by the bench height EXCLUDING sub-drill
     # ("sin pasadura"). H_net is the vertical hole extent WITHIN the bench
@@ -534,6 +553,8 @@ def aggregate_powder_factor_by_group(
         pf_g_per_ton_weighted: float or NaN (g/ton, weighted by Kilos)
         pf_g_per_ton_net_avg: float or NaN (g/ton, mean, bench height excl. sub-drill)
         pf_g_per_ton_net_weighted: float or NaN (g/ton, weighted by Kilos)
+        pf_g_per_ton_inf_avg: float or NaN (g/ton, mean, Voronoi influence area)
+        pf_g_per_ton_inf_weighted: float or NaN (g/ton, weighted by Kilos)
         energy_total_mj: float
         kg_total: float
         n_wells: int
@@ -547,6 +568,8 @@ def aggregate_powder_factor_by_group(
         "pf_g_per_ton_weighted": np.nan,
         "pf_g_per_ton_net_avg": np.nan,
         "pf_g_per_ton_net_weighted": np.nan,
+        "pf_g_per_ton_inf_avg": np.nan,
+        "pf_g_per_ton_inf_weighted": np.nan,
         "energy_total_mj": 0.0,
         "kg_total": 0.0,
         "n_wells": 0,
@@ -613,6 +636,18 @@ def aggregate_powder_factor_by_group(
         if wsum_gt_net > 0:
             out["pf_g_per_ton_net_weighted"] = float(
                 (valid_gt_net * weights_gt_net).sum() / wsum_gt_net
+            )
+
+    pf_inf = pd.to_numeric(pf_enriched.get('pf_g_per_ton_inf'), errors='coerce') if 'pf_g_per_ton_inf' in pf_enriched else pd.Series(dtype=float)
+    valid_inf = pf_inf.dropna()
+    out["pf_g_per_ton_inf_avg"] = float(valid_inf.mean()) if not valid_inf.empty else float('nan')
+
+    if kg_col and not valid_inf.empty:
+        weights_inf = pf_enriched.loc[valid_inf.index, kg_col].fillna(0)
+        wsum_inf = float(weights_inf.sum())
+        if wsum_inf > 0:
+            out["pf_g_per_ton_inf_weighted"] = float(
+                (valid_inf * weights_inf).sum() / wsum_inf
             )
 
     out["energy_total_mj"] = float(energy.fillna(0).sum()) if not energy.empty else 0.0
@@ -810,6 +845,7 @@ def compute_blast_geotech_correlation(
                 "pf_area_avg": float('nan'),
                 "pf_g_per_ton_avg": float('nan'),
                 "pf_g_per_ton_net_avg": float('nan'),
+                "pf_g_per_ton_inf_avg": float('nan'),
                 "energy_total_mj": 0.0,
                 "n_pf_valid": 0,
             }
@@ -844,6 +880,7 @@ def compute_blast_geotech_correlation(
                 pf_area_avg_kgm2=_coerce_finite(pf_agg.get("pf_area_avg")),
                 pf_g_per_ton_avg=_coerce_finite(pf_agg.get("pf_g_per_ton_avg")),
                 pf_g_per_ton_net_avg=_coerce_finite(pf_agg.get("pf_g_per_ton_net_avg")),
+                pf_g_per_ton_inf_avg=_coerce_finite(pf_agg.get("pf_g_per_ton_inf_avg")),
                 energy_total_mj=_coerce_finite(pf_agg.get("energy_total_mj")),
                 n_pf_valid=int(pf_agg.get("n_pf_valid") or 0),
                 sector=sec_sector,
