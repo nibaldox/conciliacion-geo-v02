@@ -24,6 +24,11 @@ from core.geometry_conventions import (
     normalize_inclination,
     normalize_vector_components,
 )
+from core.geometry_contract import (
+    GEOMETRY_CONFIGURATION_VERSION,
+    GeometryConfiguration,
+    GeometryConfigurationError,
+)
 
 COLS_DROP = [
     'id_rajo', 'id_malla_opit', 'numero',
@@ -142,47 +147,151 @@ def _coerce_typed_columns(df_work: pd.DataFrame) -> None:
             df_work[col] = df_work[col].astype(str)
 
 
-def _record_rejected_rows(df_work: pd.DataFrame) -> None:
-    """Register which rows will be dropped and why (auditoría §3.4).
+def _hole_id_for_row(df_work: pd.DataFrame, idx) -> str:
+    """Resolve a stable hole_id for a row (used by rejection tracking)."""
+    for col in ("label_pozo", "id_pozo", "uniqid", "hole_id", "Hole_ID"):
+        if col in df_work.columns:
+            v = df_work.loc[idx, col]
+            if v is not None and str(v) != "nan":
+                return str(v)
+    return str(idx)
 
-    Adds scalar summary columns to the frame: processing_rows_received /
-    processing_rows_accepted / processing_rows_rejected /
-    processing_rejected_ids / processing_rejected_reasons. The original
-    values stay in the input frame (the caller's copy) for audit.
+
+def _collect_rejected_rows(
+    df_work: pd.DataFrame,
+    source_map: dict[str, str] | None = None,
+) -> list[dict]:
+    """Build structured per-row rejection records BEFORE any dropna().
+
+    Remediación 3.2 / 4.2: each rejection preserves the full diagnosis
+    (hole_id, source_row_index, source_column, original_value, error_code,
+    rejection_reason, affected_calculations, recommended_action,
+    row_processing_status). Multiple errors per row are emitted as
+    multiple records. The original frame is NOT mutated and rows are NOT
+    dropped here — the caller drops them after collecting this list.
+
+    ``source_map`` (optional) maps canonical → original column names so
+    the ``source_column`` field cites the column the operator sees in
+    their source file (e.g. ``Latitud_Geo`` instead of ``X``).
+
+    The legacy scalar summary (``processing_rejected_ids`` /
+    ``processing_rejected_reasons``) is still produced for backward
+    compatibility with older consumers, but the authoritative structure
+    is the list returned here.
     """
-    n_received = len(df_work)
-    def _hole_id(idx) -> str:
-        for col in ("label_pozo", "id_pozo", "uniqid"):
-            if col in df_work.columns:
-                v = df_work.loc[idx, col]
-                if v is not None and str(v) != "nan":
-                    return str(v)
-        return str(idx)
+    src_map = source_map or {}
+    rejections: list[dict] = []
 
-    reasons: dict[str, str] = {}
+    def _source_col(canonical: str) -> str:
+        return src_map.get(canonical, canonical)
+
+    def _sanitized(value) -> object:
+        # NaN/inf are not JSON-compliant; numpy types are not JSON-serializable.
+        # Surface them as None / native Python so the structured rejection
+        # always serializes cleanly (remediación 4.2).
+        if value is None:
+            return None
+        if isinstance(value, (np.integer,)):
+            return int(value)
+        if isinstance(value, (np.floating,)):
+            f = float(value)
+            return f if np.isfinite(f) else None
+        try:
+            f = float(value)
+        except (TypeError, ValueError):
+            # Non-numeric string values: keep as-is when JSON-safe.
+            return value if isinstance(value, (str, bool)) else str(value)
+        return f if np.isfinite(f) else None
+
+    seen: dict[tuple, int] = {}
+
+    def _add(idx, column, original, error_code, reason, affected, action):
+        key = (idx, column, error_code)
+        if key in seen:
+            return
+        seen[key] = 1
+        rejections.append({
+            "hole_id": _hole_id_for_row(df_work, idx),
+            "source_row_index": int(idx) if isinstance(idx, (np.integer, int)) else str(idx),
+            "source_column": column,
+            "original_value": _sanitized(original),
+            "error_code": error_code,
+            "rejection_reason": reason,
+            "affected_calculations": affected,
+            "recommended_action": action,
+            "row_processing_status": "rejected",
+        })
+
+    # Required canonical columns checked for NaN / non-numeric values.
+    # ``Incl`` is normalized before this function runs; a row whose
+    # original inclination is out of range ends up with Incl=NaN after
+    # normalization. To avoid duplicating the rejection (INVALID_Incl +
+    # INCL_OUT_OF_RANGE for the same row), the Incl NaN check excludes
+    # rows whose ``Incl_original`` is already flagged as out-of-range.
+    incl_oob: set = set()
+    if "Incl_original" in df_work.columns:
+        incl_orig = pd.to_numeric(df_work["Incl_original"], errors="coerce")
+        incl_oob = set(df_work.index[incl_orig.abs() > 90.0].tolist())
+
     for col in ("X", "Y", "Z_collar", "Incl", "Az", "Len"):
-        vals = pd.to_numeric(df_work[col], errors="coerce") if col in df_work.columns else pd.Series(dtype=float)
-        bad = vals.isna()
-        for idx in df_work.index[bad]:
-            orig = df_work.loc[idx, col] if col in df_work.columns else None
-            reasons.setdefault(_hole_id(idx), f"valor no numérico o ausente en {col} (original: {orig!r})")
+        if col not in df_work.columns:
+            continue
+        vals = pd.to_numeric(df_work[col], errors="coerce")
+        for idx in df_work.index[vals.isna()]:
+            if col == "Incl" and idx in incl_oob:
+                continue  # already flagged as INCL_OUT_OF_RANGE below
+            orig = df_work.loc[idx, col]
+            _add(
+                idx, _source_col(col), orig,
+                error_code=f"INVALID_{col}",
+                reason=f"valor no numérico o ausente en {col} (original: {orig!r})",
+                affected="toe, PF, geometría dependiente",
+                action="Corrija el dato original y reprocese.",
+            )
     if "Len" in df_work.columns:
         lens = pd.to_numeric(df_work["Len"], errors="coerce")
         for idx in df_work.index[(lens <= 0) & lens.notna()]:
-            reasons[_hole_id(idx)] = f"longitud inválida (Len={lens.loc[idx]} <= 0)"
+            _add(
+                idx, "Len", lens.loc[idx],
+                error_code="INVALID_LEN_NON_POSITIVE",
+                reason=f"longitud inválida (Len={lens.loc[idx]} <= 0)",
+                affected="toe, PF, geometría dependiente",
+                action="Corrija la longitud y reprocese.",
+            )
     if "Incl_original" in df_work.columns:
         incls = pd.to_numeric(df_work["Incl_original"], errors="coerce")
         for idx in df_work.index[incls.abs() > 90.0]:
-            reasons[_hole_id(idx)] = (
-                f"inclinación fuera de rango (original: {incls.loc[idx]}°); fila "
-                "excluida de la geometría (cálculos bloqueados)"
+            _add(
+                idx, "Incl", incls.loc[idx],
+                error_code="INCL_OUT_OF_RANGE",
+                reason=(
+                    f"inclinación fuera de rango (original: {incls.loc[idx]}°); "
+                    "fila excluida de la geometría (cálculos bloqueados)"
+                ),
+                affected="toe, PF, geometría dependiente",
+                action="Corrija la inclinación y reprocese.",
             )
-    n_rejected = len(reasons)
+    return rejections
+
+
+def _record_rejected_rows(df_work: pd.DataFrame) -> None:
+    """Backward-compatible scalar rejection summary.
+
+    Remediación 3.2 / 4.2: this is now a THIN legacy adapter over
+    :func:`_collect_rejected_rows`. New consumers read the structured list
+    returned by ``procesar_pozos`` directly; this scalar summary exists
+    only so older code that reads ``processing_rejected_ids`` keeps
+    working.
+    """
+    rejections = _collect_rejected_rows(df_work)
+    n_received = len(df_work)
+    ids = [r["hole_id"] for r in rejections]
+    reasons = [r["rejection_reason"] for r in rejections]
     df_work["processing_rows_received"] = n_received
-    df_work["processing_rows_accepted"] = n_received - n_rejected
-    df_work["processing_rows_rejected"] = n_rejected
-    df_work["processing_rejected_ids"] = ",".join(reasons.keys())
-    df_work["processing_rejected_reasons"] = " | ".join(reasons.values())
+    df_work["processing_rows_accepted"] = n_received - len(set(ids))
+    df_work["processing_rows_rejected"] = len(set(ids))
+    df_work["processing_rejected_ids"] = ",".join(ids)
+    df_work["processing_rejected_reasons"] = " | ".join(reasons)
 
 
 def _resolve_z_collar_semantic(source_col: str | None, explicit: str | None) -> str:
@@ -285,7 +394,9 @@ def procesar_pozos(
     sign_source_rule: str | None = None,
     angle_unit: str = "degrees",
     geometry_user_confirmed: bool | None = None,
-) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
+    geometry_configuration: GeometryConfiguration | None = None,
+    return_rejections: bool = False,
+):
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
     Coordinate handling (spec §4.2):
@@ -306,61 +417,75 @@ def procesar_pozos(
             Ambiguous source names raise ValueError (the pipeline stops
             instead of guessing) unless ``z_collar_semantic`` is given.
 
-    Inclination / azimuth (spec §4.1): every input is normalized to the
-    canonical convention — inclination = deviation from vertical (0 =
-    vertical), azimuth = degrees clockwise from North. The original
-    values and the convention applied are preserved in ``Incl_original``
-    / ``Az_original`` / ``Incl_convention`` / ``Az_convention``; negative
-    inclinations (sign-as-orientation) are absolutized and flagged in
-    ``incl_anomaly``.
-
-    Then computes the toe (bottom) of each hole using:
-        Inclinacion_real : deviation from vertical in degrees (0 = vertical)
-        Azimuth_real     : horizontal direction in degrees
-        longitud_real    : measured hole length in metres
+    Geometric configuration (remediación 4.1): callers SHOULD pass a
+    validated :class:`GeometryConfiguration`. When provided, it takes
+    precedence over the legacy keyword arguments and is the single
+    source of truth. When absent, the legacy ``geometry_user_confirmed``
+    argument is still honored for backward compatibility, but no silent
+    defaults are applied — incomplete configuration raises.
 
     Returns
     -------
     df_clean : pd.DataFrame
-        Cleaned DataFrame with added columns:
-        'X', 'Y', 'Z_collar', 'X_toe', 'Y_toe', 'Z_toe',
-        'Z_collar_semantic', ('bench_height_m' when bench semantic),
-        'Incl_original', 'Az_original', 'Incl_convention', 'Az_convention'.
-        When present in the input, also captures:
-        'Burden', 'Esp', 'Diam_mm', 'Tipo_Explosivo', 'Taco_m',
-        'Secuencia', 'Retardo_ms', 'Fila', 'Carga_Fondo_kg',
-        'Carga_Columna_kg', 'Longitud_Carga_m', 'Tipo_Pozo',
-        'Az_Diseno', 'Incl_Diseno'
-        (numeric fields coerced; missing columns skipped silently).
-        Columns marked "no usar" are dropped.
-        fecha_tronadura is normalized to date-only.
+        Accepted rows with all derived geometry columns.
     x_lines, y_lines, z_lines : np.ndarray
-        1-D arrays where each hole is represented by three consecutive
-        values (collar_x, toe_x, None) — the None separator allows a
-        single Scatter3d trace to render all trajectories efficiently.
+        1-D arrays encoding (collar, toe, None) per hole.
+    rejected_rows : list[dict], optional (when ``return_rejections=True``)
+        Structured per-row rejection records preserved BEFORE dropna().
+        Each record carries hole_id / source_row_index / source_column /
+        original_value / error_code / rejection_reason /
+        affected_calculations / recommended_action / row_processing_status.
     """
     df_work = df.copy()
 
     drop_present = [c for c in COLS_DROP if c in df_work.columns]
     df_work.drop(columns=drop_present, inplace=True)
 
-    # Remediación final 4.3: la geometría SOLO se calcula con confirmación
-    # explícita del usuario (geometry_user_confirmed is True). False, None,
-    # ausencia o legacy → bloqueo (raise). Excepción: un dataset que declara
-    # su convención en una columna Incl_convention se considera confirmado
-    # implícitamente (el evento declara su propia geometría).
-    if geometry_user_confirmed is False:
-        raise ValueError(
-            "Configuración geométrica rechazada (geometry_user_confirmed=False): "
-            "el cálculo de toe y geometría dependiente está bloqueado."
-        )
-    if geometry_user_confirmed is None and "Incl_convention" not in df.columns:
-        raise ValueError(
-            "Configuración geométrica no confirmada: el cálculo de toe y "
-            "geometría dependiente está bloqueado. Establezca "
-            "geometry_user_confirmed=True después de declarar y verificar la "
-            "convención de inclinación, signo, unidad y azimut."
-        )
+    # Remediación 4.1: single source of truth — when a GeometryConfiguration
+    # is provided it takes precedence and is validated centrally. Otherwise
+    # we honor the legacy keyword arguments, but NEVER invent a default:
+    # geometry_user_confirmed is None/False or missing required fields ⇒ BLOCK.
+    if geometry_configuration is not None:
+        geometry_configuration.validate()
+        geometry_user_confirmed = geometry_configuration.geometry_user_confirmed
+        # Translate the canonical contract values back to the enum-accepted
+        # lowercase strings consumed by the existing normalization code.
+        _INCL_CONTRACT_TO_ENUM = {
+            "FROM_VERTICAL": "from_vertical",
+            "DIP_FROM_HORIZONTAL": "dip_from_horizontal",
+        }
+        if geometry_configuration.inclination_convention:
+            incl_convention = _INCL_CONTRACT_TO_ENUM[
+                geometry_configuration.inclination_convention
+            ]
+        # The enums for sign/azimuth already accept uppercase canonical
+        # values directly. The contract values OVERRIDE the legacy kwargs
+        # because the contract is the authority when present.
+        if geometry_configuration.inclination_sign_convention:
+            incl_sign_convention = geometry_configuration.inclination_sign_convention
+        sign_source_rule = geometry_configuration.inclination_source_rule or None
+        if geometry_configuration.azimuth_convention:
+            az_convention = geometry_configuration.azimuth_convention
+        angle_unit = geometry_configuration.angle_unit_canonical()
+    else:
+        # Remediación 3.1: legacy path still enforces explicit confirmation.
+        # No dataset column is treated as implicit confirmation: only
+        # ``geometry_user_confirmed is True`` enables geometry.
+        if geometry_user_confirmed is False:
+            raise GeometryConfigurationError(
+                "Configuración geométrica rechazada (geometry_user_confirmed=False): "
+                "el cálculo de toe y geometría dependiente está bloqueado.",
+                error_code="GEOMETRY_REJECTED",
+                details={"state": "REJECTED"},
+            )
+        if geometry_user_confirmed is None:
+            raise GeometryConfigurationError(
+                "Configuración geométrica no confirmada (geometry_user_confirmed=None): "
+                "el cálculo de toe y geometría dependiente está bloqueado. "
+                "Construya y valide un GeometryConfiguration antes de procesar.",
+                error_code="GEOMETRY_NOT_CONFIRMED",
+                details={"state": "LEGACY_UNCONFIRMED"},
+            )
 
     if "fecha_tronadura" in df_work.columns:
         df_work["fecha_tronadura"] = pd.to_datetime(
@@ -393,25 +518,34 @@ def procesar_pozos(
     _coerce_typed_columns(df_work)
 
     # Canonical inclination / azimuth normalization (spec §4.1, H-05,
-    # cierre final §2.2). The inclination convention is MANDATORY: without
-    # an explicit argument or a data-declared column, the geometry is
-    # BLOCKED (raise) — there is no default and no silent assumption.
+    # cierre final §2.2). The inclination convention is MANDATORY and
+    # must come either from the caller (explicit kwarg / contract) or
+    # from a data-declared column ``Incl_convention``. The data column
+    # is NOT implicit operator confirmation: the gate is the explicit
+    # ``geometry_user_confirmed=True`` value validated above (remediación 3.1).
+    # Without both (gate + a convention source), the geometry is BLOCKED.
     az_conv = AzimuthConvention(az_convention)
     if "Incl" in df_work.columns:
         df_work["Incl_original"] = df_work["Incl"]
         if incl_convention is not None:
             incl_conv = InclinationConvention(incl_convention)
             source, user_confirmed = "explicit", True
-        elif "Incl_convention" in df_work.columns:
+        elif (
+            geometry_user_confirmed is True
+            and "Incl_convention" in df_work.columns
+        ):
+            # Operator confirmed the geometry (gate passed). The convention
+            # VALUE may come from the dataset column — this is NOT implicit
+            # confirmation, it is just a value source after the gate.
             incl_conv = InclinationConvention(df_work["Incl_convention"].iloc[0])
             source, user_confirmed = "data", True
         else:
-            raise ValueError(
-                "Convención de inclinación no confirmada: no se puede calcular "
-                "toe ni geometría dependiente sin declarar la convención. "
-                "Especifique incl_convention='from_vertical' o "
-                "'dip_from_horizontal' (o declare la columna Incl_convention "
-                "en el evento)."
+            raise GeometryConfigurationError(
+                "Convención de inclinación no declarada explícitamente: no se "
+                "puede calcular toe ni geometría dependiente. Construya y valide "
+                "un GeometryConfiguration con inclination_convention.",
+                error_code="INCL_CONVENTION_MISSING",
+                details={"missing": "inclination_convention"},
             )
         # Angular unit conversion before normalization (cierre §2.2).
         if angle_unit == "radians":
@@ -570,9 +704,20 @@ def procesar_pozos(
     else:
         df_work["Z_collar_semantic"] = "collar_elevation"
 
-    # Auditoría §3.4: rejected rows keep their diagnosis — they are never
-    # dropped silently. A per-row summary (ids + reasons) survives on the
-    # accepted frame and the full detail is reproducible.
+    # Auditoría §3.4 + remediación 3.2/4.2: structured per-row rejections
+    # captured BEFORE dropna(). The legacy scalar summary is still written
+    # for backward compatibility, but the structured list is the authority.
+    src_map: dict[str, str] = {}
+    if column_map is not None:
+        for canon, orig in (column_map or {}).items():
+            if orig:
+                src_map[canon] = orig
+    else:
+        # ``resolved`` holds canonical → original-name captured before rename.
+        for canon, orig in (resolved or {}).items():
+            if orig:
+                src_map[canon] = orig
+    rejected_rows = _collect_rejected_rows(df_work, source_map=src_map)
     _record_rejected_rows(df_work)
 
     df_work = df_work.dropna(subset=["X", "Y", "Z_collar", "Incl", "Az", "Len"])
@@ -584,6 +729,8 @@ def procesar_pozos(
         df_work.loc[blocked, ["X_toe", "Y_toe", "Z_toe"]] = np.nan
     df_work["row_processing_status"] = "accepted"
     df_work["row_rejection_reason"] = ""
+    if return_rejections:
+        return df_work, *_build_scatter_lines(df_work), rejected_rows
     return df_work, *_build_scatter_lines(df_work)
 
 
