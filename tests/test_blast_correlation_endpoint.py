@@ -214,7 +214,7 @@ def test_compute_blast_geotech_correlation_emits_pf_g_per_ton():
          "longitud_real": 10.0, "Kilos_Cargados_real": 200.0,
          "fecha_tronadura": "2026-07-01"},
     ])
-    df = procesar_pozos(raw, incl_convention="from_vertical")[0]
+    df = procesar_pozos(raw, incl_convention="from_vertical", geometry_user_confirmed=True)[0]
     sections = [_section_obj("S-01", 0.0, 0.0, 0.0)]
     comps = [{"section": "S-01", "delta_crest": 0.4}]
 
@@ -304,7 +304,7 @@ def test_compute_blast_geotech_correlation_never_emits_nan_pf_when_geometry_miss
          "longitud_real": 10.0, "Kilos_Cargados_real": np.nan,
          "fecha_tronadura": "2026-07-01"},
     ])
-    df = procesar_pozos(raw, incl_convention="from_vertical")[0]
+    df = procesar_pozos(raw, incl_convention="from_vertical", geometry_user_confirmed=True)[0]
     assert len(df) > 0
     sections = [_section_obj("S-01", 0.0, 0.0, 0.0)]
     comps = [{"section": "S-01", "delta_crest": 0.4}]

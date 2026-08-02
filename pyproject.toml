@@ -30,6 +30,12 @@ dependencies = [
     "networkx",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
 [project.scripts]
 conciliacion = "cli:main"
 

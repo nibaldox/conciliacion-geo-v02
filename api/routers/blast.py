@@ -90,7 +90,8 @@ def _process_blast_dataframe(
         df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
             df, incl_convention=incl_convention, bench_height_m=bench_height_m,
             az_convention=az_convention, incl_sign_convention=incl_sign_convention,
-            sign_source_rule=sign_source_rule,
+            sign_source_rule=sign_source_rule, angle_unit=angle_unit,
+            geometry_user_confirmed=True,  # API: the request itself is the confirmation
         )
     except KeyError as exc:
         raise HTTPException(400, f"Missing required blast-hole column: {exc}")
@@ -266,6 +267,7 @@ def _build_upload_payload(
     az_convention: str = "CLOCKWISE_FROM_NORTH",
     incl_sign_convention: str = "ABSOLUTE_VALUE",
     sign_source_rule: Optional[str] = None,
+    angle_unit: str = "degrees",
 ) -> dict:
     """Run the full blast-upload pipeline off the event-loop thread.
 
@@ -296,7 +298,8 @@ def _build_upload_payload(
         df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
             df, incl_convention=incl_convention, bench_height_m=bench_height_m,
             az_convention=az_convention, incl_sign_convention=incl_sign_convention,
-            sign_source_rule=sign_source_rule,
+            sign_source_rule=sign_source_rule, angle_unit=angle_unit,
+            geometry_user_confirmed=True,  # API: the request itself is the confirmation
         )
     except KeyError as exc:
         raise HTTPException(400, f"Missing required blast-hole column: {exc}")
@@ -357,9 +360,9 @@ def _build_upload_payload(
 async def upload_blast_csv(
     file: UploadFile = File(..., description="Blast-hole CSV (CSV/Excel-style columns)"),
     session_id: str = Form(..., description="Session UUID"),
-    incl_convention: str = Form(
-        "from_vertical",
-        description="Inclinación: from_vertical | dip_from_horizontal (confirmación del evento)",
+    incl_convention: Optional[str] = Form(
+        None,
+        description="OBLIGATORIO: from_vertical | dip_from_horizontal (sin default — el evento debe confirmar)",
     ),
     bench_height_m: Optional[float] = Form(
         None, description="Altura de banco confirmada del evento (m)"
@@ -374,6 +377,9 @@ async def upload_blast_csv(
     ),
     sign_source_rule: Optional[str] = Form(
         None, description="Regla explícita para SOURCE_DEFINED (obligatoria en ese caso)"
+    ),
+    angle_unit: str = Form(
+        "degrees", description="Unidad angular: degrees | radians"
     ),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
@@ -390,6 +396,14 @@ async def upload_blast_csv(
     if not session_id.strip():
         raise HTTPException(422, "session_id is required")
 
+    # Remediación 4.4: sin convención geométrica explícita → 400 (no defaults).
+    if not incl_convention:
+        raise HTTPException(
+            400,
+            "La convención de inclinación (incl_convention) es obligatoria. "
+            "Declare 'from_vertical' o 'dip_from_horizontal'.",
+        )
+
     db.get_or_create_session(session_id)
 
     try:
@@ -399,7 +413,7 @@ async def upload_blast_csv(
 
     payload = await _run_in_executor(
         _build_upload_payload, content, incl_convention, bench_height_m,
-        az_convention, incl_sign_convention, sign_source_rule,
+        az_convention, incl_sign_convention, sign_source_rule, angle_unit,
     )
 
     db.save_blast_upload(

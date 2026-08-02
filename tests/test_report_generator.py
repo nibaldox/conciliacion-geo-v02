@@ -272,7 +272,7 @@ def _blast_holes_df():
             }
         ]
     )
-    return procesar_pozos(raw, incl_convention="from_vertical")[0]
+    return procesar_pozos(raw, incl_convention="from_vertical", geometry_user_confirmed=True)[0]
 
 
 class TestCreateSectionPlotBranches:

@@ -609,7 +609,7 @@ class TestCierreFinalConvencion:
         assert out["azimuth_conversion_applied"].iloc[0] == "ccw_from_north->cw_from_north"
 
     def test_geometry_configuration_contract(self):
-        out, *_ = procesar_pozos(self._h(), incl_convention="from_vertical", bench_height_m=15.0)
+        out, *_ = procesar_pozos(self._h(), incl_convention="from_vertical", bench_height_m=15.0, geometry_user_confirmed=True)
         assert bool(out["geometry_user_confirmed"].iloc[0]) is True
         assert out["geometry_configuration_version"].iloc[0] == "1.0"
         assert out["inclination_normalized_from_vertical_deg"].iloc[0] == pytest.approx(10.0)

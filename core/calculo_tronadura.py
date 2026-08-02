@@ -284,7 +284,7 @@ def procesar_pozos(
     incl_sign_convention: SignConvention | str = SignConvention.ABSOLUTE_VALUE,
     sign_source_rule: str | None = None,
     angle_unit: str = "degrees",
-    geometry_user_confirmed: bool = True,
+    geometry_user_confirmed: bool | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
@@ -343,6 +343,24 @@ def procesar_pozos(
 
     drop_present = [c for c in COLS_DROP if c in df_work.columns]
     df_work.drop(columns=drop_present, inplace=True)
+
+    # Remediación final 4.3: la geometría SOLO se calcula con confirmación
+    # explícita del usuario (geometry_user_confirmed is True). False, None,
+    # ausencia o legacy → bloqueo (raise). Excepción: un dataset que declara
+    # su convención en una columna Incl_convention se considera confirmado
+    # implícitamente (el evento declara su propia geometría).
+    if geometry_user_confirmed is False:
+        raise ValueError(
+            "Configuración geométrica rechazada (geometry_user_confirmed=False): "
+            "el cálculo de toe y geometría dependiente está bloqueado."
+        )
+    if geometry_user_confirmed is None and "Incl_convention" not in df.columns:
+        raise ValueError(
+            "Configuración geométrica no confirmada: el cálculo de toe y "
+            "geometría dependiente está bloqueado. Establezca "
+            "geometry_user_confirmed=True después de declarar y verificar la "
+            "convención de inclinación, signo, unidad y azimut."
+        )
 
     if "fecha_tronadura" in df_work.columns:
         df_work["fecha_tronadura"] = pd.to_datetime(
