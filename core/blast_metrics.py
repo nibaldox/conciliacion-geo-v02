@@ -585,22 +585,107 @@ def compute_influence_area_report(
     ])
     finite = np.isfinite(coords).all(axis=1)
 
-    # Remediación final 4.1: spatial validation BEFORE any early return.
-    # Build the effective domain (boundary_polygon or None) and validate
-    # every collar with the exact geometric semantics of polygon.covers().
-    # No invented spatial tolerance — boundary/vertex points are covered.
+    # Remediación 3.6: fail-closed for invalid required polygons. A
+    # degenerate / self-intersecting / non-finite / malformed boundary
+    # polygon is an EVENT-level error: it MUST block Voronoi, influence
+    # area and powder factor — never silently fall back to ``poly=None``
+    # (which would let the calculation continue as if there were no
+    # domain). The structured error is recorded on every row so callers
+    # can surface it through the API/UI/export.
+    poly: Optional[object] = None
+    domain_error: dict | None = None
     try:
         import shapely.geometry as sg
-        if boundary_polygon is not None and len(boundary_polygon) >= 3:
-            poly = sg.Polygon([(float(x), float(y)) for x, y in boundary_polygon])
-            if poly.area <= 0:
-                raise ValueError("degenerate blast polygon")
-        else:
-            poly = None
+        if boundary_polygon is not None:
+            if len(boundary_polygon) < 3:
+                domain_error = {
+                    "error_code": "DOMAIN_TOO_FEW_VERTICES",
+                    "geometry_type": "Polygon",
+                    "validation_reason": f"polígono con < 3 vértices ({len(boundary_polygon)})",
+                    "recommended_action": "Declare un polígono cerrado con ≥ 3 vértices.",
+                    "affected_calculations": "Voronoi, área asignada, factor de carga",
+                }
+            else:
+                try:
+                    parsed = [(float(x), float(y)) for x, y in boundary_polygon]
+                except (TypeError, ValueError):
+                    domain_error = {
+                        "error_code": "DOMAIN_NON_FINITE_OR_MALFORMED",
+                        "geometry_type": "Polygon",
+                        "validation_reason": "coordenadas no finitas o formato inválido",
+                        "recommended_action": "Use coordenadas numéricas finitas.",
+                        "affected_calculations": "Voronoi, área asignada, factor de carga",
+                    }
+                else:
+                    if not all(np.isfinite(p).all() for p in parsed):
+                        domain_error = {
+                            "error_code": "DOMAIN_NON_FINITE_OR_MALFORMED",
+                            "geometry_type": "Polygon",
+                            "validation_reason": "coordenadas no finitas (NaN/inf)",
+                            "recommended_action": "Use coordenadas numéricas finitas.",
+                            "affected_calculations": "Voronoi, área asignada, factor de carga",
+                        }
+                    else:
+                        poly_obj = sg.Polygon(parsed)
+                        if poly_obj.is_empty:
+                            domain_error = {
+                                "error_code": "DOMAIN_EMPTY",
+                                "geometry_type": "Polygon",
+                                "validation_reason": "geometría vacía",
+                                "recommended_action": "Declare un polígono con área positiva.",
+                                "affected_calculations": "Voronoi, área asignada, factor de carga",
+                            }
+                        elif poly_obj.area <= 0:
+                            domain_error = {
+                                "error_code": "DOMAIN_DEGENERATE_AREA_ZERO",
+                                "geometry_type": "Polygon",
+                                "validation_reason": f"área cero ({poly_obj.area})",
+                                "recommended_action": "Declare un polígono con área positiva.",
+                                "affected_calculations": "Voronoi, área asignada, factor de carga",
+                            }
+                        elif not poly_obj.is_valid:
+                            domain_error = {
+                                "error_code": "DOMAIN_SELF_INTERSECTING_OR_INVALID",
+                                "geometry_type": "Polygon",
+                                "validation_reason": (
+                                    f"polígono inválido (is_valid=False; "
+                                    f"shapely_reason={poly_obj.is_valid!r})"
+                                ),
+                                "recommended_action": (
+                                    "Corrija la geometría del dominio. buffer(0) y otras "
+                                    "reparaciones destructivas no se aplican automáticamente."
+                                ),
+                                "affected_calculations": "Voronoi, área asignada, factor de carga",
+                            }
+                        else:
+                            poly = poly_obj
     except ImportError:
-        poly = None
-    except Exception:  # noqa: BLE001
-        poly = None
+        # shapely unavailable is a different concern: the polygon cannot
+        # be validated, so we record a warning but do NOT invent a
+        # domain. The caller still gets explicit ``clip_warning``.
+        if boundary_polygon is not None:
+            domain_error = {
+                "error_code": "DOMAIN_SHAPELY_UNAVAILABLE",
+                "geometry_type": "Polygon",
+                "validation_reason": "shapely no instalado; no se puede validar el dominio",
+                "recommended_action": "Instale shapely o elimine boundary_polygon.",
+                "affected_calculations": "Voronoi, área asignada, factor de carga",
+            }
+
+    if domain_error is not None:
+        # FAIL-CLOSED: every row blocked with the structured error.
+        for col, default in (
+            ("area_m2", 0.0),
+            ("area_status", "domain_blocked"),
+            ("collar_domain_status", "DOMAIN_INVALID"),
+            ("collar_inside_domain", False),
+            ("collar_on_boundary", False),
+        ):
+            report[col] = default
+        report["domain_error"] = [domain_error] * n  # broadcast
+        report["domain_error_code"] = domain_error["error_code"]
+        report["domain_validation_reason"] = domain_error["validation_reason"]
+        return report
 
     # Classify each collar against the domain BEFORE Voronoi/early returns.
     site_status_arr: list[str] = []
@@ -693,8 +778,8 @@ def compute_influence_area_report(
         import shapely.geometry as sg
         if boundary_polygon is not None and len(boundary_polygon) >= 3:
             poly_clip = sg.Polygon([(float(x), float(y)) for x, y in boundary_polygon])
-            if poly_clip.area <= 0:
-                raise ValueError("degenerate blast polygon")
+            if poly_clip.area <= 0 or not poly_clip.is_valid:
+                raise ValueError("degenerate or invalid blast polygon")
         else:
             xmin, ymin = uniq_inside.min(axis=0)
             xmax, ymax = uniq_inside.max(axis=0)
@@ -707,7 +792,15 @@ def compute_influence_area_report(
         if boundary_polygon is not None:
             clip_warning = "polygon_clip_unavailable: shapely not installed"
     except Exception as exc:  # noqa: BLE001
+        # Remediación 3.6: a required-domain failure during clipping is NOT
+        # fail-open. We cannot silently fall back to the bounding box when
+        # the operator declared a polygon: the polygon validation already
+        # happened above (fail-closed) so this branch only fires when
+        # building the cell polygons themselves degenerated. Block the
+        # domain and record the diagnostic.
         clip_warning = f"polygon_clip_unavailable: {exc}"
+        domain_area = None
+        polys_for_clip = None
 
     # Assign areas to interior collars ONLY — external/invalid collars were
     # already set to 0.0 during the spatial validation (above).
