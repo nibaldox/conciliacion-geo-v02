@@ -93,6 +93,8 @@ def _synthetic_holes(
             "Tipo_Explosivo": explosives[i % len(explosives)],
             "Nombre_Malla_Original": f"M{section_idx+1}",
             "fecha_tronadura": hole_date.strftime("%Y-%m-%d"),
+            # Migración cierre §2.1: altura declarada por el evento.
+            "bench_height_m": 15.0,
         })
 
     return pd.DataFrame(rows), sec_names
@@ -296,6 +298,7 @@ class TestEdgeCases:
                     "Azimuth_real": 0.0,
                     "longitud_real": 12.0,
                     "Kilos_Cargados_real": kg,
+                    "bench_height_m": bench,
                     "fecha_tronadura": "2024-01-01",
                 })
 
@@ -539,6 +542,9 @@ class TestRobustRealisticData:
             Len=12.0,
             Incl=0.0,
             Az=0.0,
+            # Migración cierre §2.1: altura declarada por el evento.
+            bench_height_m=15.0,
+            Kilos_Cargados_real=250.0,
         )
 
         # Perfil de 50 puntos a lo largo de 200m

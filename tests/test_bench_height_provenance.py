@@ -111,6 +111,71 @@ class TestBenchHeightProvenance:
         }])
         out, *_ = procesar_pozos(df, bench_height_m=15.0)
         assert out["bench_height_status"].iloc[0] == "PROVIDED"
-        out2, *_ = procesar_pozos(df)  # default assumption path (flagged, documented)
-        assert out2["bench_height_status"].iloc[0] == "EXPLICIT_ASSUMPTION"
-        assert bool(out2["bench_height_assumption_flag"].iloc[0]) is True
+        out2, *_ = procesar_pozos(df)  # no height -> transformation BLOCKED
+        assert out2["bench_height_status"].iloc[0] == "MISSING"
+        assert out2["Z_collar"].iloc[0] == 4000.0  # never auto +15
+
+
+class TestCierreFinalAltura:
+    """Cierre final §2.1: confirmación explícita persistida, bloqueo total."""
+
+    def _enaex_hole(self):
+        return pd.DataFrame([{
+            "Latitud_Geo": 0.0, "Longitud_Geo": 0.0, "Nombre_Banco": 4000.0,
+            "Inclinacion_real": 0.0, "Azimuth_real": 0.0, "longitud_real": 12.0,
+        }])
+
+    def test_z_collar_not_transformed_without_confirmed_height(self):
+        """Ausencia de modificación automática de Z_collar (bloqueo)."""
+        out, *_ = procesar_pozos(self._enaex_hole(), incl_convention="from_vertical")
+        assert out["Z_collar"].iloc[0] == 4000.0  # NOT 4015
+        assert out["Z_collar_semantic"].iloc[0] == "bench_elevation_untransformed"
+        assert out["bench_height_status"].iloc[0] == "MISSING"
+        assert bool(out["bench_height_user_confirmed"].iloc[0]) is False
+        assert "bloque" in out["bench_height_validation_message"].iloc[0].lower()
+        assert pd.isna(out["Z_toe"].iloc[0])  # toe blocked too
+
+    def test_confirmed_height_transforms_and_records(self):
+        out, *_ = procesar_pozos(
+            self._enaex_hole(), incl_convention="from_vertical", bench_height_m=15.0
+        )
+        assert out["Z_collar"].iloc[0] == 4015.0
+        assert out["bench_height_status"].iloc[0] == "PROVIDED"
+        assert bool(out["bench_height_user_confirmed"].iloc[0]) is True
+        assert out["Z_toe"].iloc[0] == pytest.approx(4003.0)
+
+    def test_explicit_assumption_requires_authorisation_flag(self):
+        """EXPLICIT_ASSUMPTION solo con autorización explícita del caller."""
+        out = compute_powder_factor(
+            _df(), allow_bench_height_assumption=True
+        )
+        assert out["bench_height_status"].iloc[0] == "EXPLICIT_ASSUMPTION"
+        assert bool(out["bench_height_user_confirmed"].iloc[0]) is True
+        assert "supuesto" in out["bench_height_validation_message"].iloc[0].lower()
+
+    def test_unconfirmed_missing_blocks_all_dependent(self):
+        out = compute_powder_factor(_df())
+        assert bool(out["bench_height_user_confirmed"].iloc[0]) is False
+        assert pd.isna(out["pf_vol_kgm3"].iloc[0])
+        assert pd.isna(out["pf_g_per_ton_net"].iloc[0])
+        assert pd.isna(out["height_net_m"].iloc[0])
+
+    def test_pasadura_stats_no_default_height(self):
+        """compute_pasadura_stats() nunca usa una altura por defecto."""
+        from core.blast_correlation import compute_pasadura_stats
+
+        df = pd.DataFrame({"Z_collar": [4015.0], "Z_toe": [3998.0], "bench_height_m": [15.0]})
+        stats = compute_pasadura_stats(df)
+        assert stats["mean"] == pytest.approx(2.0)
+        df2 = df.drop(columns=["bench_height_m"])
+        stats2 = compute_pasadura_stats(df2)
+        assert stats2["bench_height_status"] == "MISSING"
+        assert pd.isna(stats2["mean"])
+
+    def test_pasadura_stats_event_height_param(self):
+        from core.blast_correlation import compute_pasadura_stats
+
+        df = pd.DataFrame({"Z_collar": [4012.0], "Z_toe": [3995.0]})
+        stats = compute_pasadura_stats(df, bench_height_m=12.0)
+        assert stats["mean"] == pytest.approx(5.0)
+        assert stats["bench_height_status"] == "PROVIDED"

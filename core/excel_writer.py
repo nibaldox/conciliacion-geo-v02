@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 import openpyxl
+import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -607,7 +608,13 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     row_idx += 1
     df_pozos = df_pozos.copy()
     stats = compute_pasadura_stats(df_pozos)
-    df_pozos['Pasadura'] = (df_pozos['Z_collar'] - DEFAULTS.blast_default_bench_height) - df_pozos['Z_toe']
+    # Cierre final §2.1: la pasadura usa la altura con procedencia (columna del
+    # evento o parámetro); nunca el default de configuración.
+    if "bench_height_m" in df_pozos.columns:
+        _bh = pd.to_numeric(df_pozos["bench_height_m"], errors="coerce")
+    else:
+        _bh = np.nan
+    df_pozos['Pasadura'] = (df_pozos['Z_collar'] - _bh) - df_pozos['Z_toe']
     # Touch `stats` so the computation is exercised even if no consumer reads it
     _ = stats["total"], stats["mean"], stats["optimal_pct"]
 

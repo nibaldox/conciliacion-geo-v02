@@ -388,28 +388,56 @@ def procesar_pozos(
         df_work["Az_convention"] = az_conv.value
 
     # Elevation transformation driven by the column semantic (spec §4.2).
+    # Cierre final §2.1: the transformation NEVER applies an unconfirmed
+    # height — no automatic 15 m. Without a confirmed height the collar
+    # elevation is left untransformed and dependent geometry is blocked.
     semantic = _resolve_z_collar_semantic(z_src, z_collar_semantic)
+    _Z_TRANSFORM_BLOCKED = False
     if semantic == "bench_elevation":
+        bh_from_col = (
+            "bench_height_m" in df_work.columns
+            and pd.to_numeric(df_work["bench_height_m"], errors="coerce").notna().any()
+        )
         if bench_height_m is not None and float(bench_height_m) > 0:
             bench_h = float(bench_height_m)
-            bh_status, bh_source, bh_assumed = "PROVIDED", "event_provided", False
+            bh_status, bh_source, bh_assumed, bh_confirmed = (
+                "PROVIDED", "event_provided", False, True,
+            )
+            bh_message = ""
+        elif bh_from_col:
+            bh_col = pd.to_numeric(df_work["bench_height_m"], errors="coerce")
+            bench_h = bh_col
+            bh_status, bh_source, bh_assumed, bh_confirmed = (
+                "PROVIDED", "data_column", False, True,
+            )
             bh_message = ""
         else:
-            # Fase 1.1 cierre §2.2: the legacy default is only applied as a
-            # VISIBLE explicit assumption (flagged), never silently.
-            bench_h = float(DEFAULTS.blast_default_bench_height)
-            bh_status, bh_source, bh_assumed = "EXPLICIT_ASSUMPTION", "default_assumption_config", True
-            bh_message = (
-                f"Supuesto explícito declarado: altura de banco = {bench_h} m "
-                "(configuración visible). Declare bench_height_m para limpiar el supuesto."
+            # No confirmed height: BLOCK the transformation (no automatic
+            # value, no silent default). Z_collar stays as the source value
+            # and the dependent geometry (toe) is not computed.
+            _Z_TRANSFORM_BLOCKED = True
+            df_work["bench_height_m"] = np.nan
+            df_work["bench_height_status"] = "MISSING"
+            df_work["bench_height_source"] = ""
+            df_work["bench_height_assumption_flag"] = True
+            df_work["bench_height_user_confirmed"] = False
+            df_work["bench_height_validation_message"] = (
+                "Altura de banco no confirmada: la cota de banco NO se transformó "
+                "a collar (sin supuesto automático) y la geometría dependiente "
+                "(toe) quedó bloqueada. Declare bench_height_m o autorice un "
+                "supuesto explícito."
             )
-        df_work["Z_collar"] = df_work["Z_collar"] + bench_h
-        df_work["Z_collar_semantic"] = "bench_elevation_plus_height"
-        df_work["bench_height_m"] = bench_h
-        df_work["bench_height_status"] = bh_status
-        df_work["bench_height_source"] = bh_source
-        df_work["bench_height_assumption_flag"] = bh_assumed
-        df_work["bench_height_validation_message"] = bh_message
+        if not _Z_TRANSFORM_BLOCKED:
+            df_work["Z_collar"] = df_work["Z_collar"] + bench_h
+            df_work["Z_collar_semantic"] = "bench_elevation_plus_height"
+            df_work["bench_height_m"] = bench_h
+            df_work["bench_height_status"] = bh_status
+            df_work["bench_height_source"] = bh_source
+            df_work["bench_height_assumption_flag"] = bh_assumed
+            df_work["bench_height_user_confirmed"] = bh_confirmed
+            df_work["bench_height_validation_message"] = bh_message
+        else:
+            df_work["Z_collar_semantic"] = "bench_elevation_untransformed"
     else:
         df_work["Z_collar_semantic"] = "collar_elevation"
 
@@ -417,6 +445,9 @@ def procesar_pozos(
     df_work = df_work[df_work["Len"] > 0]
 
     _compute_hole_toes(df_work)
+    if _Z_TRANSFORM_BLOCKED:
+        blocked = df_work["Z_collar_semantic"] == "bench_elevation_untransformed"
+        df_work.loc[blocked, ["X_toe", "Y_toe", "Z_toe"]] = np.nan
     return df_work, *_build_scatter_lines(df_work)
 
 

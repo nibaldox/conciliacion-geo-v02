@@ -505,6 +505,7 @@ def compute_powder_factor(
     out['bench_height_status'] = bh_status
     out['bench_height_source'] = bh_source
     out['bench_height_assumption_flag'] = bh_assumed
+    out['bench_height_user_confirmed'] = ~(bh_status.isin(["MISSING", "INVALID"]))
     out['bench_height_validation_message'] = bh_message
     height_blocked = bench_h.isna()
 
@@ -1001,23 +1002,51 @@ def _pasadura(df: pd.DataFrame, bench_height) -> pd.Series:
     return (df["Z_collar"] - bench_height) - df["Z_toe"]
 
 
-def compute_pasadura_stats(df_pozos: pd.DataFrame) -> dict:
+def compute_pasadura_stats(
+    df_pozos: pd.DataFrame,
+    bench_height_m: Optional[float] = None,
+) -> dict:
     """Aggregate sub-drill statistics for a blast-hole DataFrame.
 
-    Returns a dict with keys: total, mean, optimal_count, optimal_pct.
+    Cierre final §2.1: the bench height is NEVER a default — it comes
+    from the event column ``bench_height_m`` (per-row), from the
+    caller-provided ``bench_height_m``, or the stats are returned as
+    blocked (mean NaN + ``bench_height_status``) when missing.
+
+    Returns a dict with keys: total, mean, optimal_count, optimal_pct,
+    bench_height_status, bench_height_validation_message.
     """
     if df_pozos is None or df_pozos.empty:
-        return {"total": 0, "mean": 0.0, "optimal_count": 0, "optimal_pct": 0.0}
+        return {"total": 0, "mean": 0.0, "optimal_count": 0, "optimal_pct": 0.0,
+                "bench_height_status": "MISSING", "bench_height_validation_message": ""}
 
-    pas = _pasadura(df_pozos, DEFAULTS.blast_default_bench_height)
+    if "bench_height_m" in df_pozos.columns:
+        bh = pd.to_numeric(df_pozos["bench_height_m"], errors="coerce").where(
+            pd.to_numeric(df_pozos["bench_height_m"], errors="coerce") > 0
+        )
+        status = "PROVIDED" if bh.notna().any() else "INVALID"
+    elif bench_height_m is not None and float(bench_height_m) > 0:
+        bh = float(bench_height_m)
+        status = "PROVIDED"
+    else:
+        bh = np.nan
+        status = "MISSING"
+
+    pas = _pasadura(df_pozos, bh)
     lo, hi = DEFAULTS.blast_correlation_pasadura_optimal
     optimal = int(((pas >= lo) & (pas <= hi)).sum())
     total = len(df_pozos)
+    message = (
+        "Altura de banco no confirmada: pasadura bloqueada (sin supuesto automático)."
+        if status in ("MISSING", "INVALID") else ""
+    )
     return {
         "total": total,
         "mean": float(pas.mean()) if total else 0.0,
         "optimal_count": optimal,
         "optimal_pct": (optimal / total * 100.0) if total else 0.0,
+        "bench_height_status": status,
+        "bench_height_validation_message": message,
     }
 
 

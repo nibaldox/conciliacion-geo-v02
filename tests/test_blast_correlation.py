@@ -46,26 +46,39 @@ def _valid_hole(lat, lon, banco=4000.0, kg=200.0):
 class TestComputePasaduraStats:
     def test_empty_dataframe(self):
         s = compute_pasadura_stats(pd.DataFrame())
-        assert s == {"total": 0, "mean": 0.0, "optimal_count": 0, "optimal_pct": 0.0}
+        assert s["total"] == 0 and s["mean"] == 0.0
+        assert s["bench_height_status"] in ("MISSING",)
 
     def test_none_input(self):
         s = compute_pasadura_stats(None)
         assert s["total"] == 0
 
     def test_optimal_pasadura_counted(self):
-        # pasadura = (Z_collar - 15) - Z_toe. With Z_collar=4200, the formula
-        # gives 4185 - Z_toe. For each row pick Z_toe such that the resulting
-        # pasadura is 0.5, 1.5, 0.7, 5.0 respectively.
+        # pasadura = (Z_collar - bench_height) - Z_toe. With Z_collar=4200 and
+        # bench=15 declared via the event column: 4185 - Z_toe → 0.5, 1.5, 0.7, 5.0.
         df = pd.DataFrame(
             {
                 "Z_collar": [4200.0, 4200.0, 4200.0, 4200.0],
-                "Z_toe": [4184.5, 4183.5, 4184.3, 4180.0],  # → 0.5, 1.5, 0.7, 5.0
+                "Z_toe": [4184.5, 4183.5, 4184.3, 4180.0],
+                "bench_height_m": [15.0, 15.0, 15.0, 15.0],
             }
         )
         s = compute_pasadura_stats(df)
         assert s["total"] == 4
         assert s["optimal_count"] == 3  # first three are within [0.5, 1.5]
         assert s["optimal_pct"] == pytest.approx(75.0, abs=0.1)
+
+    def test_pasadura_blocked_without_height(self):
+        """Cierre final §2.1: sin altura confirmada la pasadura se bloquea."""
+        df = pd.DataFrame(
+            {
+                "Z_collar": [4200.0],
+                "Z_toe": [4184.5],
+            }
+        )
+        s = compute_pasadura_stats(df)
+        assert s["bench_height_status"] == "MISSING"
+        assert pd.isna(s["mean"])
 
 
 class TestComputeBlastGeotechCorrelation:

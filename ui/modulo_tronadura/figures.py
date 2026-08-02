@@ -761,8 +761,17 @@ def build_energy_surface_trace(energy_grid: dict) -> go.Surface:
 # ---------------------------------------------------------------------------
 
 def compute_pasadura_series(df: pd.DataFrame) -> pd.Series:
-    """Return the sub-drilling (pasadura) series for a blast dataframe."""
-    return (df["Z_collar"] - DEFAULTS.blast_default_bench_height) - df["Z_toe"]
+    """Return the sub-drilling (pasadura) series for a blast dataframe.
+
+    Cierre final §2.1: uses the per-row bench height with provenance
+    (bench_height_m column); when missing, the series is NaN (blocked) —
+    never a silent default.
+    """
+    if "bench_height_m" in df.columns:
+        bh = pd.to_numeric(df["bench_height_m"], errors="coerce")
+    else:
+        bh = np.nan
+    return (df["Z_collar"] - bh) - df["Z_toe"]
 
 
 def build_pasadura_figure(

@@ -46,6 +46,9 @@ def _make_valid_hole(
                 "longitud_real": length,
                 "Kilos_Cargados_real": 250.0,
                 "fecha_tronadura": fecha,
+                # Migración cierre §2.1: altura de banco declarada por el evento
+                # (columna validada → PROVIDED); nunca 15 m silencioso.
+                "bench_height_m": 15.0,
                 # Columns that should be dropped (per COLS_DROP)
                 "uniqid": "ignore-me",
                 "id_rajo": "X",
@@ -166,7 +169,9 @@ class TestZCollarsemantics:
         out, *_ = procesar_pozos(df)
         assert out["Z_collar"].iloc[0] == 4200.0
         assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
-        assert "bench_height_m" not in out.columns
+        # la columna bench_height_m del input se conserva pero NO se aplica
+        # (semántica collar: sin transformación de elevación)
+        assert out["Z_toe"].iloc[0] == pytest.approx(4200.0 - 12.0)  # Len=12 del fixture
 
     def test_bench_elevation_transformed_with_record(self):
         df = _make_valid_hole(banco=4000.0)
