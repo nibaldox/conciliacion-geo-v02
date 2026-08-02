@@ -15,7 +15,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-REPO = Path("/home/xodla/archivos/12_WindSurf/46-conciliacion-geo-v02")
+# Remediación 3.4: derive the repo root from THIS file's location so the
+# test is reproducible on any checkout, not just the original author's.
+REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 from core.param_extractor import BenchParams

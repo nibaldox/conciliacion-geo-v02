@@ -234,7 +234,11 @@ def run_test():
         "Incl_convention": "from_vertical",
         "bench_height_m": 15.0,
     }])
-    processed_holes, *_ = procesar_pozos(blast_actual)
+    processed_holes, *_ = procesar_pozos(
+        blast_actual,
+        geometry_user_confirmed=True,
+        incl_convention="from_vertical",
+    )
     blast_design = pandas.DataFrame([{
         "Pozo": "H-1", "X": 100.0, "Y": 200.0, "Z_collar": 1015.0,
         "Incl": 10.0, "Az": 90.0, "Len": 16.0, "Kilos": 100.0,
