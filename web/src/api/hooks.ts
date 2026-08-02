@@ -463,8 +463,10 @@ export function useResults(section?: string) {
 /**
  * Upload a blast-hole CSV to `POST /blast/upload`.
  *
- * INTEGRACIÓN §3.1/4.1 — the FormData carries the FULL geometric
- * contract declared by the operator. The backend refuses to compute
+ * INTEGRACIÓN §5.1/§5.2 — the FormData carries the FULL v2 geometric
+ * contract declared by the operator. Inclination and azimuth units are
+ * INDEPENDENT (inclination_unit + azimuth_unit); the legacy angle_unit
+ * is no longer used on this path. The backend refuses to compute
  * geometry without an explicit, complete and confirmed contract.
  */
 export interface BlastGeometryForm {
@@ -484,6 +486,24 @@ export interface BlastGeometryForm {
   bench_height_m?: number;
 }
 
+/**
+ * Extract a structured diagnostics payload from any error raised by
+ * the upload mutation. Axios stores the HTTP body in
+ * ``error.response.data``; for HTTP 400 and 422 the backend returns
+ * the same BlastUploadResponse shape (accepted_rows, rejected_rows,
+ * event_warnings, blocking_errors, processing_summary,
+ * geometry_configuration, spatial_diagnostics). Integración §5.4.
+ */
+export function extractBlastErrorDiagnostics(
+  error: unknown,
+): Partial<BlastUploadResponse> | null {
+  if (!error || typeof error !== 'object') return null;
+  const anyErr = error as { response?: { data?: unknown }; data?: unknown };
+  const data = anyErr.response?.data ?? anyErr.data;
+  if (!data || typeof data !== 'object') return null;
+  return data as Partial<BlastUploadResponse>;
+}
+
 export function useUploadBlastCsv() {
   return useMutation({
     mutationFn: async ({
@@ -498,29 +518,17 @@ export function useUploadBlastCsv() {
       const form = new FormData();
       form.append('file', file);
       form.append('session_id', sessionId);
-      // Geometric contract — exactly the field names expected by the API.
+      // v2 contract — exactly the field names expected by the API.
       form.append('geometry_user_confirmed', String(geometry.geometry_user_confirmed));
       form.append('inclination_source_column', geometry.inclination_source_column);
       form.append('incl_convention', geometry.inclination_convention);
       form.append('incl_sign_convention', geometry.inclination_sign_convention);
       form.append('incl_source_rule', geometry.inclination_source_rule ?? '');
-      // The API expects a single ``angle_unit`` Form, but the processor
-      // honours independent units (inclination_unit / azimuth_unit) when
-      // they differ. Send both so the backend can validate them.
-      if (geometry.inclination_unit === geometry.azimuth_unit) {
-        form.append('angle_unit', geometry.inclination_unit);
-      } else {
-        // When they differ the API Form cannot natively carry two values;
-        // the operator MUST use a configuration where both match. The
-        // UI prevents the mismatch upstream (see BlastUploader).
-        throw new Error(
-          'Inclination and azimuth units must match through the API Form. ' +
-            'Use the Python API or Streamlit for mixed units.',
-        );
-      }
+      form.append('inclination_unit', geometry.inclination_unit);
       form.append('az_convention', geometry.azimuth_convention);
-      form.append('incl_source_column', geometry.inclination_source_column);
-      form.append('az_source_column', geometry.azimuth_source_column);
+      form.append('azimuth_unit', geometry.azimuth_unit);
+      form.append('inclination_source_column', geometry.inclination_source_column);
+      form.append('azimuth_source_column', geometry.azimuth_source_column);
       if (geometry.bench_height_m != null) {
         form.append('bench_height_m', String(geometry.bench_height_m));
       }

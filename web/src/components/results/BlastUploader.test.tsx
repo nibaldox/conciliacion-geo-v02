@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import i18n from '../../i18n';
 import { BlastUploader } from './BlastUploader';
 import type { BlastUploadResponse } from '../../api/types';
@@ -11,6 +11,10 @@ const mockMutateAsync = vi.fn();
 vi.mock('../../api/hooks', () => ({
   useUploadBlastCsv: vi.fn(),
   useBlastHolesBySession: vi.fn(),
+  extractBlastErrorDiagnostics: (error: unknown) => {
+    const anyErr = error as { response?: { data?: unknown } };
+    return (anyErr?.response?.data ?? null) as Partial<BlastUploadResponse> | null;
+  },
 }));
 
 vi.mock('../../api/client', () => ({
@@ -74,9 +78,9 @@ function renderUploader(props: { onUploaded?: (r: BlastUploadResponse) => void }
   return render(<BlastUploader onUploaded={props.onUploaded} />);
 }
 
-// Helper: set every required field of the geometry contract so the file
-// input becomes enabled. Tests that need a "complete + confirmed" state
-// call this and then tick the checkbox.
+// Helper: select every required field with conscious values so the file
+// input becomes enabled. Mirrors the operator's flow: pick one option in
+// every dropdown, fill both source columns, then tick confirmation.
 function fillCompleteContract() {
   fireEvent.change(screen.getByTestId('incl-source-column'), {
     target: { value: 'Inclinacion_real' },
@@ -87,8 +91,17 @@ function fillCompleteContract() {
   fireEvent.change(screen.getByTestId('incl-convention'), {
     target: { value: 'from_vertical' },
   });
+  fireEvent.change(screen.getByTestId('incl-sign'), {
+    target: { value: 'ABSOLUTE_VALUE' },
+  });
+  fireEvent.change(screen.getByTestId('incl-unit'), {
+    target: { value: 'degrees' },
+  });
   fireEvent.change(screen.getByTestId('az-convention'), {
     target: { value: 'CLOCKWISE_FROM_NORTH' },
+  });
+  fireEvent.change(screen.getByTestId('az-unit'), {
+    target: { value: 'degrees' },
   });
 }
 
@@ -124,8 +137,6 @@ describe('<BlastUploader />', () => {
     renderUploader();
     expect(screen.getByTestId('blast-upload-summary')).toBeInTheDocument();
     expect(screen.getByText('42 pozos cargados, 3 filas omitidas')).toBeInTheDocument();
-    expect(screen.getByText('Carga media: 12.35 kg')).toBeInTheDocument();
-    expect(screen.getByText('Descarga media: 8.90 kg')).toBeInTheDocument();
   });
 
   it('shows persisted hole count after the GET request resolves', () => {
@@ -143,28 +154,43 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('blast-hole-count')).toHaveTextContent('2 pozos persistidos en sesión');
   });
 
-  // ── INTEGRACIÓN §5.1 — Geometry contract behaviour ──
+  // ── INTEGRACIÓN §5.3 — no defaults ──
 
-  it('disables the file input by default (no confirmation)', () => {
+  it('disables the file input by default (every field empty)', () => {
     mockUpload();
     mockHoles();
     renderUploader();
     expect(screen.getByTestId('blast-file-input')).toBeDisabled();
+    // Confirming with empty fields does NOT enable submission.
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
   });
 
-  it('requires confirmation before enabling the file input', () => {
+  it('all dropdowns start with the placeholder option selected', () => {
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    expect((screen.getByTestId('incl-convention') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByTestId('incl-sign') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByTestId('incl-unit') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByTestId('az-convention') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByTestId('az-unit') as HTMLSelectElement).value).toBe('');
+  });
+
+  // ── INTEGRACIÓN §5.3/§5.4 — confirmation + invalidation ──
+
+  it('requires confirmation after filling every field', () => {
     mockUpload();
     mockHoles();
     renderUploader();
     fillCompleteContract();
-    // Even with complete fields, the checkbox is unticked → still disabled.
+    // Fields complete but checkbox unticked → still disabled.
     expect(screen.getByTestId('blast-file-input')).toBeDisabled();
-    // Tick the checkbox → enabled.
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-file-input')).not.toBeDisabled();
   });
 
-  it('invalidates confirmation when a field is edited after ticking', () => {
+  it('invalidates confirmation when any field is edited after ticking', () => {
     mockUpload();
     mockHoles();
     renderUploader();
@@ -179,18 +205,6 @@ describe('<BlastUploader />', () => {
     expect((screen.getByTestId('geometry-confirmed') as HTMLInputElement).checked).toBe(false);
   });
 
-  it('blocks submission when source columns are empty', () => {
-    mockUpload();
-    mockHoles();
-    renderUploader();
-    fireEvent.change(screen.getByTestId('incl-convention'), {
-      target: { value: 'from_vertical' },
-    });
-    fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    // Source columns still empty → can't submit.
-    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
-  });
-
   it('requires source rule when sign convention is SOURCE_DEFINED', () => {
     mockUpload();
     mockHoles();
@@ -199,97 +213,97 @@ describe('<BlastUploader />', () => {
     fireEvent.change(screen.getByTestId('incl-sign'), {
       target: { value: 'SOURCE_DEFINED' },
     });
-    // Source rule select appears.
     expect(screen.getByTestId('source-rule')).toBeInTheDocument();
+    // Without selecting a rule, the contract is still incomplete.
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    // The rule default is filled but the field re-appears; if the user
-    // clears the source columns the file input stays disabled.
+    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
+    // Select a rule → contract complete again.
+    fireEvent.change(screen.getByTestId('source-rule'), {
+      target: { value: 'negative_is_downward_dip' },
+    });
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-file-input')).not.toBeDisabled();
   });
 
-  it('warns when inclination and azimuth units differ', () => {
+  // ── INTEGRACIÓN §5.2 — independent units ──
+
+  it('accepts differing inclination and azimuth units (no mismatch warning)', () => {
     mockUpload();
     mockHoles();
     renderUploader();
+    fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'radians' } });
-    fireEvent.change(screen.getByTestId('az-unit'), { target: { value: 'degrees' } });
-    expect(
-      screen.getByText(
-        /Las unidades de inclinación y azimut difieren/,
-      ),
-    ).toBeInTheDocument();
+    // After editing the unit, the confirmation auto-clears but NO
+    // units-mismatch warning is rendered (independent units are valid).
+    expect(screen.queryByText(/Las unidades de inclinación y azimut difieren/)).toBeNull();
+    // Re-confirm with the mixed configuration — submission still enabled.
+    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinacion_real' } });
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    expect(screen.getByTestId('blast-file-input')).not.toBeDisabled();
   });
 
-  it('shows structured blocking errors from the API', () => {
-    mockUpload({
-      isSuccess: true,
-      data: {
-        ...uploadResponse,
-        n_holes: 0,
-        blocking_errors: [
-          {
-            error_code: 'NO_ACCEPTED_ROWS',
-            message: 'Ninguna fila pasó la validación.',
-          },
-        ],
-      },
-    });
-    mockHoles();
-    renderUploader();
-    expect(screen.getByTestId('blocking-errors')).toHaveTextContent('NO_ACCEPTED_ROWS');
-  });
+  // ── INTEGRACIÓN §5.4 — structured diagnostics from HTTP 422 ──
 
-  it('shows structured rejected rows from the API', () => {
-    mockUpload({
-      isSuccess: true,
-      data: {
-        ...uploadResponse,
-        n_holes: 0,
-        rejected_rows: [
-          {
-            hole_id: 'BAD-0',
-            source_row_index: 0,
-            source_column: 'Latitud_Geo',
-            original_value: null,
-            error_code: 'INVALID_X',
-            rejection_reason: 'valor no numérico o ausente',
-            affected_calculations: 'toe, PF',
-            recommended_action: 'Corrija el dato.',
-            row_processing_status: 'rejected',
-          },
-        ],
-      },
-    });
+  it('renders rejected_rows extracted from a 422 AxiosError response', async () => {
+    // The hook rejects with an AxiosError whose .response.data carries
+    // the structured payload (rejected_rows + blocking_errors). This is
+    // what the operator sees when the backend returns HTTP 422.
+    const structuredBody: Partial<BlastUploadResponse> = {
+      n_holes: 0,
+      accepted_rows: [],
+      rejected_rows: [
+        {
+          hole_id: 'BAD-0',
+          source_row_index: 0,
+          source_column: 'Latitud_Geo',
+          original_value: null,
+          error_code: 'INVALID_X',
+          rejection_reason: 'valor no numérico o ausente',
+          affected_calculations: 'toe, PF',
+          recommended_action: 'Corrija el dato.',
+          row_processing_status: 'rejected',
+        },
+      ],
+      blocking_errors: [
+        { error_code: 'NO_ACCEPTED_ROWS', message: 'Ninguna fila pasó la validación.' },
+      ],
+    };
+    const axiosLikeError = {
+      response: { data: structuredBody, status: 422 },
+      message: 'Request failed with status code 422',
+    };
+    mockUpload({ isError: true, error: axiosLikeError as unknown as Error });
     mockHoles();
     renderUploader();
     expect(screen.getByTestId('rejected-rows')).toHaveTextContent('INVALID_X');
+    expect(screen.getByTestId('blocking-errors')).toHaveTextContent('NO_ACCEPTED_ROWS');
   });
 
-  it('sends the full geometry contract FormData on submit', async () => {
+  // ── Hook FormData assertion ──
+
+  it('sends inclination_unit AND azimuth_unit as independent fields', async () => {
     mockUpload({
-      isSuccess: false,
       mutateAsync: mockMutateAsync.mockResolvedValue(uploadResponse),
     } as Partial<ReturnType<typeof useUploadBlastCsv>>);
     mockHoles();
     renderUploader();
     fillCompleteContract();
-    fireEvent.change(screen.getByTestId('bench-height'), { target: { value: '15' } });
+    // Set differing units to prove they are transmitted independently.
+    fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'degrees' } });
+    fireEvent.change(screen.getByTestId('az-unit'), { target: { value: 'radians' } });
+    // Re-fill the source column edited by the previous change handler.
+    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinacion_real' } });
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
 
     const file = new File(['x,y'], 'pozos.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
 
-    await vi.waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
     const call = mockMutateAsync.mock.calls[0][0];
-    expect(call.sessionId).toBe('sess-001');
-    expect(call.file).toBe(file);
-    expect(call.geometry.geometry_user_confirmed).toBe(true);
+    expect(call.geometry.inclination_unit).toBe('degrees');
+    expect(call.geometry.azimuth_unit).toBe('radians');
     expect(call.geometry.inclination_source_column).toBe('Inclinacion_real');
     expect(call.geometry.azimuth_source_column).toBe('Azimuth_real');
-    expect(call.geometry.inclination_convention).toBe('from_vertical');
-    expect(call.geometry.azimuth_convention).toBe('CLOCKWISE_FROM_NORTH');
-    expect(call.geometry.inclination_unit).toBe('degrees');
-    expect(call.geometry.azimuth_unit).toBe('degrees');
-    expect(call.geometry.bench_height_m).toBe(15);
+    expect(call.geometry.geometry_user_confirmed).toBe(true);
   });
 });

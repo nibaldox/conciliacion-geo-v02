@@ -1,6 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useUploadBlastCsv, useBlastHolesBySession, type BlastGeometryForm } from '../../api/hooks';
+import {
+  useUploadBlastCsv,
+  useBlastHolesBySession,
+  extractBlastErrorDiagnostics,
+  type BlastGeometryForm,
+} from '../../api/hooks';
 import { getSessionId } from '../../api/client';
 import type { BlastUploadResponse, BlockingError, RejectedRow } from '../../api/types';
 
@@ -23,29 +28,35 @@ const AZ_CONVENTIONS = [
 const UNITS = ['degrees', 'radians'] as const;
 const SOURCE_RULES = ['negative_is_downward_dip', 'positive_only', 'absolute_value'] as const;
 
+type Empty = '';
+type Option<T extends string> = T | Empty;
+
 interface GeometryState {
   confirmed: boolean;
   inclinationSourceColumn: string;
-  inclinationConvention: (typeof INCL_CONVENTIONS)[number] | '';
-  inclinationSignConvention: (typeof SIGN_CONVENTIONS)[number];
-  inclinationUnit: (typeof UNITS)[number];
-  inclinationSourceRule: (typeof SOURCE_RULES)[number];
+  inclinationConvention: Option<(typeof INCL_CONVENTIONS)[number]>;
+  inclinationSignConvention: Option<(typeof SIGN_CONVENTIONS)[number]>;
+  inclinationUnit: Option<(typeof UNITS)[number]>;
+  inclinationSourceRule: Option<(typeof SOURCE_RULES)[number]>;
   azimuthSourceColumn: string;
-  azimuthConvention: (typeof AZ_CONVENTIONS)[number];
-  azimuthUnit: (typeof UNITS)[number];
+  azimuthConvention: Option<(typeof AZ_CONVENTIONS)[number]>;
+  azimuthUnit: Option<(typeof UNITS)[number]>;
   benchHeightM: string;
 }
 
+// INTEGRACIÓN §5.3 — NO defaults are pre-selected. Every field begins
+// empty so the operator MUST consciously select each option before
+// confirmation is allowed.
 const DEFAULT_STATE: GeometryState = {
   confirmed: false,
   inclinationSourceColumn: '',
   inclinationConvention: '',
-  inclinationSignConvention: 'ABSOLUTE_VALUE',
-  inclinationUnit: 'degrees',
-  inclinationSourceRule: 'negative_is_downward_dip',
+  inclinationSignConvention: '',
+  inclinationUnit: '',
+  inclinationSourceRule: '',
   azimuthSourceColumn: '',
-  azimuthConvention: 'CLOCKWISE_FROM_NORTH',
-  azimuthUnit: 'degrees',
+  azimuthConvention: '',
+  azimuthUnit: '',
   benchHeightM: '',
 };
 
@@ -53,15 +64,18 @@ const DEFAULT_STATE: GeometryState = {
  * Build the BlastGeometryForm from the visible state. Returns null when
  * the contract is incomplete — the caller MUST block submission then.
  *
- * INTEGRACIÓN §4.1: editing any option after confirming invalidates the
- * confirmation (we recompute validity live here, and the form below
- * unchecks the box when a field changes).
+ * INTEGRACIÓN §5.3: no default values are silently promoted to a
+ * confirmed decision. Empty options invalidate the contract.
  */
 function buildGeometry(state: GeometryState): BlastGeometryForm | null {
   if (!state.confirmed) return null;
   if (!state.inclinationSourceColumn.trim()) return null;
   if (!state.azimuthSourceColumn.trim()) return null;
   if (!state.inclinationConvention) return null;
+  if (!state.inclinationSignConvention) return null;
+  if (!state.inclinationUnit) return null;
+  if (!state.azimuthConvention) return null;
+  if (!state.azimuthUnit) return null;
   if (
     state.inclinationSignConvention === 'SOURCE_DEFINED' &&
     !state.inclinationSourceRule
@@ -94,13 +108,14 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
   const [filename, setFilename] = useState<string | null>(null);
   const [state, setState] = useState<GeometryState>(DEFAULT_STATE);
 
-  // INTEGRACIÓN §4.1: editing any option after confirming invalidates the
-  // confirmation — the operator must re-tick the checkbox.
+  // INTEGRACIÓN §5.3/§5.4: editing any option after confirming invalidates
+  // the confirmation — the operator must re-tick the checkbox. This does
+  // NOT depend on the visual state of the checkbox; it is enforced by
+  // the reducer below.
   const update = <K extends keyof GeometryState>(key: K, value: GeometryState[K]) => {
     setState((prev) => ({
       ...prev,
       [key]: value,
-      // Any edit clears the confirmation; the user must re-confirm.
       confirmed: key === 'confirmed' ? (value as boolean) : false,
     }));
   };
@@ -108,21 +123,39 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
   const geometry: BlastGeometryForm | null = useMemo(() => buildGeometry(state), [state]);
   const canSubmit = Boolean(sessionId) && geometry !== null && !upload.isPending;
 
+  // INTEGRACIÓN §5.4 — extract structured diagnostics from HTTP 400/422
+  // error responses (AxiosError.response.data) so the operator sees the
+  // same rejected_rows / blocking_errors that a 200 would carry.
+  const errorDiagnostics = useMemo(
+    () => (upload.isError ? extractBlastErrorDiagnostics(upload.error) : null),
+    [upload.isError, upload.error],
+  );
+  const errorBlockingErrors: BlockingError[] = errorDiagnostics?.blocking_errors ?? [];
+  const errorRejectedRows: RejectedRow[] = errorDiagnostics?.rejected_rows ?? [];
+
+  // Successful responses (200) and structured error responses (400/422)
+  // share the SAME diagnostics surface so the UI renders them in the
+  // same component regardless of status code.
+  const successBlockingErrors: BlockingError[] = upload.data?.blocking_errors ?? [];
+  const successRejectedRows: RejectedRow[] = upload.data?.rejected_rows ?? [];
+  const blockingErrors: BlockingError[] = upload.isError
+    ? errorBlockingErrors
+    : successBlockingErrors;
+  const rejectedRows: RejectedRow[] = upload.isError ? errorRejectedRows : successRejectedRows;
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !sessionId || !geometry) return;
     setFilename(file.name);
     try {
       const result = await upload.mutateAsync({ sessionId, file, geometry });
+      // On HTTP 422 the backend returns a structured body but Axios
+      // treats non-2xx as an error — the result only arrives on 200.
       onUploaded?.(result);
     } catch {
-      // Error state surfaced via upload.isError below.
+      // Diagnostics surfaced via errorDiagnostics below.
     }
   };
-
-  const blockingErrors: BlockingError[] = upload.data?.blocking_errors ?? [];
-  const rejectedRows: RejectedRow[] = upload.data?.rejected_rows ?? [];
-  const unitsMismatch = state.inclinationUnit !== state.azimuthUnit;
 
   return (
     <section
@@ -175,7 +208,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               data-testid="incl-convention"
               className="rounded border px-2 py-1"
             >
-              <option value="">—</option>
+              <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {INCL_CONVENTIONS.map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
@@ -189,6 +222,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               data-testid="incl-sign"
               className="rounded border px-2 py-1"
             >
+              <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {SIGN_CONVENTIONS.map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
@@ -203,6 +237,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
                 data-testid="source-rule"
                 className="rounded border px-2 py-1"
               >
+                <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
                 {SOURCE_RULES.map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
@@ -217,6 +252,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               data-testid="incl-unit"
               className="rounded border px-2 py-1"
             >
+              <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {UNITS.map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
@@ -230,6 +266,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               data-testid="az-unit"
               className="rounded border px-2 py-1"
             >
+              <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {UNITS.map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
@@ -243,6 +280,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               data-testid="az-convention"
               className="rounded border px-2 py-1"
             >
+              <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {AZ_CONVENTIONS.map((v) => (
                 <option key={v} value={v}>{v}</option>
               ))}
@@ -275,14 +313,6 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             </span>
           </label>
         </div>
-        {unitsMismatch && (
-          <p className="mt-2 text-xs" role="alert" style={{ color: 'var(--color-status-error, #ef4444)' }}>
-            {t('blast.units_mismatch', {
-              defaultValue:
-                'Las unidades de inclinación y azimut difieren. La API Form actual requiere que coincidan; use la unidad común.',
-            })}
-          </p>
-        )}
       </details>
 
       <input
