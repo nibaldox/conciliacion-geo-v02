@@ -67,17 +67,26 @@ def _read_uploaded_csv(file: UploadFile) -> pd.DataFrame:
     return df
 
 
-def _process_blast_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+def _process_blast_dataframe(
+    df: pd.DataFrame,
+    incl_convention: Optional[str] = None,
+    bench_height_m: Optional[float] = None,
+) -> pd.DataFrame:
     """Run the canonical blast-hole processing pipeline.
 
     Applies :func:`core.calculo_tronadura.procesar_pozos` to resolve collar/toe
     coordinates and then :func:`core.blast_metrics.enrich_blast_dataframe` for
     charge-derived metrics.
 
+    Cierre final §2.2: the inclination convention is mandatory — the API
+    rejects requests that do not declare it (no implicit geometry).
+
     Raises :class:`HTTPException` (400) on processing failure.
     """
     try:
-        df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(df)
+        df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
+            df, incl_convention=incl_convention, bench_height_m=bench_height_m,
+        )
     except KeyError as exc:
         raise HTTPException(400, f"Missing required blast-hole column: {exc}")
     except Exception as exc:
@@ -247,6 +256,8 @@ def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
 
 def _build_upload_payload(
     file_bytes: bytes,
+    incl_convention: Optional[str] = None,
+    bench_height_m: Optional[float] = None,
 ) -> dict:
     """Run the full blast-upload pipeline off the event-loop thread.
 
@@ -274,7 +285,9 @@ def _build_upload_payload(
     n_rows_input = len(df)
 
     try:
-        df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(df)
+        df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
+            df, incl_convention=incl_convention, bench_height_m=bench_height_m,
+        )
     except KeyError as exc:
         raise HTTPException(400, f"Missing required blast-hole column: {exc}")
     except Exception as exc:
@@ -318,6 +331,13 @@ def _build_upload_payload(
 async def upload_blast_csv(
     file: UploadFile = File(..., description="Blast-hole CSV (CSV/Excel-style columns)"),
     session_id: str = Form(..., description="Session UUID"),
+    incl_convention: str = Form(
+        "from_vertical",
+        description="Inclinación: from_vertical | dip_from_horizontal (confirmación del evento)",
+    ),
+    bench_height_m: Optional[float] = Form(
+        None, description="Altura de banco confirmada del evento (m)"
+    ),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
 
@@ -340,7 +360,9 @@ async def upload_blast_csv(
     except Exception as exc:
         raise HTTPException(400, f"Could not read uploaded file: {exc}")
 
-    payload = await _run_in_executor(_build_upload_payload, content)
+    payload = await _run_in_executor(
+        _build_upload_payload, content, incl_convention, bench_height_m,
+    )
 
     db.save_blast_upload(
         session_id,

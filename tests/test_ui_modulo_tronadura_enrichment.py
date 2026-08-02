@@ -35,7 +35,7 @@ def _enax_df(n=16, malla="M1"):
 
 class TestEnrichProcessedPF:
     def test_adds_powder_factor_columns(self):
-        dfc, *_ = procesar_pozos(_enax_df())
+        dfc, *_ = procesar_pozos(_enax_df(), incl_convention="from_vertical")
         enriched = enrich_processed(dfc)
         for col in ("pf_g_per_ton", "pf_g_per_ton_net", "pf_g_per_ton_inf",
                     "area_influence_m2", "pf_vol_kgm3", "pf_area_kgm2", "energy_mj"):
@@ -44,7 +44,7 @@ class TestEnrichProcessedPF:
         assert enriched["area_influence_m2"].notna().any()
 
     def test_pf_values_positive(self):
-        dfc, *_ = procesar_pozos(_enax_df())
+        dfc, *_ = procesar_pozos(_enax_df(), incl_convention="from_vertical")
         enriched = enrich_processed(dfc)
         valid = enriched["pf_g_per_ton_inf"].dropna()
         assert (valid > 0).all()
@@ -60,7 +60,7 @@ class _FakeSection:
 
 class TestProjectOneExposesGTon:
     def test_row_dict_carries_g_per_ton_keys(self):
-        dfc, *_ = procesar_pozos(_enax_df())
+        dfc, *_ = procesar_pozos(_enax_df(), incl_convention="from_vertical")
         enriched = enrich_processed(dfc)
         sec = _FakeSection("S1", np.array([0.0, 0.0]), 90.0)
         rows = project_powder_factor_per_section(

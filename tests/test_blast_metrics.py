@@ -55,6 +55,7 @@ def _enax_row(**overrides):
     base = {
         "Latitud_Geo": 0.0, "Longitud_Geo": 0.0, "Nombre_Banco": 4200.0,
         "Inclinacion_real": 0.0, "Azimuth_real": 0.0, "longitud_real": 15.0,
+        "Incl_convention": "from_vertical",
         "Kilos_Cargados_real": 300.0,
         "Burden": 5.0, "Esp": 6.0, "Diam_mm": 200.0, "Taco_m": 4.0,
         "Tipo_Explosivo": "ANFO", "fecha_tronadura": "2026-05-01",

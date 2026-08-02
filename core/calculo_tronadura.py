@@ -237,6 +237,8 @@ def procesar_pozos(
     z_collar_semantic: str | None = None,
     incl_convention: InclinationConvention | str | None = None,
     az_convention: AzimuthConvention | str = AzimuthConvention.FROM_NORTH_CW,
+    incl_sign_convention: str = "abs",
+    angle_unit: str = "degrees",
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
@@ -302,11 +304,15 @@ def procesar_pozos(
     # bench/collar semantics can be classified (spec §4.2).
     if column_map is not None:
         z_src = column_map.get("Z_collar")
+        incl_src = column_map.get("Incl")
+        az_src = column_map.get("Az")
         from core.column_mapping import apply_mapping
         df_work = apply_mapping(df_work, column_map)
     else:
         resolved = _resolve_column_aliases(df_work)
         z_src = resolved.get("Z_collar")
+        incl_src = resolved.get("Incl")
+        az_src = resolved.get("Az")
         df_work = _rename_to_canonical(df_work, resolved)
 
     # Trazabilidad pozos→bancos en conciliación geométrica:
@@ -319,46 +325,65 @@ def procesar_pozos(
 
     _coerce_typed_columns(df_work)
 
-    # Canonical inclination / azimuth normalization (spec §4.1, H-05).
-    # The inclination convention must be explicit: explicit argument,
-    # data-declared column, or the visible config default (which emits a
-    # persistent warning flag). It is never silently assumed.
+    # Canonical inclination / azimuth normalization (spec §4.1, H-05,
+    # cierre final §2.2). The inclination convention is MANDATORY: without
+    # an explicit argument or a data-declared column, the geometry is
+    # BLOCKED (raise) — there is no default and no silent assumption.
     az_conv = AzimuthConvention(az_convention)
     if "Incl" in df_work.columns:
         df_work["Incl_original"] = df_work["Incl"]
         if incl_convention is not None:
             incl_conv = InclinationConvention(incl_convention)
-            source, warning = "explicit", False
+            source, user_confirmed = "explicit", True
         elif "Incl_convention" in df_work.columns:
             incl_conv = InclinationConvention(df_work["Incl_convention"].iloc[0])
-            source, warning = "data", False
+            source, user_confirmed = "data", True
         else:
-            incl_conv = InclinationConvention(DEFAULTS.blast_default_incl_convention)
-            source, warning = "default_config", True
-        incl_norm, incl_meta = normalize_inclination(df_work["Incl"], incl_conv)
+            raise ValueError(
+                "Convención de inclinación no confirmada: no se puede calcular "
+                "toe ni geometría dependiente sin declarar la convención. "
+                "Especifique incl_convention='from_vertical' o "
+                "'dip_from_horizontal' (o declare la columna Incl_convention "
+                "en el evento)."
+            )
+        # Angular unit conversion before normalization (cierre §2.2).
+        if angle_unit == "radians":
+            incl_raw = np.degrees(df_work["Incl"].astype(float))
+            conversion_unit = "radians->degrees"
+        elif angle_unit == "degrees":
+            incl_raw = df_work["Incl"]
+            conversion_unit = "none"
+        else:
+            raise ValueError(f"angle_unit inválido: {angle_unit!r} (use 'degrees' o 'radians')")
+        incl_norm, incl_meta = normalize_inclination(incl_raw, incl_conv)
         df_work["Incl"] = incl_norm
         df_work["Incl_convention"] = incl_conv.value
         df_work["Incl_convention_source"] = source
-        df_work["incl_convention_warning"] = bool(warning)
-        # Fase 1.1 cierre §2.3: complete angular provenance columns.
+        df_work["incl_convention_warning"] = False
+        # Cierre final §2.2: complete angular provenance columns.
         df_work["inclination_original"] = df_work["Incl_original"]
+        df_work["inclination_source_column"] = incl_src or ""
         df_work["inclination_convention_original"] = incl_conv.value
+        df_work["inclination_sign_convention"] = incl_sign_convention
+        df_work["inclination_unit_original"] = angle_unit
         df_work["inclination_normalized_from_vertical"] = incl_norm
-        df_work["inclination_conversion_applied"] = incl_meta.get("conversion", "none")
-        df_work["inclination_assumption_flag"] = bool(warning)
-        if warning:
-            df_work["inclination_validation_status"] = "DEFAULT_ASSUMPTION"
-            df_work["inclination_validation_message"] = (
-                f"Convención no declarada por el evento; se usó la configuración "
-                f"visible '{incl_conv.value}' (DEFAULTS.blast_default_incl_convention). "
-                "Declare la convención para limpiar el supuesto."
-            )
-        elif source == "data":
+        _conv_meta = incl_meta.get("conversion", "none")
+        df_work["inclination_conversion_applied"] = (
+            f"{conversion_unit}+{_conv_meta}" if conversion_unit != "none" and _conv_meta != "none"
+            else (conversion_unit if conversion_unit != "none" else _conv_meta)
+        )
+        df_work["inclination_assumption_flag"] = False
+        df_work["inclination_user_confirmed"] = bool(user_confirmed)
+        if source == "data":
             df_work["inclination_validation_status"] = "DATA_DECLARED"
-            df_work["inclination_validation_message"] = ""
+            df_work["inclination_validation_message"] = (
+                "Convención declarada por el evento (columna Incl_convention)."
+            )
         else:
             df_work["inclination_validation_status"] = "EXPLICIT"
-            df_work["inclination_validation_message"] = ""
+            df_work["inclination_validation_message"] = (
+                "Convención confirmada explícitamente por el caller."
+            )
         df_work["inclination_validation_status"] = np.where(
             pd.to_numeric(df_work["Incl_original"], errors="coerce").abs() > 90.0,
             "OUT_OF_RANGE",
@@ -383,9 +408,33 @@ def procesar_pozos(
         )
     if "Az" in df_work.columns:
         df_work["Az_original"] = df_work["Az"]
-        az_norm, _ = normalize_azimuth(df_work["Az"], az_conv)
+        if angle_unit == "radians":
+            az_raw = np.degrees(df_work["Az"].astype(float))
+            az_conversion_unit = "radians->degrees"
+        else:
+            az_raw = df_work["Az"]
+            az_conversion_unit = "none"
+        az_norm, az_meta = normalize_azimuth(az_raw, az_conv)
         df_work["Az"] = az_norm
         df_work["Az_convention"] = az_conv.value
+        # Cierre final §2.2: azimuth provenance columns.
+        df_work["azimuth_original"] = df_work["Az_original"]
+        df_work["azimuth_source_column"] = az_src or ""
+        df_work["azimuth_convention_original"] = az_conv.value
+        df_work["azimuth_unit_original"] = angle_unit
+        df_work["azimuth_normalized_clockwise_from_north"] = az_norm
+        df_work["azimuth_conversion_applied"] = (
+            f"{az_conversion_unit}+{az_meta.get('conversion', 'none')}"
+            if az_conversion_unit != "none"
+            else az_meta.get("conversion", "none")
+        )
+        df_work["azimuth_user_confirmed"] = bool(user_confirmed)
+        df_work["azimuth_validation_status"] = (
+            "DATA_DECLARED" if source == "data" else "EXPLICIT"
+        )
+        df_work["azimuth_validation_message"] = (
+            "Azimut en grados horarios desde el Norte (canónico)."
+        )
 
     # Elevation transformation driven by the column semantic (spec §4.2).
     # Cierre final §2.1: the transformation NEVER applies an unconfirmed

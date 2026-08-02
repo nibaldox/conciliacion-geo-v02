@@ -55,7 +55,7 @@ def _upload_csv(client: TestClient, session_id: str, csv_content: str) -> object
     return client.post(
         "/api/v1/blast/upload",
         files={"file": ("pozos.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")},
-        data={"session_id": session_id},
+        data={"session_id": session_id, "incl_convention": "from_vertical"},
     )
 
 

@@ -51,7 +51,7 @@ class TestEndToEndColumnMapping:
         assert result.is_complete
 
         # procesar_pozos with explicit column_map
-        df_proc, x_lines, y_lines, z_lines = procesar_pozos(df, column_map=result.mapping)
+        df_proc, x_lines, y_lines, z_lines = procesar_pozos(df, column_map=result.mapping, incl_convention="from_vertical")
 
         # Verify output shapes
         assert len(df_proc) == 10
@@ -71,7 +71,7 @@ class TestEndToEndColumnMapping:
             "Azimuth_real": [45.0, 90.0],
             "longitud_real": [15.0, 17.0],
         })
-        df_proc, _, _, _ = procesar_pozos(df)  # no column_map
+        df_proc, _, _, _ = procesar_pozos(df, incl_convention="from_vertical")  # no column_map
         assert len(df_proc) == 2
 
     def test_user_override_mapping(self):
@@ -83,7 +83,7 @@ class TestEndToEndColumnMapping:
         mapping["X"], mapping["Y"] = mapping["Y"], mapping["X"]
         errors = validate_mapping(mapping)
         assert errors == []
-        df_proc, _, _, _ = procesar_pozos(df, column_map=mapping)
+        df_proc, _, _, _ = procesar_pozos(df, column_map=mapping, incl_convention="from_vertical")
         assert len(df_proc) == 5
 
     def test_partial_mapping_fails_gracefully(self):
@@ -91,13 +91,13 @@ class TestEndToEndColumnMapping:
         df = self._make_unknown_schema_csv(5)
         mapping = {"X": "Easting_m", "Y": "Northing_m"}  # missing 4 required
         with pytest.raises(ValueError, match="requeridos"):
-            procesar_pozos(df, column_map=mapping)
+            procesar_pozos(df, column_map=mapping, incl_convention="from_vertical")
 
     def test_extra_unmapped_columns_preserved(self):
         """Columns not in the mapping should be preserved through the pipeline."""
         df = self._make_unknown_schema_csv(5)
         result = auto_map(df.columns)
-        df_proc, _, _, _ = procesar_pozos(df, column_map=result.mapping)
+        df_proc, _, _, _ = procesar_pozos(df, column_map=result.mapping, incl_convention="from_vertical")
         # "Explosive" gets renamed to "Tipo_Explosivo" by the mapper
         # (it's an alias). The key point is the data is preserved.
         assert "Tipo_Explosivo" in df_proc.columns

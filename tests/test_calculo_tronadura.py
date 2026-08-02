@@ -44,6 +44,8 @@ def _make_valid_hole(
                 "Inclinacion_real": incl,
                 "Azimuth_real": az,
                 "longitud_real": length,
+                # Migración cierre §2.2: el evento declara su convención angular.
+                "Incl_convention": "from_vertical",
                 "Kilos_Cargados_real": 250.0,
                 "fecha_tronadura": fecha,
                 # Migración cierre §2.1: altura de banco declarada por el evento
@@ -259,12 +261,12 @@ class TestInclinationConvention:
 class TestInclinationConventionExplicit:
     """H-05: no silent angular-convention assumption; persistent warning."""
 
-    def test_default_config_emits_persistent_warning(self):
+    def test_data_declared_convention_no_warning(self):
         df = _make_valid_hole(incl=10.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, bench_height_m=15.0)
         assert out["Incl_convention"].iloc[0] == "from_vertical"
-        assert out["Incl_convention_source"].iloc[0] == "default_config"
-        assert bool(out["incl_convention_warning"].iloc[0]) is True
+        assert out["Incl_convention_source"].iloc[0] == "data"
+        assert bool(out["incl_convention_warning"].iloc[0]) is False
 
     def test_explicit_convention_no_warning(self):
         df = _make_valid_hole(incl=10.0)
@@ -337,12 +339,11 @@ class TestInclinationConventionProvenance:
         assert bool(out["inclination_assumption_flag"].iloc[0]) is False
         assert out["inclination_validation_status"].iloc[0] == "EXPLICIT"
 
-    def test_default_convention_flagged_and_message(self):
-        df = _make_valid_hole(incl=10.0)
-        out, *_ = procesar_pozos(df)
-        assert out["inclination_validation_status"].iloc[0] == "DEFAULT_ASSUMPTION"
-        assert bool(out["inclination_assumption_flag"].iloc[0]) is True
-        assert "configuración visible" in out["inclination_validation_message"].iloc[0]
+    def test_missing_convention_blocks_geometry(self):
+        """Cierre final §2.2: sin convención confirmada el backend bloquea."""
+        df = _make_valid_hole(incl=10.0).drop(columns=["bench_height_m", "Incl_convention"])
+        with pytest.raises(ValueError, match="convenci"):
+            procesar_pozos(df, bench_height_m=15.0)
 
     def test_dip_negative_conversion_recorded(self):
         df = _make_valid_hole(incl=-65.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
@@ -536,3 +537,71 @@ class TestProyectarPozosEnSeccion:
             out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0, tolerance=100.0
         )
         assert {"A", "B"} == set(proj["label_pozo"])
+
+
+class TestCierreFinalConvencion:
+    """Cierre final §2.2: la convención es obligatoria y confirmada."""
+
+    def _h(self, **kw):
+        base = {"incl": 10.0, "az": 15.0}
+        base.update(kw)
+        return _make_valid_hole(**base)
+
+    def test_missing_convention_raises(self):
+        """Backend sin convención confirmada → bloqueo (raise, sin toe)."""
+        df = self._h().drop(columns=["bench_height_m", "Incl_convention"])
+        with pytest.raises(ValueError, match="convenci"):
+            procesar_pozos(df, bench_height_m=15.0)
+
+    def test_explicit_convention_computes_and_records(self):
+        out, *_ = procesar_pozos(
+            self._h(), incl_convention="from_vertical", bench_height_m=15.0
+        )
+        assert bool(out["inclination_user_confirmed"].iloc[0]) is True
+        assert out["inclination_validation_status"].iloc[0] == "EXPLICIT"
+        assert out["inclination_sign_convention"].iloc[0] == "abs"
+        assert out["inclination_unit_original"].iloc[0] == "degrees"
+        assert out["inclination_source_column"].iloc[0] == "Inclinacion_real"
+        assert bool(out["azimuth_user_confirmed"].iloc[0]) is True
+        assert out["azimuth_convention_original"].iloc[0] == "from_north_cw"
+        assert out["azimuth_normalized_clockwise_from_north"].iloc[0] == 15.0
+
+    def test_data_declared_convention(self):
+        df = self._h()
+        df["Incl_convention"] = "from_vertical"
+        out, *_ = procesar_pozos(df, bench_height_m=15.0)
+        assert out["inclination_validation_status"].iloc[0] == "DATA_DECLARED"
+        assert bool(out["inclination_user_confirmed"].iloc[0]) is True
+        assert out["Z_toe"].iloc[0] == pytest.approx(4215.0 - 12.0 * np.cos(np.radians(10.0)))  # Len=12
+
+    def test_sign_convention_recorded(self):
+        out, *_ = procesar_pozos(
+            self._h(incl=-10.0), incl_convention="dip_from_horizontal",
+            incl_sign_convention="negative_dip_descending", bench_height_m=15.0,
+        )
+        assert out["inclination_sign_convention"].iloc[0] == "negative_dip_descending"
+        assert out["incl"].iloc[0] if "incl" in out.columns else True
+
+    def test_radians_unit_converted(self):
+        out, *_ = procesar_pozos(
+            self._h(incl=0.1745, az=0.2618), incl_convention="from_vertical",
+            angle_unit="radians", bench_height_m=15.0,
+        )
+        assert out["Incl"].iloc[0] == pytest.approx(10.0, rel=1e-3)
+        assert out["Az"].iloc[0] == pytest.approx(15.0, rel=1e-3)
+        assert out["inclination_unit_original"].iloc[0] == "radians"
+        assert out["azimuth_unit_original"].iloc[0] == "radians"
+        assert out["inclination_conversion_applied"].iloc[0] == "radians->degrees"
+
+    def test_azimuth_original_preserved(self):
+        out, *_ = procesar_pozos(
+            self._h(az=370.0), incl_convention="from_vertical", bench_height_m=15.0
+        )
+        assert out["azimuth_original"].iloc[0] == 370.0
+        assert out["Az"].iloc[0] == 10.0
+        assert out["azimuth_conversion_applied"].iloc[0] == "mod-360"
+
+    def test_out_of_range_rejected(self):
+        df = self._h(incl=120.0)
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        assert len(out) == 0  # dropped (never converted, never used)

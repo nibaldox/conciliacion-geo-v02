@@ -108,6 +108,7 @@ class TestBenchHeightProvenance:
         df = pd.DataFrame([{
             "Latitud_Geo": 0.0, "Longitud_Geo": 0.0, "Nombre_Banco": 4000.0,
             "Inclinacion_real": 0.0, "Azimuth_real": 0.0, "longitud_real": 12.0,
+            "Incl_convention": "from_vertical",
         }])
         out, *_ = procesar_pozos(df, bench_height_m=15.0)
         assert out["bench_height_status"].iloc[0] == "PROVIDED"
@@ -123,6 +124,7 @@ class TestCierreFinalAltura:
         return pd.DataFrame([{
             "Latitud_Geo": 0.0, "Longitud_Geo": 0.0, "Nombre_Banco": 4000.0,
             "Inclinacion_real": 0.0, "Azimuth_real": 0.0, "longitud_real": 12.0,
+            "Incl_convention": "from_vertical",
         }])
 
     def test_z_collar_not_transformed_without_confirmed_height(self):

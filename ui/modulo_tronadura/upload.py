@@ -127,47 +127,82 @@ def render_upload_section() -> None:
         st.error("Mapeo vacío. Selecciona al menos las columnas requeridas.")
         return
 
-    # Fase 1.1 cierre §2.3: convención angular explícita y altura de banco,
-    # seleccionables antes de procesar y persistidas en la configuración del
-    # evento (session state). Nunca se asume from_vertical en silencio.
+    # Cierre final §2.2: convención angular EXPLÍCITA y confirmada — la
+    # interfaz comienza sin selección implícita y el procesamiento se
+    # bloquea hasta que el usuario confirme.
     with st.expander("📐 Convención geométrica del evento", expanded=False):
         incl_label = st.selectbox(
             "Convención de inclinación",
-            options=["Desviación desde la vertical", "Dip desde la horizontal"],
+            options=["Seleccione una convención", "Desviación desde la vertical", "Dip desde la horizontal"],
             index=0,
             help=(
-                "Desviación desde la vertical: 0° = pozo vertical (canónica). "
-                "Dip desde la horizontal: 0° = horizontal; -65° se resuelve como "
-                "magnitud 65° con orientación conservada antes de convertir."
+                "Debe declarar la convención antes de procesar. Desviación desde "
+                "la vertical: 0° = pozo vertical (canónica). Dip desde la "
+                "horizontal: 0° = horizontal. -65° se resuelve conservando la "
+                "orientación antes de convertir."
             ),
             key="blast_incl_convention_selector",
         )
-        st.session_state["blast_incl_convention"] = (
-            "from_vertical" if "vertical" in incl_label else "dip_from_horizontal"
+        if "vertical" in incl_label:
+            st.session_state["blast_incl_convention"] = "from_vertical"
+        elif "Dip" in incl_label:
+            st.session_state["blast_incl_convention"] = "dip_from_horizontal"
+        else:
+            st.session_state.pop("blast_incl_convention", None)
+
+        st.selectbox(
+            "Tratamiento del signo",
+            options=["Usar valor absoluto", "Signo negativo representa dip descendente", "Convención definida por la fuente"],
+            index=0,
+            key="blast_incl_sign_convention",
+        )
+        st.selectbox(
+            "Unidad angular",
+            options=["Grados", "Radianes"],
+            index=0,
+            key="blast_angle_unit",
+        )
+        st.caption(
+            "Azimut: grados en sentido horario desde el Norte (canónico). La "
+            "selección se persiste en la configuración reproducible del evento."
         )
         bench_h_ui = st.number_input(
-            "Altura de banco (m) — opcional",
+            "Altura de banco (m) — obligatoria para cota de banco",
             min_value=0.0,
             value=0.0,
             step=0.5,
             help=(
-                "Si se declara, la altura se registra como PROVIDED. Si queda vacía, "
-                "el supuesto de configuración se marca explícitamente "
-                "(EXPLICIT_ASSUMPTION) y se muestra como advertencia. Nunca se "
-                "aplica un 15 m silencioso."
+                "Si la columna de elevación es cota de banco, la altura DEBE "
+                "declararse; sin ella la cota no se transforma y la geometría "
+                "dependiente queda bloqueada (nunca 15 m automáticos)."
             ),
             key="blast_bench_height_input",
         )
         st.session_state["blast_bench_height_m"] = (
             bench_h_ui if bench_h_ui and bench_h_ui > 0 else None
         )
-        st.caption(
-            "Azimut: grados en sentido horario desde el Norte (canónico). "
-            "El tratamiento del signo de la inclinación conserva la orientación "
-            "en la columna `incl_orientation`."
+        convention_confirmed = bool(
+            st.checkbox(
+                "Confirmo la convención geométrica seleccionada",
+                value=False,
+                help="Confirmación explícita: sin ella el procesamiento se bloquea.",
+                key="blast_geometry_confirmed",
+            )
         )
+        if not convention_confirmed:
+            st.warning(
+                "⚠️ **Convención geométrica no confirmada.** El procesamiento "
+                "quedará bloqueado hasta que seleccione y confirme la convención "
+                "de inclinación (y declare la altura de banco si la elevación es "
+                "cota de banco)."
+            )
+        elif st.session_state.get("blast_incl_convention") is None:
+            st.error("Seleccione una convención de inclinación para continuar.")
 
-    if st.button("🚀 Procesar Pozos", type="primary", key="process_blast"):
+    can_process = bool(st.session_state.get("blast_geometry_confirmed", False)) and \
+        st.session_state.get("blast_incl_convention") is not None
+
+    if st.button("🚀 Procesar Pozos", type="primary", key="process_blast", disabled=not can_process):
         progress = st.progress(0.0, text="Encolando trabajo de procesamiento…")
         status = st.empty()
         status.info("⏳ Procesando pozos en segundo plano…")
@@ -201,6 +236,15 @@ def render_upload_section() -> None:
                     cmap,
                     incl_convention=incl_conv_ui,
                     bench_height_m=bench_h_ui,
+                    incl_sign_convention=(
+                        "abs" if st.session_state.get("blast_incl_sign_convention", "").startswith("Usar")
+                        else "negative_dip_descending" if "negativo" in st.session_state.get("blast_incl_sign_convention", "")
+                        else "source_defined"
+                    ),
+                    angle_unit=(
+                        "radians" if st.session_state.get("blast_angle_unit", "") == "Radianes"
+                        else "degrees"
+                    ),
                 )
                 try:
                     progress.progress(0.9, text="Empacando resultados…")
