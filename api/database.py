@@ -459,14 +459,23 @@ def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
     ``blast_upload_meta``. Both writes are merged into the existing settings
     dict so other settings blocks are preserved.
 
-    Remediación 3.2/4.2: also persists ``rejected_rows`` and
-    ``processing_summary`` so the structured diagnosis survives reads
+    Remediación 3.2/4.2 + integración 3.6: also persists ``accepted_rows``,
+    ``rejected_rows``, ``processing_summary``, ``event_warnings``,
+    ``blocking_errors``, ``spatial_diagnostics`` and the versioned
+    ``geometry_configuration`` so the structured diagnosis survives reads
     after the upload response is gone.
     """
     settings = get_settings(session_id)
-    settings["blast_holes"] = payload.get("holes", [])
+    # ``accepted_rows`` is the canonical v2 name; ``holes`` is the legacy
+    # key read by GET /blast/{id}/holes. Both point at the SAME list.
+    accepted = payload.get("accepted_rows") or payload.get("holes", [])
+    settings["blast_holes"] = accepted
+    settings["accepted_rows"] = accepted
     settings["rejected_rows"] = payload.get("rejected_rows", [])
     settings["processing_summary"] = payload.get("processing_summary", {})
+    settings["event_warnings"] = payload.get("event_warnings", [])
+    settings["blocking_errors"] = payload.get("blocking_errors", [])
+    settings["spatial_diagnostics"] = payload.get("spatial_diagnostics", {})
     settings["data_warnings"] = payload.get("data_warnings", "")
     settings["geometry_configuration"] = payload.get("geometry_configuration", {})
     settings["blast_upload_meta"] = {

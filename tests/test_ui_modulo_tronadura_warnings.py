@@ -136,15 +136,17 @@ class TestPersistenciaOperacional:
             resp = client.post(
                 "/api/v1/blast/upload",
                 files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-                data={
-                    "session_id": "warn-1",
-                    "geometry_user_confirmed": "true",
-                    "incl_convention": "from_vertical",
-                    "incl_sign_convention": "ABSOLUTE_VALUE",
-                    "az_convention": "CLOCKWISE_FROM_NORTH",
-                    "angle_unit": "degrees",
-                    "bench_height_m": "15.0",
-                },
+            data={
+                "session_id": "warn-1",
+                "geometry_user_confirmed": "true",
+                "incl_convention": "from_vertical",
+                "incl_sign_convention": "ABSOLUTE_VALUE",
+                "az_convention": "CLOCKWISE_FROM_NORTH",
+                "angle_unit": "degrees",
+                "bench_height_m": "15.0",
+                "incl_source_column": "Inclinacion_real",
+                "az_source_column": "Azimuth_real",
+            },
             )
             assert resp.status_code == 200, resp.text
             body = resp.json()

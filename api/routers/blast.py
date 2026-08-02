@@ -312,24 +312,31 @@ def _build_upload_payload(
         logger.warning("Blast enrichment failed: %s", exc)
 
     # Remediación 4.5: warnings attached BEFORE building persistent records.
+    # INTEGRACIÓN 3.6: ``accepted_rows`` is the canonical structured list
+    # produced directly from the processor output. ``records`` is kept as
+    # a deprecated alias for backward compatibility but points at the
+    # SAME list (no divergent sources).
     if not df_clean.empty:
         from ui.modulo_tronadura.warnings import collect_data_warnings
         df_clean = collect_data_warnings(df_clean, attach=True)
         data_warnings = (
             str(df_clean["data_warnings"].iloc[0]) if "data_warnings" in df_clean.columns else ""
         )
-        records = _df_to_hole_records(df_clean)
+        accepted_rows = _df_to_hole_records(df_clean)
         carga_mean = _safe_mean(_compute_carga_series(df_clean))
         descarga_mean = _safe_mean(_compute_descarga_series(df_clean))
         hardness_dist = _hardness_distribution(df_clean)
     else:
         data_warnings = ""
-        records = []
+        accepted_rows = []
         carga_mean = 0.0
         descarga_mean = 0.0
         hardness_dist = {}
 
-    n_holes = len(df_clean)
+    # ``records`` is a deprecated alias for ``accepted_rows``. Both names
+    # reference the SAME list so consumers can migrate without diverging.
+    records = accepted_rows
+    n_holes = len(accepted_rows)
     n_rows_skipped = len(rejected_rows) + (n_rows_input - n_holes - len(rejected_rows))
 
     summary = {
@@ -355,7 +362,8 @@ def _build_upload_payload(
         "carga_mean": round(carga_mean, 3),
         "descarga_mean": round(descarga_mean, 3),
         "hardness_distribution": hardness_dist,
-        "records": records,
+        "accepted_rows": accepted_rows,
+        "records": records,  # deprecated alias of accepted_rows
         "data_warnings": data_warnings,
         "processing_summary": summary,
         "rejected_rows": rejected_rows,
@@ -454,13 +462,17 @@ async def upload_blast_csv(
     db.save_blast_upload(
         session_id,
         {
-            "holes": payload["records"],
+            "accepted_rows": payload["accepted_rows"],
+            "holes": payload["accepted_rows"],  # legacy alias
             "n_holes": payload["n_holes"],
             "n_rows_loaded": payload["n_rows_loaded"],
             "n_rows_skipped": payload["n_rows_skipped"],
             "rejected_rows": payload["rejected_rows"],
             "processing_summary": payload["processing_summary"],
             "data_warnings": payload["data_warnings"],
+            "event_warnings": payload.get("event_warnings", []),
+            "blocking_errors": payload.get("blocking_errors", []),
+            "spatial_diagnostics": payload.get("spatial_diagnostics", {}),
             "geometry_configuration": config.to_dict(),
         },
     )
@@ -477,10 +489,12 @@ async def upload_blast_csv(
         n_rows_skipped=payload["n_rows_skipped"],
         data_warnings=payload.get("data_warnings", ""),
         processing_summary=payload.get("processing_summary", {}),
+        accepted_rows=payload.get("accepted_rows", []),
         rejected_rows=payload.get("rejected_rows", []),
         event_warnings=payload.get("event_warnings", []),
         blocking_errors=payload.get("blocking_errors", []),
         geometry_configuration=config.to_dict(),
+        spatial_diagnostics=payload.get("spatial_diagnostics", {}),
         carga_mean=payload["carga_mean"],
         descarga_mean=payload["descarga_mean"],
         hardness_distribution=payload["hardness_distribution"],

@@ -441,10 +441,12 @@ def procesar_pozos(
     drop_present = [c for c in COLS_DROP if c in df_work.columns]
     df_work.drop(columns=drop_present, inplace=True)
 
-    # Remediación 4.1: single source of truth — when a GeometryConfiguration
-    # is provided it takes precedence and is validated centrally. Otherwise
-    # we honor the legacy keyword arguments, but NEVER invent a default:
-    # geometry_user_confirmed is None/False or missing required fields ⇒ BLOCK.
+    # Remediación 4.1 + integración 3.3/3.4/3.5: single source of truth.
+    # When a GeometryConfiguration is provided it takes precedence and is
+    # validated centrally (version + non-empty source columns + independent
+    # units). Otherwise we honor the legacy keyword arguments, but NEVER
+    # invent a default: geometry_user_confirmed is None/False or missing
+    # required fields ⇒ BLOCK.
     if geometry_configuration is not None:
         geometry_configuration.validate()
         geometry_user_confirmed = geometry_configuration.geometry_user_confirmed
@@ -458,15 +460,18 @@ def procesar_pozos(
             incl_convention = _INCL_CONTRACT_TO_ENUM[
                 geometry_configuration.inclination_convention
             ]
-        # The enums for sign/azimuth already accept uppercase canonical
-        # values directly. The contract values OVERRIDE the legacy kwargs
-        # because the contract is the authority when present.
         if geometry_configuration.inclination_sign_convention:
             incl_sign_convention = geometry_configuration.inclination_sign_convention
         sign_source_rule = geometry_configuration.inclination_source_rule or None
         if geometry_configuration.azimuth_convention:
             az_convention = geometry_configuration.azimuth_convention
-        angle_unit = geometry_configuration.angle_unit_canonical()
+        # INTEGRACIÓN 3.5: inclination and azimuth units are INDEPENDENT.
+        # Resolve each one separately; the legacy ``angle_unit`` kwarg is
+        # only kept for backward compatibility with callers that do not
+        # pass a contract and is NEVER applied to confirmed v2 contracts.
+        incl_angle_unit = geometry_configuration.inclination_unit_canonical()
+        az_angle_unit = geometry_configuration.azimuth_unit_canonical()
+        angle_unit = incl_angle_unit  # kept as a hint for legacy code paths
     else:
         # Remediación 3.1: legacy path still enforces explicit confirmation.
         # No dataset column is treated as implicit confirmation: only
@@ -507,23 +512,46 @@ def procesar_pozos(
         az_src = resolved.get("Az")
         df_work = _rename_to_canonical(df_work, resolved)
 
+    # INTEGRACIÓN 3.4: when a v2 contract is provided the source columns
+    # declared in it MUST exist in the dataset (no autodetection after
+    # confirmation). The autodetected ``incl_src``/``az_src`` above are
+    # only kept as a SUGGESTION — never used as a value source unless the
+    # contract explicitly accepts them (by declaring the same column name).
+    if geometry_configuration is not None:
+        cfg_incl_col = geometry_configuration.inclination_source_column
+        cfg_az_col = geometry_configuration.azimuth_source_column
+        if cfg_incl_col and cfg_incl_col not in df.columns:
+            raise GeometryConfigurationError(
+                f"La columna fuente de inclinación declarada "
+                f"{cfg_incl_col!r} no existe en el dataset.",
+                error_code="INCLINATION_SOURCE_COLUMN_NOT_FOUND",
+                details={"declared": cfg_incl_col, "available": list(df.columns)},
+            )
+        if cfg_az_col and cfg_az_col not in df.columns:
+            raise GeometryConfigurationError(
+                f"La columna fuente de azimut declarada "
+                f"{cfg_az_col!r} no existe en el dataset.",
+                error_code="AZIMUTH_SOURCE_COLUMN_NOT_FOUND",
+                details={"declared": cfg_az_col, "available": list(df.columns)},
+            )
+        # The declared column is the value source — override the
+        # autodetected alias so the persisted provenance matches what the
+        # operator selected in the UI.
+        incl_src = cfg_incl_col
+        az_src = cfg_az_col
+
     # Trazabilidad pozos→bancos en conciliación geométrica:
-    # conservamos ``uniqid`` e ``id_pozo`` para enlazar cada
-    # pozo del reporte de tronadura con su banco reconciliado.
-    # Si el input no trae ``uniqid``, fabricamos uno sintético
-    # a partir del índice de fila (1-based, string).
     if "uniqid" not in df_work.columns:
         df_work["uniqid"] = (df_work.index + 1).astype(str)
 
     _coerce_typed_columns(df_work)
 
     # Canonical inclination / azimuth normalization (spec §4.1, H-05,
-    # cierre final §2.2). The inclination convention is MANDATORY and
-    # must come either from the caller (explicit kwarg / contract) or
-    # from a data-declared column ``Incl_convention``. The data column
-    # is NOT implicit operator confirmation: the gate is the explicit
-    # ``geometry_user_confirmed=True`` value validated above (remediación 3.1).
-    # Without both (gate + a convention source), the geometry is BLOCKED.
+    # cierre final §2.2 + integración 3.5). The inclination convention is
+    # MANDATORY and must come from the contract or the legacy kwarg; a
+    # data-declared ``Incl_convention`` column is only honored when the
+    # operator already confirmed the geometry via ``geometry_user_confirmed
+    # is True`` (this is NOT implicit confirmation).
     az_conv = AzimuthConvention(az_convention)
     if "Incl" in df_work.columns:
         df_work["Incl_original"] = df_work["Incl"]
@@ -534,9 +562,6 @@ def procesar_pozos(
             geometry_user_confirmed is True
             and "Incl_convention" in df_work.columns
         ):
-            # Operator confirmed the geometry (gate passed). The convention
-            # VALUE may come from the dataset column — this is NOT implicit
-            # confirmation, it is just a value source after the gate.
             incl_conv = InclinationConvention(df_work["Incl_convention"].iloc[0])
             source, user_confirmed = "data", True
         else:
@@ -547,15 +572,27 @@ def procesar_pozos(
                 error_code="INCL_CONVENTION_MISSING",
                 details={"missing": "inclination_convention"},
             )
-        # Angular unit conversion before normalization (cierre §2.2).
-        if angle_unit == "radians":
+        # INTEGRACIÓN 3.5: the INDEPENDENT inclination unit is used here.
+        # When the contract is present we read its own unit; otherwise we
+        # fall back to the legacy ``angle_unit`` kwarg (kept for callers
+        # that haven't migrated to the contract yet).
+        _incl_unit = (
+            geometry_configuration.inclination_unit_canonical()
+            if geometry_configuration is not None
+            else angle_unit
+        )
+        if _incl_unit == "radians":
             incl_raw = np.degrees(df_work["Incl"].astype(float))
             conversion_unit = "radians->degrees"
-        elif angle_unit == "degrees":
+        elif _incl_unit == "degrees":
             incl_raw = df_work["Incl"]
             conversion_unit = "none"
         else:
-            raise ValueError(f"angle_unit inválido: {angle_unit!r} (use 'degrees' o 'radians')")
+            raise GeometryConfigurationError(
+                f"angle_unit inválido: {_incl_unit!r} (use 'degrees' o 'radians')",
+                error_code="GEOMETRY_INCOMPLETE",
+                details={"invalid_unit": _incl_unit},
+            )
         incl_norm, incl_meta = normalize_inclination(
             incl_raw, incl_conv,
             sign_convention=incl_sign_convention,
@@ -565,14 +602,15 @@ def procesar_pozos(
         df_work["Incl_convention"] = incl_conv.value
         df_work["Incl_convention_source"] = source
         df_work["incl_convention_warning"] = False
-        # Cierre final §2.2: complete angular provenance columns.
+        # Provenance columns carry the v2 contract version (single source
+        # of truth) and the ACTUAL source column declared by the operator.
         df_work["inclination_original"] = df_work["Incl_original"]
         df_work["inclination_source_column"] = incl_src or ""
         df_work["inclination_convention_original"] = incl_conv.value
         df_work["inclination_sign_convention"] = incl_meta.get("sign_convention", str(incl_sign_convention))
         df_work["inclination_sign_applied"] = incl_meta.get("sign_applied", "none")
         df_work["inclination_source_rule"] = sign_source_rule or ""
-        df_work["inclination_unit_original"] = angle_unit
+        df_work["inclination_unit_original"] = _incl_unit
         df_work["inclination_normalized_from_vertical"] = incl_norm
         df_work["inclination_normalized_from_vertical_deg"] = incl_norm
         _conv_meta = incl_meta.get("conversion", "none")
@@ -616,7 +654,13 @@ def procesar_pozos(
         )
     if "Az" in df_work.columns:
         df_work["Az_original"] = df_work["Az"]
-        if angle_unit == "radians":
+        # INTEGRACIÓN 3.5: the INDEPENDENT azimuth unit is used here.
+        _az_unit = (
+            geometry_configuration.azimuth_unit_canonical()
+            if geometry_configuration is not None
+            else angle_unit
+        )
+        if _az_unit == "radians":
             az_raw = np.degrees(df_work["Az"].astype(float))
             az_conversion_unit = "radians->degrees"
         else:
@@ -625,11 +669,10 @@ def procesar_pozos(
         az_norm, az_meta = normalize_azimuth(az_raw, az_conv)
         df_work["Az"] = az_norm
         df_work["Az_convention"] = az_conv.value
-        # Cierre final §2.2: azimuth provenance columns.
         df_work["azimuth_original"] = df_work["Az_original"]
         df_work["azimuth_source_column"] = az_src or ""
         df_work["azimuth_convention_original"] = az_conv.value
-        df_work["azimuth_unit_original"] = angle_unit
+        df_work["azimuth_unit_original"] = _az_unit
         df_work["azimuth_normalized_clockwise_from_north"] = az_norm
         df_work["azimuth_normalized_clockwise_from_north_deg"] = az_norm
         df_work["azimuth_conversion_applied"] = (
@@ -646,9 +689,11 @@ def procesar_pozos(
         )
 
     if "Incl" in df_work.columns or "Az" in df_work.columns:
-        # Auditoría §3.3: contrato de configuración geométrica serializable.
+        # Auditoría §3.3 + integración 3.3: el contrato de configuración
+        # geométrica serializable usa la ÚNICA versión canónica definida
+        # en core.geometry_contract.GEOMETRY_CONFIGURATION_VERSION.
         df_work["geometry_user_confirmed"] = bool(geometry_user_confirmed)
-        df_work["geometry_configuration_version"] = "1.0"
+        df_work["geometry_configuration_version"] = GEOMETRY_CONFIGURATION_VERSION
 
     # Elevation transformation driven by the column semantic (spec §4.2).
     # Cierre final §2.1: the transformation NEVER applies an unconfirmed

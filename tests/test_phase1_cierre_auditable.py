@@ -55,18 +55,27 @@ def _one_hole_df() -> pd.DataFrame:
     )
 
 
+def _full_config(**overrides) -> GeometryConfiguration:
+    """A complete, validated GeometryConfiguration for tests."""
+    defaults = {
+        "geometry_user_confirmed": True,
+        "inclination_convention": "FROM_VERTICAL",
+        "inclination_sign_convention": "ABSOLUTE_VALUE",
+        "inclination_unit": "DEGREES",
+        "azimuth_convention": "CLOCKWISE_FROM_NORTH",
+        "azimuth_unit": "DEGREES",
+        "inclination_source_column": "Inclinacion_real",
+        "azimuth_source_column": "Azimuth_real",
+    }
+    defaults.update(overrides)
+    return GeometryConfiguration(**defaults)
+
+
 class TestGeometricConfirmation:
     """Only ``geometry_user_confirmed is True`` enables geometry."""
 
     def test_explicit_true_enables_toe(self):
-        cfg = GeometryConfiguration(
-            geometry_user_confirmed=True,
-            inclination_convention="FROM_VERTICAL",
-            inclination_sign_convention="ABSOLUTE_VALUE",
-            inclination_unit="DEGREES",
-            azimuth_convention="CLOCKWISE_FROM_NORTH",
-            azimuth_unit="DEGREES",
-        )
+        cfg = _full_config()
         out, *_ = procesar_pozos(_one_hole_df(), geometry_configuration=cfg)
         assert pd.notna(out["X_toe"].iloc[0])
         assert pd.notna(out["inclination_normalized_from_vertical_deg"].iloc[0])
@@ -146,14 +155,7 @@ class TestGeometricConfirmation:
 
     def test_degrees_and_radians_both_functional(self):
         for unit, incl_in in (("DEGREES", 15.0), ("RADIANS", 0.2618)):
-            cfg = GeometryConfiguration(
-                geometry_user_confirmed=True,
-                inclination_convention="FROM_VERTICAL",
-                inclination_sign_convention="ABSOLUTE_VALUE",
-                inclination_unit=unit,
-                azimuth_convention="CLOCKWISE_FROM_NORTH",
-                azimuth_unit=unit,
-            )
+            cfg = _full_config(inclination_unit=unit, azimuth_unit=unit)
             df = _one_hole_df()
             df["Inclinacion_real"] = incl_in
             df["Azimuth_real"] = 1.5708 if unit == "RADIANS" else 90.0
@@ -171,14 +173,7 @@ class TestGeometricConfirmation:
         ],
     )
     def test_all_four_azimuth_conventions_accepted(self, az_conv):
-        cfg = GeometryConfiguration(
-            geometry_user_confirmed=True,
-            inclination_convention="FROM_VERTICAL",
-            inclination_sign_convention="ABSOLUTE_VALUE",
-            inclination_unit="DEGREES",
-            azimuth_convention=az_conv,
-            azimuth_unit="DEGREES",
-        )
+        cfg = _full_config(azimuth_convention=az_conv)
         cfg.validate()  # must not raise
         assert cfg.geometry_configuration_version == GEOMETRY_CONFIGURATION_VERSION
 
@@ -192,14 +187,7 @@ class TestStructuredRejections:
     """Rejected rows are produced directly by the processor."""
 
     def _cfg(self) -> GeometryConfiguration:
-        return GeometryConfiguration(
-            geometry_user_confirmed=True,
-            inclination_convention="FROM_VERTICAL",
-            inclination_sign_convention="ABSOLUTE_VALUE",
-            inclination_unit="DEGREES",
-            azimuth_convention="CLOCKWISE_FROM_NORTH",
-            azimuth_unit="DEGREES",
-        )
+        return _full_config()
 
     def test_mix_accepted_and_rejected(self):
         df = pd.DataFrame(
@@ -338,6 +326,8 @@ def _geometry_form() -> dict[str, str]:
         "az_convention": "CLOCKWISE_FROM_NORTH",
         "angle_unit": "degrees",
         "bench_height_m": "15.0",
+        "incl_source_column": "Inclinacion_real",
+        "az_source_column": "Azimuth_real",
     }
 
 
@@ -482,24 +472,23 @@ class TestAngleUnitUnification:
         )
 
     def test_contract_carries_angle_unit(self):
-        cfg = GeometryConfiguration(
-            geometry_user_confirmed=True,
-            inclination_convention="FROM_VERTICAL",
-            inclination_sign_convention="ABSOLUTE_VALUE",
-            inclination_unit="DEGREES",
-            azimuth_convention="CLOCKWISE_FROM_NORTH",
-            azimuth_unit="DEGREES",
-        )
+        # When both units agree, angle_unit_canonical() returns the shared
+        # value (kept for backward compatibility with callers that don't
+        # yet use inclination_unit_canonical() / azimuth_unit_canonical()).
+        cfg = _full_config()
         assert cfg.angle_unit_canonical() == "degrees"
-        cfg_rad = GeometryConfiguration(
-            geometry_user_confirmed=True,
-            inclination_convention="FROM_VERTICAL",
-            inclination_sign_convention="ABSOLUTE_VALUE",
-            inclination_unit="RADIANS",
-            azimuth_convention="CLOCKWISE_FROM_NORTH",
-            azimuth_unit="RADIANS",
-        )
+        cfg_rad = _full_config(inclination_unit="RADIANS", azimuth_unit="RADIANS")
         assert cfg_rad.angle_unit_canonical() == "radians"
+
+    def test_independent_inclination_and_azimuth_units(self):
+        # INTEGRACIÓN 3.5: inclination and azimuth units are INDEPENDENT.
+        # angle_unit_canonical() must raise when they differ; the two
+        # specific accessors return each one without collapse.
+        cfg_mixed = _full_config(inclination_unit="DEGREES", azimuth_unit="RADIANS")
+        assert cfg_mixed.inclination_unit_canonical() == "degrees"
+        assert cfg_mixed.azimuth_unit_canonical() == "radians"
+        with pytest.raises(GeometryConfigurationError):
+            cfg_mixed.angle_unit_canonical()
 
 
 # ---------------------------------------------------------------------------

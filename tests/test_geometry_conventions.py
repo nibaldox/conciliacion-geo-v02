@@ -233,6 +233,8 @@ class TestParidadBackendAPI:
                     "az_convention": "COUNTERCLOCKWISE_FROM_NORTH",
                     "angle_unit": "degrees",
                     "bench_height_m": "15.0",
+                    "incl_source_column": "Inclinacion_real",
+                    "az_source_column": "Azimuth_real",
                 },
             )
             assert resp.status_code == 200, resp.text

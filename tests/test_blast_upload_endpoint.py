@@ -56,6 +56,8 @@ GEOMETRY_FORM = {
     "az_convention": "CLOCKWISE_FROM_NORTH",
     "angle_unit": "degrees",
     "bench_height_m": "15.0",
+    "incl_source_column": "Inclinacion_real",
+    "az_source_column": "Azimuth_real",
 }
 
 
