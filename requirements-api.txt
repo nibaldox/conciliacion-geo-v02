@@ -129,7 +129,7 @@ numpy==2.4.6 ; python_full_version >= '3.11'
     #   shapely
     #   streamlit
     #   trimesh
-openai==2.41.1
+openai==2.50.0
     # via conciliacion-geotecnica
 openpyxl==3.1.5
     # via conciliacion-geotecnica
