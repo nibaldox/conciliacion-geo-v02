@@ -137,28 +137,37 @@ class TestDecouplingRatio:
         hole_area = (math.pi / 4.0) * (0.2 ** 2)
         rho_e_kgm3 = 0.80 * 1000.0
         expected_vl = kg_per_m / (hole_area * rho_e_kgm3)
-        # H-09: the physical output is the dimensionless fill fraction
+        # cierre 2.4: the canonical output is the dimensionless fill fraction
         assert out["hole_fill_fraction"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
-        # legacy alias keeps the same value (deprecated)
-        assert out["volume_load_kgm3"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
+        # the misnamed alias is NOT part of the new outputs
+        assert "volume_load_kgm3" not in out
         # Standard coupling: D_c = sqrt(4 q_l / (pi rho_e)); R_c = D_c / D_h
         d_c = math.sqrt(4.0 * kg_per_m / (math.pi * rho_e_kgm3))
         assert out["equivalent_charge_diameter_m"].iloc[0] == pytest.approx(d_c, rel=1e-3)
         assert out["coupling_ratio"].iloc[0] == pytest.approx(d_c / 0.2, rel=1e-3)
 
     def test_fill_fraction_is_dimensionless(self):
-        """H-09: the fraction is a pure ratio, always in [0, ~1] for real charges."""
+        """cierre 2.4: the fraction is a pure ratio, always in [0, ~1] for real charges."""
         df = _proc_row(Diam_mm=200.0, Len=15.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
         out = compute_decoupling_ratio(df)
         v = out["hole_fill_fraction"].iloc[0]
         assert 0.0 < v <= 1.0
         assert "kg/m³" not in str(out["hole_fill_fraction"].dtype)
 
-    def test_legacy_alias_deprecation_warning(self):
-        """H-09: consuming the legacy alias emits an explicit DeprecationWarning."""
+    def test_legacy_alias_isolated_with_warning(self):
+        """cierre 2.4: the legacy alias lives only behind include_legacy=True."""
         df = _proc_row(Diam_mm=200.0, Len=15.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
         with pytest.warns(DeprecationWarning, match="volume_load_kgm3"):
-            enrich_blast_dataframe(df)
+            out = compute_decoupling_ratio(df, include_legacy=True)
+        assert "volume_load_kgm3" in out
+        assert out["volume_load_kgm3"].iloc[0] == pytest.approx(out["hole_fill_fraction"].iloc[0])
+
+    def test_enrichment_has_no_legacy_column(self):
+        """cierre 2.4: enrich_blast_dataframe no longer emits the misnamed column."""
+        df = _proc_row(Diam_mm=200.0, Len=15.0, Kilos_Cargados_real=300.0, Tipo_Explosivo="ANFO")
+        out = enrich_blast_dataframe(df)
+        assert "hole_fill_fraction" in out.columns
+        assert "volume_load_kgm3" not in out.columns
 
     def test_analytical_case_spec(self):
         """Spec §4.6 analytic case: q_l=30 kg/m, rho_e=1200 kg/m3, D_h=250 mm."""
@@ -176,15 +185,15 @@ class TestDecouplingRatio:
         hole_area = (math.pi / 4.0) * (0.25 ** 2)
         rho_e_kgm3 = 1.05 * 1000.0
         expected_vl = kg_per_m / (hole_area * rho_e_kgm3)
-        assert out["volume_load_kgm3"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
+        assert out["hole_fill_fraction"].iloc[0] == pytest.approx(expected_vl, rel=1e-3)
         assert out["equivalent_charge_diameter_m"].iloc[0] > 0
 
     def test_missing_diameter(self):
         df = _proc_row().drop(columns=["Diam_mm"])
         out = compute_decoupling_ratio(df)
-        assert pd.isna(out["volume_load_kgm3"]).all()
         assert pd.isna(out["hole_fill_fraction"]).all()
         assert pd.isna(out["coupling_ratio"]).all()
+        assert "volume_load_kgm3" not in out
 
     def test_default_rock_density_constant(self):
         assert ROCK_DENSITY_DEFAULT_TM3 == 2.7
@@ -360,7 +369,7 @@ class TestEnrichBlastDataframe:
         out = enrich_blast_dataframe(df, ucs_mpa=100.0)
         expected_cols = {
             "stemming_ratio", "subdrilling_ratio", "spacing_burden_ratio",
-            "kg_per_meter", "volume_load_kgm3", "coupling_ratio",
+            "kg_per_meter", "hole_fill_fraction", "coupling_ratio",
             "collar_deviation_deg", "kuznetsov_x50_cm", "ispu",
             "bottom_column_ratio", "altura_carga_m",
         }

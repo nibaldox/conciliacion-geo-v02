@@ -154,6 +154,7 @@ def compute_decoupling_ratio(
     df: pd.DataFrame,
     well_kg_col: Optional[str] = None,
     rock_density_tm3: float = ROCK_DENSITY_DEFAULT_TM3,
+    include_legacy: bool = False,
 ) -> dict:
     """In-hole volumetric charge density and standard coupling ratio (spec §4.6).
 
@@ -162,12 +163,8 @@ def compute_decoupling_ratio(
     dict
         ``hole_fill_fraction`` : dimensionless fill fraction of the hole
             volume occupied by explosive (kg per m of hole /
-            (hole area × ρ_e)) — the physical, correctly named output
-            (H-09).
-        ``volume_load_kgm3`` : DEPRECATED alias of the same value (the
-            name suggests kg/m³ but the magnitude is a fraction); kept
-            for backward compatibility and emitted with a
-            DeprecationWarning.
+            (hole area × ρ_e)) — the canonical, correctly named output
+            (Fase 1.1 cierre §2.4). Range [0, 1] for real charges.
         ``equivalent_charge_diameter_m`` : D_c = sqrt(4·q_l/(π·ρ_e))
             where q_l is the linear charge density (kg/m) and ρ_e the
             explosive density (kg/m³) — the diameter of an equivalent
@@ -175,12 +172,16 @@ def compute_decoupling_ratio(
         ``coupling_ratio`` : R_c = D_c / D_h, the standard decoupling
             ratio (1.0 = fully coupled, <1 = decoupled). D_h is the
             drilled hole diameter in metres.
+        ``volume_load_kgm3`` : ONLY when ``include_legacy=True`` —
+            deprecated legacy alias of ``hole_fill_fraction`` (the name
+            suggests kg/m³ but the magnitude is a fraction). Scheduled
+            for removal in v0.13 (two release cycles after Fase 1.1).
+            Emits a DeprecationWarning.
     """
     n = len(df)
     nan = pd.Series([np.nan] * n, index=df.index, dtype=float)
     empty = {
         "hole_fill_fraction": nan.copy(),
-        "volume_load_kgm3": nan.copy(),
         "equivalent_charge_diameter_m": nan.copy(),
         "coupling_ratio": nan.copy(),
     }
@@ -225,12 +226,21 @@ def compute_decoupling_ratio(
     valid_c = d_c.notna() & (diameter_m > 0)
     coupling.loc[valid_c] = d_c[valid_c] / diameter_m[valid_c]
 
-    return {
+    result = {
         "hole_fill_fraction": volume_load_kgm3,
-        "volume_load_kgm3": volume_load_kgm3,
         "equivalent_charge_diameter_m": d_c,
         "coupling_ratio": coupling,
     }
+    if include_legacy:
+        warnings.warn(
+            "volume_load_kgm3 is deprecated (cierre 2.4): the value is a "
+            "dimensionless fill fraction. Use hole_fill_fraction. Scheduled "
+            "for removal in v0.13.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        result["volume_load_kgm3"] = volume_load_kgm3
+    return result
 
 
 def compute_collar_deviation(
@@ -736,15 +746,6 @@ def enrich_blast_dataframe(
     if first_present_column(out, _DIAM_CANDIDATES) is not None:
         decoupling = compute_decoupling_ratio(out)
         out["hole_fill_fraction"] = decoupling["hole_fill_fraction"]
-        # H-09: legacy alias, physically misnamed (fraction, not kg/m³);
-        # deprecated with an explicit warning.
-        out["volume_load_kgm3"] = decoupling["volume_load_kgm3"]
-        warnings.warn(
-            "volume_load_kgm3 is deprecated (H-09): the value is a dimensionless "
-            "fill fraction. Use hole_fill_fraction.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         out["equivalent_charge_diameter_m"] = decoupling["equivalent_charge_diameter_m"]
         out["coupling_ratio"] = decoupling["coupling_ratio"]
 
