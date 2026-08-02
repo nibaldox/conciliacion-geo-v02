@@ -55,7 +55,8 @@ def _square_polygon(cx, cy, half):
 
 
 class TestGlobalConservation:
-    def test_single_malla_single_polygon(self):
+    def test_single_malla_225_m2_polygon(self):
+        """Una malla + polígono 15×15 = 225 m²: asignado = dominio."""
         df = _event_df()
         out = compute_powder_factor(df, boundary_polygon=_event_polygon())
         # 15×15 m polygon = 225 m²; assigned must equal it within tolerance
@@ -163,3 +164,56 @@ class TestPerMallaPolygons:
         out = compute_powder_factor(df, boundary_polygons=polys)
         msg = str(out["voronoi_validation_messages"].iloc[0])
         assert "vací" in msg or "hueco" in msg
+
+
+class TestRegresionExacta300:
+    """Cierre final §2.5: regresión exacta del informe — 300 m², no 337,5 m²."""
+
+    def test_exact_300_m2_case(self):
+        """Dominio de 300 m², múltiples mallas, un dominio global.
+
+        Histórico incorrecto: 337,5 m² (+12,5 %). Esperado: 300,0 m².
+        """
+        # Polígono del evento 15×20 = 300 m²
+        polygon = [(100.0, 200.0), (115.0, 200.0), (115.0, 220.0), (100.0, 220.0)]
+        # Collares 5×4 grid (espaciado 5) dentro del polígono → 20 pozos/malla
+        rows = []
+        for malla in ("A", "B"):
+            for ix in range(4):
+                for iy in range(5):
+                    rows.append({
+                        "X": 101.0 + ix * 5.0,
+                        "Y": 201.0 + iy * 5.0,
+                        "label_pozo": f"{malla}-{ix}-{iy}",
+                        "Kilos_Cargados_real": 300.0,
+                        "Nombre_Banco": 4000.0,
+                        "Inclinacion_real": 0.0,
+                        "Azimuth_real": 0.0,
+                        "longitud_real": 12.0,
+                        "Burden": 5.0,
+                        "Esp": 5.0,
+                        "Tipo_Explosivo": "ANFO",
+                        "Nombre_Malla_Original": malla,
+                    })
+        df = pd.DataFrame(rows)
+        out = compute_powder_factor(df, boundary_polygon=polygon)
+
+        assert out["domain_area_m2"].iloc[0] == pytest.approx(300.0, rel=1e-6)
+        assigned = out["assigned_area_m2"].iloc[0]
+        assert assigned == pytest.approx(300.0, rel=1e-3)
+        assert out["area_residual_m2"].iloc[0] == pytest.approx(0.0, abs=0.3)
+        assert abs(out["area_residual_pct"].iloc[0]) < 0.1
+        assert bool(out["voronoi_conservation_ok"].iloc[0]) is True
+        # método global (no per-malla contra el mismo polígono)
+        assert out["voronoi_method"].iloc[0] == "global_polygon"
+        # ninguna malla reutiliza el dominio completo: cada una ~150 m²
+        per_malla = out.groupby("Nombre_Malla_Original")["area_influence_m2"].sum()
+        assert per_malla["A"] == pytest.approx(150.0, rel=1e-3)
+        assert per_malla["B"] == pytest.approx(150.0, rel=1e-3)
+        assert per_malla["A"] + per_malla["B"] == pytest.approx(300.0, rel=1e-3)
+        # duplicados entre mallas comparten superficie (split)
+        assert (out["area_status"] == "duplicate_shared").sum() == 40
+        # el PF solo se calcula con conservación válida
+        assert out["pf_g_per_ton_inf"].notna().all()
+        # el histórico incorrecto (337,5) queda descartado
+        assert assigned != pytest.approx(337.5, abs=0.1)

@@ -231,6 +231,8 @@ def run_test():
         "Nombre_Banco": 1000.0, "Inclinacion_real": 10.0,
         "Azimuth_real": 90.0, "longitud_real": 16.0,
         "Kilos_Cargados_real": 100.0,
+        "Incl_convention": "from_vertical",
+        "bench_height_m": 15.0,
     }])
     processed_holes, *_ = procesar_pozos(blast_actual)
     blast_design = pandas.DataFrame([{
