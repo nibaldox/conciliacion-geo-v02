@@ -227,14 +227,51 @@ def render_upload_section() -> None:
         st.session_state["blast_bench_height_m"] = (
             bench_h_ui if bench_h_ui and bench_h_ui > 0 else None
         )
+        # Integración §5.5 — fingerprint-based invalidation. We compute
+        # a deterministic hash of the CURRENT contract values and compare
+        # it against the one stored at confirmation time. If any field
+        # changed, the confirmation auto-clears.
+        def _contract_fingerprint() -> str:
+            import hashlib
+            payload = "|".join(
+                str(st.session_state.get(k, ""))
+                for k in (
+                    "blast_incl_convention", "blast_sign_rule",
+                    "blast_sign_source_rule", "blast_az_convention",
+                    "blast_incl_unit", "blast_az_unit",
+                    "blast_bench_height_m",
+                )
+            )
+            # Include the confirmed source columns in the fingerprint so
+            # editing the column mapper also invalidates the confirmation.
+            cmap = get_confirmed_mapping("blast") or {}
+            payload += f"|Incl={cmap.get('Incl', '')}|Az={cmap.get('Az', '')}"
+            return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+        current_fingerprint = _contract_fingerprint()
+        if st.session_state.get("blast_contract_fingerprint") != current_fingerprint:
+            # The contract changed since the last confirmation → invalidate.
+            if st.session_state.get("blast_geometry_confirmed"):
+                st.session_state["blast_geometry_confirmed"] = False
+            st.session_state["blast_contract_fingerprint"] = current_fingerprint
+
         convention_confirmed = bool(
             st.checkbox(
                 "Confirmo la convención geométrica seleccionada",
                 value=False,
-                help="Confirmación explícita: sin ella el procesamiento se bloquea.",
+                help=(
+                    "Confirmación explícita: sin ella el procesamiento se "
+                    "bloquea. Cambiar cualquier campo invalida esta "
+                    "confirmación automáticamente."
+                ),
                 key="blast_geometry_confirmed",
             )
         )
+        if convention_confirmed:
+            # Record the fingerprint AT confirmation time so any later
+            # edit can be detected and auto-clear the checkbox.
+            st.session_state["blast_contract_fingerprint"] = current_fingerprint
+
         if not convention_confirmed:
             st.warning(
                 "⚠️ **Convención geométrica no confirmada.** El procesamiento "
@@ -245,8 +282,14 @@ def render_upload_section() -> None:
         elif st.session_state.get("blast_incl_convention") is None:
             st.error("Seleccione una convención de inclinación para continuar.")
 
-    can_process = bool(st.session_state.get("blast_geometry_confirmed", False)) and \
-        st.session_state.get("blast_incl_convention") is not None
+    # Integración §5.5 — the operator can process ONLY when the
+    # confirmation checkbox is ticked AND the contract fingerprint still
+    # matches the one captured at confirmation time.
+    can_process = bool(
+        st.session_state.get("blast_geometry_confirmed", False)
+        and st.session_state.get("blast_contract_fingerprint") == _contract_fingerprint()
+        and st.session_state.get("blast_incl_convention") is not None
+    )
 
     if st.button("🚀 Procesar Pozos", type="primary", key="process_blast", disabled=not can_process):
         progress = st.progress(0.0, text="Encolando trabajo de procesamiento…")
@@ -319,6 +362,12 @@ def render_upload_section() -> None:
         # That branch is what we want when the user just confirmed a mapping in
         # the UI. The legacy alias-based auto-detection is still available to
         # other callers (e.g. CLI ingestion) via procesar_pozos(df).
+        #
+        # Integración §5.6 — use return_result=True so we get the canonical
+        # ProcessingResult (accepted_rows + rejected_rows + event_warnings +
+        # blocking_errors + processing_summary + spatial_diagnostics). The
+        # structured result is displayed to the operator below.
+        from core.processing_result import ProcessingResult
         local_df = df.copy()
         try:
             def _run_with_progress(
@@ -326,7 +375,7 @@ def render_upload_section() -> None:
                 cmap: dict[str, str | None] | None,
                 geometry_cfg: GeometryConfiguration,
                 bench_height: float | None,
-            ) -> tuple[pd.DataFrame, Any, Any, Any]:
+            ) -> ProcessingResult:
                 try:
                     progress.progress(0.1, text="Calculando trayectorias (toe)…")
                 except Exception:
@@ -336,6 +385,7 @@ def render_upload_section() -> None:
                     cmap,
                     geometry_configuration=geometry_cfg,
                     bench_height_m=bench_height,
+                    return_result=True,
                 )
                 try:
                     progress.progress(0.9, text="Empacando resultados…")
@@ -348,7 +398,7 @@ def render_upload_section() -> None:
                     _run_with_progress, local_df, confirmed_mapping, cfg, bench_h_ui
                 )
                 try:
-                    df_clean, x_lines, y_lines, z_lines = future.result()
+                    proc_result: ProcessingResult = future.result()
                 except (KeyError, GeometryConfigurationError) as e:
                     st.error(str(e))
                     set_blast_processed(False)
@@ -356,14 +406,62 @@ def render_upload_section() -> None:
                     progress.empty()
                     return
 
-            df_clean = enrich_processed(
-                df_clean,
-                hardness_bytes=hardness_uploaded.getvalue() if hardness_uploaded is not None else None,
-            )
+            df_clean = proc_result.accepted_dataframe
+            x_lines, y_lines, z_lines = proc_result.scatter_lines
+            if df_clean is not None and not df_clean.empty:
+                df_clean = enrich_processed(
+                    df_clean,
+                    hardness_bytes=hardness_uploaded.getvalue() if hardness_uploaded is not None else None,
+                )
+                # Refresh the canonical accepted_rows so the structured
+                # display below reflects the enriched columns.
+                from core.calculo_tronadura import (
+                    _df_to_accepted_records,
+                    _collect_structured_warnings,
+                )
+                proc_result.accepted_rows = _df_to_accepted_records(df_clean)
+                proc_result.event_warnings = (
+                    _collect_structured_warnings(df_clean) or proc_result.event_warnings
+                )
             set_blast_df(df_clean)
             set_blast_lines(x_lines, y_lines, z_lines)
             set_blast_processed(True)
-            status.success("✅ Pozos procesados correctamente")
+
+            # Integración §5.6 — render the structured processing result
+            # so the operator sees accepted / rejected / warnings /
+            # blocking_errors / summary explicitly.
+            summary = proc_result.processing_summary()
+            if proc_result.blocking_errors:
+                st.error(
+                    f"⛔ {len(proc_result.blocking_errors)} error(es) "
+                    f"bloqueante(s). Procesamiento falló para algunas filas."
+                )
+                for be in proc_result.blocking_errors:
+                    st.write(
+                        f"- **{be.get('error_code', '?')}**: "
+                        f"{be.get('message', '')}"
+                    )
+            if proc_result.rejected_rows:
+                with st.expander(
+                    f"⚠️ {proc_result.rejected_source_rows} fila(s) rechazada(s) "
+                    f"({proc_result.rejection_records} registro(s) de error)",
+                    expanded=False,
+                ):
+                    st.dataframe(pd.DataFrame(proc_result.rejected_rows), use_container_width=True)
+            if proc_result.event_warnings:
+                with st.expander(
+                    f"🔔 {len(proc_result.event_warnings)} advertencia(s)",
+                    expanded=False,
+                ):
+                    for w in proc_result.event_warnings:
+                        st.write(
+                            f"- **{w.get('warning_code', '?')}**: "
+                            f"{w.get('message', '')}"
+                        )
+            status.success(
+                f"✅ {summary['rows_accepted']} fila(s) aceptada(s) de "
+                f"{summary['rows_received']} recibida(s)."
+            )
             progress.progress(1.0, text="Listo")
         except Exception:
             logger.exception("Failed to process blast holes")
