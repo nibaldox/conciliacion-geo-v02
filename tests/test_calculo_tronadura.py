@@ -310,6 +310,63 @@ class TestZAmbiguous:
         assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
 
 
+class TestInclinationConventionProvenance:
+    """Fase 1.1 cierre §2.3: full angular provenance columns."""
+
+    def test_full_provenance_columns(self):
+        df = _make_valid_hole(incl=10.0, az=15.0)
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical")
+        for col in (
+            "inclination_original",
+            "inclination_convention_original",
+            "inclination_normalized_from_vertical",
+            "inclination_conversion_applied",
+            "inclination_assumption_flag",
+            "inclination_validation_status",
+            "inclination_validation_message",
+        ):
+            assert col in out.columns, col
+        assert out["inclination_original"].iloc[0] == 10.0
+        assert out["inclination_normalized_from_vertical"].iloc[0] == 10.0
+        assert out["inclination_conversion_applied"].iloc[0] == "none"
+        assert bool(out["inclination_assumption_flag"].iloc[0]) is False
+        assert out["inclination_validation_status"].iloc[0] == "EXPLICIT"
+
+    def test_default_convention_flagged_and_message(self):
+        df = _make_valid_hole(incl=10.0)
+        out, *_ = procesar_pozos(df)
+        assert out["inclination_validation_status"].iloc[0] == "DEFAULT_ASSUMPTION"
+        assert bool(out["inclination_assumption_flag"].iloc[0]) is True
+        assert "configuración visible" in out["inclination_validation_message"].iloc[0]
+
+    def test_dip_negative_conversion_recorded(self):
+        df = _make_valid_hole(incl=-65.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
+        out, *_ = procesar_pozos(
+            df, incl_convention="dip_from_horizontal"
+        )
+        assert out["inclination_normalized_from_vertical"].iloc[0] == 25.0
+        assert out["inclination_conversion_applied"].iloc[0] == "dip->90-dip+abs"
+        assert out["inclination_original"].iloc[0] == -65.0
+        assert out["incl_orientation"].iloc[0] == -1
+
+    def test_out_of_range_flagged_and_dropped(self):
+        df = pd.concat(
+            [_make_valid_hole(incl=10.0, label="OK"), _make_valid_hole(incl=120.0, label="BAD")],
+            ignore_index=True,
+        )
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical")
+        assert len(out) == 1
+        assert out["label_pozo"].iloc[0] == "OK"
+
+    def test_known_toe_coordinates(self):
+        """§2.3 acceptance: known collar/toe coordinates for a vertical hole."""
+        df = _make_valid_hole(incl=0.0, length=12.0, lat=100.0, lon=200.0, banco=4000.0)
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        assert out["X_toe"].iloc[0] == pytest.approx(100.0)
+        assert out["Y_toe"].iloc[0] == pytest.approx(200.0)
+        assert out["Z_toe"].iloc[0] == pytest.approx(4015.0 - 12.0)
+
+
 class TestProyectarPozosEnSeccion:
     """Tests for proyectar_pozos_en_seccion — blast-hole projection onto a section."""
 

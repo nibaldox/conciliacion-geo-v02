@@ -127,10 +127,59 @@ def render_upload_section() -> None:
         st.error("Mapeo vacío. Selecciona al menos las columnas requeridas.")
         return
 
+    # Fase 1.1 cierre §2.3: convención angular explícita y altura de banco,
+    # seleccionables antes de procesar y persistidas en la configuración del
+    # evento (session state). Nunca se asume from_vertical en silencio.
+    with st.expander("📐 Convención geométrica del evento", expanded=False):
+        incl_label = st.selectbox(
+            "Convención de inclinación",
+            options=["Desviación desde la vertical", "Dip desde la horizontal"],
+            index=0,
+            help=(
+                "Desviación desde la vertical: 0° = pozo vertical (canónica). "
+                "Dip desde la horizontal: 0° = horizontal; -65° se resuelve como "
+                "magnitud 65° con orientación conservada antes de convertir."
+            ),
+            key="blast_incl_convention_selector",
+        )
+        st.session_state["blast_incl_convention"] = (
+            "from_vertical" if "vertical" in incl_label else "dip_from_horizontal"
+        )
+        bench_h_ui = st.number_input(
+            "Altura de banco (m) — opcional",
+            min_value=0.0,
+            value=0.0,
+            step=0.5,
+            help=(
+                "Si se declara, la altura se registra como PROVIDED. Si queda vacía, "
+                "el supuesto de configuración se marca explícitamente "
+                "(EXPLICIT_ASSUMPTION) y se muestra como advertencia. Nunca se "
+                "aplica un 15 m silencioso."
+            ),
+            key="blast_bench_height_input",
+        )
+        st.session_state["blast_bench_height_m"] = (
+            bench_h_ui if bench_h_ui and bench_h_ui > 0 else None
+        )
+        st.caption(
+            "Azimut: grados en sentido horario desde el Norte (canónico). "
+            "El tratamiento del signo de la inclinación conserva la orientación "
+            "en la columna `incl_orientation`."
+        )
+
     if st.button("🚀 Procesar Pozos", type="primary", key="process_blast"):
         progress = st.progress(0.0, text="Encolando trabajo de procesamiento…")
         status = st.empty()
         status.info("⏳ Procesando pozos en segundo plano…")
+
+        # Fase 1.1 cierre §2.3: la convención angular se selecciona y se
+        # persiste en la configuración reproducible del evento.
+        incl_conv_ui = st.session_state.get("blast_incl_convention", "from_vertical")
+        bench_h_ui = st.session_state.get("blast_bench_height_m", None)
+        try:
+            bench_h_ui = float(bench_h_ui) if bench_h_ui not in (None, "") else None
+        except (TypeError, ValueError):
+            bench_h_ui = None
 
         # procesar_pozos has a dedicated ``column_map`` branch that calls
         # apply_mapping once without round-tripping through _resolve_column_aliases.
@@ -147,7 +196,12 @@ def render_upload_section() -> None:
                     progress.progress(0.1, text="Calculando trayectorias (toe)…")
                 except Exception:
                     pass
-                result = procesar_pozos(source_df, cmap)
+                result = procesar_pozos(
+                    source_df,
+                    cmap,
+                    incl_convention=incl_conv_ui,
+                    bench_height_m=bench_h_ui,
+                )
                 try:
                     progress.progress(0.9, text="Empacando resultados…")
                 except Exception:

@@ -340,6 +340,36 @@ def procesar_pozos(
         df_work["Incl_convention"] = incl_conv.value
         df_work["Incl_convention_source"] = source
         df_work["incl_convention_warning"] = bool(warning)
+        # Fase 1.1 cierre §2.3: complete angular provenance columns.
+        df_work["inclination_original"] = df_work["Incl_original"]
+        df_work["inclination_convention_original"] = incl_conv.value
+        df_work["inclination_normalized_from_vertical"] = incl_norm
+        df_work["inclination_conversion_applied"] = incl_meta.get("conversion", "none")
+        df_work["inclination_assumption_flag"] = bool(warning)
+        if warning:
+            df_work["inclination_validation_status"] = "DEFAULT_ASSUMPTION"
+            df_work["inclination_validation_message"] = (
+                f"Convención no declarada por el evento; se usó la configuración "
+                f"visible '{incl_conv.value}' (DEFAULTS.blast_default_incl_convention). "
+                "Declare la convención para limpiar el supuesto."
+            )
+        elif source == "data":
+            df_work["inclination_validation_status"] = "DATA_DECLARED"
+            df_work["inclination_validation_message"] = ""
+        else:
+            df_work["inclination_validation_status"] = "EXPLICIT"
+            df_work["inclination_validation_message"] = ""
+        df_work["inclination_validation_status"] = np.where(
+            pd.to_numeric(df_work["Incl_original"], errors="coerce").abs() > 90.0,
+            "OUT_OF_RANGE",
+            df_work["inclination_validation_status"],
+        )
+        df_work["inclination_validation_message"] = np.where(
+            pd.to_numeric(df_work["Incl_original"], errors="coerce").abs() > 90.0,
+            "Valor fuera de rango (|inclinación| > 90°): fila marcada y descartada en "
+            "los cálculos geométricos dependientes.",
+            df_work["inclination_validation_message"],
+        )
         orientation = np.asarray(incl_meta.get("orientation_sign", [0] * len(df_work)))
         df_work["incl_orientation"] = np.where(
             pd.to_numeric(df_work["Incl_original"], errors="coerce").notna(),
