@@ -150,12 +150,44 @@ def render_upload_section() -> None:
         else:
             st.session_state.pop("blast_incl_convention", None)
 
-        st.selectbox(
-            "Tratamiento del signo",
+        sign_label = st.selectbox(
+            "Tratamiento del signo (controla la geometría)",
             options=["Usar valor absoluto", "Signo negativo representa dip descendente", "Convención definida por la fuente"],
             index=0,
+            help=(
+                "Política REAL de normalización: ABSOLUTE_VALUE usa la magnitud; "
+                "NEGATIVE_IS_DOWNWARD_DIP (solo con dip) conserva la semántica "
+                "descendente; SOURCE_DEFINED exige una regla explícita — sin ella "
+                "el procesamiento se bloquea."
+            ),
             key="blast_incl_sign_convention",
         )
+        if sign_label.startswith("Usar"):
+            st.session_state["blast_sign_rule"] = "ABSOLUTE_VALUE"
+        elif sign_label.startswith("Signo negativo"):
+            st.session_state["blast_sign_rule"] = "NEGATIVE_IS_DOWNWARD_DIP"
+        else:
+            st.session_state["blast_sign_rule"] = "SOURCE_DEFINED"
+            st.selectbox(
+                "Regla de la fuente (obligatoria para SOURCE_DEFINED)",
+                options=["negative_is_downward_dip", "positive_only", "absolute_value"],
+                index=0,
+                help="Sin una regla explícita la geometría se bloquea.",
+                key="blast_sign_source_rule",
+            )
+        az_label = st.selectbox(
+            "Convención de azimut (controla la geometría)",
+            options=["Horario desde el Norte", "Antihorario desde el Norte", "Horario desde el Este", "Antihorario desde el Este"],
+            index=0,
+            key="blast_az_convention_selector",
+        )
+        az_map = {
+            "Horario desde el Norte": "CLOCKWISE_FROM_NORTH",
+            "Antihorario desde el Norte": "COUNTERCLOCKWISE_FROM_NORTH",
+            "Horario desde el Este": "CLOCKWISE_FROM_EAST",
+            "Antihorario desde el Este": "COUNTERCLOCKWISE_FROM_EAST",
+        }
+        st.session_state["blast_az_convention"] = az_map[az_label]
         st.selectbox(
             "Unidad angular",
             options=["Grados", "Radianes"],
@@ -236,11 +268,9 @@ def render_upload_section() -> None:
                     cmap,
                     incl_convention=incl_conv_ui,
                     bench_height_m=bench_h_ui,
-                    incl_sign_convention=(
-                        "abs" if st.session_state.get("blast_incl_sign_convention", "").startswith("Usar")
-                        else "negative_dip_descending" if "negativo" in st.session_state.get("blast_incl_sign_convention", "")
-                        else "source_defined"
-                    ),
+                    incl_sign_convention=st.session_state.get("blast_sign_rule", "ABSOLUTE_VALUE"),
+                    sign_source_rule=st.session_state.get("blast_sign_source_rule", None),
+                    az_convention=st.session_state.get("blast_az_convention", "CLOCKWISE_FROM_NORTH"),
                     angle_unit=(
                         "radians" if st.session_state.get("blast_angle_unit", "") == "Radianes"
                         else "degrees"

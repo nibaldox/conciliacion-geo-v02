@@ -19,6 +19,7 @@ from core.geom_utils import find_df_column
 from core.geometry_conventions import (
     AzimuthConvention,
     InclinationConvention,
+    SignConvention,
     normalize_azimuth,
     normalize_inclination,
     normalize_vector_components,
@@ -236,9 +237,11 @@ def procesar_pozos(
     bench_height_m: float | None = None,
     z_collar_semantic: str | None = None,
     incl_convention: InclinationConvention | str | None = None,
-    az_convention: AzimuthConvention | str = AzimuthConvention.FROM_NORTH_CW,
-    incl_sign_convention: str = "abs",
+    az_convention: AzimuthConvention | str = AzimuthConvention.CLOCKWISE_FROM_NORTH,
+    incl_sign_convention: SignConvention | str = SignConvention.ABSOLUTE_VALUE,
+    sign_source_rule: str | None = None,
     angle_unit: str = "degrees",
+    geometry_user_confirmed: bool = True,
 ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray]:
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
@@ -355,7 +358,11 @@ def procesar_pozos(
             conversion_unit = "none"
         else:
             raise ValueError(f"angle_unit inválido: {angle_unit!r} (use 'degrees' o 'radians')")
-        incl_norm, incl_meta = normalize_inclination(incl_raw, incl_conv)
+        incl_norm, incl_meta = normalize_inclination(
+            incl_raw, incl_conv,
+            sign_convention=incl_sign_convention,
+            sign_source_rule=sign_source_rule,
+        )
         df_work["Incl"] = incl_norm
         df_work["Incl_convention"] = incl_conv.value
         df_work["Incl_convention_source"] = source
@@ -364,9 +371,12 @@ def procesar_pozos(
         df_work["inclination_original"] = df_work["Incl_original"]
         df_work["inclination_source_column"] = incl_src or ""
         df_work["inclination_convention_original"] = incl_conv.value
-        df_work["inclination_sign_convention"] = incl_sign_convention
+        df_work["inclination_sign_convention"] = incl_meta.get("sign_convention", str(incl_sign_convention))
+        df_work["inclination_sign_applied"] = incl_meta.get("sign_applied", "none")
+        df_work["inclination_source_rule"] = sign_source_rule or ""
         df_work["inclination_unit_original"] = angle_unit
         df_work["inclination_normalized_from_vertical"] = incl_norm
+        df_work["inclination_normalized_from_vertical_deg"] = incl_norm
         _conv_meta = incl_meta.get("conversion", "none")
         df_work["inclination_conversion_applied"] = (
             f"{conversion_unit}+{_conv_meta}" if conversion_unit != "none" and _conv_meta != "none"
@@ -423,6 +433,7 @@ def procesar_pozos(
         df_work["azimuth_convention_original"] = az_conv.value
         df_work["azimuth_unit_original"] = angle_unit
         df_work["azimuth_normalized_clockwise_from_north"] = az_norm
+        df_work["azimuth_normalized_clockwise_from_north_deg"] = az_norm
         df_work["azimuth_conversion_applied"] = (
             f"{az_conversion_unit}+{az_meta.get('conversion', 'none')}"
             if az_conversion_unit != "none"
@@ -435,6 +446,11 @@ def procesar_pozos(
         df_work["azimuth_validation_message"] = (
             "Azimut en grados horarios desde el Norte (canónico)."
         )
+
+    if "Incl" in df_work.columns or "Az" in df_work.columns:
+        # Auditoría §3.3: contrato de configuración geométrica serializable.
+        df_work["geometry_user_confirmed"] = bool(geometry_user_confirmed)
+        df_work["geometry_configuration_version"] = "1.0"
 
     # Elevation transformation driven by the column semantic (spec §4.2).
     # Cierre final §2.1: the transformation NEVER applies an unconfirmed

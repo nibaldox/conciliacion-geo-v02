@@ -221,7 +221,7 @@ class TestInclinationConvention:
         assert out["Incl_original"].iloc[0] == 10.0
         assert out["Az_original"].iloc[0] == 15.0
         assert out["Incl_convention"].iloc[0] == "from_vertical"
-        assert out["Az_convention"].iloc[0] == "from_north_cw"
+        assert out["Az_convention"].iloc[0] == "CLOCKWISE_FROM_NORTH"
 
     def test_negative_inclination_wrapped_with_flag(self):
         df = _make_valid_hole(incl=-10.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
@@ -559,11 +559,11 @@ class TestCierreFinalConvencion:
         )
         assert bool(out["inclination_user_confirmed"].iloc[0]) is True
         assert out["inclination_validation_status"].iloc[0] == "EXPLICIT"
-        assert out["inclination_sign_convention"].iloc[0] == "abs"
+        assert out["inclination_sign_convention"].iloc[0] == "ABSOLUTE_VALUE"
         assert out["inclination_unit_original"].iloc[0] == "degrees"
         assert out["inclination_source_column"].iloc[0] == "Inclinacion_real"
         assert bool(out["azimuth_user_confirmed"].iloc[0]) is True
-        assert out["azimuth_convention_original"].iloc[0] == "from_north_cw"
+        assert out["azimuth_convention_original"].iloc[0] == "CLOCKWISE_FROM_NORTH"
         assert out["azimuth_normalized_clockwise_from_north"].iloc[0] == 15.0
 
     def test_data_declared_convention(self):
@@ -577,10 +577,43 @@ class TestCierreFinalConvencion:
     def test_sign_convention_recorded(self):
         out, *_ = procesar_pozos(
             self._h(incl=-10.0), incl_convention="dip_from_horizontal",
-            incl_sign_convention="negative_dip_descending", bench_height_m=15.0,
+            incl_sign_convention="NEGATIVE_IS_DOWNWARD_DIP", bench_height_m=15.0,
         )
-        assert out["inclination_sign_convention"].iloc[0] == "negative_dip_descending"
-        assert out["incl"].iloc[0] if "incl" in out.columns else True
+        assert out["inclination_sign_convention"].iloc[0] == "NEGATIVE_IS_DOWNWARD_DIP"
+        assert out["inclination_sign_applied"].iloc[0] == "negative_dip_downward"
+        assert out["Incl"].iloc[0] == pytest.approx(80.0)  # dip 10 → 80 desde vertical
+
+    def test_sign_source_defined_requires_rule(self):
+        with pytest.raises(ValueError, match="sign_source_rule"):
+            procesar_pozos(
+                self._h(incl=-10.0), incl_convention="dip_from_horizontal",
+                incl_sign_convention="SOURCE_DEFINED", bench_height_m=15.0,
+            )
+
+    def test_sign_source_defined_with_rule(self):
+        out, *_ = procesar_pozos(
+            self._h(incl=-65.0), incl_convention="dip_from_horizontal",
+            incl_sign_convention="SOURCE_DEFINED", sign_source_rule="negative_is_downward_dip",
+            bench_height_m=15.0,
+        )
+        assert out["Incl"].iloc[0] == pytest.approx(25.0)
+        assert out["inclination_sign_applied"].iloc[0] == "negative_dip_downward"
+
+    def test_azimuth_convention_functional(self):
+        """az=90 en CCW-from-North (Este) → az normalizado 270 (Oeste horario)."""
+        out, *_ = procesar_pozos(
+            self._h(az=90.0), incl_convention="from_vertical",
+            az_convention="COUNTERCLOCKWISE_FROM_NORTH", bench_height_m=15.0,
+        )
+        assert out["Az"].iloc[0] == pytest.approx(270.0)
+        assert out["azimuth_conversion_applied"].iloc[0] == "ccw_from_north->cw_from_north"
+
+    def test_geometry_configuration_contract(self):
+        out, *_ = procesar_pozos(self._h(), incl_convention="from_vertical", bench_height_m=15.0)
+        assert bool(out["geometry_user_confirmed"].iloc[0]) is True
+        assert out["geometry_configuration_version"].iloc[0] == "1.0"
+        assert out["inclination_normalized_from_vertical_deg"].iloc[0] == pytest.approx(10.0)
+        assert out["azimuth_normalized_clockwise_from_north_deg"].iloc[0] == pytest.approx(15.0)
 
     def test_radians_unit_converted(self):
         out, *_ = procesar_pozos(

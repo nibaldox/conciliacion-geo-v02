@@ -71,6 +71,9 @@ def _process_blast_dataframe(
     df: pd.DataFrame,
     incl_convention: Optional[str] = None,
     bench_height_m: Optional[float] = None,
+    az_convention: str = "CLOCKWISE_FROM_NORTH",
+    incl_sign_convention: str = "ABSOLUTE_VALUE",
+    sign_source_rule: Optional[str] = None,
 ) -> pd.DataFrame:
     """Run the canonical blast-hole processing pipeline.
 
@@ -86,6 +89,8 @@ def _process_blast_dataframe(
     try:
         df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
             df, incl_convention=incl_convention, bench_height_m=bench_height_m,
+            az_convention=az_convention, incl_sign_convention=incl_sign_convention,
+            sign_source_rule=sign_source_rule,
         )
     except KeyError as exc:
         raise HTTPException(400, f"Missing required blast-hole column: {exc}")
@@ -258,6 +263,9 @@ def _build_upload_payload(
     file_bytes: bytes,
     incl_convention: Optional[str] = None,
     bench_height_m: Optional[float] = None,
+    az_convention: str = "CLOCKWISE_FROM_NORTH",
+    incl_sign_convention: str = "ABSOLUTE_VALUE",
+    sign_source_rule: Optional[str] = None,
 ) -> dict:
     """Run the full blast-upload pipeline off the event-loop thread.
 
@@ -287,6 +295,8 @@ def _build_upload_payload(
     try:
         df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
             df, incl_convention=incl_convention, bench_height_m=bench_height_m,
+            az_convention=az_convention, incl_sign_convention=incl_sign_convention,
+            sign_source_rule=sign_source_rule,
         )
     except KeyError as exc:
         raise HTTPException(400, f"Missing required blast-hole column: {exc}")
@@ -338,6 +348,17 @@ async def upload_blast_csv(
     bench_height_m: Optional[float] = Form(
         None, description="Altura de banco confirmada del evento (m)"
     ),
+    az_convention: str = Form(
+        "CLOCKWISE_FROM_NORTH",
+        description="Azimut: CLOCKWISE_FROM_NORTH | COUNTERCLOCKWISE_FROM_NORTH | CLOCKWISE_FROM_EAST | COUNTERCLOCKWISE_FROM_EAST",
+    ),
+    incl_sign_convention: str = Form(
+        "ABSOLUTE_VALUE",
+        description="Signo: ABSOLUTE_VALUE | NEGATIVE_IS_DOWNWARD_DIP | SOURCE_DEFINED",
+    ),
+    sign_source_rule: Optional[str] = Form(
+        None, description="Regla explícita para SOURCE_DEFINED (obligatoria en ese caso)"
+    ),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
 
@@ -362,6 +383,7 @@ async def upload_blast_csv(
 
     payload = await _run_in_executor(
         _build_upload_payload, content, incl_convention, bench_height_m,
+        az_convention, incl_sign_convention, sign_source_rule,
     )
 
     db.save_blast_upload(
