@@ -277,15 +277,21 @@ def _assign_voronoi_global(
 
     if np.isnan(domain):
         messages.append("dominio no disponible (shapely ausente o sin suficientes sitios)")
+        # Even without a domain, count outside/invalid from the report.
+        _inside = rep["collar_inside_domain"].astype(bool).to_numpy() if "collar_inside_domain" in rep.columns else np.ones(len(rep), dtype=bool)
+        _ext_mask = ~_inside
+        _labels = df["label_pozo"].astype(str).to_numpy() if "label_pozo" in df.columns else df.index.astype(str).to_numpy()
         result = _voronoi_result(rep["area_m2"], rep["area_status"], np.nan, assigned,
                                  method, messages, False)
         result["collar_domain_status"] = rep["collar_domain_status"]
         result["collar_inside_domain"] = rep["collar_inside_domain"]
         result["collar_on_boundary"] = rep["collar_on_boundary"]
         result["collar_validation_message"] = rep["collar_validation_message"]
-        result["outside_domain_hole_count"] = 0
-        result["outside_domain_hole_ids"] = ""
-        result["outside_domain_assigned_area_m2"] = 0.0
+        result["outside_domain_hole_count"] = int(_ext_mask.sum())
+        result["outside_domain_hole_ids"] = "|".join(_labels[_ext_mask]) if _ext_mask.any() else ""
+        result["outside_domain_assigned_area_m2"] = float(
+            rep.loc[~_inside, "area_m2"].sum() if "area_m2" in rep.columns else 0.0
+        )
         result["invalid_coordinate_hole_count"] = int(
             (rep["collar_domain_status"] == "INVALID_COORDINATES").sum()
             if "collar_domain_status" in rep.columns else 0

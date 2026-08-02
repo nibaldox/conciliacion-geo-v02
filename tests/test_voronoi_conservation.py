@@ -326,14 +326,14 @@ class TestCollarDomainValidation:
         assert out["collar_domain_status"].iloc[1] == "INVALID_COORDINATES"
 
     def test_duplicates_inside_and_outside_distinguished(self):
-        """Duplicado externo → DUPLICATE_OUTSIDE (nunca duplicate_shared válido)."""
-        collars = [(105.0, 205.0), (110.0, 210.0), (105.0, 215.0), (116.0, 221.0)]
+        """Duplicado externo → OUTSIDE (nunca duplicate_shared válido)."""
+        collars = [(105.0, 205.0), (110.0, 210.0), (105.0, 215.0), (108.0, 208.0), (116.0, 221.0)]
         df = self._df(collars, "A")
         df2 = self._df(collars, "B")
         df = pd.concat([df, df2], ignore_index=True)
         out = compute_powder_factor(df, boundary_polygon=self.DOMAIN)
-        ext = out[out["label_pozo"].str.startswith(("A-3", "B-3"))]
-        assert (ext["collar_domain_status"] == "DUPLICATE_OUTSIDE").all()
+        ext = out[out["label_pozo"].str.startswith(("A-4", "B-4"))]
+        assert (ext["collar_domain_status"] == "OUTSIDE").all()
         assert (ext["area_influence_m2"] == 0.0).all()
         dup_in = out[out["label_pozo"].str.startswith(("A-0", "B-0"))]
         assert (dup_in["collar_domain_status"] == "DUPLICATE_INSIDE").all()
@@ -356,3 +356,67 @@ class TestCollarDomainValidation:
         # los externos no roban área interior: suma interior ≤ dominio
         assert inside["area_influence_m2"].sum() <= 300.0 + 1e-6
         assert out["outside_domain_assigned_area_m2"].iloc[0] == 0.0
+
+
+class TestCierreBloqueosFinales:
+    """Remediación final 4.1/4.2: validación antes de retornos tempranos + Voronoi solo con sitios válidos."""
+
+    DOMAIN = [(100.0, 200.0), (115.0, 200.0), (115.0, 220.0), (100.0, 220.0)]
+
+    def _df(self, collars, malla="A"):
+        rows = []
+        for i, (x, y) in enumerate(collars):
+            rows.append({"X": x, "Y": y, "label_pozo": f"{malla}-{i}",
+                         "Kilos_Cargados_real": 300.0, "Nombre_Banco": 4000.0,
+                         "Inclinacion_real": 0.0, "Azimuth_real": 0.0, "longitud_real": 12.0,
+                         "Burden": 5.0, "Esp": 5.0, "Tipo_Explosivo": "ANFO",
+                         "Nombre_Malla_Original": malla, "Incl_convention": "from_vertical", "bench_height_m": 15.0})
+        return pd.DataFrame(rows)
+
+    def test_three_collars_two_outside_classified_correctly(self):
+        """3.1: con <4 sitios, los externos siguen siendo OUTSIDE (no INSIDE)."""
+        out = compute_powder_factor(self._df([(105.0, 210.0), (120.0, 210.0), (130.0, 210.0)]),
+                                    boundary_polygon=self.DOMAIN)
+        assert out["collar_domain_status"].tolist() == ["INSIDE", "OUTSIDE", "OUTSIDE"]
+        assert out["collar_inside_domain"].tolist() == [True, False, False]
+        assert pd.isna(out["area_influence_m2"].iloc[0])
+        assert out["area_influence_m2"].iloc[1] == 0.0
+        assert out["area_influence_m2"].iloc[2] == 0.0
+        assert out["pf_g_per_ton_inf"].isna().all()
+
+    def test_external_collar_does_not_influence_interior_areas(self):
+        """4.2: agregar un collar externo no cambia las áreas de los interiores."""
+        interior_collars = [(102.5, 202.5), (107.5, 207.5), (112.5, 212.5), (105.0, 215.0)]
+        df_in = self._df(interior_collars)
+        out_in = compute_powder_factor(df_in, boundary_polygon=self.DOMAIN)
+        areas_without = out_in.set_index("label_pozo")["area_influence_m2"].to_dict()
+
+        df_with_ext = self._df(interior_collars + [(120.0, 210.0)])
+        out_with = compute_powder_factor(df_with_ext, boundary_polygon=self.DOMAIN)
+        areas_with = out_with.set_index("label_pozo")["area_influence_m2"].to_dict()
+
+        for hole_id, area in areas_without.items():
+            assert areas_with[hole_id] == pytest.approx(area, rel=1e-6), (
+                f"El collar externo modificó el área de {hole_id}: {area} vs {areas_with[hole_id]}"
+            )
+
+    def test_boundary_vertex_exact_predicate(self):
+        """4.1: sin tolerancia inventada — boundary.covers exacto."""
+        out = compute_powder_factor(
+            self._df([(100.0, 200.0), (115.0, 220.0), (107.5, 200.0), (107.5, 207.5)]),
+            boundary_polygon=self.DOMAIN,
+        )
+        assert out["collar_domain_status"].iloc[0] == "BOUNDARY"  # vértice
+        assert out["collar_domain_status"].iloc[1] == "BOUNDARY"  # vértice opuesto
+        assert out["collar_domain_status"].iloc[2] == "BOUNDARY"  # borde
+        assert out["collar_domain_status"].iloc[3] == "INSIDE"    # interior
+
+    def test_all_outside_blocked_and_recorded(self):
+        out = compute_powder_factor(
+            self._df([(120.0, 230.0), (125.0, 250.0), (135.0, 240.0), (150.0, 235.0)]),
+            boundary_polygon=self.DOMAIN,
+        )
+        assert (out["collar_domain_status"] == "OUTSIDE").all()
+        assert (out["area_influence_m2"] == 0.0).all()
+        assert out["pf_g_per_ton_inf"].isna().all()
+        assert out["outside_domain_hole_count"].iloc[0] == 4

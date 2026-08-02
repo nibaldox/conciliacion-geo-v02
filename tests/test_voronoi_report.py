@@ -78,8 +78,9 @@ class TestAreaReport:
         df = _grid_df(n_side=3)
         df.loc[0, "X"] = np.nan
         out = compute_influence_area_report(df)
-        assert (out["area_status"] == "invalid").sum() == 1
-        assert pd.isna(out.loc[out["area_status"] == "invalid", "area_m2"]).all()
+        invalid_mask = out["area_status"] == "invalid_coordinates"
+        assert invalid_mask.sum() == 1
+        assert out.loc[invalid_mask, "area_m2"].iloc[0] == 0.0
 
     def test_too_few_holes_all_invalid(self):
         df = _grid_df(n_side=2).head(3)

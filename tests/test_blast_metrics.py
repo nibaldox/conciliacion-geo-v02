@@ -562,7 +562,8 @@ class TestComputeInfluenceArea:
         df = self._grid(n=3)
         df.loc[0, "X"] = np.nan
         areas = compute_influence_area_m2(df)
-        assert pd.isna(areas.iloc[0])  # only the invalid row is NaN
+        # Remediación 4.1: coords inválidas → 0.0 (INVALID_COORDINATES)
+        assert areas.iloc[0] == 0.0
         assert areas.iloc[1:].notna().all()  # the rest still computed
 
 
