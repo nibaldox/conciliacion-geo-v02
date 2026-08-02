@@ -36,3 +36,27 @@ class TestImportSmoke:
         )
         assert result.returncode == 0, result.stderr
         assert "OK" in result.stdout
+
+    def test_api_imports_without_reportlab(self):
+        """Fase 1.1 cierre §3: the API must import even when reportlab is
+        missing (the PDF report is a localised dependency with a clear error)."""
+        code = """
+import sys
+
+class _BlockReportlab:
+    def find_module(self, name, path=None):
+        if name == "reportlab" or name.startswith("reportlab."):
+            raise ImportError("blocked for test")
+
+sys.meta_path.insert(0, _BlockReportlab())
+import api.main  # must NOT raise
+print("API_OK")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            cwd=str(_REPO_ROOT),
+        )
+        assert result.returncode == 0, result.stderr
+        assert "API_OK" in result.stdout

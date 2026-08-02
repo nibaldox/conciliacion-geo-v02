@@ -33,8 +33,20 @@ from core import (
 from core.section_cutter import azimuth_to_direction
 from core.excel_writer import export_results
 from core.report_generator import generate_word_report, generate_section_images_zip
-from core.pdf_report import generate_pdf_report
 from core.param_extractor import ExtractionResult
+
+# Fase 1.1 cierre §3: reportlab is an optional runtime dependency of the
+# PDF report; the import is LOCALISED so the API still starts without it,
+# surfacing a clear error only when the PDF endpoint is used.
+def _import_pdf_report():
+    try:
+        from core.pdf_report import generate_pdf_report
+        return generate_pdf_report
+    except ImportError as exc:  # pragma: no cover — dependency missing
+        raise ImportError(
+            "La exportación PDF requiere reportlab: instale 'pip install reportlab' "
+            "o use requirements.txt / requirements-api.txt."
+        ) from exc
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/export", tags=["export"])
@@ -653,7 +665,7 @@ def _build_pdf_payload_sync(
     }
 
     tmp = os.path.join(tempfile.gettempdir(), f"Conciliacion_PDF_{session_id[:8]}.pdf")
-    generate_pdf_report(results, all_data, tmp, project_info=project_info)
+    _import_pdf_report()(results, all_data, tmp, project_info=project_info)
     return tmp
 
 
