@@ -86,7 +86,7 @@ class TestComputeBlastGeotechCorrelation:
     def test_returns_one_row_per_section(self):
         # One hole at (0,0). Two sections: S1 passes through the hole, S2 is
         # 100 m away (beyond the 15 m default tolerance).
-        df = procesar_pozos(_valid_hole(0.0, 0.0))[0]
+        df = procesar_pozos(_valid_hole(0.0, 0.0), geometry_user_confirmed=True)[0]
         sections = [_section("S1", 0.0, 0.0, 90.0), _section("S2", 100.0, 0.0, 90.0)]
         comps = [
             {"section": "S1", "delta_crest": 0.3},
@@ -101,13 +101,13 @@ class TestComputeBlastGeotechCorrelation:
         assert s2.num_wells == 0   # hole is 100 m from S2 (>15 m tolerance)
 
     def test_no_sections_returns_empty(self):
-        df = procesar_pozos(_valid_hole(0.0, 0.0))[0]
+        df = procesar_pozos(_valid_hole(0.0, 0.0), geometry_user_confirmed=True)[0]
         assert compute_blast_geotech_correlation(df, [], []) == []
         assert compute_blast_geotech_correlation(None, [], []) == []
         assert compute_blast_geotech_correlation(pd.DataFrame(), [], []) == []
 
     def test_comparisons_without_deviation_column_still_work(self):
-        df = procesar_pozos(_valid_hole(0.0, 0.0))[0]
+        df = procesar_pozos(_valid_hole(0.0, 0.0), geometry_user_confirmed=True)[0]
         sections = [_section("S1", 0.0, 0.0, 90.0)]
         comps = [{"section": "S1", "height_status": "CUMPLE"}]  # no delta_crest
         rows = compute_blast_geotech_correlation(df, sections, comps)
@@ -185,7 +185,7 @@ class TestBlastCorrelationRowBackwardsCompat:
         assert row.n_over == 0 and row.n_under == 0
 
     def test_correlation_rows_carry_signed_fields(self):
-        df = procesar_pozos(_valid_hole(0.0, 0.0))[0]
+        df = procesar_pozos(_valid_hole(0.0, 0.0), geometry_user_confirmed=True)[0]
         sections = [_section("S1", 0.0, 0.0, 90.0)]
         comps = [
             {"section": "S1", "delta_crest": 0.8},
@@ -295,7 +295,7 @@ class TestComputePowderFactor:
         """Without Burden/Esp, k-NN estimates median nearest-neighbour spacing."""
         df = _holes_grid_with_pattern(burden=4.0, esp=4.0, kg=200.0)
         df = df.drop(columns=["Burden", "Esp"])
-        processed = procesar_pozos(df)[0]
+        processed = procesar_pozos(df, geometry_user_confirmed=True)[0]
         out = compute_powder_factor(processed)
         assert out["pf_vol_kgm3"].iloc[0] > 0
         assert out["burden_est_m"].iloc[0] == pytest.approx(4.0, abs=1.5)
@@ -354,7 +354,7 @@ class TestAggregatePowderFactorByGroup:
     def test_group_by_section(self):
         """PF and energy aggregate by section via projected_pozos."""
         df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
-        processed = procesar_pozos(df)[0]
+        processed = procesar_pozos(df, geometry_user_confirmed=True)[0]
         out = compute_powder_factor(processed)
         sec_origin = np.array([0.0, 0.0])
         from core.calculo_tronadura import proyectar_pozos_en_seccion
@@ -408,7 +408,7 @@ class TestBlastCorrelationRowPF:
 
     def test_correlation_function_populates_pf(self):
         """compute_blast_geotech_correlation should fill PF fields when data allows."""
-        df = procesar_pozos(_holes_grid_with_pattern())[0]
+        df = procesar_pozos(_holes_grid_with_pattern(), geometry_user_confirmed=True)[0]
         sections = [_section("S1", 0.0, 0.0, 90.0)]
         rows = compute_blast_geotech_correlation(df, sections, [])
         assert len(rows) == 1
@@ -700,7 +700,7 @@ class TestComputePowderFactorGPerTon:
     def test_pf_g_per_ton_in_aggregate(self):
         """aggregate_powder_factor_by_group exposes pf_g_per_ton_avg."""
         df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
-        processed = procesar_pozos(df)[0]
+        processed = procesar_pozos(df, geometry_user_confirmed=True)[0]
         out = compute_powder_factor(processed)
         from core.calculo_tronadura import proyectar_pozos_en_seccion
         proj = proyectar_pozos_en_seccion(
@@ -795,7 +795,7 @@ class TestComputePowderFactorGPerTonNet:
     def test_pf_g_per_ton_net_in_aggregate(self):
         """aggregate_powder_factor_by_group exposes pf_g_per_ton_net_avg."""
         df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
-        processed = procesar_pozos(df)[0]
+        processed = procesar_pozos(df, geometry_user_confirmed=True)[0]
         out = compute_powder_factor(processed)
         from core.calculo_tronadura import proyectar_pozos_en_seccion
         proj = proyectar_pozos_en_seccion(
@@ -816,7 +816,7 @@ class TestPowderFactorInfluenceArea:
     def test_compute_adds_influence_columns(self):
         """compute_powder_factor must expose area_influence_m2 + pf_g_per_ton_inf."""
         df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, n=25)
-        processed = procesar_pozos(df)[0]
+        processed = procesar_pozos(df, geometry_user_confirmed=True)[0]
         out = compute_powder_factor(processed)
         assert "area_influence_m2" in out.columns
         assert "pf_g_per_ton_inf" in out.columns
@@ -827,7 +827,7 @@ class TestPowderFactorInfluenceArea:
 
     def test_aggregate_includes_influence_avg(self):
         df = _holes_grid_with_pattern(burden=5.0, esp=6.0, kg=300.0, malla="M1")
-        processed = procesar_pozos(df)[0]
+        processed = procesar_pozos(df, geometry_user_confirmed=True)[0]
         out = compute_powder_factor(processed)
         from core.calculo_tronadura import proyectar_pozos_en_seccion
         proj = proyectar_pozos_en_seccion(

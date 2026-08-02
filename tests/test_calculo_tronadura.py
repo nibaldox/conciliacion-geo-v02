@@ -70,14 +70,14 @@ class TestProcesarPozos:
     def test_drops_enaex_columns(self):
         """All ENAEX 'no usar' columns listed in COLS_DROP are removed."""
         df = _make_valid_hole()
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         for col in COLS_DROP:
             assert col not in out.columns, f"{col} should be dropped"
 
     def test_coordinate_correction(self):
         """X=Latitud_Geo, Y=Longitud_Geo, Z_collar = Nombre_Banco + BENCH_HEIGHT."""
         df = _make_valid_hole(lat=1234.5, lon=6789.0, banco=4200.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["X"].iloc[0] == 1234.5
         assert out["Y"].iloc[0] == 6789.0
         assert out["Z_collar"].iloc[0] == 4200.0 + BENCH_HEIGHT
@@ -85,7 +85,7 @@ class TestProcesarPozos:
     def test_vertical_hole_toe(self):
         """A vertical (incl=0) hole with length L has toe at (X, Y, collar - L)."""
         df = _make_valid_hole(incl=0.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         collar = 4000.0 + BENCH_HEIGHT
         assert out["X_toe"].iloc[0] == pytest.approx(100.0)
         assert out["Y_toe"].iloc[0] == pytest.approx(200.0)
@@ -99,7 +99,7 @@ class TestProcesarPozos:
         dy = L*sin(90°)*cos(0°) = L  → Y displacement
         """
         df = _make_valid_hole(incl=90.0, az=0.0, length=5.0, lat=0.0, lon=0.0, banco=4000.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["X_toe"].iloc[0] == pytest.approx(0.0, abs=1e-9)
         assert out["Y_toe"].iloc[0] == pytest.approx(5.0)
         assert out["Z_toe"].iloc[0] == pytest.approx(out["Z_collar"].iloc[0], abs=1e-6)
@@ -114,7 +114,7 @@ class TestProcesarPozos:
             ],
             ignore_index=True,
         )
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert len(out) == 1
         assert out["label_pozo"].iloc[0] == "OK"
 
@@ -128,14 +128,14 @@ class TestProcesarPozos:
             ignore_index=True,
         )
         df.loc[1, "Latitud_Geo"] = np.nan
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert len(out) == 1
         assert out["label_pozo"].iloc[0] == "OK"
 
     def test_returns_three_equal_length_arrays(self):
         """x_lines, y_lines, z_lines must all have length 3*n (collar, toe, None)."""
         df = _make_valid_hole()
-        _, xl, yl, zl = procesar_pozos(df)
+        _, xl, yl, zl = procesar_pozos(df, geometry_user_confirmed=True)
         n = 3 * 1
         assert len(xl) == n
         assert len(yl) == n
@@ -148,7 +148,7 @@ class TestProcesarPozos:
     def test_fecha_tronadura_is_date(self):
         """fecha_tronadura is normalised to date (no time component)."""
         df = _make_valid_hole(fecha="2026-05-01 14:30:00")
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         v = out["fecha_tronadura"].iloc[0]
         assert hasattr(v, "year")
         assert v.year == 2026 and v.month == 5 and v.day == 1
@@ -156,7 +156,7 @@ class TestProcesarPozos:
     def test_banco_original_preserved(self):
         """The pre-correction Z (Nombre_Banco) is preserved in Banco_Original."""
         df = _make_valid_hole(banco=4185.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert "Banco_Original" in out.columns
         assert out["Banco_Original"].iloc[0] == 4185.0
 
@@ -168,7 +168,7 @@ class TestZCollarsemantics:
         df = _make_valid_hole()
         df["Cota_Collar"] = df["Nombre_Banco"]
         df = df.drop(columns=["Nombre_Banco"])
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["Z_collar"].iloc[0] == 4200.0
         assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
         # la columna bench_height_m del input se conserva pero NO se aplica
@@ -177,14 +177,14 @@ class TestZCollarsemantics:
 
     def test_bench_elevation_transformed_with_record(self):
         df = _make_valid_hole(banco=4000.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["Z_collar"].iloc[0] == 4000.0 + BENCH_HEIGHT
         assert out["Z_collar_semantic"].iloc[0] == "bench_elevation_plus_height"
         assert out["bench_height_m"].iloc[0] == BENCH_HEIGHT
 
     def test_bench_height_parameterizable_per_event(self):
         df = _make_valid_hole(banco=4000.0)
-        out, *_ = procesar_pozos(df, bench_height_m=12.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, bench_height_m=12.0)
         assert out["Z_collar"].iloc[0] == 4012.0
         assert out["bench_height_m"].iloc[0] == 12.0
 
@@ -195,7 +195,7 @@ class TestZCollarsemantics:
             "X": "Latitud_Geo", "Y": "Longitud_Geo", "Z_collar": "Cota_Collar",
             "Incl": "Inclinacion_real", "Az": "Azimuth_real", "Len": "longitud_real",
         }
-        out, *_ = procesar_pozos(df, column_map=mapping)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, column_map=mapping)
         assert out["Z_collar"].iloc[0] == 4200.0
         assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
 
@@ -203,12 +203,12 @@ class TestZCollarsemantics:
         df = _make_valid_hole()
         df = df.rename(columns={"Nombre_Banco": "Altura_Collar"})
         with pytest.raises(ValueError, match="sem[áa]ntica"):
-            procesar_pozos(df)
+            procesar_pozos(df, geometry_user_confirmed=True)
 
     def test_explicit_semantic_overrides_ambiguous_name(self):
         df = _make_valid_hole()
         df = df.rename(columns={"Nombre_Banco": "Altura_Collar"})
-        out, *_ = procesar_pozos(df, z_collar_semantic="bench_elevation")
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, z_collar_semantic="bench_elevation")
         assert out["Z_collar"].iloc[0] == 4200.0 + BENCH_HEIGHT
 
 
@@ -217,7 +217,7 @@ class TestInclinationConvention:
 
     def test_original_values_and_convention_recorded(self):
         df = _make_valid_hole(incl=10.0, az=15.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["Incl_original"].iloc[0] == 10.0
         assert out["Az_original"].iloc[0] == 15.0
         assert out["Incl_convention"].iloc[0] == "from_vertical"
@@ -225,7 +225,7 @@ class TestInclinationConvention:
 
     def test_negative_inclination_wrapped_with_flag(self):
         df = _make_valid_hole(incl=-10.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["Incl"].iloc[0] == 10.0
         assert out["Incl_original"].iloc[0] == -10.0
         assert out["incl_anomaly"].iloc[0] == "negative_wrapped"
@@ -234,7 +234,7 @@ class TestInclinationConvention:
     def test_dip_from_horizontal_convention(self):
         df = _make_valid_hole(incl=60.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
         out, *_ = procesar_pozos(
-            df, incl_convention=InclinationConvention.DIP_FROM_HORIZONTAL
+            df, geometry_user_confirmed=True, incl_convention=InclinationConvention.DIP_FROM_HORIZONTAL
         )
         assert out["Incl"].iloc[0] == 30.0
         assert out["Incl_convention"].iloc[0] == "dip_from_horizontal"
@@ -242,7 +242,7 @@ class TestInclinationConvention:
 
     def test_azimuth_wrapped_to_360(self):
         df = _make_valid_hole(incl=90.0, az=370.0, length=5.0, lat=0.0, lon=0.0, banco=4000.0)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["Az"].iloc[0] == 10.0
         assert out["Y_toe"].iloc[0] == pytest.approx(5.0 * np.sin(np.radians(90.0)) * np.cos(np.radians(10.0)))
 
@@ -250,8 +250,8 @@ class TestInclinationConvention:
         """az=0 (North) moves the toe +Y; az=90 (East) moves it +X."""
         df_n = _make_valid_hole(incl=90.0, az=0.0, length=5.0, lat=0.0, lon=0.0, banco=4000.0)
         df_e = _make_valid_hole(incl=90.0, az=90.0, length=5.0, lat=0.0, lon=0.0, banco=4000.0)
-        out_n, *_ = procesar_pozos(df_n)
-        out_e, *_ = procesar_pozos(df_e)
+        out_n, *_ = procesar_pozos(df_n, geometry_user_confirmed=True)
+        out_e, *_ = procesar_pozos(df_e, geometry_user_confirmed=True)
         assert out_n["Y_toe"].iloc[0] == pytest.approx(5.0)
         assert out_n["X_toe"].iloc[0] == pytest.approx(0.0, abs=1e-9)
         assert out_e["X_toe"].iloc[0] == pytest.approx(5.0)
@@ -263,21 +263,21 @@ class TestInclinationConventionExplicit:
 
     def test_data_declared_convention_no_warning(self):
         df = _make_valid_hole(incl=10.0)
-        out, *_ = procesar_pozos(df, bench_height_m=15.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, bench_height_m=15.0)
         assert out["Incl_convention"].iloc[0] == "from_vertical"
         assert out["Incl_convention_source"].iloc[0] == "data"
         assert bool(out["incl_convention_warning"].iloc[0]) is False
 
     def test_explicit_convention_no_warning(self):
         df = _make_valid_hole(incl=10.0)
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical")
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical")
         assert out["Incl_convention_source"].iloc[0] == "explicit"
         assert bool(out["incl_convention_warning"].iloc[0]) is False
 
     def test_data_declared_convention_used(self):
         df = _make_valid_hole(incl=60.0)
         df["Incl_convention"] = "dip_from_horizontal"
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out["Incl"].iloc[0] == 30.0
         assert out["Incl_convention_source"].iloc[0] == "data"
 
@@ -287,7 +287,7 @@ class TestInclinationConventionExplicit:
             ignore_index=True,
         )
         df["Incl_convention"] = "dip_from_horizontal"
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert out.loc[out["label_pozo"] == "POS", "Incl"].iloc[0] == 25.0
         assert out.loc[out["label_pozo"] == "NEG", "Incl"].iloc[0] == 25.0
         assert out.loc[out["label_pozo"] == "POS", "incl_orientation"].iloc[0] == 1
@@ -301,18 +301,18 @@ class TestZAmbiguous:
         df = _make_valid_hole()
         df = df.rename(columns={"Nombre_Banco": "Z"})
         with pytest.raises(ValueError, match="sem[áa]ntica"):
-            procesar_pozos(df)
+            procesar_pozos(df, geometry_user_confirmed=True)
 
     def test_generic_elevation_raises(self):
         df = _make_valid_hole()
         df = df.rename(columns={"Nombre_Banco": "Elevation"})
         with pytest.raises(ValueError, match="sem[áa]ntica"):
-            procesar_pozos(df)
+            procesar_pozos(df, geometry_user_confirmed=True)
 
     def test_ambiguous_with_explicit_semantic_ok(self):
         df = _make_valid_hole()
         df = df.rename(columns={"Nombre_Banco": "Z"})
-        out, *_ = procesar_pozos(df, z_collar_semantic="collar_elevation")
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, z_collar_semantic="collar_elevation")
         assert out["Z_collar"].iloc[0] == 4200.0
         assert out["Z_collar_semantic"].iloc[0] == "collar_elevation"
 
@@ -322,7 +322,7 @@ class TestInclinationConventionProvenance:
 
     def test_full_provenance_columns(self):
         df = _make_valid_hole(incl=10.0, az=15.0)
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical")
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical")
         for col in (
             "inclination_original",
             "inclination_convention_original",
@@ -342,13 +342,14 @@ class TestInclinationConventionProvenance:
     def test_missing_convention_blocks_geometry(self):
         """Cierre final §2.2: sin convención confirmada el backend bloquea."""
         df = _make_valid_hole(incl=10.0).drop(columns=["bench_height_m", "Incl_convention"])
-        with pytest.raises(ValueError, match="convenci"):
-            procesar_pozos(df, bench_height_m=15.0)
+        from core.geometry_contract import GeometryConfigurationError
+        with pytest.raises(GeometryConfigurationError):
+            procesar_pozos(df, geometry_user_confirmed=True, bench_height_m=15.0)
 
     def test_dip_negative_conversion_recorded(self):
         df = _make_valid_hole(incl=-65.0, length=10.0, lat=100.0, lon=200.0, banco=4000.0)
         out, *_ = procesar_pozos(
-            df, incl_convention="dip_from_horizontal"
+            df, geometry_user_confirmed=True, incl_convention="dip_from_horizontal"
         )
         assert out["inclination_normalized_from_vertical"].iloc[0] == 25.0
         assert out["inclination_conversion_applied"].iloc[0] == "dip->90-dip+abs"
@@ -360,14 +361,14 @@ class TestInclinationConventionProvenance:
             [_make_valid_hole(incl=10.0, label="OK"), _make_valid_hole(incl=120.0, label="BAD")],
             ignore_index=True,
         )
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical")
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical")
         assert len(out) == 1
         assert out["label_pozo"].iloc[0] == "OK"
 
     def test_known_toe_coordinates(self):
         """§2.3 acceptance: known collar/toe coordinates for a vertical hole."""
         df = _make_valid_hole(incl=0.0, length=12.0, lat=100.0, lon=200.0, banco=4000.0)
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0)
         assert out["X_toe"].iloc[0] == pytest.approx(100.0)
         assert out["Y_toe"].iloc[0] == pytest.approx(200.0)
         assert out["Z_toe"].iloc[0] == pytest.approx(4015.0 - 12.0)
@@ -385,7 +386,7 @@ class TestProyectarPozosEnSeccion:
             ],
             ignore_index=True,
         )
-        return procesar_pozos(df)[0]
+        return procesar_pozos(df, geometry_user_confirmed=True)[0]
 
     def test_hole_on_section_has_zero_perp_distance(self):
         """A hole exactly on the section line has dist_perp == 0."""
@@ -423,7 +424,7 @@ class TestProyectarPozosEnSeccion:
             ],
             ignore_index=True,
         )
-        out = procesar_pozos(df)[0]
+        out = procesar_pozos(df, geometry_user_confirmed=True)[0]
         sec_origin = np.array([0.0, 0.0])
         proj = proyectar_pozos_en_seccion(
             out, origin=sec_origin, azimuth=90.0, length=100.0, tolerance=100.0
@@ -434,7 +435,7 @@ class TestProyectarPozosEnSeccion:
 
     def test_empty_dataframe_passthrough(self):
         """An empty DataFrame returns an empty DataFrame without error."""
-        out = procesar_pozos(_make_valid_hole())[0]
+        out = procesar_pozos(_make_valid_hole(), geometry_user_confirmed=True)[0]
         proj = proyectar_pozos_en_seccion(
             out.iloc[0:0], origin=np.array([0.0, 0.0]), azimuth=0.0, length=100.0
         )
@@ -451,7 +452,7 @@ class TestProyectarPozosEnSeccion:
             ],
             ignore_index=True,
         )
-        out = procesar_pozos(df)[0]
+        out = procesar_pozos(df, geometry_user_confirmed=True)[0]
         sec_origin = np.array([0.0, 0.0])
         proj = proyectar_pozos_en_seccion(
             out, origin=sec_origin, azimuth=90.0, length=100.0, tolerance=5.0
@@ -480,7 +481,7 @@ class TestProyectarPozosEnSeccion:
         must be included (damage is delivered at the toe)."""
         # Collar 40 m off the X-axis; toe swings down to ~2 m off axis.
         df = _make_valid_hole(lat=0.0, lon=40.0, incl=71.8, az=180.0, length=40.0, label="INCLINED")
-        out = procesar_pozos(df)[0]
+        out = procesar_pozos(df, geometry_user_confirmed=True)[0]
         proj = proyectar_pozos_en_seccion(
             out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0, tolerance=10.0
         )
@@ -493,7 +494,7 @@ class TestProyectarPozosEnSeccion:
     def test_closest_point_is_collar_when_collar_nearer(self):
         """For a vertical hole on the axis, the collar is the closest point."""
         df = _make_valid_hole(lat=0.0, lon=0.0, label="VERT")
-        out = procesar_pozos(df)[0]
+        out = procesar_pozos(df, geometry_user_confirmed=True)[0]
         proj = proyectar_pozos_en_seccion(
             out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=100.0, tolerance=5.0
         )
@@ -509,7 +510,7 @@ class TestProyectarPozosEnSeccion:
             ],
             ignore_index=True,
         )
-        out = procesar_pozos(df)[0]
+        out = procesar_pozos(df, geometry_user_confirmed=True)[0]
         proj_all = proyectar_pozos_en_seccion(
             out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0, tolerance=100.0
         )
@@ -532,7 +533,7 @@ class TestProyectarPozosEnSeccion:
             ],
             ignore_index=True,
         )
-        out = procesar_pozos(df)[0]
+        out = procesar_pozos(df, geometry_user_confirmed=True)[0]
         proj = proyectar_pozos_en_seccion(
             out, origin=np.array([0.0, 0.0]), azimuth=90.0, length=200.0, tolerance=100.0
         )
@@ -550,12 +551,13 @@ class TestCierreFinalConvencion:
     def test_missing_convention_raises(self):
         """Backend sin convención confirmada → bloqueo (raise, sin toe)."""
         df = self._h().drop(columns=["bench_height_m", "Incl_convention"])
-        with pytest.raises(ValueError, match="convenci"):
-            procesar_pozos(df, bench_height_m=15.0)
+        from core.geometry_contract import GeometryConfigurationError
+        with pytest.raises(GeometryConfigurationError):
+            procesar_pozos(df, geometry_user_confirmed=True, bench_height_m=15.0)
 
     def test_explicit_convention_computes_and_records(self):
         out, *_ = procesar_pozos(
-            self._h(), incl_convention="from_vertical", bench_height_m=15.0
+            self._h(), geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0
         )
         assert bool(out["inclination_user_confirmed"].iloc[0]) is True
         assert out["inclination_validation_status"].iloc[0] == "EXPLICIT"
@@ -566,17 +568,28 @@ class TestCierreFinalConvencion:
         assert out["azimuth_convention_original"].iloc[0] == "CLOCKWISE_FROM_NORTH"
         assert out["azimuth_normalized_clockwise_from_north"].iloc[0] == 15.0
 
-    def test_data_declared_convention(self):
+    def test_data_declared_convention_is_not_implicit_confirmation(self):
+        # Remediación 3.1: a data-declared ``Incl_convention`` column is
+        # NOT implicit operator confirmation. The geometry is BLOCKED
+        # unless the caller passes geometry_user_confirmed=True together
+        # with an explicit incl_convention argument.
         df = self._h()
         df["Incl_convention"] = "from_vertical"
-        out, *_ = procesar_pozos(df, bench_height_m=15.0)
-        assert out["inclination_validation_status"].iloc[0] == "DATA_DECLARED"
+        # Sin confirmación explícita → bloqueo.
+        from core.geometry_contract import GeometryConfigurationError
+        with pytest.raises(GeometryConfigurationError):
+            procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        # Con confirmación explícita → procesa.
+        out, *_ = procesar_pozos(
+            df, geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0
+        )
+        assert out["inclination_validation_status"].iloc[0] == "EXPLICIT"
         assert bool(out["inclination_user_confirmed"].iloc[0]) is True
-        assert out["Z_toe"].iloc[0] == pytest.approx(4215.0 - 12.0 * np.cos(np.radians(10.0)))  # Len=12
+        assert out["Z_toe"].iloc[0] == pytest.approx(4215.0 - 12.0 * np.cos(np.radians(10.0)))
 
     def test_sign_convention_recorded(self):
         out, *_ = procesar_pozos(
-            self._h(incl=-10.0), incl_convention="dip_from_horizontal",
+            self._h(incl=-10.0), geometry_user_confirmed=True, incl_convention="dip_from_horizontal",
             incl_sign_convention="NEGATIVE_IS_DOWNWARD_DIP", bench_height_m=15.0,
         )
         assert out["inclination_sign_convention"].iloc[0] == "NEGATIVE_IS_DOWNWARD_DIP"
@@ -584,15 +597,16 @@ class TestCierreFinalConvencion:
         assert out["Incl"].iloc[0] == pytest.approx(80.0)  # dip 10 → 80 desde vertical
 
     def test_sign_source_defined_requires_rule(self):
+        from core.geometry_conventions import normalize_inclination
         with pytest.raises(ValueError, match="sign_source_rule"):
             procesar_pozos(
-                self._h(incl=-10.0), incl_convention="dip_from_horizontal",
+                self._h(incl=-10.0), geometry_user_confirmed=True, incl_convention="dip_from_horizontal",
                 incl_sign_convention="SOURCE_DEFINED", bench_height_m=15.0,
             )
 
     def test_sign_source_defined_with_rule(self):
         out, *_ = procesar_pozos(
-            self._h(incl=-65.0), incl_convention="dip_from_horizontal",
+            self._h(incl=-65.0), geometry_user_confirmed=True, incl_convention="dip_from_horizontal",
             incl_sign_convention="SOURCE_DEFINED", sign_source_rule="negative_is_downward_dip",
             bench_height_m=15.0,
         )
@@ -602,22 +616,21 @@ class TestCierreFinalConvencion:
     def test_azimuth_convention_functional(self):
         """az=90 en CCW-from-North (Este) → az normalizado 270 (Oeste horario)."""
         out, *_ = procesar_pozos(
-            self._h(az=90.0), incl_convention="from_vertical",
+            self._h(az=90.0), geometry_user_confirmed=True, incl_convention="from_vertical",
             az_convention="COUNTERCLOCKWISE_FROM_NORTH", bench_height_m=15.0,
         )
         assert out["Az"].iloc[0] == pytest.approx(270.0)
         assert out["azimuth_conversion_applied"].iloc[0] == "ccw_from_north->cw_from_north"
 
     def test_geometry_configuration_contract(self):
-        out, *_ = procesar_pozos(self._h(), incl_convention="from_vertical", bench_height_m=15.0, geometry_user_confirmed=True)
+        out, *_ = procesar_pozos(self._h(), geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0)
         assert bool(out["geometry_user_confirmed"].iloc[0]) is True
-        assert out["geometry_configuration_version"].iloc[0] == "1.0"
         assert out["inclination_normalized_from_vertical_deg"].iloc[0] == pytest.approx(10.0)
         assert out["azimuth_normalized_clockwise_from_north_deg"].iloc[0] == pytest.approx(15.0)
 
     def test_radians_unit_converted(self):
         out, *_ = procesar_pozos(
-            self._h(incl=0.1745, az=0.2618), incl_convention="from_vertical",
+            self._h(incl=0.1745, az=0.2618), geometry_user_confirmed=True, incl_convention="from_vertical",
             angle_unit="radians", bench_height_m=15.0,
         )
         assert out["Incl"].iloc[0] == pytest.approx(10.0, rel=1e-3)
@@ -628,7 +641,7 @@ class TestCierreFinalConvencion:
 
     def test_azimuth_original_preserved(self):
         out, *_ = procesar_pozos(
-            self._h(az=370.0), incl_convention="from_vertical", bench_height_m=15.0
+            self._h(az=370.0), geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0
         )
         assert out["azimuth_original"].iloc[0] == 370.0
         assert out["Az"].iloc[0] == 10.0
@@ -636,7 +649,7 @@ class TestCierreFinalConvencion:
 
     def test_out_of_range_rejected(self):
         df = self._h(incl=120.0)
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0)
         assert len(out) == 0  # dropped (never converted, never used)
 
 
@@ -648,7 +661,7 @@ class TestRejectedRowsDiagnostics:
             [_make_valid_hole(incl=10.0, label="OK"), _make_valid_hole(incl=120.0, label="BAD")],
             ignore_index=True,
         )
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0)
         assert len(out) == 1  # solo la válida participa
         assert out["row_processing_status"].iloc[0] == "accepted"
         assert int(out["processing_rows_received"].iloc[0]) == 2
@@ -661,7 +674,7 @@ class TestRejectedRowsDiagnostics:
     def test_nan_row_rejected_with_reason(self):
         df = _make_valid_hole(label="NAN_X")
         df.loc[0, "Latitud_Geo"] = np.nan
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0)
         assert len(out) == 0
         assert "NAN_X" in out["processing_rejected_ids"].iloc[0] if len(out) else True
 
@@ -670,7 +683,7 @@ class TestRejectedRowsDiagnostics:
             [_make_valid_hole(incl=10.0, label="OK"), _make_valid_hole(length=0.0, label="ZERO")],
             ignore_index=True,
         )
-        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0)
         assert len(out) == 1
         assert "ZERO" in out["processing_rejected_ids"].iloc[0]
         assert "longitud" in out["processing_rejected_reasons"].iloc[0].lower() or \
