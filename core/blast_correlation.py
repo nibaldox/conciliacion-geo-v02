@@ -366,17 +366,15 @@ def compute_powder_factor(
 
     ``H_net`` is the vertical hole extent WITHIN the bench (collar to
     floor), i.e. the design bench height excluding the sub-drill ("sin
-    pasadura"). The ``pasadura`` term reuses :func:`_pasadura` with
-    ``bench_height = height_fallback_m`` (the configured bench height,
-    currently 15 m). When ``Z_collar`` / ``Z_toe`` are missing or the
-    resulting pasadura is NaN / negative / non-finite, pasadura falls
-    back to 0 so ``H_net = H_real`` (the net metric gracefully equals the
-    full metric when sub-drill is unknown). ``H_net`` is clamped to NaN
-    when non-positive to avoid spurious negative powder factors. In the
-    ENAEX dataset ``Z_collar = Nombre_Banco + 15``, so ``H_net ≈ 15 m``
-    for every hole — ``pf_g_per_ton_net`` is therefore the design-bench-
-    normalised powder factor, complementary to the primary
-    ``pf_g_per_ton``.
+    pasadura"). The ``pasadura`` term reuses :func:`_pasadura` with the
+    RESOLVED per-row bench height (event value or validated dataset
+    column — never an automatic default). When ``Z_collar`` / ``Z_toe``
+    are missing, or the bench height is not confirmed, ``H_net`` is
+    BLOCKED (NaN): no silent pasadura=0 pass-through. ``H_net`` is
+    clamped to NaN when non-positive to avoid spurious negative powder
+    factors. With a declared 15 m bench (e.g. the ENAEX event), ``H_net
+    ≈ 15 m`` and ``pf_g_per_ton_net`` is the design-bench-normalised
+    powder factor, complementary to the primary ``pf_g_per_ton``.
 
     Per-session overrides:
         ``rock_density_tm3`` — in-situ rock bulk density (ton/m³) used as
@@ -384,8 +382,9 @@ def compute_powder_factor(
         ``BLAST.rock_density_tm3`` (2.7 ton/m³), preserving the original
         behaviour.
         ``height_fallback_m`` — vertical height used when ``longitud_real``
-        or ``Inclinacion_real`` is missing/invalid. ``None`` (default)
-        falls back to ``BLAST.height_fallback_m`` (15.0 m).
+        or ``Inclinacion_real`` is missing/invalid, ONLY under an
+        authorised assumption (``allow_bench_height_assumption=True``);
+        otherwise the height-dependent indicators are blocked.
 
     If Burden/Espaciamiento columns are missing, estimate them from the
     median nearest-neighbour distance (k=4) among the collars in the
@@ -645,7 +644,7 @@ def compute_powder_factor(
     # Per-mass powder factor normalised by the bench height EXCLUDING sub-drill
     # ("sin pasadura"). H_net is the vertical hole extent WITHIN the bench
     # (collar to floor), i.e. the design bench height minus the sub-drill. In
-    # the ENAEX dataset ``Z_collar = Nombre_Banco + 15``, so H_net ≈ 15 m (the
+    # with a declared 15 m bench (ENAEX event), H_net ≈ 15 m (the
     # design bench height) for all holes — this metric is therefore the
     # design-bench-normalised powder factor, complementary to the primary
     # ``pf_g_per_ton`` which uses the full real hole length.

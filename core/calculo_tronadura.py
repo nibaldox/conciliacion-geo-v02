@@ -295,9 +295,12 @@ def procesar_pozos(
             known:
             - bench_elevation (e.g. Nombre_Banco): the column holds the
               target bench elevation; the collar sits ``bench_height_m``
-              metres above it (default 15 m, configurable per event).
-              The applied height is recorded in ``bench_height_m`` and
-              the transformation in ``Z_collar_semantic``.
+              metres above it ONLY when a valid, user-confirmed height
+              is provided (event value, validated dataset column, or an
+              authorised explicit assumption). There is NO automatic
+              default: without a confirmed height the elevation is left
+              untransformed (``bench_elevation_untransformed``) and the
+              dependent geometry (toe) is blocked.
             - collar_elevation (e.g. Cota_Collar): the column already
               holds the real collar elevation; no transformation.
             Ambiguous source names raise ValueError (the pipeline stops

@@ -71,7 +71,7 @@ Not re-exported (import from the submodule): anything in `core.geom_utils`, `cor
 
 ### Drill & Blast (Tronadura)
 
-- `core/calculo_tronadura.py` — coordinate correction: `X=Latitud_Geo`, `Y=Longitud_Geo`, `Z_collar=Nombre_Banco+15m`; toe from `Inclinacion_real`/`Azimuth_real`/`longitud_real`.
+- `core/calculo_tronadura.py` — coordinate correction: `X=Latitud_Geo`, `Y=Longitud_Geo`; `Z_collar` is derived from a bench elevation ONLY with a valid, user-confirmed `bench_height_m` (no automatic 15 m — without it the elevation is left untransformed and dependent geometry is blocked); toe from `Inclinacion_real`/`Azimuth_real`/`longitud_real` (convention must be confirmed).
 - `core/blast_correlation.py` + `core/blast_metrics.py` — projects blast holes onto cross-sections, computes PF / stemming ratio / kg/m, classifies berms as ramps.
 - Legacy UI lives in `ui/modulo_tronadura.py` + `ui/tabs/blast_correlation.py` (`app.py`/`ui/` off-limits except `ui/modulo_tronadura/` — see the H-10 exception).
 
