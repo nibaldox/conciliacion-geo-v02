@@ -457,7 +457,19 @@ async def upload_blast_csv(
     except Exception as exc:
         raise HTTPException(400, f"Could not read uploaded file: {exc}")
 
-    payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m)
+    try:
+        payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m)
+    except GeometryConfigurationError as exc:
+        # The processor may raise GEOMETRY errors after the contract check
+        # (e.g. declared source column not found in dataset).
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": exc.error_code,
+                "message": str(exc),
+                "details": exc.details,
+            },
+        )
 
     db.save_blast_upload(
         session_id,

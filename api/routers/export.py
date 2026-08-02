@@ -759,7 +759,7 @@ async def export_blast_diagnostics(request: Request):
         session_id = db.get_or_create_session(request.state.session_id)
         tmp = await _run_in_executor(_build_blast_diagnostics_payload_sync, session_id)
         return FileResponse(
-            tmp,
+            str(tmp),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename="Diagnostico_Tronadura.xlsx",
         )
@@ -786,12 +786,13 @@ async def export_blast_rejections(request: Request):
         tmp = tempfile.NamedTemporaryFile(
             prefix=f"blast_rej_{session_id}_", suffix=".xlsx", delete=False
         )
+        tmp_path = tmp.name
         tmp.close()
         await _run_in_executor(
-            lambda: export_rejected_rows_excel(rejected, tmp.name, config=config)
+            lambda: export_rejected_rows_excel(rejected, tmp_path, config=config)
         )
         return FileResponse(
-            tmp,
+            str(tmp_path),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename="Filas_Rechazadas.xlsx",
         )
