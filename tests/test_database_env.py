@@ -5,21 +5,43 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
+
 
 def _reload_database_module():
     """Reimport api.database so module-level DB_PATH is recomputed.
 
-    On Python 3.14+ the parent package caches submodules as attributes,
-    so just deleting from sys.modules is not enough — the package
-    attribute must be cleared too, otherwise `from api import database`
-    returns the stale module.
+    Uses :func:`importlib.reload` so the EXISTING module object is updated
+    in place — every other module that did ``import api.database as db``
+    (e.g. ``api.routers.blast``) keeps a single, consistent reference.
+    The previous ``del sys.modules[...]`` approach created a NEW module
+    object and silently broke downstream callers (their ``db`` kept
+    pointing at the stale one), which surfaced as order-dependent
+    failures in unrelated tests.
     """
     if "api.database" in sys.modules:
-        del sys.modules["api.database"]
-    parent = sys.modules.get("api")
-    if parent is not None and hasattr(parent, "database"):
-        delattr(parent, "database")
+        return importlib.reload(sys.modules["api.database"])
     return importlib.import_module("api.database")
+
+
+@pytest.fixture(autouse=True)
+def _restore_db_path_after_reload(monkeypatch):
+    """Restore the default DB_PATH after the reload-based tests.
+
+    ``importlib.reload`` re-runs the module body and recomputes
+    ``DB_PATH`` from the active ``CONCILIACION_DATA_DIR`` env var. Even
+    after the monkeypatch teardown restores the env, the module-level
+    constant stays at the reloaded value. We reload ONCE MORE on the way
+    out (with the original env restored) so subsequent tests see a
+    consistent default path.
+    """
+    yield
+    # Restore: with the env now reverted, reload so DB_PATH points back
+    # at the package default (<repo>/data/conciliacion.db).
+    try:
+        importlib.reload(sys.modules["api.database"])
+    except Exception:
+        pass
 
 
 def test_db_path_uses_default_when_env_unset(monkeypatch, tmp_path):
