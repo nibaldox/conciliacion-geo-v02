@@ -10,6 +10,11 @@ import streamlit as st
 
 from core.calculo_tronadura import procesar_pozos
 from core.column_mapping import apply_mapping, validate_mapping
+from core.geometry_contract import (
+    GEOMETRY_CONFIGURATION_VERSION,
+    GeometryConfiguration,
+    GeometryConfigurationError,
+)
 from ui.modulo_tronadura.column_mapper import (
     clear_confirmed_mapping,
     get_confirmed_mapping,
@@ -189,14 +194,23 @@ def render_upload_section() -> None:
         }
         st.session_state["blast_az_convention"] = az_map[az_label]
         st.selectbox(
-            "Unidad angular",
+            "Unidad angular de INCLINACIÓN",
             options=["Grados", "Radianes"],
             index=0,
-            key="blast_angle_unit",
+            key="blast_incl_unit",
+            help="Unidad independiente para la columna de inclinación.",
+        )
+        st.selectbox(
+            "Unidad angular de AZIMUT",
+            options=["Grados", "Radianes"],
+            index=0,
+            key="blast_az_unit",
+            help="Unidad independiente para la columna de azimut (puede diferir de incl).",
         )
         st.caption(
             "Azimut: grados en sentido horario desde el Norte (canónico). La "
-            "selección se persiste en la configuración reproducible del evento."
+            "selección se persiste en la configuración reproducible del evento "
+            f"(versión {GEOMETRY_CONFIGURATION_VERSION})."
         )
         bench_h_ui = st.number_input(
             "Altura de banco (m) — obligatoria para cota de banco",
@@ -239,14 +253,66 @@ def render_upload_section() -> None:
         status = st.empty()
         status.info("⏳ Procesando pozos en segundo plano…")
 
-        # Fase 1.1 cierre §2.3: la convención angular se selecciona y se
-        # persiste en la configuración reproducible del evento.
-        incl_conv_ui = st.session_state.get("blast_incl_convention", "from_vertical")
+        # Fase 1.1 cierre §2.3 + integración §3.2/4.2: la configuración
+        # geométrica se construye como un contrato versionado y validado
+        # que el operador confirma explícitamente. La confirmación visual
+        # se transmite como ``geometry_user_confirmed=True`` al backend.
+        incl_conv_ui = st.session_state.get("blast_incl_convention", None)
         bench_h_ui = st.session_state.get("blast_bench_height_m", None)
         try:
             bench_h_ui = float(bench_h_ui) if bench_h_ui not in (None, "") else None
         except (TypeError, ValueError):
             bench_h_ui = None
+
+        # Source columns: derived from the CONFIRMED column mapping (the
+        # operator selected these names). When the mapper didn't capture
+        # Incl/Az we cannot construct a v2 contract — surface the error.
+        incl_src_col = (confirmed_mapping or {}).get("Incl") or ""
+        az_src_col = (confirmed_mapping or {}).get("Az") or ""
+
+        # Build the v2 contract. ``geometry_user_confirmed`` is True ONLY
+        # when the operator ticked the confirmation checkbox in this UI.
+        # Integración §3.2 — the value MUST reach ``procesar_pozos``.
+        operator_confirmed = bool(
+            st.session_state.get("blast_geometry_confirmed", False)
+        )
+        cfg = GeometryConfiguration(
+            geometry_user_confirmed=operator_confirmed,
+            inclination_convention=(
+                {"from_vertical": "FROM_VERTICAL",
+                 "dip_from_horizontal": "DIP_FROM_HORIZONTAL"}.get(incl_conv_ui or "")
+                if incl_conv_ui else None
+            ),
+            inclination_sign_convention=st.session_state.get(
+                "blast_sign_rule", "ABSOLUTE_VALUE"
+            ),
+            inclination_source_rule=st.session_state.get(
+                "blast_sign_source_rule", ""
+            ),
+            inclination_unit=(
+                "RADIANS"
+                if st.session_state.get("blast_incl_unit", "Grados") == "Radianes"
+                else "DEGREES"
+            ),
+            azimuth_convention=st.session_state.get(
+                "blast_az_convention", "CLOCKWISE_FROM_NORTH"
+            ),
+            azimuth_unit=(
+                "RADIANS"
+                if st.session_state.get("blast_az_unit", "Grados") == "Radianes"
+                else "DEGREES"
+            ),
+            inclination_source_column=incl_src_col,
+            azimuth_source_column=az_src_col,
+        )
+        try:
+            cfg.validate()
+        except GeometryConfigurationError as exc:
+            st.error(f"Configuración geométrica inválida: {exc}")
+            set_blast_processed(False)
+            status.empty()
+            progress.empty()
+            return
 
         # procesar_pozos has a dedicated ``column_map`` branch that calls
         # apply_mapping once without round-tripping through _resolve_column_aliases.
@@ -258,6 +324,8 @@ def render_upload_section() -> None:
             def _run_with_progress(
                 source_df: pd.DataFrame,
                 cmap: dict[str, str | None] | None,
+                geometry_cfg: GeometryConfiguration,
+                bench_height: float | None,
             ) -> tuple[pd.DataFrame, Any, Any, Any]:
                 try:
                     progress.progress(0.1, text="Calculando trayectorias (toe)…")
@@ -266,15 +334,8 @@ def render_upload_section() -> None:
                 result = procesar_pozos(
                     source_df,
                     cmap,
-                    incl_convention=incl_conv_ui,
-                    bench_height_m=bench_h_ui,
-                    incl_sign_convention=st.session_state.get("blast_sign_rule", "ABSOLUTE_VALUE"),
-                    sign_source_rule=st.session_state.get("blast_sign_source_rule", None),
-                    az_convention=st.session_state.get("blast_az_convention", "CLOCKWISE_FROM_NORTH"),
-                    angle_unit=(
-                        "radians" if st.session_state.get("blast_angle_unit", "") == "Radianes"
-                        else "degrees"
-                    ),
+                    geometry_configuration=geometry_cfg,
+                    bench_height_m=bench_height,
                 )
                 try:
                     progress.progress(0.9, text="Empacando resultados…")
@@ -283,10 +344,12 @@ def render_upload_section() -> None:
                 return result
 
             with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_run_with_progress, local_df, confirmed_mapping)
+                future = executor.submit(
+                    _run_with_progress, local_df, confirmed_mapping, cfg, bench_h_ui
+                )
                 try:
                     df_clean, x_lines, y_lines, z_lines = future.result()
-                except KeyError as e:
+                except (KeyError, GeometryConfigurationError) as e:
                     st.error(str(e))
                     set_blast_processed(False)
                     status.empty()
