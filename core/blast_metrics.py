@@ -569,14 +569,58 @@ def compute_influence_area_report(
     report = df.copy()
     report["area_m2"] = np.nan
     report["area_status"] = "invalid"
+    report["collar_domain_status"] = "INSIDE"
+    report["collar_inside_domain"] = True
+    report["collar_on_boundary"] = False
+    report["collar_validation_message"] = ""
 
     if n < 4 or "X" not in df.columns or "Y" not in df.columns:
+        # Sin partición Voronoi posible: las filas no son "externas" — solo se
+        # bloquea el área de influencia (NaN), no los indicadores B×S.
+        if "X" in df.columns and "Y" in df.columns:
+            non_fin = ~(
+                np.isfinite(pd.to_numeric(df["X"], errors="coerce").to_numpy(dtype=float))
+                & np.isfinite(pd.to_numeric(df["Y"], errors="coerce").to_numpy(dtype=float))
+            )
+            if non_fin.any():
+                rows = df.index[non_fin]
+                report.loc[rows, "collar_domain_status"] = "INVALID_COORDINATES"
+                report.loc[rows, "collar_inside_domain"] = False
+                report.loc[rows, "collar_validation_message"] = (
+                    "Coordenadas no finitas/no numéricas: excluido del dominio."
+                )
+                report.loc[rows, "area_m2"] = 0.0
+                report.loc[rows, "area_status"] = "invalid_coordinates"
         return report
-    coords = df[["X", "Y"]].to_numpy(dtype=float)
+    # Auditoría §3.1: coordinate parsing must tolerate non-numeric entries
+    # (they become INVALID_COORDINATES, never a crash).
+    coords = np.column_stack([
+        pd.to_numeric(df["X"], errors="coerce").to_numpy(dtype=float),
+        pd.to_numeric(df["Y"], errors="coerce").to_numpy(dtype=float),
+    ])
     finite = np.isfinite(coords).all(axis=1)
     if int(finite.sum()) < 4:
+        # Not enough valid sites for a Voronoi partition: finite rows are
+        # INSIDE-but-blocked (no partition), non-finite rows are
+        # INVALID_COORDINATES — the diagnosis survives (auditoría §3.1/§3.4).
+        fin_rows = df.index[finite]
+        nonfin_rows = df.index[~finite]
+        report.loc[fin_rows, "collar_domain_status"] = "INSIDE"
+        report.loc[fin_rows, "collar_inside_domain"] = True
+        report.loc[fin_rows, "collar_on_boundary"] = False
+        report.loc[fin_rows, "collar_validation_message"] = (
+            "Sitios válidos insuficientes para partición Voronoi (n<4): bloqueado."
+        )
+        report.loc[nonfin_rows, "collar_domain_status"] = "INVALID_COORDINATES"
+        report.loc[nonfin_rows, "collar_inside_domain"] = False
+        report.loc[nonfin_rows, "collar_validation_message"] = (
+            "Coordenadas no finitas/no numéricas: excluido del dominio."
+        )
+        report.loc[nonfin_rows, "area_m2"] = 0.0
+        report.loc[nonfin_rows, "area_status"] = "invalid_coordinates"
         return report
     coords_f = coords[finite]
+
 
     uniq, inverse = np.unique(coords_f, axis=0, return_inverse=True)
     if len(uniq) < 4:
@@ -638,9 +682,63 @@ def compute_influence_area_report(
 
     finite_idx = np.flatnonzero(finite)
     finite_labels = report.index[finite]  # actual index labels (may be non-contiguous)
+
+    # Auditoría §3.1: validate every collar against the domain BEFORE any
+    # Voronoi cell is built or shared. The exact geometric semantics of
+    # ``polygon.covers(Point)`` is used (no invented spatial tolerance):
+    # points ON the boundary or on a vertex are covered (inside);
+    # anything outside is excluded and receives zero area.
+    site_status: list[str] = []
+    site_inside: list[bool] = []
+    site_boundary: list[bool] = []
+    site_message: list[str] = []
+    if polys_for_clip is not None:
+        from shapely.geometry import Point
+        for site in range(len(uniq)):
+            x, y = uniq[site]
+            if not (np.isfinite(x) and np.isfinite(y)):
+                site_status.append("INVALID_COORDINATES")
+                site_inside.append(False)
+                site_boundary.append(False)
+                site_message.append(
+                    f"Coordenadas no finitas/no numéricas en el collar "
+                    f"({x!r}, {y!r}): excluido del dominio."
+                )
+                continue
+            pt = Point(x, y)
+            if poly.covers(pt):
+                on_b = poly.boundary.distance(pt) < 1e-9
+                site_status.append("BOUNDARY" if on_b else "INSIDE")
+                site_inside.append(True)
+                site_boundary.append(bool(on_b))
+                site_message.append("")
+            else:
+                site_status.append("OUTSIDE")
+                site_inside.append(False)
+                site_boundary.append(False)
+                site_message.append(
+                    f"Collar ({x}, {y}) fuera del dominio evaluado: excluido, "
+                    "recibe 0 m² y no participa del reparto."
+                )
+    else:
+        for _site in range(len(uniq)):
+            site_status.append("INSIDE")
+            site_inside.append(True)
+            site_boundary.append(False)
+            site_message.append("")
+
     for site in range(len(uniq)):
         mask = inverse == site
         idx = finite_labels[mask]
+        st_site = site_status[site]
+        if not site_inside[site]:
+            # Excluded collar: zero area, explicit status (never a valid
+            # duplicate_shared, never interior area).
+            report.loc[idx, "area_m2"] = 0.0
+            report.loc[idx, "area_status"] = (
+                "outside_domain" if st_site == "OUTSIDE" else "invalid_coordinates"
+            )
+            continue
         if polys_for_clip is not None and not polys_for_clip[site].is_empty:
             clipped = polys_for_clip[site].intersection(poly)
             if clipped.is_empty or clipped.area <= 0:
@@ -660,15 +758,62 @@ def compute_influence_area_report(
             else:
                 st = "voronoi_cell"
         # H-03: duplicate collars SPLIT the shared cell so the sum of
-        # assigned areas never exceeds the domain.
+        # assigned areas never exceeds the domain. The spatial validation
+        # happened BEFORE the split: an outside duplicate never becomes a
+        # valid shared cell (auditoría §3.1).
         a = a / float(counts[site])
         report.loc[idx, "area_m2"] = a
         report.loc[idx, "area_status"] = st
 
+    # Auditoría §3.1: duplicates are classified INSIDE/OUTSIDE only AFTER
+    # the spatial validation; outside duplicates keep their excluded state.
     if counts[inverse].max() > 1:
         dup = counts[inverse] > 1
         idx = finite_labels[dup]
-        report.loc[idx, "area_status"] = "duplicate_shared"
+        valid_dup = idx[report.loc[idx, "area_m2"].to_numpy() > 0]
+        if len(valid_dup):
+            report.loc[valid_dup, "area_status"] = "duplicate_shared"
+        dup_site_status = {}
+        for row_pos in np.flatnonzero(dup):
+            site = inverse[row_pos]
+            dup_site_status.setdefault(site, site_status[site])
+        for site, st in dup_site_status.items():
+            site_status[site] = (
+                "DUPLICATE_INSIDE" if site_inside[site] else "DUPLICATE_OUTSIDE"
+            )
+
+    # Auditoría §3.1: per-collar domain provenance columns.
+    site_status_arr = np.asarray(site_status)
+    site_inside_arr = np.asarray(site_inside)
+    site_boundary_arr = np.asarray(site_boundary)
+    site_message_arr = np.asarray(site_message)
+    fin_idx_arr = np.asarray(finite_idx)
+    uniq_site_of_row = inverse
+    status_col = np.full(len(df), "INSIDE", dtype=object)
+    inside_col = np.full(len(df), True, dtype=bool)
+    boundary_col = np.full(len(df), False, dtype=bool)
+    message_col = np.full(len(df), "", dtype=object)
+    for row_pos, site in enumerate(uniq_site_of_row):
+        orig_idx = df.index[row_pos]
+        if orig_idx not in report.index:
+            continue
+        status_col[row_pos] = site_status_arr[site]
+        inside_col[row_pos] = bool(site_inside_arr[site])
+        boundary_col[row_pos] = bool(site_boundary_arr[site])
+        message_col[row_pos] = site_message_arr[site]
+    # filas no finitas (excluidas del Voronoi) → INVALID_COORDINATES
+    non_finite_rows = df.index[~finite]
+    if len(non_finite_rows):
+        for orig_idx in non_finite_rows:
+            if orig_idx in report.index:
+                pos = df.index.get_loc(orig_idx)
+                status_col[pos] = "INVALID_COORDINATES"
+                inside_col[pos] = False
+                message_col[pos] = "Coordenadas no finitas/no numéricas: excluido del dominio."
+    report["collar_domain_status"] = status_col
+    report["collar_inside_domain"] = inside_col
+    report["collar_on_boundary"] = boundary_col
+    report["collar_validation_message"] = message_col
 
     if domain_area is not None:
         report["domain_area_m2"] = float(domain_area)

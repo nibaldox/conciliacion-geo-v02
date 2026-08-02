@@ -203,6 +203,7 @@ def _assign_voronoi_global(
             # Assign each hole to its malla's polygon and clip per-malla.
             areas = nan_area.copy()
             status = pd.Series("invalid", index=df.index, dtype=object)
+            rep_parts: list[pd.DataFrame] = []
             for malla_name, poly in polys.items():
                 mask = df[group_col].astype(str) == str(malla_name)
                 if not mask.any():
@@ -213,6 +214,7 @@ def _assign_voronoi_global(
                 )
                 areas.loc[mask] = rep["area_m2"]
                 status.loc[mask] = rep["area_status"]
+                rep_parts.append(rep)
             domain = union_area
             method = "per_malla_polygon"
             assigned = float(areas.sum())
@@ -222,8 +224,34 @@ def _assign_voronoi_global(
             conservation_ok = overlap_ok and abs(assigned - domain) <= domain * (
                 DEFAULTS.voronoi_conservation_tolerance_pct / 100.0
             )
-            return _voronoi_result(areas, status, domain, assigned, method, messages,
-                                   conservation_ok)
+            result = _voronoi_result(areas, status, domain, assigned, method, messages,
+                                     conservation_ok)
+            if rep_parts:
+                rep_all = pd.concat(rep_parts)
+                result["collar_domain_status"] = rep_all["collar_domain_status"]
+                result["collar_inside_domain"] = rep_all["collar_inside_domain"]
+                result["collar_on_boundary"] = rep_all["collar_on_boundary"]
+                result["collar_validation_message"] = rep_all["collar_validation_message"]
+                ext_mask = ~rep_all["collar_inside_domain"].astype(bool).to_numpy()
+                labels_all = rep_all["label_pozo"].astype(str).to_numpy() if "label_pozo" in rep_all.columns else rep_all.index.astype(str).to_numpy()
+                result["outside_domain_hole_count"] = int(ext_mask.sum())
+                result["outside_domain_hole_ids"] = "|".join(labels_all[ext_mask]) if ext_mask.any() else ""
+                result["outside_domain_assigned_area_m2"] = float(
+                    rep_all.loc[~rep_all["collar_inside_domain"].astype(bool), "area_m2"].sum()
+                )
+                result["invalid_coordinate_hole_count"] = int(
+                    (rep_all["collar_domain_status"] == "INVALID_COORDINATES").sum()
+                )
+            else:
+                result["collar_domain_status"] = pd.Series("INSIDE", index=df.index, dtype=object)
+                result["collar_inside_domain"] = pd.Series(True, index=df.index, dtype=bool)
+                result["collar_on_boundary"] = pd.Series(False, index=df.index, dtype=bool)
+                result["collar_validation_message"] = pd.Series("", index=df.index, dtype=object)
+                result["outside_domain_hole_count"] = 0
+                result["outside_domain_hole_ids"] = ""
+                result["outside_domain_assigned_area_m2"] = 0.0
+                result["invalid_coordinate_hole_count"] = 0
+            return result
         # fall through to the global path when shapely is missing
 
     # Strategy 1 (default): ONE Voronoi over the whole event, one domain.
@@ -231,13 +259,38 @@ def _assign_voronoi_global(
     method = "global_polygon" if boundary_polygon is not None else "global_bbox"
     domain = float(rep["domain_area_m2"].iloc[0]) if "domain_area_m2" in rep.columns else np.nan
     assigned = float(rep["area_m2"].sum())
+
+    # Auditoría §3.1: external/invalid collars — explicit count, ids and
+    # zero assigned area; never masked by duplicate sharing.
+    inside = rep["collar_inside_domain"].astype(bool).to_numpy() if "collar_inside_domain" in rep.columns else np.ones(len(rep), dtype=bool)
+    labels = df["label_pozo"].astype(str).to_numpy() if "label_pozo" in df.columns else df.index.astype(str).to_numpy()
+    ext_mask = ~inside
+    n_outside = int(ext_mask.sum())
+    ext_ids = labels[ext_mask]
+    ext_area = float(rep.loc[rep["collar_inside_domain"] == False, "area_m2"].sum()) if "collar_inside_domain" in rep.columns else 0.0  # noqa: E712
+    if n_outside:
+        messages.append(
+            f"pozos excluidos fuera del dominio o con coordenadas inválidas: "
+            f"{n_outside} ({', '.join(ext_ids[:10])}{'…' if n_outside > 10 else ''}); "
+            f"reciben 0 m² y no participan del reparto"
+        )
+
     if np.isnan(domain):
         messages.append("dominio no disponible (shapely ausente o sin suficientes sitios)")
-        return _voronoi_result(rep["area_m2"], rep["area_status"], np.nan, assigned,
-                               method, messages, False)
-    holes_out = int((rep["area_status"] == "invalid").sum())
-    if holes_out:
-        messages.append(f"pozos fuera del dominio o celdas inválidas: {holes_out}")
+        result = _voronoi_result(rep["area_m2"], rep["area_status"], np.nan, assigned,
+                                 method, messages, False)
+        result["collar_domain_status"] = rep["collar_domain_status"]
+        result["collar_inside_domain"] = rep["collar_inside_domain"]
+        result["collar_on_boundary"] = rep["collar_on_boundary"]
+        result["collar_validation_message"] = rep["collar_validation_message"]
+        result["outside_domain_hole_count"] = 0
+        result["outside_domain_hole_ids"] = ""
+        result["outside_domain_assigned_area_m2"] = 0.0
+        result["invalid_coordinate_hole_count"] = int(
+            (rep["collar_domain_status"] == "INVALID_COORDINATES").sum()
+            if "collar_domain_status" in rep.columns else 0
+        )
+        return result
     residual = assigned - domain
     residual_pct = residual / domain * 100.0 if domain > 0 else np.nan
     conservation_ok = abs(residual_pct) <= DEFAULTS.voronoi_conservation_tolerance_pct
@@ -247,8 +300,20 @@ def _assign_voronoi_global(
             f"{domain:.2f} m² ({residual_pct:+.2f}%) — PF por área de influencia "
             "bloqueado"
         )
-    return _voronoi_result(rep["area_m2"], rep["area_status"], domain, assigned,
-                           method, messages, conservation_ok)
+    result = _voronoi_result(rep["area_m2"], rep["area_status"], domain, assigned,
+                             method, messages, conservation_ok)
+    result["collar_domain_status"] = rep["collar_domain_status"]
+    result["collar_inside_domain"] = rep["collar_inside_domain"]
+    result["collar_on_boundary"] = rep["collar_on_boundary"]
+    result["collar_validation_message"] = rep["collar_validation_message"]
+    result["outside_domain_hole_count"] = int(n_outside)
+    result["outside_domain_hole_ids"] = "|".join(ext_ids) if n_outside else ""
+    result["outside_domain_assigned_area_m2"] = ext_area
+    result["invalid_coordinate_hole_count"] = int(
+        (rep["collar_domain_status"] == "INVALID_COORDINATES").sum()
+        if "collar_domain_status" in rep.columns else 0
+    )
+    return result
 
 
 def _voronoi_result(areas, status, domain, assigned, method, messages, ok) -> dict:
@@ -411,6 +476,16 @@ def compute_powder_factor(
     out['area_residual_m2'] = float(voronoi_result["residual_m2"])
     out['area_residual_pct'] = float(voronoi_result["residual_pct"])
     out['voronoi_conservation_ok'] = bool(voronoi_result["conservation_ok"])
+    # Auditoría §3.1: per-collar domain provenance propagated to the
+    # operational frame.
+    out['collar_domain_status'] = voronoi_result["collar_domain_status"]
+    out['collar_inside_domain'] = voronoi_result["collar_inside_domain"]
+    out['collar_on_boundary'] = voronoi_result["collar_on_boundary"]
+    out['collar_validation_message'] = voronoi_result["collar_validation_message"]
+    out['outside_domain_hole_count'] = voronoi_result["outside_domain_hole_count"]
+    out['outside_domain_hole_ids'] = voronoi_result["outside_domain_hole_ids"]
+    out['outside_domain_assigned_area_m2'] = voronoi_result["outside_domain_assigned_area_m2"]
+    out['invalid_coordinate_hole_count'] = voronoi_result["invalid_coordinate_hole_count"]
 
     out['burden_est_m'] = burden_est
     out['esp_est_m'] = esp_est
@@ -559,6 +634,13 @@ def compute_powder_factor(
         ok_mask = out["voronoi_conservation_ok"].astype(bool)
         if not ok_mask.all():
             out.loc[~ok_mask, "pf_g_per_ton_inf"] = np.nan
+
+    # Auditoría §3.1: collars outside the domain (or with invalid
+    # coordinates) never produce powder factor — zero area, NaN PF.
+    if "collar_inside_domain" in out.columns:
+        inside_mask = out["collar_inside_domain"].astype(bool)
+        if not inside_mask.all():
+            out.loc[~inside_mask, ["pf_vol_kgm3", "pf_g_per_ton", "pf_g_per_ton_net", "pf_g_per_ton_inf"]] = np.nan
 
     # Per-mass powder factor normalised by the bench height EXCLUDING sub-drill
     # ("sin pasadura"). H_net is the vertical hole extent WITHIN the bench
