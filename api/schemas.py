@@ -377,3 +377,5 @@ class BlastUploadResponse(BaseModel):
     # Auditoría §3.4: advertencias y resumen de filas en la respuesta API.
     data_warnings: str = ""
     processing_summary: Dict[str, Any] = Field(default_factory=dict)
+    # Remediación 4.6: rejected rows as an independent structure.
+    rejected_rows: List[Dict[str, Any]] = Field(default_factory=list)

@@ -317,26 +317,44 @@ def _build_upload_payload(
     n_holes = len(df_clean)
     n_rows_skipped = max(0, n_rows_input - n_holes)
 
+    # Remediación 4.5: attach warnings BEFORE creating persistent records.
+    from ui.modulo_tronadura.warnings import collect_data_warnings
+    df_clean = collect_data_warnings(df_clean, attach=True)
+    data_warnings = str(df_clean["data_warnings"].iloc[0]) if "data_warnings" in df_clean.columns else ""
+
     carga_series = _compute_carga_series(df_clean)
     descarga_series = _compute_descarga_series(df_clean)
     carga_mean = _safe_mean(carga_series)
     descarga_mean = _safe_mean(descarga_series)
     hardness_dist = _hardness_distribution(df_clean)
+    # Records built from the enriched frame (warnings included).
     records = _df_to_hole_records(df_clean)
 
-    # Auditoría §3.4: advertencias y resumen de filas en la respuesta API.
-    from ui.modulo_tronadura.warnings import collect_data_warnings
-    _df_w = collect_data_warnings(df_clean, attach=True)
-    data_warnings = str(_df_w["data_warnings"].iloc[0]) if "data_warnings" in _df_w.columns else ""
+    # Remediación 4.6: rejected rows as an independent exportable structure.
     summary = {}
+    rejected_rows = []
     if "processing_rows_received" in df_clean.columns:
+        ids_str = str(df_clean["processing_rejected_ids"].iloc[0])
+        reasons_str = str(df_clean["processing_rejected_reasons"].iloc[0])
         summary = {
             "rows_received": int(df_clean["processing_rows_received"].iloc[0]),
             "rows_accepted": int(df_clean["processing_rows_accepted"].iloc[0]),
             "rows_rejected": int(df_clean["processing_rows_rejected"].iloc[0]),
-            "rejected_ids": str(df_clean["processing_rejected_ids"].iloc[0]),
-            "rejected_reasons": str(df_clean["processing_rejected_reasons"].iloc[0]),
+            "rejected_ids": ids_str,
+            "rejected_reasons": reasons_str,
         }
+        # Build per-rejection detail from the summary (ids + reasons).
+        if ids_str:
+            ids = [i.strip() for i in ids_str.split(",") if i.strip()]
+            reasons = [r.strip() for r in reasons_str.split(" | ") if r.strip()]
+            for i, rid in enumerate(ids):
+                rejected_rows.append({
+                    "hole_id": rid,
+                    "rejection_reason": reasons[i] if i < len(reasons) else "",
+                    "error_code": "REJECTED",
+                    "affected_calculations": "toe, PF, geometría dependiente",
+                    "recommended_action": "Corrija el dato original y reprocese.",
+                })
 
     return {
         "n_holes": n_holes,
@@ -348,6 +366,7 @@ def _build_upload_payload(
         "records": records,
         "data_warnings": data_warnings,
         "processing_summary": summary,
+        "rejected_rows": rejected_rows,
     }
 
 
