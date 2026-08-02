@@ -29,6 +29,7 @@ from core.geometry_contract import (
     GeometryConfiguration,
     GeometryConfigurationError,
 )
+from core.processing_result import ProcessingResult
 
 COLS_DROP = [
     'id_rajo', 'id_malla_opit', 'numero',
@@ -396,6 +397,7 @@ def procesar_pozos(
     geometry_user_confirmed: bool | None = None,
     geometry_configuration: GeometryConfiguration | None = None,
     return_rejections: bool = False,
+    return_result: bool = False,
 ):
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
@@ -774,9 +776,164 @@ def procesar_pozos(
         df_work.loc[blocked, ["X_toe", "Y_toe", "Z_toe"]] = np.nan
     df_work["row_processing_status"] = "accepted"
     df_work["row_rejection_reason"] = ""
+
+    # Canonical ProcessingResult — born in the core, not the router. The
+    # accepted_rows/rejected_rows dicts are the authority consumed by
+    # API/UI/persistence/export. ``return_result=True`` is the v2 path;
+    # ``return_rejections`` and the positional return stay as a thin
+    # deprecated adapter for legacy callers (integración §5.7).
+    if return_result:
+        accepted_rows = _df_to_accepted_records(df_work)
+        event_warnings = _collect_structured_warnings(df_work)
+        spatial_diagnostics = _collect_spatial_diagnostics(df_work)
+        cfg_dict = (
+            geometry_configuration.to_dict()
+            if geometry_configuration is not None
+            else {
+                "geometry_configuration_version": GEOMETRY_CONFIGURATION_VERSION,
+                "geometry_user_confirmed": bool(geometry_user_confirmed),
+            }
+        )
+        result = ProcessingResult.from_rejections(
+            accepted_dataframe=df_work,
+            accepted_rows=accepted_rows,
+            rejected_rows=rejected_rows,
+            event_warnings=event_warnings,
+            spatial_diagnostics=spatial_diagnostics,
+            geometry_configuration=cfg_dict,
+            rows_received=len(df),
+            scatter_lines=_build_scatter_lines(df_work),
+        )
+        return result
     if return_rejections:
         return df_work, *_build_scatter_lines(df_work), rejected_rows
     return df_work, *_build_scatter_lines(df_work)
+
+
+def _df_to_accepted_records(df_work: pd.DataFrame) -> list[dict]:
+    """Convert accepted rows to plain JSON-serializable dicts.
+
+    This is the canonical accepted_rows list born in the core. Numpy
+    scalars are coerced to native Python types; non-finite floats
+    become None so the records always serialize cleanly.
+
+    Integración §5.7: carga/descarga are computed HERE so the canonical
+    list carries every derived field consumed by the API/UI/export.
+    """
+    if df_work is None or df_work.empty:
+        return []
+    import math
+    from core.column_utils import KILOS_CANDIDATES, first_present_column
+
+    _LENGTH_CANDIDATES_LOCAL = ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
+    _TACO_CANDIDATES_LOCAL = ("Taco_m", "Taco", "Stemming")
+
+    def _carga_series(df: pd.DataFrame) -> "pd.Series":
+        if "kg_per_meter" in df.columns:
+            return pd.to_numeric(df["kg_per_meter"], errors="coerce")
+        kg_col = first_present_column(df, KILOS_CANDIDATES)
+        len_col = first_present_column(df, _LENGTH_CANDIDATES_LOCAL)
+        if kg_col is None or len_col is None:
+            import pandas as _pd
+            return _pd.Series([float("nan")] * len(df), index=df.index, dtype=float)
+        kilos = pd.to_numeric(df[kg_col], errors="coerce")
+        length = pd.to_numeric(df[len_col], errors="coerce")
+        import pandas as _pd
+        out = _pd.Series([float("nan")] * len(df), index=df.index, dtype=float)
+        valid = kilos.notna() & length.notna() & (length > 0)
+        out.loc[valid] = kilos.loc[valid] / length.loc[valid]
+        return out
+
+    def _descarga_series(df: pd.DataFrame) -> "pd.Series":
+        if "altura_carga_m" in df.columns:
+            return pd.to_numeric(df["altura_carga_m"], errors="coerce")
+        len_col = first_present_column(df, _LENGTH_CANDIDATES_LOCAL)
+        taco_col = first_present_column(df, _TACO_CANDIDATES_LOCAL)
+        if len_col is None or taco_col is None:
+            import pandas as _pd
+            return _pd.Series([float("nan")] * len(df), index=df.index, dtype=float)
+        length = pd.to_numeric(df[len_col], errors="coerce")
+        taco = pd.to_numeric(df[taco_col], errors="coerce")
+        return (length - taco).clip(lower=0.0)
+
+    carga_series = _carga_series(df_work)
+    descarga_series = _descarga_series(df_work)
+
+    out: list[dict] = []
+    for idx, row in df_work.iterrows():
+        record: dict = {}
+        for col in df_work.columns:
+            value = row[col]
+            if isinstance(value, (np.integer,)):
+                value = int(value)
+            elif isinstance(value, (np.floating,)):
+                f = float(value)
+                value = f if math.isfinite(f) else None
+            elif isinstance(value, float):
+                value = value if math.isfinite(value) else None
+            record[col] = value
+        # Derived metrics required by BlastHoleSummary downstream.
+        carga_val = carga_series.loc[idx] if idx in carga_series.index else float("nan")
+        descarga_val = descarga_series.loc[idx] if idx in descarga_series.index else float("nan")
+        record["carga"] = float(carga_val) if pd.notna(carga_val) else 0.0
+        record["descarga"] = float(descarga_val) if pd.notna(descarga_val) else 0.0
+        record["source_row_index"] = int(idx) if isinstance(idx, (np.integer, int)) else str(idx)
+        record["row_processing_status"] = "accepted"
+        out.append(record)
+    return out
+
+
+def _collect_structured_warnings(df_work: pd.DataFrame) -> list[dict]:
+    """Lift structured warnings from the accepted frame.
+
+    Previously the pipeline collapsed warnings into a single string in
+    ``data_warnings`` (integración §4.9/§5.9). This helper reverses the
+    collapse: it parses the string back into individual structured
+    warning records when possible. A future refactor should make the
+    upstream producer emit structured records directly.
+    """
+    if df_work is None or df_work.empty or "data_warnings" not in df_work.columns:
+        return []
+    raw = df_work["data_warnings"].iloc[0]
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return []
+    text = str(raw).strip()
+    if not text:
+        return []
+    # The legacy producer emits a comma-separated list of short messages.
+    # Split by the documented separator and surface each one with its
+    # code + context so the downstream layers (export/UI) can show it.
+    parts = [p.strip() for p in text.split("|") if p.strip()]
+    return [
+        {
+            "warning_code": "DATA_WARNING",
+            "message": part,
+            "source": "core.blast_metrics.collect_data_warnings",
+            "context": {"raw": part},
+        }
+        for part in parts
+    ]
+
+
+def _collect_spatial_diagnostics(df_work: pd.DataFrame) -> dict:
+    """Surface the actual spatial diagnostics columns from the accepted frame."""
+    if df_work is None or df_work.empty:
+        return {}
+    diag: dict = {}
+    for key in (
+        "area_m2",
+        "area_status",
+        "collar_domain_status",
+        "domain_area_m2",
+        "clip_warning",
+        "domain_error_code",
+        "domain_validation_reason",
+    ):
+        if key in df_work.columns:
+            series = df_work[key].dropna()
+            if not series.empty:
+                diag[key] = series.iloc[0]
+    return diag
 
 
 def proyectar_pozos_en_seccion(

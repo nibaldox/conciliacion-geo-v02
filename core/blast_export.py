@@ -58,6 +58,38 @@ def _styled_header(ws, headers: List[str]) -> None:
         ws.column_dimensions[get_column_letter(col_idx)].width = min(max_len + 2, 60)
 
 
+def _normalize_cell(value: Any) -> Any:
+    """Normalize a single cell value for openpyxl.
+
+    Integración §5.10 — openpyxl raises ``ValueError: Cannot convert
+    dict to Excel`` when it receives a container (dict/list/tuple).
+    We serialize any non-scalar through ``json.dumps`` with stable
+    settings, so nested diagnostics round-trip safely and read back as
+    JSON strings the operator can parse later. ``None`` stays empty.
+    """
+    if value is None:
+        return None
+    # Native scalars openpyxl accepts directly.
+    if isinstance(value, (bool, int, float, str)):
+        # NaN/inf floats are not JSON-compliant; surface as None.
+        if isinstance(value, float):
+            try:
+                import math
+                if not math.isfinite(value):
+                    return None
+            except (TypeError, ValueError):
+                return None
+        return value
+    # Dates / datetimes are Excel-compatible.
+    if isinstance(value, (datetime,)):
+        return value
+    # Containers and any other type → stable JSON.
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return str(value)
+
+
 def _write_df_sheet(wb: Workbook, name: str, df: pd.DataFrame) -> None:
     ws = wb.create_sheet(title=name[:31])  # Excel sheet-name cap = 31 chars
     if df.empty:
@@ -77,11 +109,7 @@ def _write_df_sheet(wb: Workbook, name: str, df: pd.DataFrame) -> None:
             # Make every value JSON-safe (numpy/pandas scalars → native).
             if isinstance(value, (pd.Timestamp, datetime)):
                 value = value.isoformat()
-            try:
-                json.dumps(value)
-            except (TypeError, ValueError):
-                value = str(value)
-            ws.cell(row=row_idx, column=col_idx, value=value)
+            ws.cell(row=row_idx, column=col_idx, value=_normalize_cell(value))
     _styled_header(ws, headers)
 
 
@@ -93,15 +121,7 @@ def _write_kv_sheet(wb: Workbook, name: str, kv: Dict[str, Any]) -> None:
     ws.cell(row=1, column=2).fill = HEADER_FILL
     for idx, (key, value) in enumerate(kv.items(), start=2):
         ws.cell(row=idx, column=1, value=str(key))
-        # Serialize containers as readable JSON.
-        if isinstance(value, (dict, list, tuple)):
-            value = json.dumps(value, ensure_ascii=False, default=str, indent=2)
-        else:
-            try:
-                json.dumps(value)
-            except (TypeError, ValueError):
-                value = str(value)
-        ws.cell(row=idx, column=2, value=value)
+        ws.cell(row=idx, column=2, value=_normalize_cell(value))
     ws.column_dimensions["A"].width = 36
     ws.column_dimensions["B"].width = 80
 

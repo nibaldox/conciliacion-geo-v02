@@ -274,19 +274,20 @@ def _build_upload_payload(
 
     n_rows_input = len(df)
 
-    # Run the processor with structured rejections. ``KeyError`` (missing
-    # required source columns) and ``GeometryConfigurationError`` are
-    # surfaced as structured blocking errors in the payload body, not as
-    # opaque HTTP 400s.
-    df_clean: pd.DataFrame
-    rejected_rows: list[dict] = []
+    # Integración §5.7: invoke the processor with return_result=True so
+    # the canonical ProcessingResult (accepted_rows + rejected_rows +
+    # warnings + diagnostics) is born in the core. The router no longer
+    # reconstructs accepted_rows from the DataFrame — it consumes the
+    # core's structured output directly.
+    from core.processing_result import ProcessingResult
     blocking_errors: list[dict] = []
+    result: ProcessingResult
     try:
-        df_clean, _x_lines, _y_lines, _z_lines, rejected_rows = procesar_pozos(
+        result = procesar_pozos(
             df,
             geometry_configuration=config,
             bench_height_m=bench_height_m,
-            return_rejections=True,
+            return_result=True,
         )
     except KeyError as exc:
         blocking_errors.append({
@@ -294,7 +295,13 @@ def _build_upload_payload(
             "message": f"Columna requerida ausente en el CSV: {exc}",
             "recommended_action": "Mapee o renombre las columnas fuente y reprocese.",
         })
-        df_clean = pd.DataFrame()
+        result = ProcessingResult(
+            geometry_configuration=config.to_dict(),
+            accepted_rows=[],
+            rejected_rows=[],
+            rows_received=n_rows_input,
+        )
+        result.blocking_errors = list(blocking_errors)
     except GeometryConfigurationError as exc:
         blocking_errors.append({
             "error_code": exc.error_code,
@@ -302,58 +309,60 @@ def _build_upload_payload(
             "details": exc.details,
             "recommended_action": "Confirme y complete la configuración geométrica.",
         })
-        df_clean = pd.DataFrame()
+        result = ProcessingResult(
+            geometry_configuration=config.to_dict(),
+            accepted_rows=[],
+            rejected_rows=[],
+            rows_received=n_rows_input,
+        )
+        result.blocking_errors = list(blocking_errors)
 
     # Enrichment runs over the accepted frame only. Failures here are
-    # non-fatal — the rejection list is preserved either way.
-    try:
-        df_clean = enrich_blast_dataframe(df_clean)
-    except Exception as exc:
-        logger.warning("Blast enrichment failed: %s", exc)
-
-    # Remediación 4.5: warnings attached BEFORE building persistent records.
-    # INTEGRACIÓN 3.6: ``accepted_rows`` is the canonical structured list
-    # produced directly from the processor output. ``records`` is kept as
-    # a deprecated alias for backward compatibility but points at the
-    # SAME list (no divergent sources).
-    if not df_clean.empty:
-        from ui.modulo_tronadura.warnings import collect_data_warnings
-        df_clean = collect_data_warnings(df_clean, attach=True)
-        data_warnings = (
-            str(df_clean["data_warnings"].iloc[0]) if "data_warnings" in df_clean.columns else ""
+    # non-fatal — the canonical result is preserved either way. The
+    # enriched data is merged BACK into result.accepted_rows so the
+    # canonical list reflects the additional carga/descarga columns.
+    df_clean = result.accepted_dataframe
+    if df_clean is not None and not df_clean.empty:
+        try:
+            df_clean = enrich_blast_dataframe(df_clean)
+        except Exception as exc:
+            logger.warning("Blast enrichment failed: %s", exc)
+        try:
+            from ui.modulo_tronadura.warnings import collect_data_warnings
+            df_clean = collect_data_warnings(df_clean, attach=True)
+        except Exception as exc:
+            logger.warning("Blast warnings attachment failed: %s", exc)
+        # Re-build accepted_rows with the enriched columns and refresh
+        # structured warnings (integración §5.9 — warnings survive as
+        # structured objects, never as a collapsed string).
+        from core.calculo_tronadura import (
+            _df_to_accepted_records,
+            _collect_structured_warnings,
         )
-        accepted_rows = _df_to_hole_records(df_clean)
+        result.accepted_rows = _df_to_accepted_records(df_clean)
+        result.event_warnings = _collect_structured_warnings(df_clean)
         carga_mean = _safe_mean(_compute_carga_series(df_clean))
         descarga_mean = _safe_mean(_compute_descarga_series(df_clean))
         hardness_dist = _hardness_distribution(df_clean)
+        data_warnings_text = (
+            str(df_clean["data_warnings"].iloc[0]) if "data_warnings" in df_clean.columns else ""
+        )
     else:
-        data_warnings = ""
-        accepted_rows = []
         carga_mean = 0.0
         descarga_mean = 0.0
         hardness_dist = {}
+        data_warnings_text = ""
 
-    # ``records`` is a deprecated alias for ``accepted_rows``. Both names
-    # reference the SAME list so consumers can migrate without diverging.
-    records = accepted_rows
+    accepted_rows = result.accepted_rows
+    rejected_rows = result.rejected_rows
+    records = accepted_rows  # deprecated alias of the SAME list
     n_holes = len(accepted_rows)
-    n_rows_skipped = len(rejected_rows) + (n_rows_input - n_holes - len(rejected_rows))
+    n_rows_skipped = result.rejected_source_rows
 
-    summary = {
-        "rows_received": n_rows_input,
-        "rows_accepted": n_holes,
-        "rows_rejected": len(rejected_rows),
-        "blocking_errors": blocking_errors if blocking_errors else (
-            [] if n_holes > 0 else [
-                {
-                    "error_code": "NO_ACCEPTED_ROWS",
-                    "message": "Ninguna fila pasó la validación geométrica.",
-                    "recommended_action": "Corrija los datos de origen o la configuración y reprocese.",
-                }
-            ]
-        ),
-        "geometry_configuration": config.to_dict(),
-    }
+    summary = result.processing_summary()
+    summary["geometry_configuration"] = config.to_dict()
+    summary["blocking_errors"] = result.blocking_errors
+
 
     return {
         "n_holes": n_holes,
@@ -364,12 +373,12 @@ def _build_upload_payload(
         "hardness_distribution": hardness_dist,
         "accepted_rows": accepted_rows,
         "records": records,  # deprecated alias of accepted_rows
-        "data_warnings": data_warnings,
+        "data_warnings": data_warnings_text,
         "processing_summary": summary,
         "rejected_rows": rejected_rows,
-        "event_warnings": [],
-        "blocking_errors": summary["blocking_errors"],
-        "spatial_diagnostics": {},
+        "event_warnings": result.event_warnings,
+        "blocking_errors": result.blocking_errors,
+        "spatial_diagnostics": result.spatial_diagnostics,
     }
 
 
@@ -406,11 +415,34 @@ async def upload_blast_csv(
     sign_source_rule: Optional[str] = Form(
         None, description="Regla explícita para SOURCE_DEFINED (obligatoria en ese caso)"
     ),
-    angle_unit: Optional[str] = Form(
-        None, description="OBLIGATORIO: degrees | radians (sin default)"
+    inclination_unit: Optional[str] = Form(
+        None,
+        description="OBLIGATORIO v2: degrees | radians — unidad INDEPENDIENTE de inclinación",
     ),
-    incl_source_column: str = Form("", description="Columna fuente de inclinación (opcional)"),
-    az_source_column: str = Form("", description="Columna fuente de azimut (opcional)"),
+    azimuth_unit: Optional[str] = Form(
+        None,
+        description="OBLIGATORIO v2: degrees | radians — unidad INDEPENDIENTE de azimut",
+    ),
+    angle_unit: Optional[str] = Form(
+        None,
+        description="LEGACY: unidad compartida. Si se envía junto con inclination_unit/"
+        "azimuth_unit, los campos v2 tienen prioridad. Nunca habilita geometría por sí solo.",
+    ),
+    inclination_source_column: str = Form(
+        "",
+        description="OBLIGATORIO v2: columna fuente de inclinación (nombre exacto del CSV)",
+    ),
+    azimuth_source_column: str = Form(
+        "",
+        description="OBLIGATORIO v2: columna fuente de azimut (nombre exacto del CSV)",
+    ),
+    # ── Alias legacy (deprecados) — aceptados por compatibilidad ──
+    incl_source_column: Optional[str] = Form(
+        None, description="LEGACY: alias de inclination_source_column"
+    ),
+    az_source_column: Optional[str] = Form(
+        None, description="LEGACY: alias de azimuth_source_column"
+    ),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
 
@@ -427,16 +459,29 @@ async def upload_blast_csv(
         raise HTTPException(422, "session_id is required")
 
     try:
+        # Resolución de aliases legacy: inclination_source_column y
+        # azimuth_source_column son los nombres v2 canónicos; los alias
+        # incl_source_column / az_source_column se aceptan como fallback
+        # documentado pero NUNCA sobrescriben a los v2.
+        final_incl_col = inclination_source_column or (incl_source_column or "")
+        final_az_col = azimuth_source_column or (az_source_column or "")
+        # Unidades v2 independientes; angle_unit es legacy y sólo aplica
+        # cuando ambos campos v2 están ausentes.
+        final_incl_unit = inclination_unit
+        final_az_unit = azimuth_unit
+        if inclination_unit is None and azimuth_unit is None and angle_unit is not None:
+            final_incl_unit = angle_unit
+            final_az_unit = angle_unit
         config = _build_geometry_configuration(
             geometry_user_confirmed=geometry_user_confirmed,
             incl_convention=incl_convention,
             incl_sign_convention=incl_sign_convention,
             sign_source_rule=sign_source_rule,
-            incl_unit=angle_unit,
+            incl_unit=final_incl_unit,
             az_convention=az_convention,
-            az_unit=angle_unit,
-            incl_source_column=incl_source_column,
-            az_source_column=az_source_column,
+            az_unit=final_az_unit,
+            incl_source_column=final_incl_col,
+            az_source_column=final_az_col,
         )
         config.validate()
     except GeometryConfigurationError as exc:
