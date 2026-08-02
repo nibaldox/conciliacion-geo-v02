@@ -246,7 +246,22 @@
     "hardness_soft": "Soft",
     "hardness_medium": "Medium",
     "hardness_hard": "Hard",
-    "hardness_unknown": "Unclassified"
+    "hardness_unknown": "Unclassified",
+    "geometry_contract": "Geometry contract (mandatory)",
+    "incl_source_col": "Inclination source column",
+    "az_source_col": "Azimuth source column",
+    "incl_convention": "Inclination convention",
+    "incl_sign": "Sign policy",
+    "source_rule": "Rule (required for SOURCE_DEFINED)",
+    "incl_unit": "Inclination unit",
+    "az_unit": "Azimuth unit",
+    "az_convention": "Azimuth convention",
+    "bench_height": "Bench height (m)",
+    "confirm_geometry": "I have reviewed and confirm the geometry configuration (enables computation).",
+    "units_mismatch": "Inclination and azimuth units differ. The current API Form requires them to match; use the common unit.",
+    "contract_required": "Complete and confirm the geometry contract before uploading the CSV.",
+    "blocking_errors": "Blocking errors:",
+    "rejected_rows": "Rejected rows:"
   },
   "section_list": {
     "loading": "Loading sections...",

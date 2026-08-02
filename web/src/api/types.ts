@@ -342,6 +342,54 @@ export interface BlastDamageModelResponse {
 
 // Blast-hole upload summary
 
+/**
+ * Versioned geometric configuration contract — single source of truth.
+ * Mirrors core.geometry_contract.GeometryConfiguration (v2.0).
+ * INTEGRACIÓN §3.1/4.1 — UI, API and backend MUST serialize the same object.
+ */
+export const GEOMETRY_CONFIGURATION_VERSION = '2.0';
+
+export interface GeometryConfiguration {
+  geometry_configuration_version: string;
+  geometry_user_confirmed: boolean | null;
+  inclination_source_column: string;
+  inclination_convention: 'FROM_VERTICAL' | 'DIP_FROM_HORIZONTAL' | null;
+  inclination_sign_convention:
+    | 'ABSOLUTE_VALUE'
+    | 'NEGATIVE_IS_DOWNWARD_DIP'
+    | 'SOURCE_DEFINED'
+    | null;
+  inclination_unit: 'DEGREES' | 'RADIANS' | null;
+  inclination_source_rule: string;
+  azimuth_source_column: string;
+  azimuth_convention:
+    | 'CLOCKWISE_FROM_NORTH'
+    | 'COUNTERCLOCKWISE_FROM_NORTH'
+    | 'CLOCKWISE_FROM_EAST'
+    | 'COUNTERCLOCKWISE_FROM_EAST'
+    | null;
+  azimuth_unit: 'DEGREES' | 'RADIANS' | null;
+}
+
+export interface RejectedRow {
+  hole_id: string;
+  source_row_index: number;
+  source_column: string;
+  original_value: unknown;
+  error_code: string;
+  rejection_reason: string;
+  affected_calculations: string;
+  recommended_action: string;
+  row_processing_status: 'rejected';
+}
+
+export interface BlockingError {
+  error_code: string;
+  message: string;
+  recommended_action?: string;
+  details?: Record<string, unknown>;
+}
+
 export interface BlastUploadResponse {
   session_id: string;
   n_holes: number;
@@ -350,6 +398,15 @@ export interface BlastUploadResponse {
   carga_mean: number | null;
   descarga_mean: number | null;
   hardness_distribution: Record<string, number>;
+  // Structured processing output (integración §3.6).
+  data_warnings: string;
+  processing_summary: Record<string, unknown>;
+  accepted_rows: Record<string, unknown>[];
+  rejected_rows: RejectedRow[];
+  event_warnings: Record<string, unknown>[];
+  blocking_errors: BlockingError[];
+  geometry_configuration: GeometryConfiguration;
+  spatial_diagnostics: Record<string, unknown>;
 }
 
 export interface BlastHoleSummary {
