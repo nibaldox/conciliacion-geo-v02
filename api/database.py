@@ -458,9 +458,17 @@ def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
     blast-correlation and profile endpoints) and a small upload summary under
     ``blast_upload_meta``. Both writes are merged into the existing settings
     dict so other settings blocks are preserved.
+
+    Remediación 3.2/4.2: also persists ``rejected_rows`` and
+    ``processing_summary`` so the structured diagnosis survives reads
+    after the upload response is gone.
     """
     settings = get_settings(session_id)
     settings["blast_holes"] = payload.get("holes", [])
+    settings["rejected_rows"] = payload.get("rejected_rows", [])
+    settings["processing_summary"] = payload.get("processing_summary", {})
+    settings["data_warnings"] = payload.get("data_warnings", "")
+    settings["geometry_configuration"] = payload.get("geometry_configuration", {})
     settings["blast_upload_meta"] = {
         "n_holes": payload.get("n_holes", 0),
         "n_rows_loaded": payload.get("n_rows_loaded", 0),

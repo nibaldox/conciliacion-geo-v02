@@ -23,18 +23,19 @@ import api.schemas as schemas
 from core.blast_metrics import enrich_blast_dataframe
 from core.calculo_tronadura import procesar_pozos
 from core.column_utils import KILOS_CANDIDATES, first_present_column
+from core.geometry_contract import (
+    GeometryConfiguration,
+    GeometryConfigurationError,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _run_in_executor(func, *args):
-    """Schedule a CPU/IO-bound callable on the default executor.
-
-    Keeps handlers ``async def`` while still letting pandas / trimesh /
-    file-IO work run off the event-loop thread.
-    """
+    """Schedule a CPU/IO-bound callable on the default executor."""
     loop = asyncio.get_event_loop()
     return loop.run_in_executor(None, func, *args)
+
 
 router = APIRouter(prefix="/blast", tags=["blast"])
 
@@ -43,11 +44,7 @@ _TACO_CANDIDATES = ("Taco_m", "Taco", "Stemming")
 
 
 def _read_uploaded_csv(file: UploadFile) -> pd.DataFrame:
-    """Read an uploaded CSV file into a DataFrame.
-
-    Raises :class:`HTTPException` (400) when the file cannot be parsed or is
-    empty.
-    """
+    """Read an uploaded CSV file into a DataFrame (HTTP 400 on parse error)."""
     try:
         content = file.file.read()
     except Exception as exc:
@@ -67,73 +64,26 @@ def _read_uploaded_csv(file: UploadFile) -> pd.DataFrame:
     return df
 
 
-def _process_blast_dataframe(
-    df: pd.DataFrame,
-    incl_convention: Optional[str] = None,
-    bench_height_m: Optional[float] = None,
-    az_convention: str = "CLOCKWISE_FROM_NORTH",
-    incl_sign_convention: str = "ABSOLUTE_VALUE",
-    sign_source_rule: Optional[str] = None,
-) -> pd.DataFrame:
-    """Run the canonical blast-hole processing pipeline.
-
-    Applies :func:`core.calculo_tronadura.procesar_pozos` to resolve collar/toe
-    coordinates and then :func:`core.blast_metrics.enrich_blast_dataframe` for
-    charge-derived metrics.
-
-    Cierre final §2.2: the inclination convention is mandatory — the API
-    rejects requests that do not declare it (no implicit geometry).
-
-    Raises :class:`HTTPException` (400) on processing failure.
-    """
-    try:
-        df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
-            df, incl_convention=incl_convention, bench_height_m=bench_height_m,
-            az_convention=az_convention, incl_sign_convention=incl_sign_convention,
-            sign_source_rule=sign_source_rule, angle_unit=angle_unit,
-            geometry_user_confirmed=True,  # API: the request itself is the confirmation
-        )
-    except KeyError as exc:
-        raise HTTPException(400, f"Missing required blast-hole column: {exc}")
-    except Exception as exc:
-        raise HTTPException(400, f"Failed to process blast holes: {exc}")
-
-    try:
-        df_clean = enrich_blast_dataframe(df_clean)
-    except Exception as exc:
-        logger.warning("Blast enrichment failed: %s", exc)
-
-    if df_clean is None or df_clean.empty:
-        raise HTTPException(400, "No valid blast holes found in CSV")
-
-    return df_clean
-
-
 def _resolve_carga_column(df: pd.DataFrame) -> Optional[str]:
-    """Return the column that holds kg of explosive per metre, if any."""
     if "kg_per_meter" in df.columns:
         return "kg_per_meter"
     return None
 
 
 def _resolve_descarga_column(df: pd.DataFrame) -> Optional[str]:
-    """Return the column that holds charge column length, if any."""
     if "altura_carga_m" in df.columns:
         return "altura_carga_m"
     return None
 
 
 def _compute_carga_series(df: pd.DataFrame) -> pd.Series:
-    """Compute kg/m per hole, returning a Series of floats (NaN when unknown)."""
     col = _resolve_carga_column(df)
     if col is not None:
         return pd.to_numeric(df[col], errors="coerce")
-
     kg_col = first_present_column(df, KILOS_CANDIDATES)
     len_col = first_present_column(df, _LENGTH_CANDIDATES)
     if kg_col is None or len_col is None:
         return pd.Series([np.nan] * len(df), index=df.index, dtype=float)
-
     kilos = pd.to_numeric(df[kg_col], errors="coerce")
     length = pd.to_numeric(df[len_col], errors="coerce")
     out = pd.Series([np.nan] * len(df), index=df.index, dtype=float)
@@ -143,16 +93,13 @@ def _compute_carga_series(df: pd.DataFrame) -> pd.Series:
 
 
 def _compute_descarga_series(df: pd.DataFrame) -> pd.Series:
-    """Compute charge column length per hole, returning NaN when unknown."""
     col = _resolve_descarga_column(df)
     if col is not None:
         return pd.to_numeric(df[col], errors="coerce")
-
     len_col = first_present_column(df, _LENGTH_CANDIDATES)
     taco_col = first_present_column(df, _TACO_CANDIDATES)
     if len_col is None or taco_col is None:
         return pd.Series([np.nan] * len(df), index=df.index, dtype=float)
-
     length = pd.to_numeric(df[len_col], errors="coerce")
     taco = pd.to_numeric(df[taco_col], errors="coerce")
     out = length - taco
@@ -160,14 +107,12 @@ def _compute_descarga_series(df: pd.DataFrame) -> pd.Series:
 
 
 def _safe_mean(series: pd.Series) -> float:
-    """Return the finite mean of ``series`` or ``0.0``."""
     cleaned = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan)
     value = float(cleaned.mean()) if not cleaned.empty else 0.0
     return value if math.isfinite(value) else 0.0
 
 
 def _hardness_distribution(df: pd.DataFrame) -> Dict[str, int]:
-    """Count hardness categories from the ``dureza`` column."""
     distribution: Dict[str, int] = {}
     if "dureza" not in df.columns:
         return distribution
@@ -177,7 +122,6 @@ def _hardness_distribution(df: pd.DataFrame) -> Dict[str, int]:
 
 
 def _hole_id_for_row(row: pd.Series, index: int, df: pd.DataFrame) -> str:
-    """Extract or synthesise a hole identifier for a row."""
     for candidate in ("pozo", "hole_id", "id_pozo", "Hole_ID"):
         if candidate in df.columns:
             value = row.get(candidate)
@@ -187,12 +131,7 @@ def _hole_id_for_row(row: pd.Series, index: int, df: pd.DataFrame) -> str:
 
 
 def _df_to_hole_records(df: pd.DataFrame) -> List[Dict[str, object]]:
-    """Convert a processed blast DataFrame to plain dicts for persistence.
-
-    Records retain the uppercase column names produced by ``procesar_pozos``
-    (``X``, ``Y``, ``Z_collar`` …) so existing endpoints that read from the
-    ``blast_holes`` settings key continue to work.
-    """
+    """Convert a processed blast DataFrame to plain dicts for persistence."""
     carga_series = _compute_carga_series(df)
     descarga_series = _compute_descarga_series(df)
 
@@ -214,7 +153,6 @@ def _df_to_hole_records(df: pd.DataFrame) -> List[Dict[str, object]]:
 
 
 def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
-    """Map a persisted record to the public ``BlastHoleSummary`` schema."""
     def _float_or_zero(key: str) -> float:
         value = record.get(key)
         if value is None:
@@ -234,50 +172,92 @@ def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
     hardness = _str_or_none("dureza")
     bench = _str_or_none("Banco_Original")
 
-    x = _float_or_zero("X")
-    y = _float_or_zero("Y")
-    z = _float_or_zero("Z_collar")
-    carga = _float_or_zero("carga")
-    descarga = _float_or_zero("descarga")
-    length = _float_or_zero("Len")
-    inclination = _float_or_zero("Incl")
-    azimuth = _float_or_zero("Az")
-
     hole_id = _str_or_none("hole_id") or str(int(record.get("index", 0)))
 
     return schemas.BlastHoleSummary(
         hole_id=hole_id,
-        x=x,
-        y=y,
-        z=z,
-        carga=carga,
-        descarga=descarga,
+        x=_float_or_zero("X"),
+        y=_float_or_zero("Y"),
+        z=_float_or_zero("Z_collar"),
+        carga=_float_or_zero("carga"),
+        descarga=_float_or_zero("descarga"),
         hardness=hardness,
         bench=bench,
-        length=length,
-        inclination=inclination,
-        azimuth=azimuth,
+        length=_float_or_zero("Len"),
+        inclination=_float_or_zero("Incl"),
+        azimuth=_float_or_zero("Az"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Geometric configuration builder (remediación 4.1 — single source of truth)
+# ---------------------------------------------------------------------------
+
+
+def _build_geometry_configuration(
+    *,
+    geometry_user_confirmed: Optional[bool],
+    incl_convention: Optional[str],
+    incl_sign_convention: Optional[str],
+    sign_source_rule: Optional[str],
+    incl_unit: Optional[str],
+    az_convention: Optional[str],
+    az_unit: Optional[str],
+    incl_source_column: str = "",
+    az_source_column: str = "",
+) -> GeometryConfiguration:
+    """Translate the API Form fields into a validated GeometryConfiguration.
+
+    No defaults are invented: any missing required field propagates as
+    ``None``/empty and the contract's ``validate()`` raises a structured
+    error. The API never calls ``procesar_pozos`` without this object.
+
+    Canonical values (spec §4.1):
+      * inclination_convention: ``FROM_VERTICAL`` | ``DIP_FROM_HORIZONTAL``
+        (accepted case-insensitively; normalized to uppercase by the contract)
+      * inclination_sign_convention: ``ABSOLUTE_VALUE`` |
+        ``NEGATIVE_IS_DOWNWARD_DIP`` | ``SOURCE_DEFINED``
+      * inclination_unit / azimuth_unit: ``DEGREES`` | ``RADIANS``
+      * azimuth_convention: ``CLOCKWISE_FROM_NORTH`` |
+        ``COUNTERCLOCKWISE_FROM_NORTH`` | ``CLOCKWISE_FROM_EAST`` |
+        ``COUNTERCLOCKWISE_FROM_EAST``
+    """
+    def _upper(v: Optional[str]) -> Optional[str]:
+        return v.upper() if v else None
+
+    return GeometryConfiguration(
+        geometry_user_confirmed=geometry_user_confirmed,
+        inclination_source_column=incl_source_column,
+        inclination_convention=_upper(incl_convention),
+        inclination_sign_convention=_upper(incl_sign_convention),
+        inclination_unit=_upper(incl_unit),
+        inclination_source_rule=sign_source_rule or "",
+        azimuth_source_column=az_source_column,
+        azimuth_convention=_upper(az_convention),
+        azimuth_unit=_upper(az_unit),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Structured upload result (remediación 4.2 — direct processor output)
+# ---------------------------------------------------------------------------
 
 
 def _build_upload_payload(
     file_bytes: bytes,
-    incl_convention: Optional[str] = None,
-    bench_height_m: Optional[float] = None,
-    az_convention: str = "CLOCKWISE_FROM_NORTH",
-    incl_sign_convention: str = "ABSOLUTE_VALUE",
-    sign_source_rule: Optional[str] = None,
-    angle_unit: str = "degrees",
+    config: GeometryConfiguration,
+    bench_height_m: Optional[float],
 ) -> dict:
     """Run the full blast-upload pipeline off the event-loop thread.
 
-    Returns a plain dict with everything the async handler still needs:
+    Returns the STRUCTURED processor result directly — never reconstructed
+    from scalar summary strings. ``rejected_rows`` is the authoritative
+    per-row rejection list coming from ``procesar_pozos``.
 
-    - ``df_clean``: processed DataFrame (used to derive mean / distribution).
-    - ``n_rows_input``: length of the raw parsed CSV.
-    - ``records``: hole dicts ready for ``db.save_blast_upload``.
-    - ``carga_mean``, ``descarga_mean``: scalar metrics.
-    - ``hardness_distribution``: ``Dict[str, int]``.
+    When zero rows are accepted the payload is still fully populated with
+    the structured rejections and a blocking summary; the caller decides
+    whether to map that to a 4xx status code, but the body never loses
+    the rejection detail (remediación 3.2).
     """
     if isinstance(file_bytes, bytes):
         content = file_bytes.decode("utf-8", errors="replace")
@@ -294,67 +274,79 @@ def _build_upload_payload(
 
     n_rows_input = len(df)
 
+    # Run the processor with structured rejections. ``KeyError`` (missing
+    # required source columns) and ``GeometryConfigurationError`` are
+    # surfaced as structured blocking errors in the payload body, not as
+    # opaque HTTP 400s.
+    df_clean: pd.DataFrame
+    rejected_rows: list[dict] = []
+    blocking_errors: list[dict] = []
     try:
-        df_clean, _x_lines, _y_lines, _z_lines = procesar_pozos(
-            df, incl_convention=incl_convention, bench_height_m=bench_height_m,
-            az_convention=az_convention, incl_sign_convention=incl_sign_convention,
-            sign_source_rule=sign_source_rule, angle_unit=angle_unit,
-            geometry_user_confirmed=True,  # API: the request itself is the confirmation
+        df_clean, _x_lines, _y_lines, _z_lines, rejected_rows = procesar_pozos(
+            df,
+            geometry_configuration=config,
+            bench_height_m=bench_height_m,
+            return_rejections=True,
         )
     except KeyError as exc:
-        raise HTTPException(400, f"Missing required blast-hole column: {exc}")
-    except Exception as exc:
-        raise HTTPException(400, f"Failed to process blast holes: {exc}")
+        blocking_errors.append({
+            "error_code": "MISSING_REQUIRED_COLUMN",
+            "message": f"Columna requerida ausente en el CSV: {exc}",
+            "recommended_action": "Mapee o renombre las columnas fuente y reprocese.",
+        })
+        df_clean = pd.DataFrame()
+    except GeometryConfigurationError as exc:
+        blocking_errors.append({
+            "error_code": exc.error_code,
+            "message": str(exc),
+            "details": exc.details,
+            "recommended_action": "Confirme y complete la configuración geométrica.",
+        })
+        df_clean = pd.DataFrame()
 
+    # Enrichment runs over the accepted frame only. Failures here are
+    # non-fatal — the rejection list is preserved either way.
     try:
         df_clean = enrich_blast_dataframe(df_clean)
     except Exception as exc:
         logger.warning("Blast enrichment failed: %s", exc)
 
-    if df_clean is None or df_clean.empty:
-        raise HTTPException(400, "No valid blast holes found in CSV")
+    # Remediación 4.5: warnings attached BEFORE building persistent records.
+    if not df_clean.empty:
+        from ui.modulo_tronadura.warnings import collect_data_warnings
+        df_clean = collect_data_warnings(df_clean, attach=True)
+        data_warnings = (
+            str(df_clean["data_warnings"].iloc[0]) if "data_warnings" in df_clean.columns else ""
+        )
+        records = _df_to_hole_records(df_clean)
+        carga_mean = _safe_mean(_compute_carga_series(df_clean))
+        descarga_mean = _safe_mean(_compute_descarga_series(df_clean))
+        hardness_dist = _hardness_distribution(df_clean)
+    else:
+        data_warnings = ""
+        records = []
+        carga_mean = 0.0
+        descarga_mean = 0.0
+        hardness_dist = {}
 
     n_holes = len(df_clean)
-    n_rows_skipped = max(0, n_rows_input - n_holes)
+    n_rows_skipped = len(rejected_rows) + (n_rows_input - n_holes - len(rejected_rows))
 
-    # Remediación 4.5: attach warnings BEFORE creating persistent records.
-    from ui.modulo_tronadura.warnings import collect_data_warnings
-    df_clean = collect_data_warnings(df_clean, attach=True)
-    data_warnings = str(df_clean["data_warnings"].iloc[0]) if "data_warnings" in df_clean.columns else ""
-
-    carga_series = _compute_carga_series(df_clean)
-    descarga_series = _compute_descarga_series(df_clean)
-    carga_mean = _safe_mean(carga_series)
-    descarga_mean = _safe_mean(descarga_series)
-    hardness_dist = _hardness_distribution(df_clean)
-    # Records built from the enriched frame (warnings included).
-    records = _df_to_hole_records(df_clean)
-
-    # Remediación 4.6: rejected rows as an independent exportable structure.
-    summary = {}
-    rejected_rows = []
-    if "processing_rows_received" in df_clean.columns:
-        ids_str = str(df_clean["processing_rejected_ids"].iloc[0])
-        reasons_str = str(df_clean["processing_rejected_reasons"].iloc[0])
-        summary = {
-            "rows_received": int(df_clean["processing_rows_received"].iloc[0]),
-            "rows_accepted": int(df_clean["processing_rows_accepted"].iloc[0]),
-            "rows_rejected": int(df_clean["processing_rows_rejected"].iloc[0]),
-            "rejected_ids": ids_str,
-            "rejected_reasons": reasons_str,
-        }
-        # Build per-rejection detail from the summary (ids + reasons).
-        if ids_str:
-            ids = [i.strip() for i in ids_str.split(",") if i.strip()]
-            reasons = [r.strip() for r in reasons_str.split(" | ") if r.strip()]
-            for i, rid in enumerate(ids):
-                rejected_rows.append({
-                    "hole_id": rid,
-                    "rejection_reason": reasons[i] if i < len(reasons) else "",
-                    "error_code": "REJECTED",
-                    "affected_calculations": "toe, PF, geometría dependiente",
-                    "recommended_action": "Corrija el dato original y reprocese.",
-                })
+    summary = {
+        "rows_received": n_rows_input,
+        "rows_accepted": n_holes,
+        "rows_rejected": len(rejected_rows),
+        "blocking_errors": blocking_errors if blocking_errors else (
+            [] if n_holes > 0 else [
+                {
+                    "error_code": "NO_ACCEPTED_ROWS",
+                    "message": "Ninguna fila pasó la validación geométrica.",
+                    "recommended_action": "Corrija los datos de origen o la configuración y reprocese.",
+                }
+            ]
+        ),
+        "geometry_configuration": config.to_dict(),
+    }
 
     return {
         "n_holes": n_holes,
@@ -367,6 +359,9 @@ def _build_upload_payload(
         "data_warnings": data_warnings,
         "processing_summary": summary,
         "rejected_rows": rejected_rows,
+        "event_warnings": [],
+        "blocking_errors": summary["blocking_errors"],
+        "spatial_diagnostics": {},
     }
 
 
@@ -377,50 +372,74 @@ def _build_upload_payload(
 
 @router.post("/upload")
 async def upload_blast_csv(
-    file: UploadFile = File(..., description="Blast-hole CSV (CSV/Excel-style columns)"),
+    file: UploadFile = File(..., description="Blast-hole CSV"),
     session_id: str = Form(..., description="Session UUID"),
+    geometry_user_confirmed: Optional[bool] = Form(
+        None,
+        description="OBLIGATORIO: el evento debe declarar true (confirmado por el operador). "
+        "false/ausente/None bloquean la geometría.",
+    ),
     incl_convention: Optional[str] = Form(
         None,
-        description="OBLIGATORIO: from_vertical | dip_from_horizontal (sin default — el evento debe confirmar)",
+        description="OBLIGATORIO: from_vertical | dip_from_horizontal (sin default)",
     ),
     bench_height_m: Optional[float] = Form(
         None, description="Altura de banco confirmada del evento (m)"
     ),
-    az_convention: str = Form(
-        "CLOCKWISE_FROM_NORTH",
-        description="Azimut: CLOCKWISE_FROM_NORTH | COUNTERCLOCKWISE_FROM_NORTH | CLOCKWISE_FROM_EAST | COUNTERCLOCKWISE_FROM_EAST",
+    az_convention: Optional[str] = Form(
+        None,
+        description="OBLIGATORIO: CLOCKWISE_FROM_NORTH | COUNTERCLOCKWISE_FROM_NORTH | "
+        "CLOCKWISE_FROM_EAST | COUNTERCLOCKWISE_FROM_EAST (sin default)",
     ),
-    incl_sign_convention: str = Form(
-        "ABSOLUTE_VALUE",
-        description="Signo: ABSOLUTE_VALUE | NEGATIVE_IS_DOWNWARD_DIP | SOURCE_DEFINED",
+    incl_sign_convention: Optional[str] = Form(
+        None,
+        description="OBLIGATORIO: ABSOLUTE_VALUE | NEGATIVE_IS_DOWNWARD_DIP | SOURCE_DEFINED (sin default)",
     ),
     sign_source_rule: Optional[str] = Form(
         None, description="Regla explícita para SOURCE_DEFINED (obligatoria en ese caso)"
     ),
-    angle_unit: str = Form(
-        "degrees", description="Unidad angular: degrees | radians"
+    angle_unit: Optional[str] = Form(
+        None, description="OBLIGATORIO: degrees | radians (sin default)"
     ),
+    incl_source_column: str = Form("", description="Columna fuente de inclinación (opcional)"),
+    az_source_column: str = Form("", description="Columna fuente de azimut (opcional)"),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
 
-    The CSV is processed with :func:`core.calculo_tronadura.procesar_pozos` and
-    enriched with :func:`core.blast_metrics.enrich_blast_dataframe`, exactly as
-    the Streamlit reference does. The resulting hole records are stored under
-    the session's ``blast_holes`` settings key so existing blast endpoints can
-    consume them.
-
-    CPU/IO work (pandas parsing + procesar_pozos + enrichment + metrics) runs
-    on the default executor so the event-loop stays responsive.
+    Remediación 3.1/4.1: the geometric configuration MUST be declared and
+    confirmed explicitly by the caller. ``geometry_user_confirmed=true`` is
+    the only value that enables geometry; ``false``/absent/``None`` and any
+    missing required convention field produce a structured error payload
+    (no silent defaults).
+    Remediación 3.2/4.2: even when zero rows are accepted, the response
+    carries the structured ``rejected_rows`` so the operator sees what to
+    fix — never a bare HTTP 400 that hides the diagnosis.
     """
     if not session_id.strip():
         raise HTTPException(422, "session_id is required")
 
-    # Remediación 4.4: sin convención geométrica explícita → 400 (no defaults).
-    if not incl_convention:
+    try:
+        config = _build_geometry_configuration(
+            geometry_user_confirmed=geometry_user_confirmed,
+            incl_convention=incl_convention,
+            incl_sign_convention=incl_sign_convention,
+            sign_source_rule=sign_source_rule,
+            incl_unit=angle_unit,
+            az_convention=az_convention,
+            az_unit=angle_unit,
+            incl_source_column=incl_source_column,
+            az_source_column=az_source_column,
+        )
+        config.validate()
+    except GeometryConfigurationError as exc:
+        # Surface the structured contract error in the response body.
         raise HTTPException(
-            400,
-            "La convención de inclinación (incl_convention) es obligatoria. "
-            "Declare 'from_vertical' o 'dip_from_horizontal'.",
+            status_code=400,
+            detail={
+                "error_code": exc.error_code,
+                "message": str(exc),
+                "details": exc.details,
+            },
         )
 
     db.get_or_create_session(session_id)
@@ -430,10 +449,7 @@ async def upload_blast_csv(
     except Exception as exc:
         raise HTTPException(400, f"Could not read uploaded file: {exc}")
 
-    payload = await _run_in_executor(
-        _build_upload_payload, content, incl_convention, bench_height_m,
-        az_convention, incl_sign_convention, sign_source_rule, angle_unit,
-    )
+    payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m)
 
     db.save_blast_upload(
         session_id,
@@ -442,24 +458,46 @@ async def upload_blast_csv(
             "n_holes": payload["n_holes"],
             "n_rows_loaded": payload["n_rows_loaded"],
             "n_rows_skipped": payload["n_rows_skipped"],
+            "rejected_rows": payload["rejected_rows"],
+            "processing_summary": payload["processing_summary"],
+            "data_warnings": payload["data_warnings"],
+            "geometry_configuration": config.to_dict(),
         },
     )
 
-    return schemas.BlastUploadResponse(
+    # Remediación 3.2: when zero rows are accepted, return HTTP 422 with the
+    # structured payload in the body — never a bare 400 that loses the
+    # rejection detail. The Pydantic response model still validates.
+    from fastapi.responses import JSONResponse
+
+    response_body = schemas.BlastUploadResponse(
         session_id=session_id,
         n_holes=payload["n_holes"],
         n_rows_loaded=payload["n_rows_loaded"],
         n_rows_skipped=payload["n_rows_skipped"],
         data_warnings=payload.get("data_warnings", ""),
         processing_summary=payload.get("processing_summary", {}),
+        rejected_rows=payload.get("rejected_rows", []),
+        event_warnings=payload.get("event_warnings", []),
+        blocking_errors=payload.get("blocking_errors", []),
+        geometry_configuration=config.to_dict(),
         carga_mean=payload["carga_mean"],
         descarga_mean=payload["descarga_mean"],
         hardness_distribution=payload["hardness_distribution"],
     )
 
+    # Remediación 3.2: when zero rows are accepted OR a blocking error
+    # occurred, return HTTP 422 with the structured payload in the body —
+    # never a bare 400 that hides the rejection detail.
+    if payload["n_holes"] == 0 or payload.get("blocking_errors"):
+        return JSONResponse(
+            status_code=422,
+            content=response_body.model_dump(),
+        )
+    return response_body
+
 
 def _build_hole_summaries(records: List[Dict[str, object]]) -> List[schemas.BlastHoleSummary]:
-    """Map a list of persisted records to ``BlastHoleSummary`` schemas (sync)."""
     return [_record_to_summary(record) for record in records]
 
 
@@ -473,13 +511,7 @@ async def get_blast_holes(
     session_id: str,
     section_name: Optional[str] = None,
 ) -> schemas.BlastHolesResponse:
-    """Return persisted blast holes for the session.
-
-    ``section_name`` is reserved for future filtering; it currently does not
-    narrow the result set because the persisted store contains global 3D hole
-    data rather than per-section projections.
-    """
-    _ = section_name  # reserved for future section-scoped filtering
+    _ = section_name  # reserved
 
     settings = db.get_settings(session_id) or {}
     raw = settings.get("blast_holes", [])
