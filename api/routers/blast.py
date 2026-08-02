@@ -321,6 +321,20 @@ def _build_upload_payload(
     hardness_dist = _hardness_distribution(df_clean)
     records = _df_to_hole_records(df_clean)
 
+    # Auditoría §3.4: advertencias y resumen de filas en la respuesta API.
+    from ui.modulo_tronadura.warnings import collect_data_warnings
+    _df_w = collect_data_warnings(df_clean, attach=True)
+    data_warnings = str(_df_w["data_warnings"].iloc[0]) if "data_warnings" in _df_w.columns else ""
+    summary = {}
+    if "processing_rows_received" in df_clean.columns:
+        summary = {
+            "rows_received": int(df_clean["processing_rows_received"].iloc[0]),
+            "rows_accepted": int(df_clean["processing_rows_accepted"].iloc[0]),
+            "rows_rejected": int(df_clean["processing_rows_rejected"].iloc[0]),
+            "rejected_ids": str(df_clean["processing_rejected_ids"].iloc[0]),
+            "rejected_reasons": str(df_clean["processing_rejected_reasons"].iloc[0]),
+        }
+
     return {
         "n_holes": n_holes,
         "n_rows_loaded": n_holes,
@@ -329,6 +343,8 @@ def _build_upload_payload(
         "descarga_mean": round(descarga_mean, 3),
         "hardness_distribution": hardness_dist,
         "records": records,
+        "data_warnings": data_warnings,
+        "processing_summary": summary,
     }
 
 
@@ -401,6 +417,8 @@ async def upload_blast_csv(
         n_holes=payload["n_holes"],
         n_rows_loaded=payload["n_rows_loaded"],
         n_rows_skipped=payload["n_rows_skipped"],
+        data_warnings=payload.get("data_warnings", ""),
+        processing_summary=payload.get("processing_summary", {}),
         carga_mean=payload["carga_mean"],
         descarga_mean=payload["descarga_mean"],
         hardness_distribution=payload["hardness_distribution"],

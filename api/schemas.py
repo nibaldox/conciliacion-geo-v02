@@ -374,3 +374,6 @@ class BlastUploadResponse(BaseModel):
     carga_mean: float
     descarga_mean: float
     hardness_distribution: Dict[str, int] = Field(default_factory=dict)
+    # Auditoría §3.4: advertencias y resumen de filas en la respuesta API.
+    data_warnings: str = ""
+    processing_summary: Dict[str, Any] = Field(default_factory=dict)

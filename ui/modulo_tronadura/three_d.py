@@ -87,13 +87,25 @@ def render_three_d_tab(df_clean: pd.DataFrame) -> None:
     if show_energy_grid and get_last_idw_grid() is not None:
         _render_idw_download()
 
-    # Cierre final §2.3: advertencias físicas VISIBLES (nunca ocultas en
-    # columnas, tooltips o expanders cerrados).
+    # Auditoría §3.4: advertencias físicas VISIBLES y PERSISTIDAS en el
+    # resultado operacional (attach=True → columna data_warnings).
     from ui.modulo_tronadura.warnings import collect_data_warnings, render_warnings
+    df_filtered = collect_data_warnings(df_filtered, attach=True)
     warnings = collect_data_warnings(df_filtered)
     if warnings:
         st.markdown("#### ⚠️ Advertencias de calidad del dato")
         render_warnings(warnings)
+
+    # Auditoría §3.4: resumen visible de filas aceptadas/rechazadas.
+    if "processing_rows_received" in df_filtered.columns:
+        c_sum = st.columns(3)
+        c_sum[0].metric("Filas recibidas", int(df_filtered["processing_rows_received"].iloc[0]))
+        c_sum[1].metric("Filas aceptadas", int(df_filtered["processing_rows_accepted"].iloc[0]))
+        c_sum[2].metric(
+            "Filas rechazadas",
+            int(df_filtered["processing_rows_rejected"].iloc[0]),
+            help=df_filtered["processing_rejected_reasons"].iloc[0] or "Sin rechazos",
+        )
 
     from ui.modulo_tronadura.tabular import render_explosive_quality
     render_explosive_quality(df_filtered)

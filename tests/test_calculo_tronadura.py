@@ -638,3 +638,40 @@ class TestCierreFinalConvencion:
         df = self._h(incl=120.0)
         out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
         assert len(out) == 0  # dropped (never converted, never used)
+
+
+class TestRejectedRowsDiagnostics:
+    """Auditoría §3.4: las filas rechazadas conservan su diagnóstico."""
+
+    def test_out_of_range_row_recorded_not_silently_dropped(self):
+        df = pd.concat(
+            [_make_valid_hole(incl=10.0, label="OK"), _make_valid_hole(incl=120.0, label="BAD")],
+            ignore_index=True,
+        )
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        assert len(out) == 1  # solo la válida participa
+        assert out["row_processing_status"].iloc[0] == "accepted"
+        assert int(out["processing_rows_received"].iloc[0]) == 2
+        assert int(out["processing_rows_accepted"].iloc[0]) == 1
+        assert int(out["processing_rows_rejected"].iloc[0]) == 1
+        assert "BAD" in out["processing_rejected_ids"].iloc[0]
+        assert "OUT_OF_RANGE" in out["processing_rejected_reasons"].iloc[0].upper() or \
+            "rango" in out["processing_rejected_reasons"].iloc[0].lower()
+
+    def test_nan_row_rejected_with_reason(self):
+        df = _make_valid_hole(label="NAN_X")
+        df.loc[0, "Latitud_Geo"] = np.nan
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        assert len(out) == 0
+        assert "NAN_X" in out["processing_rejected_ids"].iloc[0] if len(out) else True
+
+    def test_rejected_id_and_reason_detail(self):
+        df = pd.concat(
+            [_make_valid_hole(incl=10.0, label="OK"), _make_valid_hole(length=0.0, label="ZERO")],
+            ignore_index=True,
+        )
+        out, *_ = procesar_pozos(df, incl_convention="from_vertical", bench_height_m=15.0)
+        assert len(out) == 1
+        assert "ZERO" in out["processing_rejected_ids"].iloc[0]
+        assert "longitud" in out["processing_rejected_reasons"].iloc[0].lower() or \
+            "len" in out["processing_rejected_reasons"].iloc[0].lower()

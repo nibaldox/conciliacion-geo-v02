@@ -142,6 +142,49 @@ def _coerce_typed_columns(df_work: pd.DataFrame) -> None:
             df_work[col] = df_work[col].astype(str)
 
 
+def _record_rejected_rows(df_work: pd.DataFrame) -> None:
+    """Register which rows will be dropped and why (auditoría §3.4).
+
+    Adds scalar summary columns to the frame: processing_rows_received /
+    processing_rows_accepted / processing_rows_rejected /
+    processing_rejected_ids / processing_rejected_reasons. The original
+    values stay in the input frame (the caller's copy) for audit.
+    """
+    n_received = len(df_work)
+    def _hole_id(idx) -> str:
+        for col in ("label_pozo", "id_pozo", "uniqid"):
+            if col in df_work.columns:
+                v = df_work.loc[idx, col]
+                if v is not None and str(v) != "nan":
+                    return str(v)
+        return str(idx)
+
+    reasons: dict[str, str] = {}
+    for col in ("X", "Y", "Z_collar", "Incl", "Az", "Len"):
+        vals = pd.to_numeric(df_work[col], errors="coerce") if col in df_work.columns else pd.Series(dtype=float)
+        bad = vals.isna()
+        for idx in df_work.index[bad]:
+            orig = df_work.loc[idx, col] if col in df_work.columns else None
+            reasons.setdefault(_hole_id(idx), f"valor no numérico o ausente en {col} (original: {orig!r})")
+    if "Len" in df_work.columns:
+        lens = pd.to_numeric(df_work["Len"], errors="coerce")
+        for idx in df_work.index[(lens <= 0) & lens.notna()]:
+            reasons[_hole_id(idx)] = f"longitud inválida (Len={lens.loc[idx]} <= 0)"
+    if "Incl_original" in df_work.columns:
+        incls = pd.to_numeric(df_work["Incl_original"], errors="coerce")
+        for idx in df_work.index[incls.abs() > 90.0]:
+            reasons[_hole_id(idx)] = (
+                f"inclinación fuera de rango (original: {incls.loc[idx]}°); fila "
+                "excluida de la geometría (cálculos bloqueados)"
+            )
+    n_rejected = len(reasons)
+    df_work["processing_rows_received"] = n_received
+    df_work["processing_rows_accepted"] = n_received - n_rejected
+    df_work["processing_rows_rejected"] = n_rejected
+    df_work["processing_rejected_ids"] = ",".join(reasons.keys())
+    df_work["processing_rejected_reasons"] = " | ".join(reasons.values())
+
+
 def _resolve_z_collar_semantic(source_col: str | None, explicit: str | None) -> str:
     """Classify the elevation column semantics (spec §4.2).
 
@@ -506,6 +549,11 @@ def procesar_pozos(
     else:
         df_work["Z_collar_semantic"] = "collar_elevation"
 
+    # Auditoría §3.4: rejected rows keep their diagnosis — they are never
+    # dropped silently. A per-row summary (ids + reasons) survives on the
+    # accepted frame and the full detail is reproducible.
+    _record_rejected_rows(df_work)
+
     df_work = df_work.dropna(subset=["X", "Y", "Z_collar", "Incl", "Az", "Len"])
     df_work = df_work[df_work["Len"] > 0]
 
@@ -513,6 +561,8 @@ def procesar_pozos(
     if _Z_TRANSFORM_BLOCKED:
         blocked = df_work["Z_collar_semantic"] == "bench_elevation_untransformed"
         df_work.loc[blocked, ["X_toe", "Y_toe", "Z_toe"]] = np.nan
+    df_work["row_processing_status"] = "accepted"
+    df_work["row_rejection_reason"] = ""
     return df_work, *_build_scatter_lines(df_work)
 
 
