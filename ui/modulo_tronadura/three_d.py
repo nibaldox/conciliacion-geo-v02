@@ -87,6 +87,14 @@ def render_three_d_tab(df_clean: pd.DataFrame) -> None:
     if show_energy_grid and get_last_idw_grid() is not None:
         _render_idw_download()
 
+    # Cierre final §2.3: advertencias físicas VISIBLES (nunca ocultas en
+    # columnas, tooltips o expanders cerrados).
+    from ui.modulo_tronadura.warnings import collect_data_warnings, render_warnings
+    warnings = collect_data_warnings(df_filtered)
+    if warnings:
+        st.markdown("#### ⚠️ Advertencias de calidad del dato")
+        render_warnings(warnings)
+
     from ui.modulo_tronadura.tabular import render_explosive_quality
     render_explosive_quality(df_filtered)
 
