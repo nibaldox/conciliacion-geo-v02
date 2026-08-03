@@ -8,17 +8,30 @@ where ``r`` is the distance from the source centre to the voxel centre,
 ``α`` is the attenuation coefficient (1/m) and ``r0`` is the
 regularization radius (m) that avoids the singularity at r=0.
 
-The kernel is NEVER used to distribute energy directly. Per source, the
-engine computes discrete weights ``w_j = K(r_j) × V_j`` over the voxels
-that fall inside the domain, sums them into ``W = Σ w_j`` and assigns
-each voxel ``e_j = E_acoplada × w_j / W``. Conservation then holds by
-construction within numerical tolerance:
+CRITICAL INVARIANT (Falla 4 fix, audit 2026-08-03): the discrete kernel
+normaliser ``Q_total`` and the per-voxel weights ``q_j = K(r_j) × V_j``
+MUST be sampled on the SAME cartesian voxel grid. The previous
+implementation mixed radial-shell quadrature for ``Q_total`` with
+cartesian centres for ``q_j`` — when the source sat on a voxel centre,
+``q_j`` captured the ``K(0) = 1/r0²`` spike while the radial shells
+started at ``r = 0.5·dx`` and missed it, producing ratios of 32 801× the
+coupled energy. The new ``discrete_total_mass`` evaluates the kernel on
+the SAME cartesian voxel centres that ``_accumulate_source`` uses, so
+``Σ_in_domain e_j + E_outside == E_coupled`` holds strictly by
+construction regardless of source position.
 
-    Σ_j e_j = E_acoplada × (Σ_j w_j) / W = E_acoplada
+Dimensional analysis (audit §4.4):
 
-When part of the kernel's effective support is truncated by the domain
-boundary, the truncated mass is reported as ``outside_domain_energy_j``
-and is NEVER silently renormalized into the inside-domain voxels.
+    [K(r)]    = L⁻²       (the integrand of ∫∫∫ K dV is adimensional)
+    [V_j]     = L³
+    [q = K·V] = L
+    [Q_total] = L
+    [q/Q]     = adimensional
+    [e_j]     = J
+
+``Q_total`` is therefore a length, NOT an energy. The engine multiplies
+the adimensional fraction ``q/Q`` by ``E_coupled`` (J) to obtain the
+per-voxel energy.
 
 Anisotropy:
 
@@ -117,20 +130,28 @@ def source_weights(
     voxel_volume_m3: float,
     attenuation_coefficient_1_m: float,
     regularization_radius_m: float,
+    support_radius_m: Optional[float] = None,
 ) -> np.ndarray:
-    """Per-voxel unnormalized weights ``w_j = K(r_j) × V_j`` over the
-    voxels that fall inside the domain.
+    """Per-voxel unnormalized weights ``q_j = K(r_j) × V_j``.
 
     ``r_in_domain`` is the distance from the source centre to each
-    in-domain voxel centre. The caller is responsible for keeping
-    out-of-domain voxels out of this array — that is what makes the
-    outside-domain energy well-defined and reportable.
+    voxel centre. ``support_radius_m`` enforces the strict finite
+    support ``K(r) = 0`` for ``r > R``. When omitted, callers assert
+    they have already filtered the input to ``r ≤ R``.
     """
-    k = radial_kernel(
-        r_in_domain,
-        attenuation_coefficient_1_m=attenuation_coefficient_1_m,
-        regularization_radius_m=regularization_radius_m,
-    )
+    if support_radius_m is not None:
+        k = radial_kernel(
+            r_in_domain,
+            attenuation_coefficient_1_m=attenuation_coefficient_1_m,
+            regularization_radius_m=regularization_radius_m,
+            support_radius_m=support_radius_m,
+        )
+    else:
+        # Backwards-compatible path: caller guarantees pre-filtered r ≤ R.
+        alpha = float(attenuation_coefficient_1_m)
+        r0 = float(regularization_radius_m)
+        rr = np.asarray(r_in_domain, dtype=np.float64)
+        k = np.exp(-alpha * rr) / (rr * rr + r0 * r0)
     return k * float(voxel_volume_m3)
 
 
@@ -138,35 +159,52 @@ def kernel_total_mass(
     *,
     attenuation_coefficient_1_m: float,
     regularization_radius_m: float,
-    cutoff_radius_m: float | None = None,
-    n_samples: int = 20000,
+    support_radius_m: float,
+    voxel_size_m: float,
 ) -> float:
-    """Numerical integral of the kernel over all 3D space.
+    """Backwards-compatible facade over :func:`discrete_total_mass`.
 
-    For ``K(r) = exp(-αr) / (r² + r0²)`` the total mass is
-
-        W_inf = ∫₀^∞ 4πr² · K(r) dr
-
-    This has no closed form for general α, r0, so it is computed once
-    via trapezoidal quadrature on a fine radial grid extending past the
-    effective support of the kernel (``cutoff = max(50/α, 1000·r0)``).
-
-    The engine uses ``W_inf`` to normalise per-source energy WITHOUT
-    silently renormalising truncated domains (spec §4.2). When a source
-    sits at the domain edge, part of its kernel falls outside the
-    domain — that fraction is reported as ``outside_domain_energy_j``,
-    never silently rescaled into the in-domain voxels.
+    Historical callers expected a ``kernel_total_mass`` symbol. The
+    implementation now defers to the cartesian discrete normaliser so
+    no hidden ``1000·r0`` cutoff can ever leak into production. The
+    support radius is MANDATORY — there is no implicit fallback.
     """
-    alpha = float(attenuation_coefficient_1_m)
+    R = float(support_radius_m)
     r0 = float(regularization_radius_m)
-    if cutoff_radius_m is None:
-        cutoff_radius_m = max(50.0 / alpha, 1000.0 * r0) if alpha > 0 else 1000.0 * r0
-    r = np.linspace(0.0, float(cutoff_radius_m), n_samples)
-    K = np.exp(-alpha * r) / (r * r + r0 * r0)
-    integrand = 4.0 * np.pi * r * r * K
-    # numpy 2.x renamed np.trapz → np.trapezoid; older numpy keeps trapz.
-    trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
-    return float(trapezoid(integrand, r))
+    if not (R > r0 > 0.0):
+        raise ValueError(
+            f"kernel_total_mass requires support_radius_m > r0 > 0; "
+            f"got R={R}, r0={r0}"
+        )
+    return discrete_total_mass(
+        attenuation_coefficient_1_m=attenuation_coefficient_1_m,
+        regularization_radius_m=regularization_radius_m,
+        support_radius_m=support_radius_m,
+        voxel_size_m=voxel_size_m,
+    )
+
+
+def _local_support_offsets(
+    *,
+    support_radius_m: float,
+    voxel_size_m: float,
+) -> np.ndarray:
+    """Integer-axis offsets whose bounding box covers ``[-R, R]`` cubed.
+
+    Returns a ``(n, 3)`` int array of axis offsets relative to the
+    source voxel. ``n = (2·ceil(R/dx) + 1)³``. Each offset corresponds
+    to a voxel centre on the SAME cartesian lattice as the global grid
+    — this is the key invariant that makes ``discrete_total_mass`` and
+    ``_accumulate_source`` use identical sample points.
+    """
+    R = float(support_radius_m)
+    dx = float(voxel_size_m)
+    if not (R > 0.0 and dx > 0.0):
+        raise ValueError("support_radius_m and voxel_size_m must be > 0")
+    extent = int(math.ceil(R / dx))
+    axis = np.arange(-extent, extent + 1, dtype=np.int64)
+    X, Y, Z = np.meshgrid(axis, axis, axis, indexing="ij")
+    return np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])
 
 
 def discrete_total_mass(
@@ -178,58 +216,48 @@ def discrete_total_mass(
     anisotropy_mode: str = AnisotropyMode.ISOTROPIC,
     tensor: Optional[np.ndarray] = None,
 ) -> float:
-    """Position-independent discrete total mass of the kernel over its finite support.
+    """Cartesian discrete kernel mass over the finite support cube.
 
-    The radial kernel K(r) = exp(-αr)/(r²+r0²) is ISOTROPIC; its discrete
-    total mass over the support cube [-R, R]³, sampled at voxel centres
-    on a regular grid of step dx, depends only on dx and R — NOT on
-    the source position relative to the grid.
+    Samples the kernel at every voxel centre that lies inside the cube
+    ``[-R, R]³`` on the SAME cartesian lattice that the engine uses for
+    per-voxel weights. Therefore for any source position::
 
-    This function computes the integral
+        Σ_{j: r_j ≤ R} K(r_j) · V_j  ==  Q_total
 
-        Q_total = ∫_0^R 4πr² · K(r) dr
+    regardless of where the source sits relative to the grid — the
+    offset between source and lattice only moves some centres outside
+    the spherical support, never adds spurious mass.
 
-    by midpoint quadrature on concentric shells of thickness dx. The
-    shell midpoints are at r_k = (k + 0.5) · dx for k = 0, …, n-1 where
-    n = ceil(R/dx). Each shell contributes
+    For ``ANISOTROPIC_TENSOR`` the centres inside the ellipsoidal
+    support ``Δxᵀ M Δx ≤ R²`` are summed (the bounding cube is still
+    ``[-R, R]³`` but only the ellipsoid-interior centres contribute).
 
-        4π · r_k² · K(r_k) · dx
-
-    This is the correct discrete normaliser because:
-
-    * The same radial partition is used regardless of source position.
-    * As dx → 0 the quadrature converges to the continuous integral.
-    * For a source AT a domain voxel centre, the in-domain sum of
-      K(r_j)·V_j over the support cube approaches Q_total; any
-      source-position offset only removes vóxeles outside the
-      domain, never adds spurious energy.
-
-    Therefore for any source fully contained in the domain,
-    Σ_{j in-domain, r_j ≤ R} K(r_j)·V_j ≤ Q_total; equality holds in
-    the limit of fine resolution and source at voxel centre.
+    Returns the scalar ``Q_total`` (dimension: length, since
+    ``[K] = L⁻²`` and ``[V] = L³``).
     """
     alpha = float(attenuation_coefficient_1_m)
     r0 = float(regularization_radius_m)
     R = float(support_radius_m)
     dx = float(voxel_size_m)
     if not (alpha >= 0.0 and r0 > 0.0 and R > r0 and dx > 0.0):
-        return 0.0
+        raise ValueError(
+            f"invalid kernel params: alpha={alpha}, r0={r0}, R={R}, dx={dx}"
+        )
 
-    # Midpoint quadrature on concentric shells of thickness dx.
-    n = max(1, int(math.ceil(R / dx)))
-    r_mid = (np.arange(n, dtype=np.float64) + 0.5) * dx
+    offsets = _local_support_offsets(support_radius_m=R, voxel_size_m=dx)
+    centres = offsets * dx  # cartesian offsets in metres
     if anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR and tensor is not None:
-        # For anisotropic, the Jacobian shifts the volume element.
-        # We approximate by the isotropic form scaled by 1/sqrt(det M).
-        # (Full anisotropic integral is not radially symmetric.)
         M = np.asarray(tensor, dtype=np.float64)
-        det_M = float(np.linalg.det(M))
-        jacobian = 1.0 / math.sqrt(det_M) if det_M > 0 else 1.0
+        quad = np.einsum("ij,jk,ik->i", centres, M, centres)
+        r2 = np.clip(quad, 0.0, None)
     else:
-        jacobian = 1.0
-    kernel_vals = np.exp(-alpha * r_mid) / (r_mid * r_mid + r0 * r0)
-    shell_volumes = 4.0 * np.pi * r_mid * r_mid * dx
-    return float(np.sum(kernel_vals * shell_volumes) * jacobian)
+        r2 = np.einsum("ij,ij->i", centres, centres)
+    inside = r2 <= R * R
+    if not np.any(inside):
+        return 0.0
+    r_inside = np.sqrt(r2[inside])
+    k = np.exp(-alpha * r_inside) / (r_inside * r_inside + r0 * r0)
+    return float(np.sum(k) * (dx ** 3))
 
 
 def energy_split_for_source(
