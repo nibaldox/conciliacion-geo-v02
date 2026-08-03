@@ -352,6 +352,160 @@ def compute_time_of_max(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Chunked variants — process per-segment lists without materialising a
+# dense (n_voxels × n_segments) matrix (Falla 7 fix, audit v2 §6.2).
+# ---------------------------------------------------------------------------
+
+
+def compute_first_arrival_chunked(
+    *,
+    distances_per_segment: Sequence[np.ndarray],
+    energy_per_segment: Sequence[np.ndarray],
+    propagation_velocity_m_s: float,
+    detonation_times_per_segment: Sequence[Optional[float]],
+    n_voxels: int,
+) -> np.ndarray:
+    """First-arrival per voxel computed from per-segment arrays.
+
+    Inputs are LISTS of 1D arrays, one entry per contributing segment.
+    Each entry has shape ``(n_voxels,)``. The function maintains a
+    single ``first_arrival`` accumulator of size ``n_voxels`` and folds
+    segments one at a time — peak memory ``O(n_voxels)`` instead of
+    ``O(n_voxels × n_segments)``.
+
+    Voxels with no contributing segment stay at ``np.inf``. Callers
+    convert to NaN downstream if desired.
+    """
+    velocity = _validate_velocity(propagation_velocity_m_s)
+    if not distances_per_segment:
+        return np.full(n_voxels, np.inf, dtype=np.float64)
+    detonation = np.asarray(
+        [0.0 if value is None else float(value) for value in detonation_times_per_segment],
+        dtype=np.float64,
+    )
+    if detonation.shape != (len(distances_per_segment),):
+        raise ValueError(
+            "detonation_times_per_segment must match the number of segments"
+        )
+    if np.any(~np.isfinite(detonation)):
+        raise ValueError("detonation_times_per_segment must be finite or None")
+
+    first = np.full(n_voxels, np.inf, dtype=np.float64)
+    for s, dist_s in enumerate(distances_per_segment):
+        d = np.asarray(dist_s, dtype=np.float64)
+        e = (
+            np.asarray(energy_per_segment[s], dtype=np.float64)
+            if s < len(energy_per_segment)
+            else np.ones_like(d)
+        )
+        contributing = (e > 0.0) & np.isfinite(d)
+        arrival_s = np.where(
+            contributing,
+            detonation[s] + d / velocity,
+            np.inf,
+        )
+        first = np.minimum(first, arrival_s)
+    return first
+
+
+def compute_time_of_max_chunked(
+    *,
+    energy_total_per_voxel: np.ndarray,
+    first_arrival_per_voxel: np.ndarray,
+    distances_per_segment: Sequence[np.ndarray],
+    energy_per_segment: Sequence[np.ndarray],
+    propagation_velocity_m_s: float,
+    sigma_s: float,
+    detonation_times_per_segment: Sequence[Optional[float]],
+    voxel_block_size: int = 4096,
+    n_time_bins: int = 64,
+    t_window_factor: float = 6.0,
+) -> np.ndarray:
+    """time_of_max computed without dense (n_voxels × n_segments) matrix.
+
+    For each voxel block, stacks the per-segment contributions ONLY for
+    that block, computes the temporal response via CDF differences, and
+    writes the argmax bin centre back into the global ``result`` array.
+
+    Peak memory: ``O(voxel_block_size × n_segments)`` plus
+    ``O(voxel_block_size × n_time_bins)`` — bounded by the configured
+    ``voxel_block_size`` regardless of the global voxel count.
+    """
+    velocity = _validate_velocity(propagation_velocity_m_s)
+    sigma = _validate_sigma(sigma_s)
+    n_segments = len(distances_per_segment)
+    n_voxels = int(energy_total_per_voxel.size)
+    if n_segments == 0:
+        return np.full(n_voxels, np.nan, dtype=np.float64)
+
+    detonation = np.asarray(
+        [0.0 if v is None else float(v) for v in detonation_times_per_segment],
+        dtype=np.float64,
+    )
+    if detonation.shape != (n_segments,):
+        raise ValueError("detonation_times_per_segment must match segments")
+
+    block = max(1, int(voxel_block_size))
+    half_window = float(t_window_factor) / 2.0 * sigma
+    unit_edges = np.linspace(0.0, 1.0, int(n_time_bins) + 1, dtype=np.float64)
+
+    result = np.full(n_voxels, np.nan, dtype=np.float64)
+
+    for start in range(0, n_voxels, block):
+        stop = min(start + block, n_voxels)
+        # Stack per-segment contributions ONLY for this voxel block.
+        # Bounded memory: (block_size × n_segments) instead of
+        # (n_voxels × n_segments).
+        block_dist = np.empty((stop - start, n_segments), dtype=np.float64)
+        block_energy = np.empty((stop - start, n_segments), dtype=np.float64)
+        for s in range(n_segments):
+            block_dist[:, s] = np.asarray(
+                distances_per_segment[s][start:stop], dtype=np.float64,
+            )
+            block_energy[:, s] = np.asarray(
+                energy_per_segment[s][start:stop], dtype=np.float64,
+            )
+
+        arrivals_block = block_dist / velocity + detonation[None, :]
+        valid = (block_energy > 0.0) & np.isfinite(arrivals_block)
+        arrivals_block = np.where(valid, arrivals_block, np.nan)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            arrival_min = np.nanmin(np.where(valid, arrivals_block, np.nan), axis=1)
+            arrival_max = np.nanmax(np.where(valid, arrivals_block, np.nan), axis=1)
+            any_valid = np.any(valid, axis=1)
+            arrival_min = np.where(any_valid, arrival_min, 0.0)
+            arrival_max = np.where(any_valid, arrival_max, 0.0)
+
+        same_arrival = any_valid & np.isclose(
+            arrival_min, arrival_max, rtol=0.0, atol=1.0e-14,
+        )
+        # When all arrivals coincide the peak time IS that arrival.
+        result[start:stop] = np.where(same_arrival, arrival_min, result[start:stop])
+
+        active = any_valid & ~same_arrival
+        if not np.any(active):
+            continue
+
+        starts_w = np.clip(arrival_min - half_window, 0.0, None)
+        stops_w = arrival_max + half_window
+        edges = starts_w[:, None] + (stops_w - starts_w)[:, None] * unit_edges[None, :]
+        # edges shape: (block_size, n_time_bins+1)
+        # arrivals_block shape: (block_size, n_segments)
+        z = (edges[:, :, None] - arrivals_block[:, None, :]) / sigma
+        fractions = np.diff(ndtr(z), axis=1)
+        # response shape: (block_size, n_time_bins)
+        response = np.sum(block_energy[:, None, :] * fractions, axis=2)
+        centres = 0.5 * (edges[:, 1:] + edges[:, :-1])
+        local_indices = np.argmax(response, axis=1)
+        block_result = centres[np.arange(stop - start), local_indices]
+        result[start:stop] = np.where(active, block_result, result[start:stop])
+
+    return result
+
+
 def resolve_temporal_status(
     *,
     temporal_mode: str,

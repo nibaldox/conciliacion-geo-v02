@@ -73,7 +73,9 @@ from core.blast_simulation.kernels import (
 from core.blast_simulation.temporal import (
     NOT_AVAILABLE,
     compute_first_arrival,
+    compute_first_arrival_chunked,
     compute_time_of_max,
+    compute_time_of_max_chunked,
     resolve_temporal_status,
 )
 from core.config import SIMULATION
@@ -634,39 +636,37 @@ def run_simulation(
         first_arrival[~np.isfinite(first_arrival)] = np.nan
 
     # Compute temporal fields from per-source accumulated contributions.
-    # SINGLE CANONICAL ROUTE (Falla 6 fix, audit 2026-08-03): both
-    # ``run_simulation`` (in-memory) and ``compute_field_arrays`` /
-    # ``export_field_arrays`` (NPZ) use the SAME call signature for
-    # ``compute_first_arrival`` and ``compute_time_of_max`` — they pass
-    # ``energy_per_segment_per_voxel`` and ``detonation_times_per_segment``
-    # explicitly. The previous in-memory path distributed the energy
-    # total uniformly across segments and lost the real per-segment
-    # retardos, causing the NPZ vs memory divergence.
+    # CHUNKED CANONICAL ROUTE (Falla 6 + Falla 7 fix, audit v2 §6.2):
+    # both ``run_simulation`` (in-memory) and ``compute_field_arrays`` /
+    # ``export_field_arrays`` (NPZ) consume the SAME per-segment lists
+    # via the chunked variants in ``temporal.py``. No dense
+    # ``(n_voxels × n_segments)`` matrix is ever materialised; peak
+    # memory is bounded by ``voxel_block_size × n_segments``.
     if is_temporal and temporal_energy_contributions and len(temporal_energy_contributions) > 0:
-        energy_matrix = np.column_stack(temporal_energy_contributions)  # (n_vox, n_seg)
-        distance_matrix = np.column_stack(temporal_distances)           # (n_vox, n_seg)
-        segment_mask = energy_matrix > 0.0
         detonation_array = (
             temporal_detonation_times
             if temporal_detonation_times is not None
             else []
         )
-        first_arrival, _ = compute_first_arrival(
-            distances_per_voxel=distance_matrix,
-            propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
+        velocity = float(configuration.propagation_velocity_m_s)
+        sigma_value = float(pulse_sigma) if pulse_sigma is not None else 1e-3
+        first_arrival = compute_first_arrival_chunked(
+            distances_per_segment=temporal_distances,
+            energy_per_segment=temporal_energy_contributions,
+            propagation_velocity_m_s=velocity,
             detonation_times_per_segment=detonation_array,
-            segment_mask=segment_mask,
+            n_voxels=n_voxels,
         )
         first_arrival[~np.isfinite(first_arrival)] = np.nan
-        time_of_max = compute_time_of_max(
+        time_of_max = compute_time_of_max_chunked(
             energy_total_per_voxel=energy_total,
             first_arrival_per_voxel=first_arrival,
-            distances_per_voxel=distance_matrix,
-            propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
-            sigma_s=float(pulse_sigma) if pulse_sigma is not None else 1e-3,
-            energy_per_segment_per_voxel=energy_matrix,
+            distances_per_segment=temporal_distances,
+            energy_per_segment=temporal_energy_contributions,
+            propagation_velocity_m_s=velocity,
+            sigma_s=sigma_value,
             detonation_times_per_segment=detonation_array,
-            segment_mask=segment_mask,
+            voxel_block_size=block,
         )
 
     energy_unit = "J" if configuration.energy_mode == EnergyMode.ABSOLUTE else "dimensionless"
@@ -935,28 +935,28 @@ def export_field_arrays(
         "voxel_centres": voxel_centres.astype(np.float32),
     }
     if is_temporal:
+        # Chunked canonical route — no dense (n_vox × n_seg) matrix.
         first_arrival = np.full(grid.voxel_count, np.nan, dtype=np.float64)
         time_of_max = np.full(grid.voxel_count, np.nan, dtype=np.float64)
         if temporal_energy_contributions:
-            distances_matrix = np.column_stack(temporal_distances)
-            energy_matrix = np.column_stack(temporal_energy_contributions)
-            segment_mask = energy_matrix > 0.0
-            first_arrival, _ = compute_first_arrival(
-                distances_per_voxel=distances_matrix,
-                propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
+            velocity = float(configuration.propagation_velocity_m_s)
+            sigma_value = float(pulse_sigma) if pulse_sigma is not None else 1e-3
+            first_arrival = compute_first_arrival_chunked(
+                distances_per_segment=temporal_distances,
+                energy_per_segment=temporal_energy_contributions,
+                propagation_velocity_m_s=velocity,
                 detonation_times_per_segment=temporal_detonation_times,
-                segment_mask=segment_mask,
+                n_voxels=grid.voxel_count,
             )
             first_arrival[~np.isfinite(first_arrival)] = np.nan
-            time_of_max = compute_time_of_max(
+            time_of_max = compute_time_of_max_chunked(
                 energy_total_per_voxel=energy_total,
                 first_arrival_per_voxel=first_arrival,
-                distances_per_voxel=distances_matrix,
-                propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
-                sigma_s=float(pulse_sigma),
-                energy_per_segment_per_voxel=energy_matrix,
+                distances_per_segment=temporal_distances,
+                energy_per_segment=temporal_energy_contributions,
+                propagation_velocity_m_s=velocity,
+                sigma_s=sigma_value,
                 detonation_times_per_segment=temporal_detonation_times,
-                segment_mask=segment_mask,
             )
         out["first_arrival_s"] = first_arrival.astype(np.float32)
         out["time_of_max_s"] = time_of_max.astype(np.float32)

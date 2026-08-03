@@ -86,7 +86,9 @@ from core.blast_simulation.kernels import (
 )
 from core.blast_simulation.temporal import (
     compute_first_arrival,
+    compute_first_arrival_chunked,
     compute_time_of_max,
+    compute_time_of_max_chunked,
 )
 from core.config import SIMULATION
 
@@ -399,25 +401,27 @@ def compute_field_arrays(
     ):
         n_segments = len(temporal_energy_contributions)
         if n_segments > 0:
-            distances_matrix = np.column_stack(temporal_distances)
-            energy_matrix = np.column_stack(temporal_energy_contributions)
-            segment_mask = energy_matrix > 0.0
-            first_arrival_array, _ = compute_first_arrival(
-                distances_per_voxel=distances_matrix,
-                propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
+            # Chunked canonical route — no dense (n_vox × n_seg) matrix
+            # (Falla 7 fix). Peak memory bounded by
+            # voxel_block_size × n_segments.
+            velocity = float(configuration.propagation_velocity_m_s)
+            sigma_value = float(pulse_sigma) if pulse_sigma is not None else 1e-3
+            first_arrival_array = compute_first_arrival_chunked(
+                distances_per_segment=temporal_distances,
+                energy_per_segment=temporal_energy_contributions,
+                propagation_velocity_m_s=velocity,
                 detonation_times_per_segment=temporal_detonation_times,
-                segment_mask=segment_mask,
+                n_voxels=n_voxels,
             )
             first_arrival_array[~np.isfinite(first_arrival_array)] = np.nan
-            time_of_max_array = compute_time_of_max(
+            time_of_max_array = compute_time_of_max_chunked(
                 energy_total_per_voxel=energy_total,
                 first_arrival_per_voxel=first_arrival_array,
-                distances_per_voxel=distances_matrix,
-                propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
-                sigma_s=float(pulse_sigma),
-                energy_per_segment_per_voxel=energy_matrix,
+                distances_per_segment=temporal_distances,
+                energy_per_segment=temporal_energy_contributions,
+                propagation_velocity_m_s=velocity,
+                sigma_s=sigma_value,
                 detonation_times_per_segment=temporal_detonation_times,
-                segment_mask=segment_mask,
             )
             out["first_arrival_s"] = first_arrival_array.astype(np.float32)
             out["time_of_max_s"] = time_of_max_array.astype(np.float32)
