@@ -319,15 +319,14 @@ class TestNestedExtraForbid:
         assert any("imaginary_rock_property" in f for f in unknown), unknown
 
     def test_unknown_domain_bounds_nested_field_rejected(self):
-        """The ``domain_bounds`` is a free-form Dict[str, float]; the
-        contract translates it into DomainBounds downstream, which
-        rejects unexpected keys via SimulationConfigurationError. The
-        HTTP shape must still surface UNKNOWN_FIELD-like diagnostics."""
+        """Falla 9 fix: domain_bounds is now a typed Pydantic schema
+        with extra='forbid'. An unknown axis key MUST trigger HTTP 422
+        + UNKNOWN_FIELD (not silent acceptance)."""
         from fastapi.testclient import TestClient
         from api.main import app
         client = TestClient(app)
         body = {
-            "session_id": "test-nested-bounds",
+            "session_id": "test-nested-bounds-strict",
             "geometry_configuration_version": "2.0",
             "user_confirmed": True,
             "voxel_size_m": 1.0,
@@ -347,15 +346,47 @@ class TestNestedExtraForbid:
             "plan_elevations": [],
             "section_coordinates": [],
         }
-        # Pydantic accepts arbitrary keys in Dict[str, float] but the
-        # ``_config_from_request`` translator only reads the canonical
-        # six. Unknown extra keys are silently ignored at the dict level
-        # today — this test documents that and will be tightened if we
-        # migrate domain_bounds to a strict schema.
         r = client.post("/api/v1/blast/simulations", json=body)
-        # The endpoint either succeeds (extra dict key ignored) or 400
-        # (no accepted rows). Either way, no crash — pin the contract.
-        assert r.status_code in (200, 400, 422)
+        assert r.status_code == 422, (
+            f"Unknown domain_bounds key 'w_axis' must be rejected with "
+            f"HTTP 422; got {r.status_code}"
+        )
+        detail = r.json()["detail"]
+        assert detail["error_code"] == "UNKNOWN_FIELD"
+        unknown = detail["details"]["unknown_fields"]
+        assert any("w_axis" in f for f in unknown), unknown
+
+    def test_domain_bounds_nan_rejected(self):
+        """Non-numeric (NaN-equivalent for JSON) in any domain_bounds
+        value MUST be rejected with HTTP 422."""
+        from fastapi.testclient import TestClient
+        from api.main import app
+        client = TestClient(app)
+        body = {
+            "session_id": "test-nan-bounds",
+            "geometry_configuration_version": "2.0",
+            "user_confirmed": True,
+            "voxel_size_m": 1.0,
+            "domain_bounds": {
+                "x_min": "not-a-number", "y_min": 0, "z_min": 0,
+                "x_max": 10, "y_max": 10, "z_max": 10,
+            },
+            "energy_mode": "ABSOLUTE",
+            "temporal_mode": "STATIC",
+            "anisotropy_mode": "ISOTROPIC",
+            "attenuation_coefficient_1_m": 0.2,
+            "regularization_radius_m": 0.5,
+            "support_radius_m": 5.0,
+            "coupling_efficiency": 0.85,
+            "rock_mass": {"rock_unit_id": "t", "source": "t", "status": "OK"},
+            "plan_elevations": [],
+            "section_coordinates": [],
+        }
+        r = client.post("/api/v1/blast/simulations", json=body)
+        assert r.status_code == 422, (
+            f"Non-numeric in domain_bounds must be rejected with HTTP 422; "
+            f"got {r.status_code}"
+        )
 
 
 class TestPublicImport:

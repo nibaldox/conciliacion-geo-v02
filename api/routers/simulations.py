@@ -48,7 +48,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from core.blast_simulation import (
     DomainBounds,
@@ -106,6 +106,33 @@ class RockMassSchema(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class DomainBoundsSchema(BaseModel):
+    """Typed replacement for the free-form ``Dict[str, float]`` that
+    previously carried the domain bounds (Falla 9 fix, audit v2 §9).
+
+    ``extra='forbid'`` rejects unknown axes (e.g. ``w_axis``) with HTTP
+    422 + ``UNKNOWN_FIELD``. Numeric values are validated downstream by
+    the contract; NaN/inf are pre-rejected here via the ``finite``
+    validator.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    x_min: float
+    y_min: float
+    z_min: float
+    x_max: float
+    y_max: float
+    z_max: float
+
+    @field_validator("x_min", "y_min", "z_min", "x_max", "y_max", "z_max")
+    @classmethod
+    def _reject_non_finite(cls, v: float) -> float:
+        v_f = float(v)
+        if not math.isfinite(v_f):
+            raise ValueError("domain_bounds values must be finite (no NaN/inf)")
+        return v_f
+
+
 class SimulationCreateRequest(BaseModel):
     """Body for ``POST /blast/simulations``.
 
@@ -113,9 +140,6 @@ class SimulationCreateRequest(BaseModel):
     silent defaults. ``extra='forbid'`` enforces the contract at the
     boundary; the engine configuration is built downstream in
     :func:`_config_from_request`.
-
-    The geometry is consumed from the canonical Fase 1 ``accepted_rows``
-    persisted on the session via :func:`api.database.get_settings`.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -124,7 +148,7 @@ class SimulationCreateRequest(BaseModel):
     user_confirmed: bool
 
     voxel_size_m: float
-    domain_bounds: Dict[str, float]
+    domain_bounds: DomainBoundsSchema
 
     energy_mode: str
     temporal_mode: str
@@ -286,12 +310,12 @@ def _run_in_executor(func, *args):
 
 def _config_from_request(req: SimulationCreateRequest) -> SimulationConfiguration:
     bounds = DomainBounds(
-        x_min=float(req.domain_bounds["x_min"]),
-        y_min=float(req.domain_bounds["y_min"]),
-        z_min=float(req.domain_bounds["z_min"]),
-        x_max=float(req.domain_bounds["x_max"]),
-        y_max=float(req.domain_bounds["y_max"]),
-        z_max=float(req.domain_bounds["z_max"]),
+        x_min=float(req.domain_bounds.x_min),
+        y_min=float(req.domain_bounds.y_min),
+        z_min=float(req.domain_bounds.z_min),
+        x_max=float(req.domain_bounds.x_max),
+        y_max=float(req.domain_bounds.y_max),
+        z_max=float(req.domain_bounds.z_max),
     )
     rock = RockMassConfiguration(
         rock_unit_id=req.rock_mass.rock_unit_id,
