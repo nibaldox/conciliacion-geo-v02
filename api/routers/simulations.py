@@ -44,14 +44,15 @@ from core.blast_simulation import (
     SimulationConfigurationError,
     TemporalMode,
     attach_slices_to_result,
+    compute_field_arrays,
     export_simulation_xlsx,
     npz_path_for,
     read_npz_artifact,
     run_simulation,
-    write_npz_artifact,
+    should_persist,
+    write_atomic_simulation,
     write_summary_json,
 )
-from core.blast_simulation.engine import export_field_arrays
 from core.config import SIMULATION
 
 import api.database as db
@@ -235,28 +236,32 @@ async def create_simulation(req: SimulationCreateRequest) -> JSONResponse:
             configuration=config,
             segments_per_hole=req.segments_per_hole,
         )
-        # 4. Persist the NPZ artifact + JSON summary.
-        result, npz_path, sha = write_npz_artifact(
-            result=result,
-            accepted_rows=accepted_rows,
-            configuration=config,
-            segments_per_hole=req.segments_per_hole,
-        )
-        # 5. Attach plan / section slices if requested.
-        if req.plan_elevations or req.section_coordinates:
-            arrays = export_field_arrays(
+        # 4. Persist the NPZ artifact + JSON summary ONLY when the
+        # simulation is not blocked (Falla 7). A blocked simulation
+        # does not produce an artifact on disk; the SQLite metadata row
+        # still records the attempt so the UI can show the diagnostics.
+        if should_persist(result):
+            result, npz_path, sha, _summary_path = write_atomic_simulation(
                 result=result,
                 accepted_rows=accepted_rows,
                 configuration=config,
                 segments_per_hole=req.segments_per_hole,
             )
-            section_coords = [(str(c[0]), float(c[1])) for c in req.section_coordinates]
-            result = attach_slices_to_result(
-                result,
-                energy_total_flat=arrays["energy_total"],
-                plan_elevations=req.plan_elevations,
-                section_coords=section_coords,
-            )
+            # 5. Attach plan / section slices if requested.
+            if req.plan_elevations or req.section_coordinates:
+                arrays = compute_field_arrays(
+                    result=result,
+                    accepted_rows=accepted_rows,
+                    configuration=config,
+                    segments_per_hole=req.segments_per_hole,
+                )
+                section_coords = [(str(c[0]), float(c[1])) for c in req.section_coordinates]
+                result = attach_slices_to_result(
+                    result,
+                    energy_total_flat=arrays["energy_total"],
+                    plan_elevations=req.plan_elevations,
+                    section_coords=section_coords,
+                )
         write_summary_json(result=result)
         # 6. Persist the SQLite metadata row.
         db.save_blast_simulation(

@@ -60,16 +60,20 @@ from core.blast_simulation.contracts import (
 )
 from core.blast_simulation.grid import (
     estimated_memory_bytes,
+    intersection_mask_flat,
     reshape_to_grid,
     voxel_centres_flat,
 )
 from core.blast_simulation.kernels import (
     compute_distance,
+    discrete_total_mass,
     kernel_total_mass,
     radial_kernel,
 )
 from core.blast_simulation.temporal import (
     NOT_AVAILABLE,
+    compute_first_arrival,
+    compute_time_of_max,
     resolve_temporal_status,
 )
 from core.config import SIMULATION
@@ -174,8 +178,10 @@ def _accumulate_source(
     seg: ChargeSegment,
     e_acoplada: float,
     voxel_centres: np.ndarray,
+    in_domain_mask: np.ndarray,
     grid: VoxelGridSpecification,
     config: SimulationConfiguration,
+    support_radius_m: float,
     kernel_total: float,
     energy_total: np.ndarray,
     contributing_count: np.ndarray,
@@ -185,6 +191,9 @@ def _accumulate_source(
     first_arrival: Optional[np.ndarray],
     time_of_max: Optional[np.ndarray],
     pulse_sigma: Optional[float],
+    temporal_energy_contributions: Optional[list[np.ndarray]],
+    temporal_distances: Optional[list[np.ndarray]],
+    temporal_detonation_times: Optional[list[float]],
     total_represented: list[float],
     total_outside: list[float],
     per_hole_energy: dict[str, float],
@@ -195,12 +204,13 @@ def _accumulate_source(
     out-of-domain energy in the passed lists so the caller can compute
     the totals.
 
-    Normalisation policy (spec §4.2): each voxel receives
-    ``e_j = E_acoplada × w_j / W_inf`` where ``W_inf`` is the kernel's
-    total mass integrated over all 3D space. The sum over in-domain
-    voxels can therefore be strictly less than ``E_acoplada`` when the
-    domain truncates the source's effective support — the remainder is
-    reported as ``outside_domain_energy_j`` and NEVER silently rescaled.
+    Normalisation policy (spec §4.2 — Falla 1 / Falla 2 fix): each voxel
+    receives ``e_j = E_acoplada × q_j / Q_total`` where ``Q_total`` is
+    the DISCRETE total mass of the finite-support kernel over the
+    support cube (see ``discrete_total_mass``) and ``q_j = K(r_j) × V``
+    are the per-voxel weights over the in-domain subset. Because the
+    denominator and the numerator use the SAME metric and the SAME
+    voxel volume, the conservation invariant holds strictly.
     """
     src = np.asarray([seg.cx, seg.cy, seg.cz], dtype=np.float64)
     delta = voxel_centres - src
@@ -212,21 +222,16 @@ def _accumulate_source(
     )
     r = compute_distance(delta, anisotropy_mode=config.anisotropy_mode, tensor=tensor)
 
-    b = grid.bounds
-    in_domain = (
-        (voxel_centres[:, 0] >= b.x_min)
-        & (voxel_centres[:, 0] <= b.x_max)
-        & (voxel_centres[:, 1] >= b.y_min)
-        & (voxel_centres[:, 1] <= b.y_max)
-        & (voxel_centres[:, 2] >= b.z_min)
-        & (voxel_centres[:, 2] <= b.z_max)
-    )
+    in_domain = in_domain_mask
 
-    # Kernel weights restricted to in-domain voxels.
+    # Kernel weights restricted to in-domain voxels. The kernel has
+    # strict finite support — K(r) = 0 for r > support_radius_m — so
+    # voxels outside the source's support contribute zero naturally.
     k = radial_kernel(
         r[in_domain],
         attenuation_coefficient_1_m=config.attenuation_coefficient_1_m,
         regularization_radius_m=config.regularization_radius_m,
+        support_radius_m=support_radius_m,
     )
     w = k * grid.voxel_volume_m3
     W_in_domain = float(w.sum())
@@ -237,8 +242,9 @@ def _accumulate_source(
         total_outside.append(float(e_acoplada))
         return
 
-    # Per-voxel energy: e_j = E × w_j / W_inf (NOT / W_in_domain).
-    # Truncated energy is reported, never silently renormalised.
+    # Per-voxel energy: e_j = E × w_j / Q_total. Because Q_total is the
+    # discrete sum over the FULL support cube and w_j are a subset of
+    # those weights, conservation holds strictly by construction.
     e_j = np.zeros(voxel_centres.shape[0], dtype=np.float64)
     e_j[in_domain] = float(e_acoplada) * (w / kernel_total)
     represented = float(e_j.sum())
@@ -263,21 +269,25 @@ def _accumulate_source(
 
     per_hole_energy[seg.hole_id] = per_hole_energy.get(seg.hole_id, 0.0) + represented
 
-    # Temporal layer.
+    # Temporal layer — record per-source contributions so the engine
+    # can compute the aggregated time-of-max downstream (vectorised,
+    # blocked). The accumulated per-voxel energy and distance vectors
+    # keep the spatial mapping so superposition is exact.
     if (
         config.temporal_mode == TemporalMode.TEMPORAL
         and config.propagation_velocity_m_s is not None
         and pulse_sigma is not None
+        and temporal_energy_contributions is not None
+        and temporal_distances is not None
+        and temporal_detonation_times is not None
     ):
-        v = float(config.propagation_velocity_m_s)
-        t_det = seg.detonation_time_s if seg.detonation_time_s is not None else 0.0
-        t_arr = t_det + r / v
-        # Only voxels that actually receive energy from this source can
-        # observe a pulse arrival.
         arriving = e_j > 0.0
         if np.any(arriving):
-            t_arr_arr = t_arr[arriving]
-            np.minimum.at(first_arrival, np.where(arriving)[0], t_arr_arr)
+            temporal_energy_contributions.append(e_j)
+            temporal_distances.append(r)
+            temporal_detonation_times.append(
+                float(seg.detonation_time_s) if seg.detonation_time_s is not None else 0.0
+            )
 
 
 def _stable_hole_index(hole_id: str) -> int:
@@ -304,6 +314,7 @@ def run_simulation(
     configuration: SimulationConfiguration,
     segments_per_hole: int = 8,
     block_size: Optional[int] = None,
+    support_radius_m: Optional[float] = None,
 ) -> SimulationResult:
     """Run the deterministic voxel energy simulation.
 
@@ -320,6 +331,13 @@ def run_simulation(
     block_size
         Voxel block size for chunked evaluation. Defaults to
         :data:`core.config.SIMULATION.chunk_voxel_block`.
+    support_radius_m
+        Kernel support radius ``R`` (m). MUST satisfy
+        ``R > regularization_radius_m > 0``. When ``None`` (the
+        default) the value falls back to
+        :data:`core.config.SIMULATION.default_support_radius_m`. This
+        is the explicit, finite support of the kernel — there is no
+        implicit cutoff (Falla 2 fix).
 
     Returns
     -------
@@ -386,6 +404,7 @@ def run_simulation(
     # 6. Allocate the accumulator arrays.
     n_voxels = grid.voxel_count
     voxel_centres = voxel_centres_flat(grid)
+    in_domain_mask = intersection_mask_flat(grid)
     energy_total = np.zeros(n_voxels, dtype=np.float64)
     contributing_count = np.zeros(n_voxels, dtype=np.int32)
     dominant_idx = np.zeros(n_voxels, dtype=np.int64)
@@ -413,26 +432,34 @@ def run_simulation(
     total_represented: list[float] = []
     total_outside: list[float] = []
     per_hole_energy: dict[str, float] = {}
+    temporal_energy_contributions: Optional[list[np.ndarray]] = [] if is_temporal else None
+    temporal_distances: Optional[list[np.ndarray]] = [] if is_temporal else None
+    temporal_detonation_times: Optional[list[float]] = [] if is_temporal else None
 
-    # Compute the kernel's total mass over all 3D space ONCE. This is
-    # the normalisation denominator for every source — it lets us
-    # honestly report how much of each source's energy fell outside the
-    # domain without silently renormalising truncated fields (spec §4.2).
-    kernel_total = kernel_total_mass(
+    R_runtime = (
+        float(support_radius_m)
+        if support_radius_m is not None
+        else float(SIMULATION.default_support_radius_m)
+    )
+
+    # Compute the DISCRETE kernel mass Q_total ONCE. This is the
+    # normalisation denominator for every source. It is computed with
+    # the same metric as the per-source weights so conservation holds
+    # strictly by construction (Σ_in_domain e_j ≤ E_acoplada).
+    anisotropy_tensor = (
+        np.asarray(configuration.rock_mass.anisotropy_tensor, dtype=np.float64)
+        if configuration.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR
+        and configuration.rock_mass.anisotropy_tensor is not None
+        else None
+    )
+    kernel_total = discrete_total_mass(
         attenuation_coefficient_1_m=configuration.attenuation_coefficient_1_m,
         regularization_radius_m=configuration.regularization_radius_m,
+        support_radius_m=R_runtime,
+        voxel_size_m=grid.voxel_size_m,
+        anisotropy_mode=configuration.anisotropy_mode,
+        tensor=anisotropy_tensor,
     )
-    # Anisotropy rescales the kernel mass: in the transformed coordinate
-    # u = M^(1/2) x, the Jacobian of the inverse map is 1/sqrt(det M), so
-    # the integral over all original space is W_inf_iso / sqrt(det M).
-    if (
-        configuration.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR
-        and configuration.rock_mass.anisotropy_tensor is not None
-    ):
-        M = np.asarray(configuration.rock_mass.anisotropy_tensor, dtype=np.float64)
-        det_M = float(np.linalg.det(M))
-        if det_M > 0.0:
-            kernel_total = kernel_total / math.sqrt(det_M)
 
     for seg in valid:
         e_acoplada = _source_coupled_energy(
@@ -446,8 +473,10 @@ def run_simulation(
             seg=seg,
             e_acoplada=e_acoplada,
             voxel_centres=voxel_centres,
+            in_domain_mask=in_domain_mask,
             grid=grid,
             config=configuration,
+            support_radius_m=R_runtime,
             kernel_total=kernel_total,
             energy_total=energy_total,
             contributing_count=contributing_count,
@@ -457,6 +486,9 @@ def run_simulation(
             first_arrival=first_arrival,
             time_of_max=time_of_max,
             pulse_sigma=pulse_sigma,
+            temporal_energy_contributions=temporal_energy_contributions,
+            temporal_distances=temporal_distances,
+            temporal_detonation_times=temporal_detonation_times,
             total_represented=total_represented,
             total_outside=total_outside,
             per_hole_energy=per_hole_energy,
@@ -619,6 +651,7 @@ def export_field_arrays(
     accepted_rows: list[dict[str, Any]],
     configuration: SimulationConfiguration,
     segments_per_hole: int = 8,
+    support_radius_m: Optional[float] = None,
 ) -> dict[str, np.ndarray]:
     """Recompute the canonical field arrays for NPZ persistence.
 
@@ -641,23 +674,41 @@ def export_field_arrays(
     )
     valid, _, _ = classify_segments(segments, energy_mode=configuration.energy_mode)
 
-    kernel_total = kernel_total_mass(
+    R_runtime = (
+        float(support_radius_m)
+        if support_radius_m is not None
+        else float(SIMULATION.default_support_radius_m)
+    )
+
+    anisotropy_tensor = (
+        np.asarray(configuration.rock_mass.anisotropy_tensor, dtype=np.float64)
+        if configuration.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR
+        and configuration.rock_mass.anisotropy_tensor is not None
+        else None
+    )
+    kernel_total = discrete_total_mass(
         attenuation_coefficient_1_m=configuration.attenuation_coefficient_1_m,
         regularization_radius_m=configuration.regularization_radius_m,
+        support_radius_m=R_runtime,
+        voxel_size_m=grid.voxel_size_m,
+        anisotropy_mode=configuration.anisotropy_mode,
+        tensor=anisotropy_tensor,
     )
-    if (
-        configuration.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR
-        and configuration.rock_mass.anisotropy_tensor is not None
-    ):
-        M = np.asarray(configuration.rock_mass.anisotropy_tensor, dtype=np.float64)
-        det_M = float(np.linalg.det(M))
-        if det_M > 0.0:
-            kernel_total = kernel_total / math.sqrt(det_M)
 
     energy_total = np.zeros(grid.voxel_count, dtype=np.float32)
     contributing_count = np.zeros(grid.voxel_count, dtype=np.int32)
     dominant_idx = np.zeros(grid.voxel_count, dtype=np.int64)
     dominant_energy = np.zeros(grid.voxel_count, dtype=np.float32)
+    is_temporal = configuration.temporal_mode == TemporalMode.TEMPORAL
+    pulse_sigma = (
+        float(configuration.pulse_sigma_s)
+        if configuration.pulse_sigma_s is not None
+        else float(SIMULATION.fallback_temporal_sigma_s)
+    ) if is_temporal else None
+    temporal_energy_contributions: Optional[list[np.ndarray]] = [] if is_temporal else None
+    temporal_distances: Optional[list[np.ndarray]] = [] if is_temporal else None
+    temporal_detonation_times: Optional[list[float]] = [] if is_temporal else None
+    in_domain_mask_export = intersection_mask_flat(grid)
 
     for seg in valid:
         e_acoplada = _source_coupled_energy(
@@ -671,8 +722,10 @@ def export_field_arrays(
             seg=seg,
             e_acoplada=e_acoplada,
             voxel_centres=voxel_centres,
+            in_domain_mask=in_domain_mask_export,
             grid=grid,
             config=configuration,
+            support_radius_m=R_runtime,
             kernel_total=kernel_total,
             energy_total=energy_total,
             contributing_count=contributing_count,
@@ -681,7 +734,10 @@ def export_field_arrays(
             arrival_times=None,
             first_arrival=None,
             time_of_max=None,
-            pulse_sigma=None,
+            pulse_sigma=pulse_sigma,
+            temporal_energy_contributions=temporal_energy_contributions,
+            temporal_distances=temporal_distances,
+            temporal_detonation_times=temporal_detonation_times,
             total_represented=[],
             total_outside=[],
             per_hole_energy={},
@@ -695,12 +751,30 @@ def export_field_arrays(
         "dominant_energy": dominant_energy.astype(np.float32),
         "voxel_centres": voxel_centres.astype(np.float32),
     }
-    if configuration.temporal_mode == TemporalMode.TEMPORAL:
-        first_arrival = np.full(grid.voxel_count, np.nan, dtype=np.float32)
-        time_of_max = np.full(grid.voxel_count, np.nan, dtype=np.float32)
-        # Re-evaluate temporal layer for the export. For now we expose the
-        # raw first-arrival placeholder; a richer implementation would
-        # recompute it identically to the engine run.
-        out["first_arrival_s"] = first_arrival
-        out["time_of_max_s"] = time_of_max
+    if is_temporal:
+        first_arrival = np.full(grid.voxel_count, np.nan, dtype=np.float64)
+        time_of_max = np.full(grid.voxel_count, np.nan, dtype=np.float64)
+        if temporal_energy_contributions:
+            distances_matrix = np.column_stack(temporal_distances)
+            energy_matrix = np.column_stack(temporal_energy_contributions)
+            segment_mask = energy_matrix > 0.0
+            first_arrival, _ = compute_first_arrival(
+                distances_per_voxel=distances_matrix,
+                propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
+                detonation_times_per_segment=temporal_detonation_times,
+                segment_mask=segment_mask,
+            )
+            first_arrival[~np.isfinite(first_arrival)] = np.nan
+            time_of_max = compute_time_of_max(
+                energy_total_per_voxel=energy_total,
+                first_arrival_per_voxel=first_arrival,
+                distances_per_voxel=distances_matrix,
+                propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
+                sigma_s=float(pulse_sigma),
+                energy_per_segment_per_voxel=energy_matrix,
+                detonation_times_per_segment=temporal_detonation_times,
+                segment_mask=segment_mask,
+            )
+        out["first_arrival_s"] = first_arrival.astype(np.float32)
+        out["time_of_max_s"] = time_of_max.astype(np.float32)
     return out

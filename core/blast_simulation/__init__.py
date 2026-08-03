@@ -68,13 +68,16 @@ from core.blast_simulation.export import (
 )
 from core.blast_simulation.persistence import (
     PersistenceError,
+    compute_field_arrays,
     npz_path_for,
     read_npz_artifact,
     read_summary_json,
     sha256_bytes,
     sha256_file,
+    should_persist,
     simulation_dir,
     summary_path_for,
+    write_atomic_simulation,
     write_npz_artifact,
     write_summary_json,
 )
@@ -82,6 +85,7 @@ from core.blast_simulation.slicing import (
     attach_slices_to_result,
     compute_slices,
     plan_slice,
+    profile_slice,
     section_slice,
 )
 
@@ -116,6 +120,7 @@ __all__ = [
     "classify_energy_bands",
     "classify_segments",
     "compute_slices",
+    "compute_field_arrays",
     "coverage_report",
     "export_field_arrays",
     "export_simulation_xlsx",
@@ -124,13 +129,16 @@ __all__ = [
     "read_back_simulation_xlsx",
     "read_npz_artifact",
     "read_summary_json",
+    "reject_extra_fields",
     "run_simulation",
     "section_slice",
     "sha256_bytes",
     "sha256_file",
+    "should_persist",
     "statistical_summary",
     "simulation_dir",
     "summary_path_for",
+    "write_atomic_simulation",
     "write_npz_artifact",
     "write_summary_json",
 ]
