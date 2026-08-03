@@ -106,7 +106,30 @@ class TestAtomicWriteCleanup:
         cfg = _cfg()
         result = _run_simulation(cfg, tmp_path)
 
-        # Force compute_field_arrays to raise mid-flight.
+        # Force compute_field_arrays to raise mid-flight. We clear
+        # result.field_arrays so the legacy recalculation path is taken
+        # (the canonical path copies the arrays directly and never
+        # calls compute_field_arrays).
+        from core.blast_simulation.contracts import SimulationResult as _SR
+        result = _SR(
+            simulation_id=result.simulation_id,
+            configuration=result.configuration,
+            grid_metadata=result.grid_metadata,
+            source_summary=result.source_summary,
+            energy_field=result.energy_field,
+            plan_slices=result.plan_slices,
+            section_slices=result.section_slices,
+            processing_summary=result.processing_summary,
+            warnings=result.warnings,
+            blocking_errors=result.blocking_errors,
+            spatial_diagnostics=result.spatial_diagnostics,
+            temporal_diagnostics=result.temporal_diagnostics,
+            provenance=result.provenance,
+            created_at=result.created_at,
+            engine_version=result.engine_version,
+            field_arrays=None,  # force legacy path
+        )
+
         def _boom(**kwargs):
             raise RuntimeError("simulated field-array failure")
 

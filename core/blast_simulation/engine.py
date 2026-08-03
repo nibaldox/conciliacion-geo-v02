@@ -788,6 +788,45 @@ def run_simulation(
         accepted_rows_hash=_hash_accepted_rows(accepted_rows),
     )
 
+    # 11. Build the canonical field_arrays dict (Falla 4 fix, audit v3 §4).
+    # Persistence consumes these directly; it MUST NOT call
+    # compute_field_arrays to recalculate. Every array produced here is
+    # the single authority for downstream layers.
+    idx_to_hole: dict[int, str] = {}
+    for seg in valid:
+        idx = _stable_hole_index(seg.hole_id)
+        idx_to_hole.setdefault(idx, seg.hole_id)
+    if n_voxels > 0:
+        dominant_hole_id_arr = np.array(
+            [idx_to_hole.get(int(idx), "") for idx in dominant_idx],
+            dtype="U",
+        )
+    else:
+        dominant_hole_id_arr = np.array([], dtype="U")
+
+    import json as _json
+    field_arrays: dict[str, Any] = {
+        "energy_total": energy_total.astype(np.float32),
+        "energy_density_j_m3": (energy_total / grid.voxel_volume_m3).astype(np.float32),
+        "contributing_count": contributing_count,
+        "dominant_idx": dominant_idx,
+        "dominant_hole_id": dominant_hole_id_arr,
+        "dominant_energy": dominant_energy.astype(np.float32),
+        "voxel_centres": voxel_centres.astype(np.float32),
+        "grid_shape": np.array(
+            [grid.shape[0], grid.shape[1], grid.shape[2]], dtype=np.int32
+        ),
+        "axis_order": np.array(["x", "y", "z"], dtype="U"),
+        "dtype": np.array("float32", dtype="U"),
+        "units": np.array(
+            _json.dumps({"energy": energy_unit, "density": "J/m3", "time": "s"}),
+            dtype="U",
+        ),
+    }
+    if is_temporal and first_arrival is not None and time_of_max is not None:
+        field_arrays["first_arrival_s"] = first_arrival.astype(np.float32)
+        field_arrays["time_of_max_s"] = time_of_max.astype(np.float32)
+
     return SimulationResult(
         simulation_id=simulation_id,
         configuration=configuration.to_dict(),
@@ -804,6 +843,7 @@ def run_simulation(
         provenance=provenance,
         created_at=created_at,
         engine_version=ENGINE_VERSION,
+        field_arrays=field_arrays,
     )
 
 

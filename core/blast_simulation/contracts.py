@@ -952,9 +952,19 @@ class SimulationResult:
     """Canonical simulation result — single authority (spec §8).
 
     Every layer (API, React, Streamlit, export, persistence) consumes
-    this object. It is NEVER reconstructed downstream. Large volumetric
-    arrays live in the NPZ artifact referenced by ``energy_field.npz_path``;
-    SQLite stores only metadata + summary.
+    this object. It is NEVER reconstructed downstream.
+
+    The ``field_arrays`` dict carries the ACTUAL scientific arrays
+    computed once by ``run_simulation`` (Falla 4 fix, audit v3 §4):
+    energy_total, energy_density_j_m3, dominant_idx, dominant_hole_id,
+    contributing_count, dominant_energy, voxel_centres, grid_shape,
+    axis_order, dtype, units, and (in TEMPORAL mode) first_arrival_s
+    and time_of_max_s. Persistence MUST consume these directly; it
+    MUST NOT call ``compute_field_arrays`` to recalculate.
+
+    When ``field_arrays`` is ``None`` (back-compat for direct callers
+    that build SimulationResult without the engine), persistence falls
+    back to the legacy recalculation path.
     """
     simulation_id: str
     configuration: dict[str, Any]
@@ -971,6 +981,7 @@ class SimulationResult:
     provenance: SimulationProvenance
     created_at: str
     engine_version: str
+    field_arrays: Optional[dict[str, Any]] = None
 
     def to_dict(self, *, include_artifacts: bool = False) -> dict[str, Any]:
         return {
