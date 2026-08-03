@@ -38,6 +38,5 @@ export function useHotkeys(key: string | string[], handler: HotkeyHandler, deps:
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [Array.isArray(key) ? key.join('|') : key, ...deps]);
 }

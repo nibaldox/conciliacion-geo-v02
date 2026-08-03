@@ -57,7 +57,11 @@ jobs:
       - name: TypeScript check
         working-directory: web
         run: npx tsc --noEmit
-      
+
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+
       - name: Build
         working-directory: web
         run: npm run build
