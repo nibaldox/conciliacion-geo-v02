@@ -133,6 +133,7 @@ class SimulationCreateRequest(BaseModel):
     kernel_type: str = KernelType.EXPONENTIAL_INVERSE_SQUARE
     attenuation_coefficient_1_m: float
     regularization_radius_m: float
+    support_radius_m: float
     coupling_efficiency: float
 
     propagation_velocity_m_s: Optional[float] = None
@@ -321,6 +322,7 @@ def _config_from_request(req: SimulationCreateRequest) -> SimulationConfiguratio
         kernel_type=req.kernel_type,
         attenuation_coefficient_1_m=req.attenuation_coefficient_1_m,
         regularization_radius_m=req.regularization_radius_m,
+        support_radius_m=req.support_radius_m,
         coupling_efficiency=req.coupling_efficiency,
         propagation_velocity_m_s=req.propagation_velocity_m_s,
         propagation_velocity_source=req.propagation_velocity_source,

@@ -441,7 +441,7 @@ class Test12SliceIntegration:
             grid=grid, elevation_m=z_mid,
             energy_unit="J", field_type="energy_j",
         )
-        assert slice_obj.represented_energy_j == pytest.approx(e_at_slice, abs=2.0)  # float32 precision
+        assert slice_obj.represented_energy_j == pytest.approx(e_at_slice, rel=1e-5)  # float32 precision
 
 
 # --- 13. Decks reales ---------------------------------------------------

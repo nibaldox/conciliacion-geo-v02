@@ -58,6 +58,7 @@ def _cfg(temporal_mode: str = TemporalMode.STATIC) -> SimulationConfiguration:
         kernel_type=KernelType.EXPONENTIAL_INVERSE_SQUARE,
         attenuation_coefficient_1_m=2.0,
         regularization_radius_m=0.5,
+        support_radius_m=5.0,
         coupling_efficiency=0.85,
         propagation_velocity_m_s=3500.0 if temporal_mode == TemporalMode.TEMPORAL else None,
         propagation_velocity_source="lab" if temporal_mode == TemporalMode.TEMPORAL else "",

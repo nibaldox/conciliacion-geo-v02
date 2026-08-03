@@ -40,6 +40,7 @@ def _canonical_body(session_id: str, **overrides) -> dict:
         "kernel_type": "EXPONENTIAL_INVERSE_SQUARE",
         "attenuation_coefficient_1_m": 2.0,
         "regularization_radius_m": 0.5,
+        "support_radius_m": 5.0,
         "coupling_efficiency": 0.85,
         "rock_mass": {
             "rock_unit_id": "1c", "density_kg_m3": 2700.0, "ucs_mpa": 80.0,

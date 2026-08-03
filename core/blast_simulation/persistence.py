@@ -262,7 +262,10 @@ def compute_field_arrays(
         and configuration.rock_mass.anisotropy_tensor is not None
         else None
     )
-    kernel_total = discrete_total_mass(
+    # Q_total is computed inside _accumulate_source on the SAME cartesian
+    # lattice as the per-voxel weights (Falla 4 fix). The constant
+    # discrete_total_mass here is only a diagnostic reference value.
+    _ = discrete_total_mass(
         attenuation_coefficient_1_m=configuration.attenuation_coefficient_1_m,
         regularization_radius_m=configuration.regularization_radius_m,
         support_radius_m=R_runtime,
@@ -318,7 +321,6 @@ def compute_field_arrays(
             grid=grid,
             config=configuration,
             support_radius_m=R_runtime,
-            kernel_total=kernel_total,
             energy_total=energy_total,
             contributing_count=contributing_count,
             dominant_idx=dominant_idx,

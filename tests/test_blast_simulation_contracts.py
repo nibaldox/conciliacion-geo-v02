@@ -66,6 +66,7 @@ def _canonical_config(**overrides) -> SimulationConfiguration:
         kernel_type=KernelType.EXPONENTIAL_INVERSE_SQUARE,
         attenuation_coefficient_1_m=0.05,
         regularization_radius_m=0.5,
+        support_radius_m=5.0,
         coupling_efficiency=0.85,
         rock_mass=_canonical_rock(),
     )

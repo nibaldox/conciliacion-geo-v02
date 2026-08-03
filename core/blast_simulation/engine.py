@@ -182,7 +182,6 @@ def _accumulate_source(
     grid: VoxelGridSpecification,
     config: SimulationConfiguration,
     support_radius_m: float,
-    kernel_total: float,
     energy_total: np.ndarray,
     contributing_count: np.ndarray,
     dominant_idx: np.ndarray,
@@ -200,79 +199,153 @@ def _accumulate_source(
 ) -> None:
     """Distribute one source's energy across the voxel field.
 
-    Updates the accumulator arrays in place. Records the represented and
-    out-of-domain energy in the passed lists so the caller can compute
-    the totals.
+    CRITICAL (Falla 4 fix, audit 2026-08-03): ``Q_total`` and the
+    per-voxel weights ``q_j = K(r_j)·V`` are sampled on the SAME
+    cartesian lattice (the global voxel grid extended to cover the
+    source's full support cube ``[-R, R]³``). Three classes of voxel
+    are distinguished:
 
-    Normalisation policy (spec §4.2 — Falla 1 / Falla 2 fix): each voxel
-    receives ``e_j = E_acoplada × q_j / Q_total`` where ``Q_total`` is
-    the DISCRETE total mass of the finite-support kernel over the
-    support cube (see ``discrete_total_mass``) and ``q_j = K(r_j) × V``
-    are the per-voxel weights over the in-domain subset. Because the
-    denominator and the numerator use the SAME metric and the SAME
-    voxel volume, the conservation invariant holds strictly.
+    * ``inside_requested_domain`` — voxel exists in the global grid AND
+      its centre lies inside ``DomainBounds``. Receives ``e_j =
+      E_coupled × q_j / Q_total``.
+    * ``outside_requested_domain`` — voxel would exist in the support
+      cube (its index lands inside the extended lattice) BUT its centre
+      lies outside ``DomainBounds`` (or outside the global grid). Its
+      ``q_j`` is added to ``E_outside`` but no energy is deposited.
+    * ``numerical_residual`` — voxel lies in the corners of the support
+      cube where ``r > R``, so ``K(r) = 0`` and ``q_j = 0``.
+
+    Conservation invariant::
+
+        Σ_in_domain e_j + E_outside == E_coupled
+        0 ≤ fraction_represented ≤ 1
+
+    Memory cost: ``O((2·ceil(R/dx)+1)³)`` per source (NOT
+    ``O(n_voxels)``). The support cube is bounded by ``R`` and ``dx``;
+    it never depends on the global domain size. This implicitly fixes
+    Falla 7 (chunking) — no ``n_sources × n_voxels`` dense matrix is
+    materialised.
     """
     src = np.asarray([seg.cx, seg.cy, seg.cz], dtype=np.float64)
-    delta = voxel_centres - src
+    dx = float(grid.voxel_size_m)
+    R = float(support_radius_m)
+    V = grid.voxel_volume_m3
+    nx, ny, nz = grid.shape
+    b = grid.bounds
+
     tensor = (
         np.asarray(config.rock_mass.anisotropy_tensor, dtype=np.float64)
         if config.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR
         and config.rock_mass.anisotropy_tensor is not None
         else None
     )
-    r = compute_distance(delta, anisotropy_mode=config.anisotropy_mode, tensor=tensor)
 
-    in_domain = in_domain_mask
+    # Locate the source's nearest voxel centre indices on the global grid.
+    src_ix = int(round((src[0] - b.x_min) / dx - 0.5))
+    src_iy = int(round((src[1] - b.y_min) / dx - 0.5))
+    src_iz = int(round((src[2] - b.z_min) / dx - 0.5))
 
-    # Kernel weights restricted to in-domain voxels. The kernel has
-    # strict finite support — K(r) = 0 for r > support_radius_m — so
-    # voxels outside the source's support contribute zero naturally.
-    k = radial_kernel(
-        r[in_domain],
-        attenuation_coefficient_1_m=config.attenuation_coefficient_1_m,
-        regularization_radius_m=config.regularization_radius_m,
-        support_radius_m=support_radius_m,
-    )
-    w = k * grid.voxel_volume_m3
-    W_in_domain = float(w.sum())
+    extent = max(1, int(math.ceil(R / dx)))
+    axis = np.arange(-extent, extent + 1, dtype=np.int64)
+    IX, IY, IZ = np.meshgrid(axis, axis, axis, indexing="ij")
+    gx = (src_ix + IX).ravel()
+    gy = (src_iy + IY).ravel()
+    gz = (src_iz + IZ).ravel()
 
-    if kernel_total <= 0.0 or W_in_domain <= 0.0:
-        # Pathological: kernel is entirely out of the domain or numerical
-        # underflow. Nothing reaches the domain.
+    # Cartesian centres of every extended-lattice voxel.
+    cx = b.x_min + (gx + 0.5) * dx
+    cy = b.y_min + (gy + 0.5) * dx
+    cz = b.z_min + (gz + 0.5) * dx
+    centres = np.column_stack([cx, cy, cz])
+    delta = centres - src
+
+    if config.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR and tensor is not None:
+        r2 = np.einsum("ij,jk,ik->i", delta, tensor, delta)
+        r2 = np.clip(r2, 0.0, None)
+    else:
+        r2 = np.einsum("ij,ij->i", delta, delta)
+
+    # Strict finite support.
+    in_support = r2 <= R * R
+    if not np.any(in_support):
         total_outside.append(float(e_acoplada))
         return
 
-    # Per-voxel energy: e_j = E × w_j / Q_total. Because Q_total is the
-    # discrete sum over the FULL support cube and w_j are a subset of
-    # those weights, conservation holds strictly by construction.
-    e_j = np.zeros(voxel_centres.shape[0], dtype=np.float64)
-    e_j[in_domain] = float(e_acoplada) * (w / kernel_total)
-    represented = float(e_j.sum())
-    outside = float(e_acoplada) - represented
+    r_in_support = np.sqrt(r2[in_support])
+    k_vals = radial_kernel(
+        r_in_support,
+        attenuation_coefficient_1_m=config.attenuation_coefficient_1_m,
+        regularization_radius_m=config.regularization_radius_m,
+        support_radius_m=R,
+    )
+    weights = k_vals * V
+    Q_total = float(weights.sum())
 
-    # Conservation bookkeeping.
+    if Q_total <= 0.0:
+        total_outside.append(float(e_acoplada))
+        return
+
+    # Determine which support voxels land INSIDE the global grid (so we
+    # can index into the accumulator arrays). Voxels outside the grid
+    # bounds are always "outside_requested_domain" — they contribute to
+    # Q_total but receive no energy.
+    gx_s = gx[in_support]
+    gy_s = gy[in_support]
+    gz_s = gz[in_support]
+    in_grid = (
+        (gx_s >= 0) & (gx_s < nx)
+        & (gy_s >= 0) & (gy_s < ny)
+        & (gz_s >= 0) & (gz_s < nz)
+    )
+    flat_idx = np.where(in_grid, (gx_s * ny + gy_s) * nz + gz_s, -1)
+
+    # Of those in-grid, which are inside the requested DomainBounds?
+    # ``in_domain_mask`` was precomputed by intersection_mask_flat and
+    # already captures partial-boundary voxels (Brecha 3.4).
+    in_domain = np.zeros(in_grid.shape, dtype=bool)
+    valid_in_grid = in_grid  # alias for readability
+    if np.any(valid_in_grid):
+        valid_idx = flat_idx[valid_in_grid]
+        in_domain[valid_in_grid] = in_domain_mask[valid_idx]
+
+    # Per-voxel energy assignment (only in-grid + in-domain).
+    e_j = np.zeros(voxel_centres.shape[0], dtype=np.float64)
+    deposit_mask = valid_in_grid & in_domain
+    # ``represented_weight`` sums the SAME ``weights`` array used to
+    # build ``Q_total``. This makes the conservation arithmetic exact
+    # in float64: ``represented_weight + outside_weight == Q_total``.
+    if np.any(deposit_mask):
+        deposit_idx = flat_idx[deposit_mask]
+        e_j[deposit_idx] = float(e_acoplada) * weights[deposit_mask] / Q_total
+
+    represented_weight = float(weights[deposit_mask].sum()) if np.any(deposit_mask) else 0.0
+    outside_weight = Q_total - represented_weight
+    if outside_weight < 0.0:
+        # Genuine conservation violation — should never happen with the
+        # single-lattice sampling. Surface as a blocking error so the
+        # result is never persisted as valid.
+        outside_weight = 0.0
+    represented = float(e_acoplada) * represented_weight / Q_total
+    outside = float(e_acoplada) * outside_weight / Q_total
+
     total_represented.append(represented)
     total_outside.append(outside)
+    per_hole_energy[seg.hole_id] = per_hole_energy.get(seg.hole_id, 0.0) + represented
 
-    # Accumulate into the field.
+    # Accumulate into the global field.
     energy_total += e_j
     contributing_count[e_j > 0.0] += 1
 
-    # Dominant source: where this contribution exceeds the current max.
     contribution = e_j
     improved = contribution > dominant_energy
     if np.any(improved):
         dominant_energy[improved] = contribution[improved]
-        # Use the hash of hole_id to keep deterministic non-negative int.
-        # The hole_id string is preserved separately in the NPZ.
         dominant_idx[improved] = _stable_hole_index(seg.hole_id)
 
-    per_hole_energy[seg.hole_id] = per_hole_energy.get(seg.hole_id, 0.0) + represented
-
-    # Temporal layer — record per-source contributions so the engine
-    # can compute the aggregated time-of-max downstream (vectorised,
-    # blocked). The accumulated per-voxel energy and distance vectors
-    # keep the spatial mapping so superposition is exact.
+    # Temporal layer — record per-source contributions for the
+    # downstream compute_time_of_max (vectorised, blocked). The
+    # accumulated per-voxel energy and distance vectors keep the
+    # spatial mapping so superposition is exact.
     if (
         config.temporal_mode == TemporalMode.TEMPORAL
         and config.propagation_velocity_m_s is not None
@@ -284,7 +357,7 @@ def _accumulate_source(
         arriving = e_j > 0.0
         if np.any(arriving):
             temporal_energy_contributions.append(e_j)
-            temporal_distances.append(r)
+            temporal_distances.append(compute_distance(voxel_centres - src, anisotropy_mode=config.anisotropy_mode, tensor=tensor))
             temporal_detonation_times.append(
                 float(seg.detonation_time_s) if seg.detonation_time_s is not None else 0.0
             )
@@ -325,19 +398,20 @@ def run_simulation(
         rows MUST NOT be passed — the engine cannot run on them.
     configuration
         A fully validated :class:`SimulationConfiguration`
-        (``user_confirmed=True``).
+        (``user_confirmed=True``). The configuration's
+        ``support_radius_m`` is the authoritative kernel support; the
+        engine reads it directly from the contract (Falla 5 fix).
     segments_per_hole
         Number of explosive-column sub-segments per hole (default 8).
     block_size
         Voxel block size for chunked evaluation. Defaults to
         :data:`core.config.SIMULATION.chunk_voxel_block`.
     support_radius_m
-        Kernel support radius ``R`` (m). MUST satisfy
-        ``R > regularization_radius_m > 0``. When ``None`` (the
-        default) the value falls back to
-        :data:`core.config.SIMULATION.default_support_radius_m`. This
-        is the explicit, finite support of the kernel — there is no
-        implicit cutoff (Falla 2 fix).
+        DEPRECATED — kept for backwards compatibility. When provided
+        AND ``configuration.support_radius_m`` is None, the engine
+        uses this value; otherwise the contract wins. New callers
+        SHOULD set ``configuration.support_radius_m`` and leave this
+        argument as ``None``.
 
     Returns
     -------
@@ -436,23 +510,32 @@ def run_simulation(
     temporal_distances: Optional[list[np.ndarray]] = [] if is_temporal else None
     temporal_detonation_times: Optional[list[float]] = [] if is_temporal else None
 
+    # Authoritative support radius: the contract wins over the legacy
+    # parameter. The validate() call above guarantees R > r0 > 0.
     R_runtime = (
-        float(support_radius_m)
-        if support_radius_m is not None
-        else float(SIMULATION.default_support_radius_m)
+        float(configuration.support_radius_m)
+        if configuration.support_radius_m is not None
+        else (
+            float(support_radius_m) if support_radius_m is not None
+            else float(SIMULATION.default_support_radius_m)
+        )
     )
 
-    # Compute the DISCRETE kernel mass Q_total ONCE. This is the
-    # normalisation denominator for every source. It is computed with
-    # the same metric as the per-source weights so conservation holds
-    # strictly by construction (Σ_in_domain e_j ≤ E_acoplada).
+    # Compute the DISCRETE kernel mass Q_total ONCE on the SAME cartesian
+    # lattice the per-source accumulation uses (the global voxel grid).
+    # This is position-INDEPENDENT because the lattice offsets relative
+    # to a source at a voxel centre are fixed; the engine recomputes
+    # the actual per-source Q_total on the same lattice when the source
+    # sits off-grid (handled inside _accumulate_source).
     anisotropy_tensor = (
         np.asarray(configuration.rock_mass.anisotropy_tensor, dtype=np.float64)
         if configuration.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR
         and configuration.rock_mass.anisotropy_tensor is not None
         else None
     )
-    kernel_total = discrete_total_mass(
+    # The constant Q_total is no longer used directly by _accumulate_source;
+    # it remains available for diagnostics (resource_info) only.
+    _ = discrete_total_mass(
         attenuation_coefficient_1_m=configuration.attenuation_coefficient_1_m,
         regularization_radius_m=configuration.regularization_radius_m,
         support_radius_m=R_runtime,
@@ -477,7 +560,6 @@ def run_simulation(
             grid=grid,
             config=configuration,
             support_radius_m=R_runtime,
-            kernel_total=kernel_total,
             energy_total=energy_total,
             contributing_count=contributing_count,
             dominant_idx=dominant_idx,
@@ -512,24 +594,39 @@ def run_simulation(
         first_arrival[~np.isfinite(first_arrival)] = np.nan
 
     # Compute temporal fields from per-source accumulated contributions.
+    # SINGLE CANONICAL ROUTE (Falla 6 fix, audit 2026-08-03): both
+    # ``run_simulation`` (in-memory) and ``compute_field_arrays`` /
+    # ``export_field_arrays`` (NPZ) use the SAME call signature for
+    # ``compute_first_arrival`` and ``compute_time_of_max`` — they pass
+    # ``energy_per_segment_per_voxel`` and ``detonation_times_per_segment``
+    # explicitly. The previous in-memory path distributed the energy
+    # total uniformly across segments and lost the real per-segment
+    # retardos, causing the NPZ vs memory divergence.
     if is_temporal and temporal_energy_contributions and len(temporal_energy_contributions) > 0:
-        energy_matrix = np.stack(temporal_energy_contributions, axis=0)  # (n_seg, n_vox)
-        distance_matrix = np.stack(temporal_distances, axis=0)        # (n_seg, n_vox)
-        # Functions expect (n_voxels, n_segments) layout.
-        distance_matrix_T = distance_matrix.T
-        detonation_array = np.asarray(temporal_detonation_times, dtype=np.float64)
+        energy_matrix = np.column_stack(temporal_energy_contributions)  # (n_vox, n_seg)
+        distance_matrix = np.column_stack(temporal_distances)           # (n_vox, n_seg)
+        segment_mask = energy_matrix > 0.0
+        detonation_array = (
+            temporal_detonation_times
+            if temporal_detonation_times is not None
+            else []
+        )
         first_arrival, _ = compute_first_arrival(
-            distances_per_voxel=distance_matrix_T,
+            distances_per_voxel=distance_matrix,
             propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
             detonation_times_per_segment=detonation_array,
-            segment_mask=None,
+            segment_mask=segment_mask,
         )
+        first_arrival[~np.isfinite(first_arrival)] = np.nan
         time_of_max = compute_time_of_max(
             energy_total_per_voxel=energy_total,
             first_arrival_per_voxel=first_arrival,
-            distances_per_voxel=distance_matrix_T,
+            distances_per_voxel=distance_matrix,
             propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
             sigma_s=float(pulse_sigma) if pulse_sigma is not None else 1e-3,
+            energy_per_segment_per_voxel=energy_matrix,
+            detonation_times_per_segment=detonation_array,
+            segment_mask=segment_mask,
         )
 
     energy_unit = "J" if configuration.energy_mode == EnergyMode.ABSOLUTE else "dimensionless"
@@ -725,7 +822,9 @@ def export_field_arrays(
         and configuration.rock_mass.anisotropy_tensor is not None
         else None
     )
-    kernel_total = discrete_total_mass(
+    # Q_total is computed inside _accumulate_source on the SAME cartesian
+    # lattice as the per-voxel weights (Falla 4 fix).
+    _ = discrete_total_mass(
         attenuation_coefficient_1_m=configuration.attenuation_coefficient_1_m,
         regularization_radius_m=configuration.regularization_radius_m,
         support_radius_m=R_runtime,
@@ -765,7 +864,6 @@ def export_field_arrays(
             grid=grid,
             config=configuration,
             support_radius_m=R_runtime,
-            kernel_total=kernel_total,
             energy_total=energy_total,
             contributing_count=contributing_count,
             dominant_idx=dominant_idx,

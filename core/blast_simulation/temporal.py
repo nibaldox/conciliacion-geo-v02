@@ -336,6 +336,10 @@ def compute_time_of_max(
             )
         block_first_safe = np.where(np.isfinite(block_first), block_first, 0.0)
         starts = block_first_safe - half_window
+        # Time cannot be negative — detonation is the origin of the
+        # temporal axis. Clamp the search window to ``[0, +inf)`` so
+        # ``time_of_max`` is always a non-negative scalar.
+        starts = np.clip(starts, 0.0, None)
         stops = block_max + half_window
         edges = starts[:, None] + (stops - starts)[:, None] * unit_edges[None, :]
         z = (edges[:, :, None] - block_arrivals[:, None, :]) / sigma

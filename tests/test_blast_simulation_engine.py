@@ -74,6 +74,7 @@ def _cfg(
     velocity: float | None = None,
     rock: RockMassConfiguration | None = None,
     pulse_sigma: float | None = None,
+    support_radius_m: float = 5.0,
 ) -> SimulationConfiguration:
     return SimulationConfiguration(
         simulation_configuration_version=SIMULATION_CONFIGURATION_VERSION,
@@ -87,6 +88,7 @@ def _cfg(
         kernel_type=KernelType.EXPONENTIAL_INVERSE_SQUARE,
         attenuation_coefficient_1_m=alpha,
         regularization_radius_m=r0,
+        support_radius_m=support_radius_m,
         coupling_efficiency=eta,
         propagation_velocity_m_s=velocity,
         propagation_velocity_source="lab" if velocity else "",

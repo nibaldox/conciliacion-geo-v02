@@ -28,7 +28,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
 
-SIMULATION_CONFIGURATION_VERSION = "1.0"
+SIMULATION_CONFIGURATION_VERSION = "2.0"
 
 
 # ---------------------------------------------------------------------------
@@ -498,21 +498,30 @@ class SimulationConfiguration:
             details["domain_bounds"] = "required"
         if self.attenuation_coefficient_1_m is None or self.attenuation_coefficient_1_m < 0.0:
             details["attenuation_coefficient_1_m"] = "required, >= 0"
+        elif not _is_finite_number(self.attenuation_coefficient_1_m):
+            details["attenuation_coefficient_1_m"] = "must be finite"
         if self.regularization_radius_m is None or self.regularization_radius_m <= 0.0:
             details["regularization_radius_m"] = "required, > 0"
-        # support_radius_m defaults to SIMULATION.default_support_radius_m at runtime;
-        # if not provided here, validate() defers to the engine.
-        if self.support_radius_m is not None:
-            if self.support_radius_m <= 0.0:
-                details["support_radius_m"] = "must be > 0"
-            elif (
-                self.regularization_radius_m is not None
-                and self.regularization_radius_m > 0.0
-                and self.support_radius_m <= self.regularization_radius_m
-            ):
-                details["support_radius_m"] = (
-                    f"must be > regularization_radius_m (r0={self.regularization_radius_m})"
-                )
+        elif not _is_finite_number(self.regularization_radius_m):
+            details["regularization_radius_m"] = "must be finite"
+        # support_radius_m is MANDATORY (Falla 5 fix): there is no implicit
+        # fallback. It must be finite, > 0, and strictly greater than the
+        # regularization radius so the kernel support fully contains the
+        # regularised peak.
+        if self.support_radius_m is None:
+            details["support_radius_m"] = "required, > regularization_radius_m"
+        elif not _is_finite_number(self.support_radius_m):
+            details["support_radius_m"] = "must be finite"
+        elif self.support_radius_m <= 0.0:
+            details["support_radius_m"] = "must be > 0"
+        elif (
+            self.regularization_radius_m is not None
+            and self.regularization_radius_m > 0.0
+            and self.support_radius_m <= self.regularization_radius_m
+        ):
+            details["support_radius_m"] = (
+                f"must be > regularization_radius_m (r0={self.regularization_radius_m})"
+            )
         if self.coupling_efficiency is None or not (0.0 <= self.coupling_efficiency <= 1.0):
             details["coupling_efficiency"] = "required, in [0, 1]"
         if self.temporal_mode == TemporalMode.TEMPORAL:
@@ -567,6 +576,7 @@ class SimulationConfiguration:
             "kernel_type": self.kernel_type,
             "attenuation_coefficient_1_m": self.attenuation_coefficient_1_m,
             "regularization_radius_m": self.regularization_radius_m,
+            "support_radius_m": self.support_radius_m,
             "coupling_efficiency": self.coupling_efficiency,
             "propagation_velocity_m_s": self.propagation_velocity_m_s,
             "propagation_velocity_source": self.propagation_velocity_source,
