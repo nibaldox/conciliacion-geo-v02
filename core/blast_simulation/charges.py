@@ -154,7 +154,15 @@ def _segment_single_hole(
     candidate_charge = descarga_m if descarga_m is not None else (declared_len - taco_m)
     if candidate_charge is None or not math.isfinite(candidate_charge):
         candidate_charge = geom_len - taco_m
-    if candidate_charge < 0.0:
+    # If the taco alone is longer than (or equal to) the hole, there is
+    # no explosive column — clamp to zero with a warning (never negative).
+    if taco_m >= declared_len:
+        warnings.append(
+            f"taco_m ({taco_m:.3f} m) >= hole length ({declared_len:.3f} m); "
+            "charge length clamped to 0"
+        )
+        candidate_charge = 0.0
+    elif candidate_charge < 0.0:
         warnings.append("taco_m longer than hole length; charge length clamped to 0")
         candidate_charge = 0.0
     if candidate_charge > geom_len:
