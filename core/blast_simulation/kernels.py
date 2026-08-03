@@ -28,6 +28,7 @@ Anisotropy:
 """
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import numpy as np
@@ -40,17 +41,29 @@ def radial_kernel(
     *,
     attenuation_coefficient_1_m: float,
     regularization_radius_m: float,
+    support_radius_m: float,
 ) -> np.ndarray:
-    """Vectorized regularized radial kernel ``K(r) = exp(-αr) / (r² + r0²)``.
+    """Vectorized regularized radial kernel with strict finite support.
 
-    ``r`` may be any shape; the return preserves it. The denominator is
-    strictly positive (``r0 > 0`` is enforced upstream) so the kernel is
-    finite everywhere including ``r=0``.
+    ``K(r) = exp(-αr) / (r² + r0²)`` and ``K(r) = 0`` for
+    ``r > support_radius_m``. ``support_radius_m`` MUST satisfy
+    ``support_radius_m > regularization_radius_m > 0`` so the regularised
+    kernel can be evaluated at sample points before truncation.
     """
     alpha = float(attenuation_coefficient_1_m)
     r0 = float(regularization_radius_m)
+    R = float(support_radius_m)
+    if not (alpha >= 0.0 and r0 > 0.0 and R > r0):
+        raise ValueError(
+            f"invalid kernel params: alpha={alpha}, r0={r0}, R={R}"
+        )
     r_arr = np.asarray(r, dtype=np.float64)
-    return np.exp(-alpha * r_arr) / (r_arr * r_arr + r0 * r0)
+    out = np.zeros_like(r_arr, dtype=np.float64)
+    inside = r_arr <= R
+    if np.any(inside):
+        r_in = r_arr[inside]
+        out[inside] = np.exp(-alpha * r_in) / (r_in * r_in + r0 * r0)
+    return out
 
 
 def isotropic_distance(
@@ -154,6 +167,54 @@ def kernel_total_mass(
     # numpy 2.x renamed np.trapz → np.trapezoid; older numpy keeps trapz.
     trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
     return float(trapezoid(integrand, r))
+
+
+def discrete_total_mass(
+    *,
+    attenuation_coefficient_1_m: float,
+    regularization_radius_m: float,
+    support_radius_m: float,
+    voxel_size_m: float,
+    anisotropy_mode: str = AnisotropyMode.ISOTROPIC,
+    tensor: Optional[np.ndarray] = None,
+) -> float:
+    """Discrete total mass of the kernel over its finite support.
+
+    Builds a local voxel grid centred on the source that covers the
+    support cube ``[-R, R]³`` and sums the kernel weights over the ENTIRE
+    local grid (not just the requested domain). This is the
+    normalisation denominator used by the engine: ``e_j = E × q_j / Q``
+    where ``q_j = K(r_j) × V_j``. Because the same metric is used for
+    the per-source weights and the discrete total, conservation holds
+    strictly by construction.
+    """
+    alpha = float(attenuation_coefficient_1_m)
+    r0 = float(regularization_radius_m)
+    R = float(support_radius_m)
+    dx = float(voxel_size_m)
+    if not (alpha >= 0.0 and r0 > 0.0 and R > r0 and dx > 0.0):
+        return 0.0
+    n_per_side = 1 if dx >= 2.0 * R else max(1, int(math.ceil(2.0 * R / dx)))
+    half_span = (n_per_side * dx) / 2.0
+    if n_per_side == 1:
+        centres = np.zeros((1, 3), dtype=np.float64)
+    else:
+        offsets = (np.arange(n_per_side, dtype=np.float64) + 0.5) * dx - half_span
+        ox, oy, oz = np.meshgrid(offsets, offsets, offsets, indexing="ij")
+        centres = np.column_stack([ox.ravel(), oy.ravel(), oz.ravel()])
+    delta = centres
+    if anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR and tensor is not None:
+        M = np.asarray(tensor, dtype=np.float64)
+        quad = np.einsum("ij,jk,ik->i", delta, M, delta)
+        r = np.sqrt(np.clip(quad, 0.0, None))
+    else:
+        r = np.sqrt(np.einsum("ij,ij->i", delta, delta))
+    inside = r <= R
+    if not np.any(inside):
+        return 0.0
+    r_in = r[inside]
+    kernel = np.exp(-alpha * r_in) / (r_in * r_in + r0 * r0)
+    return float(np.sum(kernel) * dx * dx * dx)
 
 
 def energy_split_for_source(

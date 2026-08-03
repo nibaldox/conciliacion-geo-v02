@@ -21,7 +21,7 @@ from typing import Iterator
 
 import numpy as np
 
-from core.blast_simulation.contracts import VoxelGridSpecification
+from core.blast_simulation.contracts import DomainBounds, VoxelGridSpecification
 
 
 def voxel_centres_flat(grid: VoxelGridSpecification) -> np.ndarray:
@@ -104,3 +104,62 @@ def reshape_to_grid(flat: np.ndarray, grid: VoxelGridSpecification) -> np.ndarra
             f"flat size {flat.size} does not match grid shape {(nx, ny, nz)}"
         )
     return flat.reshape((nx, ny, nz))
+
+
+def voxel_grid_with_effective_bounds(
+    grid: VoxelGridSpecification,
+) -> tuple[np.ndarray, DomainBounds, np.ndarray]:
+    """Return ``(centres_flat, effective_bounds, partial_boundary_mask)``."""
+    if grid.bounds is None:
+        empty = np.empty((0, 3), dtype=np.float32)
+        empty_mask = np.empty((0,), dtype=bool)
+        return empty, DomainBounds(0.0, 0.0, 0.0, 0.0, 0.0, 0.0), empty_mask
+
+    nx, ny, nz = grid.shape
+    dx = grid.voxel_size_m
+    b = grid.bounds
+
+    effective_bounds = DomainBounds(
+        x_min=b.x_min,
+        y_min=b.y_min,
+        z_min=b.z_min,
+        x_max=b.x_min + nx * dx,
+        y_max=b.y_min + ny * dx,
+        z_max=b.z_min + nz * dx,
+    )
+
+    centres = voxel_centres_flat(grid)
+    half_dx = dx / 2.0
+    cx, cy, cz = centres[:, 0], centres[:, 1], centres[:, 2]
+    partial_boundary = (
+        ((cx - half_dx < b.x_min) | (cx + half_dx > b.x_max))
+        | ((cy - half_dx < b.y_min) | (cy + half_dx > b.y_max))
+        | ((cz - half_dx < b.z_min) | (cz + half_dx > b.z_max))
+    ) & ~(
+        (cx >= b.x_min) & (cx <= b.x_max)
+        & (cy >= b.y_min) & (cy <= b.y_max)
+        & (cz >= b.z_min) & (cz <= b.z_max)
+    )
+    return centres, effective_bounds, partial_boundary
+
+
+def intersection_mask_flat(grid: VoxelGridSpecification) -> np.ndarray:
+    """Boolean ``(n_voxels,)`` mask — intersection semantics (Brecha 3.4).
+
+    A voxel is considered part of the domain if its **box** (centre ±
+    ``dx/2`` along each axis) intersects the requested bounds. This
+    captures the partial-boundary voxels that the ``ceil``-shaped grid
+    produces near the requested ``DomainBounds`` edges.
+    """
+    centres, effective_bounds, partial = voxel_grid_with_effective_bounds(grid)
+    if centres.size == 0:
+        return np.empty((0,), dtype=bool)
+    b = grid.bounds
+    cx, cy, cz = centres[:, 0], centres[:, 1], centres[:, 2]
+    half = effective_bounds  # ensure dependency
+    inside = (
+        (cx >= b.x_min) & (cx <= b.x_max)
+        & (cy >= b.y_min) & (cy <= b.y_max)
+        & (cz >= b.z_min) & (cz <= b.z_max)
+    )
+    return inside | partial

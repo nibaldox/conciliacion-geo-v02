@@ -567,6 +567,68 @@ class SimulationConfiguration:
 
 
 @dataclass(frozen=True)
+class DeckSegment:
+    """Real explosive deck inside a hole cylinder.
+
+    A deck is a contiguous block of explosive material that may carry a
+    different explosive product or density than its neighbours. The engine
+    uses decks to honour per-deck density / specific-energy overrides, tag
+    detonation times per deck and surface per-deck provenance.
+    """
+    hole_id: str = ""
+    deck_id: str = ""
+    from_m: float = 0.0
+    to_m: float = 0.0
+    length_m: float = 0.0
+    explosive_type: str = ""
+    density_kg_m3: Optional[float] = None
+    mass_kg: float = 0.0
+    specific_energy_j_kg: Optional[float] = None
+    detonation_time_s: Optional[float] = None
+    status: str = "OK"
+    source: str = ""
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hole_id": self.hole_id,
+            "deck_id": self.deck_id,
+            "from_m": self.from_m,
+            "to_m": self.to_m,
+            "length_m": self.length_m,
+            "explosive_type": self.explosive_type,
+            "density_kg_m3": self.density_kg_m3,
+            "mass_kg": self.mass_kg,
+            "specific_energy_j_kg": self.specific_energy_j_kg,
+            "detonation_time_s": self.detonation_time_s,
+            "status": self.status,
+            "source": self.source,
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class SimulationAttempt:
+    """Registro de un intento fallido — NO es :class:`SimulationResult`."""
+    attempt_id: str = ""
+    attempted_at: str = ""
+    blocking_errors: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    configuration_fingerprint: str = ""
+    accepted_rows_hash: str = ""
+    status: str = "REJECTED"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "attempt_id": self.attempt_id,
+            "attempted_at": self.attempted_at,
+            "blocking_errors": [dict(err) for err in self.blocking_errors],
+            "configuration_fingerprint": self.configuration_fingerprint,
+            "accepted_rows_hash": self.accepted_rows_hash,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
 class ChargeSegment:
     """A discretized explosive-charge segment inside a hole cylinder.
 
@@ -736,36 +798,119 @@ class VoxelEnergyField:
 
 @dataclass(frozen=True)
 class PlanSlice:
-    """Horizontal energy slice at a given elevation."""
+    """Horizontal energy slice at a given elevation.
+
+    The dataclass carries the full 2D matrix flattened in row-major
+    order plus its coordinates, the validity mask, percentile summary,
+    projection of the source holes onto the slice plane, and the
+    SHA-256 of the raw 2D array. Legacy aggregate fields
+    (``max_value``, ``mean_value``, ``represented_energy_j``) are kept
+    so the Excel export, NPZ round-trip and the API export endpoint
+    do not regress.
+    """
     elevation_m: float
     unit: str
-    grid_shape: tuple[int, int]
-    data_sha256: str
-    max_value: float
-    mean_value: float
-    represented_energy_j: float
+    field_type: str = "energy_j"
+    grid_shape: tuple[int, int] = (0, 0)
+    values: tuple[float, ...] = field(default_factory=tuple)
+    x_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    y_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    valid_mask: tuple[bool, ...] = field(default_factory=tuple)
+    min: float = 0.0
+    max: float = 0.0
+    mean: float = 0.0
+    percentiles: dict[str, float] = field(default_factory=dict)
+    source_holes_projection: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    data_sha256: str = ""
+    max_value: float = 0.0
+    mean_value: float = 0.0
+    represented_energy_j: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.max_value == 0.0 and self.max != 0.0:
+            object.__setattr__(self, "max_value", self.max)
+        if self.mean_value == 0.0 and self.mean != 0.0:
+            object.__setattr__(self, "mean_value", self.mean)
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["grid_shape"] = list(self.grid_shape)
-        return d
+        return {
+            "elevation_m": self.elevation_m,
+            "unit": self.unit,
+            "field_type": self.field_type,
+            "grid_shape": list(self.grid_shape),
+            "values": list(self.values),
+            "x_coordinates_m": list(self.x_coordinates_m),
+            "y_coordinates_m": list(self.y_coordinates_m),
+            "valid_mask": list(self.valid_mask),
+            "min": self.min,
+            "max": self.max,
+            "mean": self.mean,
+            "percentiles": dict(self.percentiles),
+            "source_holes_projection": [dict(p) for p in self.source_holes_projection],
+            "data_sha256": self.data_sha256,
+            "max_value": self.max_value,
+            "mean_value": self.mean_value,
+            "represented_energy_j": self.represented_energy_j,
+        }
 
 
 @dataclass(frozen=True)
 class SectionSlice:
-    """Vertical energy slice along an in-plane axis."""
+    """Vertical energy slice along an in-plane axis.
+
+    The dataclass carries the full 2D matrix flattened in row-major
+    order plus its along-axis and vertical coordinates, the validity
+    mask, percentile summary, projection of the source holes onto the
+    slice plane, and the SHA-256 of the raw 2D array. Legacy aggregate
+    fields (``max_value``, ``mean_value``, ``represented_energy_j``) are
+    kept so the existing consumers keep working.
+    """
     axis: str  # "x" | "y"
     coordinate_m: float
     unit: str
-    grid_shape: tuple[int, int]
-    data_sha256: str
-    max_value: float
-    mean_value: float
+    field_type: str = "energy_j"
+    grid_shape: tuple[int, int] = (0, 0)
+    values: tuple[float, ...] = field(default_factory=tuple)
+    along_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    vertical_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    valid_mask: tuple[bool, ...] = field(default_factory=tuple)
+    min: float = 0.0
+    max: float = 0.0
+    mean: float = 0.0
+    percentiles: dict[str, float] = field(default_factory=dict)
+    source_holes_projection: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    data_sha256: str = ""
+    max_value: float = 0.0
+    mean_value: float = 0.0
+    represented_energy_j: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.max_value == 0.0 and self.max != 0.0:
+            object.__setattr__(self, "max_value", self.max)
+        if self.mean_value == 0.0 and self.mean != 0.0:
+            object.__setattr__(self, "mean_value", self.mean)
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["grid_shape"] = list(self.grid_shape)
-        return d
+        return {
+            "axis": self.axis,
+            "coordinate_m": self.coordinate_m,
+            "unit": self.unit,
+            "field_type": self.field_type,
+            "grid_shape": list(self.grid_shape),
+            "values": list(self.values),
+            "along_coordinates_m": list(self.along_coordinates_m),
+            "vertical_coordinates_m": list(self.vertical_coordinates_m),
+            "valid_mask": list(self.valid_mask),
+            "min": self.min,
+            "max": self.max,
+            "mean": self.mean,
+            "percentiles": dict(self.percentiles),
+            "source_holes_projection": [dict(p) for p in self.source_holes_projection],
+            "data_sha256": self.data_sha256,
+            "max_value": self.max_value,
+            "mean_value": self.mean_value,
+            "represented_energy_j": self.represented_energy_j,
+        }
 
 
 @dataclass(frozen=True)

@@ -368,6 +368,11 @@ class SimulationDefaults:
     # declare temporal_mode explicitly).
     fallback_temporal_sigma_s: float = 0.025
 
+    # Default finite support radius for the spatial kernel. The operator
+    # may override this; it MUST be > regularization_radius_m. Used when
+    # the caller does not supply a value.
+    default_support_radius_m: float = 5.0
+
     # Local empirical UCS proxy for unit 1c (13). DISABLED by default —
     # enabling it is a versioned, tagged strategy choice.
     enable_drilling_time_ucs_proxy: bool = False
