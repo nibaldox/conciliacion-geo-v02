@@ -23,6 +23,10 @@ reimplement the engine.
 """
 from __future__ import annotations
 
+from core.blast_simulation.charges import (
+    build_charge_segments,
+    classify_segments,
+)
 from core.blast_simulation.contracts import (
     AnisotropyMode,
     ChargeSegment,
@@ -47,11 +51,30 @@ from core.blast_simulation.contracts import (
     VoxelEnergyField,
     VoxelGridSpecification,
 )
+from core.blast_simulation.diagnostics import (
+    DEFAULT_BAND_EDGES,
+    classify_energy_bands,
+    coverage_report,
+    statistical_summary,
+)
+from core.blast_simulation.engine import (
+    ENGINE_VERSION,
+    export_field_arrays,
+    run_simulation,
+)
+from core.blast_simulation.slicing import (
+    attach_slices_to_result,
+    compute_slices,
+    plan_slice,
+    section_slice,
+)
 
 __all__ = [
     "SIMULATION_CONFIGURATION_VERSION",
+    "ENGINE_VERSION",
     "AnisotropyMode",
     "ChargeSegment",
+    "DEFAULT_BAND_EDGES",
     "DomainBounds",
     "EnergyMode",
     "EnergyPropagationConfiguration",
@@ -71,4 +94,15 @@ __all__ = [
     "TemporalSimulationConfiguration",
     "VoxelEnergyField",
     "VoxelGridSpecification",
+    "attach_slices_to_result",
+    "build_charge_segments",
+    "classify_energy_bands",
+    "classify_segments",
+    "compute_slices",
+    "coverage_report",
+    "export_field_arrays",
+    "plan_slice",
+    "run_simulation",
+    "section_slice",
+    "statistical_summary",
 ]
