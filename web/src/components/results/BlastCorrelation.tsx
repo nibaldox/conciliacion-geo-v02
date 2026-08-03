@@ -7,9 +7,11 @@ import { useBlastCorrelation, useSections } from '../../api/hooks';
 import { getSessionId } from '../../api/client';
 import { BlastUploader } from './BlastUploader';
 import { BlastHoles3DViewer } from './BlastHoles3DViewer';
+import { BlastSimulationPanel } from './BlastSimulationPanel';
 import { PowderFactorDamagePanel } from './PowderFactorDamagePanel';
 import { BlastSectorDensityEditor } from './BlastSectorDensityEditor';
 import { BlastCorrelationTable } from './BlastCorrelationTable';
+import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { useBlastSettings } from './useBlastSettings';
 // Re-exports below kept for backwards-compat with existing tests:
 //   - damage test suite imports `buildDamageTraces` / `DAMAGE_MODEL_MIN_SAMPLES`
@@ -217,6 +219,20 @@ export function BlastCorrelation() {
         }
       >
         <BlastHoles3DViewer sessionId={getSessionId()} />
+      </Suspense>
+
+      {/* Phase 2: energy simulation panel (voxel-based, conservative model) */}
+      <Suspense
+        fallback={
+          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            {t('common.loading', { defaultValue: 'Cargando…' })}
+          </p>
+        }
+      >
+        <BlastSimulationPanel
+          sessionId={getSessionId()}
+          geometryConfigurationVersion={GEOMETRY_CONFIGURATION_VERSION}
+        />
       </Suspense>
     </div>
   );

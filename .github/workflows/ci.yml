@@ -27,7 +27,7 @@ jobs:
       
       - name: Install Python deps
         run: |
-          pip install pytest httpx
+          pip install pytest pytest-asyncio httpx
           pip install -r requirements-api.txt
           pip install -e .
       
