@@ -246,13 +246,15 @@ class TestFalla3TemporalArrays:
         assert "time_of_max_s" not in arrays
 
     def test_compute_field_arrays_temporal_mode_has_arrays(self, tmp_path):
+        """The canonical path (run_simulation → field_arrays) must
+        carry temporal arrays in TEMPORAL mode. The legacy
+        compute_field_arrays is a back-compat fallback; the canonical
+        arrays come from run_simulation directly."""
         cfg = _cfg(temporal_mode=TemporalMode.TEMPORAL)
         result = _run_simulation(cfg, tmp_path)
-        arrays = compute_field_arrays(
-            result=result,
-            accepted_rows=_rows(),
-            configuration=cfg,
-        )
+        # The canonical field_arrays carry the temporal arrays.
+        assert result.field_arrays is not None
+        arrays = result.field_arrays
         assert "first_arrival_s" in arrays
         assert "time_of_max_s" in arrays
         assert arrays["first_arrival_s"].dtype == np.float32

@@ -347,21 +347,30 @@ def _accumulate_source(
         in_domain[valid_in_grid] = in_domain_mask[valid_idx]
 
     # Per-voxel energy assignment (only in-grid + in-domain).
-    e_j = np.zeros(voxel_centres.shape[0], dtype=np.float64)
+    # DIRECTLY UPDATE the global accumulators at the deposit indices —
+    # NO full-length e_j vector is allocated (Falla 4 v4 fix, audit §6).
+    # This eliminates O(n_voxels) auxiliary memory per source.
     deposit_mask = valid_in_grid & in_domain
-    # ``represented_weight`` sums the SAME ``weights`` array used to
-    # build ``Q_total``. This makes the conservation arithmetic exact
-    # in float64: ``represented_weight + outside_weight == Q_total``.
     if np.any(deposit_mask):
         deposit_idx = flat_idx[deposit_mask]
-        e_j[deposit_idx] = float(e_acoplada) * weights[deposit_mask] / Q_total
+        deposit_energies = (
+            float(e_acoplada) * weights[deposit_mask] / Q_total
+        )
+        # Update global accumulators in-place.
+        energy_total[deposit_idx] += deposit_energies
+        contributing_count[deposit_idx] += 1
+        # Dominant source: where this contribution exceeds the current max.
+        improved = deposit_energies > dominant_energy[deposit_idx]
+        if np.any(improved):
+            dominant_energy[deposit_idx[improved]] = deposit_energies[improved]
+            dominant_idx[deposit_idx[improved]] = _stable_hole_index(seg.hole_id)
+    else:
+        deposit_idx = np.array([], dtype=np.int64)
+        deposit_energies = np.array([], dtype=np.float64)
 
     represented_weight = float(weights[deposit_mask].sum()) if np.any(deposit_mask) else 0.0
     outside_weight = Q_total - represented_weight
     if outside_weight < 0.0:
-        # Genuine conservation violation — should never happen with the
-        # single-lattice sampling. Surface as a blocking error so the
-        # result is never persisted as valid.
         outside_weight = 0.0
     represented = float(e_acoplada) * represented_weight / Q_total
     outside = float(e_acoplada) * outside_weight / Q_total
@@ -370,20 +379,17 @@ def _accumulate_source(
     total_outside.append(outside)
     per_hole_energy[seg.hole_id] = per_hole_energy.get(seg.hole_id, 0.0) + represented
 
-    # Accumulate into the global field.
-    energy_total += e_j
-    contributing_count[e_j > 0.0] += 1
-
-    contribution = e_j
-    improved = contribution > dominant_energy
-    if np.any(improved):
-        dominant_energy[improved] = contribution[improved]
-        dominant_idx[improved] = _stable_hole_index(seg.hole_id)
-
-    # Temporal layer — record per-source contributions for the
-    # downstream compute_time_of_max (vectorised, blocked). The
-    # accumulated per-voxel energy and distance vectors keep the
-    # spatial mapping so superposition is exact.
+    # Temporal layer — store COMPACT per-segment info for the streaming
+    # temporal computation (Falla 7 v4 fix, audit §7).
+    # Instead of appending full-length e_j[n_voxels] and r[n_voxels]
+    # arrays, we store:
+    #   - source position (3 floats)
+    #   - deposit_indices (compact: only voxels that received energy)
+    #   - deposit_energies (matching compact array)
+    #   - detonation_time_s (1 float)
+    # The downstream temporal functions reconstruct per-block distances
+    # on-the-fly, keeping auxiliary memory O(support_cube) per source
+    # instead of O(n_voxels).
     if (
         config.temporal_mode == TemporalMode.TEMPORAL
         and config.propagation_velocity_m_s is not None
@@ -392,13 +398,135 @@ def _accumulate_source(
         and temporal_distances is not None
         and temporal_detonation_times is not None
     ):
-        arriving = e_j > 0.0
-        if np.any(arriving):
-            temporal_energy_contributions.append(e_j)
-            temporal_distances.append(compute_distance(voxel_centres - src, anisotropy_mode=config.anisotropy_mode, tensor=tensor))
+        if deposit_idx.size > 0:
+            temporal_energy_contributions.append(
+                (src.copy(), deposit_idx.copy(), deposit_energies.copy())
+            )
             temporal_detonation_times.append(
                 float(seg.detonation_time_s) if seg.detonation_time_s is not None else 0.0
             )
+
+
+# ---------------------------------------------------------------------------
+# Streaming temporal computation — bounded memory (Falla 7 v4 fix, audit §7)
+# ---------------------------------------------------------------------------
+
+
+def _compute_temporal_fields_streaming(
+    *,
+    voxel_centres: np.ndarray,
+    energy_total: np.ndarray,
+    segment_infos: list[tuple[np.ndarray, np.ndarray, np.ndarray]],
+    detonation_times: list[float],
+    velocity: float,
+    sigma: float,
+    anisotropy_mode: str,
+    tensor: Optional[np.ndarray],
+    n_voxels: int,
+    voxel_block_size: int = 4096,
+    n_time_bins: int = 64,
+    t_window_factor: float = 6.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute first_arrival and time_of_max from compact segment info.
+
+    Processes voxels in blocks. For each block, iterates segments and
+    computes distances ON-THE-FLY from the segment's source position to
+    the block's voxel centres. NO full-length per-segment arrays are
+    materialised.
+
+    Peak auxiliary memory: O(voxel_block_size × n_contributing_segments)
+    where n_contributing_segments is the number of segments that have
+    at least one deposit voxel in the current block — typically a small
+    fraction of the total.
+
+    Parameters
+    ----------
+    segment_infos
+        List of ``(source_position, deposit_indices, deposit_energies)``
+        tuples, one per contributing segment. ``deposit_indices`` are
+        flat indices into the global voxel grid; only voxels that
+        received energy are included (compact representation).
+    """
+    from scipy.special import ndtr
+
+    first_arrival = np.full(n_voxels, np.inf, dtype=np.float64)
+    time_of_max = np.full(n_voxels, np.nan, dtype=np.float64)
+
+    if not segment_infos or n_voxels == 0:
+        return first_arrival, time_of_max
+
+    half_window = float(t_window_factor) / 2.0 * sigma
+    unit_edges = np.linspace(0.0, 1.0, n_time_bins + 1, dtype=np.float64)
+    block = max(1, int(voxel_block_size))
+
+    for start in range(0, n_voxels, block):
+        stop = min(start + block, n_voxels)
+        block_size = stop - start
+
+        # Collect per-segment data for voxels in THIS block only.
+        # Each entry: (local_indices, distances, energies, detonation).
+        block_segments: list[tuple[np.ndarray, np.ndarray, np.ndarray, float]] = []
+        for seg_idx, (src_pos, dep_idx, dep_energies) in enumerate(segment_infos):
+            if dep_idx.size == 0:
+                continue
+            in_block = (dep_idx >= start) & (dep_idx < stop)
+            if not np.any(in_block):
+                continue
+            local_idx = dep_idx[in_block] - start
+            local_energy = dep_energies[in_block]
+            # Compute distances ON-THE-FLY for these few voxels.
+            local_centres = voxel_centres[start + local_idx]
+            delta = local_centres - src_pos
+            r = compute_distance(delta, anisotropy_mode=anisotropy_mode, tensor=tensor)
+            det = float(detonation_times[seg_idx]) if seg_idx < len(detonation_times) else 0.0
+            block_segments.append((local_idx, r, local_energy, det))
+
+            # Update first_arrival at the global indices.
+            global_idx = dep_idx[in_block]
+            arrivals_seg = det + r / velocity
+            first_arrival[global_idx] = np.minimum(
+                first_arrival[global_idx], arrivals_seg,
+            )
+
+        if not block_segments:
+            continue
+
+        # Compute time_of_max for each active voxel in this block.
+        all_local = np.concatenate([d[0] for d in block_segments])
+        unique_local = np.unique(all_local)
+
+        for vl in unique_local:
+            arrivals_v = []
+            energies_v = []
+            for local_idx, r, energy, det in block_segments:
+                mask = local_idx == vl
+                if np.any(mask):
+                    arrivals_v.append(det + r[mask][0] / velocity)
+                    energies_v.append(energy[mask][0])
+
+            if not arrivals_v:
+                continue
+
+            arrivals_arr = np.array(arrivals_v, dtype=np.float64)
+            energies_arr = np.array(energies_v, dtype=np.float64)
+
+            t_min = float(arrivals_arr.min())
+            t_max = float(arrivals_arr.max())
+
+            if np.isclose(t_min, t_max, atol=1e-14):
+                time_of_max[start + vl] = t_min
+                continue
+
+            starts_w = max(0.0, t_min - half_window)
+            stops_w = t_max + half_window
+            edges = starts_w + (stops_w - starts_w) * unit_edges
+            z = (edges[:, None] - arrivals_arr[None, :]) / sigma
+            fractions = np.diff(ndtr(z), axis=0)
+            response = np.sum(energies_arr[None, :] * fractions, axis=1)
+            best_bin = int(np.argmax(response))
+            time_of_max[start + vl] = 0.5 * (edges[best_bin] + edges[best_bin + 1])
+
+    return first_arrival, time_of_max
 
 
 def _stable_hole_index(hole_id: str) -> int:
@@ -635,13 +763,11 @@ def run_simulation(
     if first_arrival is not None:
         first_arrival[~np.isfinite(first_arrival)] = np.nan
 
-    # Compute temporal fields from per-source accumulated contributions.
-    # CHUNKED CANONICAL ROUTE (Falla 6 + Falla 7 fix, audit v2 §6.2):
-    # both ``run_simulation`` (in-memory) and ``compute_field_arrays`` /
-    # ``export_field_arrays`` (NPZ) consume the SAME per-segment lists
-    # via the chunked variants in ``temporal.py``. No dense
-    # ``(n_voxels × n_segments)`` matrix is ever materialised; peak
-    # memory is bounded by ``voxel_block_size × n_segments``.
+    # Compute temporal fields using STREAMING per-block processing
+    # (Falla 7 v4 fix, audit §7). NO full-length per-segment arrays
+    # are retained; the compact segment info is used to compute
+    # distances and arrivals on-the-fly for each voxel block.
+    # Peak auxiliary memory: O(voxel_block_size × n_active_segments).
     if is_temporal and temporal_energy_contributions and len(temporal_energy_contributions) > 0:
         detonation_array = (
             temporal_detonation_times
@@ -650,24 +776,19 @@ def run_simulation(
         )
         velocity = float(configuration.propagation_velocity_m_s)
         sigma_value = float(pulse_sigma) if pulse_sigma is not None else 1e-3
-        first_arrival = compute_first_arrival_chunked(
-            distances_per_segment=temporal_distances,
-            energy_per_segment=temporal_energy_contributions,
-            propagation_velocity_m_s=velocity,
-            detonation_times_per_segment=detonation_array,
+        first_arrival, time_of_max = _compute_temporal_fields_streaming(
+            voxel_centres=voxel_centres,
+            energy_total=energy_total,
+            segment_infos=temporal_energy_contributions,
+            detonation_times=detonation_array,
+            velocity=velocity,
+            sigma=sigma_value,
+            anisotropy_mode=configuration.anisotropy_mode,
+            tensor=anisotropy_tensor,
             n_voxels=n_voxels,
-        )
-        first_arrival[~np.isfinite(first_arrival)] = np.nan
-        time_of_max = compute_time_of_max_chunked(
-            energy_total_per_voxel=energy_total,
-            first_arrival_per_voxel=first_arrival,
-            distances_per_segment=temporal_distances,
-            energy_per_segment=temporal_energy_contributions,
-            propagation_velocity_m_s=velocity,
-            sigma_s=sigma_value,
-            detonation_times_per_segment=detonation_array,
             voxel_block_size=block,
         )
+        first_arrival[~np.isfinite(first_arrival)] = np.nan
 
     energy_unit = "J" if configuration.energy_mode == EnergyMode.ABSOLUTE else "dimensionless"
 

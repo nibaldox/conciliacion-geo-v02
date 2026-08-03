@@ -49,4 +49,5 @@ markers = [
     "slow: benchmarks that require a large voxel grid and may take several minutes",
     "regression_v2: red regression tests for the v2 blocking remediation",
     "regression_v3: red regression tests for the v3 canonical result remediation",
+    "regression_v4: red regression tests for the v4 streaming remediation",
 ]
