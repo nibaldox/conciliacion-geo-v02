@@ -110,9 +110,9 @@ class TestBenchHeightProvenance:
             "Inclinacion_real": 0.0, "Azimuth_real": 0.0, "longitud_real": 12.0,
             "Incl_convention": "from_vertical",
         }])
-        out, *_ = procesar_pozos(df, bench_height_m=15.0)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0)
         assert out["bench_height_status"].iloc[0] == "PROVIDED"
-        out2, *_ = procesar_pozos(df)  # no height -> transformation BLOCKED
+        out2, *_ = procesar_pozos(df, geometry_user_confirmed=True, incl_convention="from_vertical")  # no height -> transformation BLOCKED
         assert out2["bench_height_status"].iloc[0] == "MISSING"
         assert out2["Z_collar"].iloc[0] == 4000.0  # never auto +15
 
@@ -129,7 +129,7 @@ class TestCierreFinalAltura:
 
     def test_z_collar_not_transformed_without_confirmed_height(self):
         """Ausencia de modificación automática de Z_collar (bloqueo)."""
-        out, *_ = procesar_pozos(self._enaex_hole(), incl_convention="from_vertical")
+        out, *_ = procesar_pozos(self._enaex_hole(), geometry_user_confirmed=True, incl_convention="from_vertical")
         assert out["Z_collar"].iloc[0] == 4000.0  # NOT 4015
         assert out["Z_collar_semantic"].iloc[0] == "bench_elevation_untransformed"
         assert out["bench_height_status"].iloc[0] == "MISSING"
@@ -139,7 +139,7 @@ class TestCierreFinalAltura:
 
     def test_confirmed_height_transforms_and_records(self):
         out, *_ = procesar_pozos(
-            self._enaex_hole(), incl_convention="from_vertical", bench_height_m=15.0
+            self._enaex_hole(), geometry_user_confirmed=True, incl_convention="from_vertical", bench_height_m=15.0
         )
         assert out["Z_collar"].iloc[0] == 4015.0
         assert out["bench_height_status"].iloc[0] == "PROVIDED"

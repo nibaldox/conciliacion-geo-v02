@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -10,6 +12,11 @@ import streamlit as st
 
 from core.calculo_tronadura import procesar_pozos
 from core.column_mapping import apply_mapping, validate_mapping
+from core.geometry_contract import (
+    GEOMETRY_CONFIGURATION_VERSION,
+    GeometryConfiguration,
+    GeometryConfigurationError,
+)
 from ui.modulo_tronadura.column_mapper import (
     clear_confirmed_mapping,
     get_confirmed_mapping,
@@ -35,7 +42,34 @@ from ui.modulo_tronadura.state import (
 logger = logging.getLogger(__name__)
 
 
-def render_upload_section() -> None:
+def geometry_contract_fingerprint(contract: dict[str, Any]) -> str:
+    payload = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def geometry_contract_is_complete(contract: dict[str, Any]) -> bool:
+    required = (
+        "geometry_configuration_version",
+        "inclination_source_column",
+        "inclination_convention",
+        "inclination_sign_convention",
+        "inclination_unit",
+        "azimuth_source_column",
+        "azimuth_convention",
+        "azimuth_unit",
+    )
+    if any(not contract.get(field) for field in required):
+        return False
+    return not (
+        contract.get("inclination_sign_convention") == "SOURCE_DEFINED"
+        and not contract.get("inclination_source_rule")
+    )
+
+
+def render_upload_section(
+    source_df: pd.DataFrame | None = None,
+    confirmed_mapping_override: dict[str, str | None] | None = None,
+) -> None:
     """Render file uploaders, preview, process button and drill compliance."""
     ref_traces = get_ref_line_traces()
     if ref_traces:
@@ -47,52 +81,58 @@ def render_upload_section() -> None:
     Azimuth_real, longitud_real) y opcionalmente Kilos_Cargados_real para colorear.
     """)
 
-    uploaded = st.file_uploader(
-        "Archivo de pozos (CSV o Excel)",
-        type=["csv", "xlsx", "xls"],
-        key="blast_file",
-    )
-    design_uploaded = st.file_uploader(
-        "Diseño de perforación (CSV, opcional)",
-        type=["csv"],
-        key="blast_design_file",
-    )
-    hardness_uploaded = st.file_uploader(
-        "Reporte de perforación (rig) — CSV opcional",
-        type=["csv"],
-        key="blast_drill_hardness_file",
-        help="CSV con Pozo, Tiempo Inicial/Final, Profundidad, Equipo y coordenadas. Enriquece cada pozo con dureza, índice de dureza y tasa de penetración.",
-    )
-
-    if uploaded is None:
-        if not ref_traces:
-            st.info("⏳ Esperando archivo de pozos y/o líneas de referencia para procesar.")
-        return
-
-    try:
-        df = read_uploaded_bytes(uploaded.getvalue(), uploaded.name)
-    except Exception:
-        logger.exception("Failed to read blast file")
-        st.error("No se pudo leer el archivo de pozos. Revisa la consola para detalles.")
-        return
+    design_uploaded = None
+    hardness_uploaded = None
+    source_name = "embedded-blast.csv"
+    if source_df is None:
+        uploaded = st.file_uploader(
+            "Archivo de pozos (CSV o Excel)",
+            type=["csv", "xlsx", "xls"],
+            key="blast_file",
+        )
+        design_uploaded = st.file_uploader(
+            "Diseño de perforación (CSV, opcional)",
+            type=["csv"],
+            key="blast_design_file",
+        )
+        hardness_uploaded = st.file_uploader(
+            "Reporte de perforación (rig) — CSV opcional",
+            type=["csv"],
+            key="blast_drill_hardness_file",
+            help="CSV con Pozo, Tiempo Inicial/Final, Profundidad, Equipo y coordenadas. Enriquece cada pozo con dureza, índice de dureza y tasa de penetración.",
+        )
+        if uploaded is None:
+            if not ref_traces:
+                st.info("⏳ Esperando archivo de pozos y/o líneas de referencia para procesar.")
+            return
+        source_name = uploaded.name
+        try:
+            df = read_uploaded_bytes(uploaded.getvalue(), uploaded.name)
+        except Exception:
+            logger.exception("Failed to read blast file")
+            st.error("No se pudo leer el archivo de pozos. Revisa la consola para detalles.")
+            return
+    else:
+        df = source_df.copy()
 
     st.subheader("Vista previa del archivo")
     st.dataframe(df.head(20), width="stretch")
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
     cached_name = get_blast_cached_name()
-    if cached_name != uploaded.name:
-        set_blast_cached_name(uploaded.name)
+    if cached_name != source_name:
+        set_blast_cached_name(source_name)
         reset_blast_processed_state()
         # New file — also reset the column-mapper confirmed mapping so the
         # next render starts from the auto-detected baseline.
-        clear_confirmed_mapping("blast")
+        if confirmed_mapping_override is None:
+            clear_confirmed_mapping("blast")
 
     # ── Column mapper ──────────────────────────────────────────────────────
     # The mapper is always rendered when a file is uploaded. It returns the
     # mapping dict if the user clicked "Confirmar mapeo", or None if the user
     # is still picking columns. We hold processing until then.
-    confirmed_mapping = render_column_mapper(df, key_prefix="blast")
+    confirmed_mapping = confirmed_mapping_override or render_column_mapper(df, key_prefix="blast")
 
     # Re-fetch from session_state in case a previous rerun had confirmed
     # but this rerun the user just opened the mapper again (e.g. scrolled
@@ -152,7 +192,7 @@ def render_upload_section() -> None:
 
         sign_label = st.selectbox(
             "Tratamiento del signo (controla la geometría)",
-            options=["Usar valor absoluto", "Signo negativo representa dip descendente", "Convención definida por la fuente"],
+            options=["Seleccione una convención", "Usar valor absoluto", "Signo negativo representa dip descendente", "Convención definida por la fuente"],
             index=0,
             help=(
                 "Política REAL de normalización: ABSOLUTE_VALUE usa la magnitud; "
@@ -166,18 +206,25 @@ def render_upload_section() -> None:
             st.session_state["blast_sign_rule"] = "ABSOLUTE_VALUE"
         elif sign_label.startswith("Signo negativo"):
             st.session_state["blast_sign_rule"] = "NEGATIVE_IS_DOWNWARD_DIP"
-        else:
+        elif sign_label.startswith("Convención definida"):
             st.session_state["blast_sign_rule"] = "SOURCE_DEFINED"
-            st.selectbox(
+            source_rule_label = st.selectbox(
                 "Regla de la fuente (obligatoria para SOURCE_DEFINED)",
-                options=["negative_is_downward_dip", "positive_only", "absolute_value"],
+                options=["Seleccione una regla", "negative_is_downward_dip", "positive_only", "absolute_value"],
                 index=0,
                 help="Sin una regla explícita la geometría se bloquea.",
                 key="blast_sign_source_rule",
             )
+            if source_rule_label == "Seleccione una regla":
+                st.session_state.pop("blast_sign_source_rule_value", None)
+            else:
+                st.session_state["blast_sign_source_rule_value"] = source_rule_label
+        else:
+            st.session_state.pop("blast_sign_rule", None)
+            st.session_state.pop("blast_sign_source_rule_value", None)
         az_label = st.selectbox(
             "Convención de azimut (controla la geometría)",
-            options=["Horario desde el Norte", "Antihorario desde el Norte", "Horario desde el Este", "Antihorario desde el Este"],
+            options=["Seleccione una convención", "Horario desde el Norte", "Antihorario desde el Norte", "Horario desde el Este", "Antihorario desde el Este"],
             index=0,
             key="blast_az_convention_selector",
         )
@@ -187,16 +234,36 @@ def render_upload_section() -> None:
             "Horario desde el Este": "CLOCKWISE_FROM_EAST",
             "Antihorario desde el Este": "COUNTERCLOCKWISE_FROM_EAST",
         }
-        st.session_state["blast_az_convention"] = az_map[az_label]
-        st.selectbox(
-            "Unidad angular",
-            options=["Grados", "Radianes"],
+        if az_label in az_map:
+            st.session_state["blast_az_convention"] = az_map[az_label]
+        else:
+            st.session_state.pop("blast_az_convention", None)
+        incl_unit_label = st.selectbox(
+            "Unidad angular de INCLINACIÓN",
+            options=["Seleccione una unidad", "Grados", "Radianes"],
             index=0,
-            key="blast_angle_unit",
+            key="blast_incl_unit",
+            help="Unidad independiente para la columna de inclinación.",
         )
+        if incl_unit_label == "Seleccione una unidad":
+            st.session_state.pop("blast_incl_unit_value", None)
+        else:
+            st.session_state["blast_incl_unit_value"] = incl_unit_label
+        az_unit_label = st.selectbox(
+            "Unidad angular de AZIMUT",
+            options=["Seleccione una unidad", "Grados", "Radianes"],
+            index=0,
+            key="blast_az_unit",
+            help="Unidad independiente para la columna de azimut (puede diferir de incl).",
+        )
+        if az_unit_label == "Seleccione una unidad":
+            st.session_state.pop("blast_az_unit_value", None)
+        else:
+            st.session_state["blast_az_unit_value"] = az_unit_label
         st.caption(
             "Azimut: grados en sentido horario desde el Norte (canónico). La "
-            "selección se persiste en la configuración reproducible del evento."
+            "selección se persiste en la configuración reproducible del evento "
+            f"(versión {GEOMETRY_CONFIGURATION_VERSION})."
         )
         bench_h_ui = st.number_input(
             "Altura de banco (m) — obligatoria para cota de banco",
@@ -213,14 +280,48 @@ def render_upload_section() -> None:
         st.session_state["blast_bench_height_m"] = (
             bench_h_ui if bench_h_ui and bench_h_ui > 0 else None
         )
+        # Integración §5.5 — fingerprint-based invalidation. We compute
+        # a deterministic hash of the CURRENT contract values and compare
+        # it against the one stored at confirmation time. If any field
+        # changed, the confirmation auto-clears.
+        cmap = confirmed_mapping or get_confirmed_mapping("blast") or {}
+        visible_contract = {
+            "geometry_configuration_version": GEOMETRY_CONFIGURATION_VERSION,
+            "inclination_source_column": cmap.get("Incl") or "",
+            "inclination_convention": st.session_state.get("blast_incl_convention"),
+            "inclination_sign_convention": st.session_state.get("blast_sign_rule"),
+            "inclination_unit": st.session_state.get("blast_incl_unit_value"),
+            "inclination_source_rule": st.session_state.get("blast_sign_source_rule_value", ""),
+            "azimuth_source_column": cmap.get("Az") or "",
+            "azimuth_convention": st.session_state.get("blast_az_convention"),
+            "azimuth_unit": st.session_state.get("blast_az_unit_value"),
+        }
+        current_fingerprint = geometry_contract_fingerprint(visible_contract)
+        previous_fingerprint = st.session_state.get("blast_visible_contract_fingerprint")
+        if previous_fingerprint is not None and previous_fingerprint != current_fingerprint:
+            st.session_state["blast_geometry_confirmed"] = False
+            st.session_state.pop("blast_confirmed_contract_fingerprint", None)
+        st.session_state["blast_visible_contract_fingerprint"] = current_fingerprint
+        contract_complete = geometry_contract_is_complete(visible_contract)
+        st.caption("Resumen del contrato a confirmar")
+        st.json(visible_contract)
+
         convention_confirmed = bool(
             st.checkbox(
                 "Confirmo la convención geométrica seleccionada",
                 value=False,
-                help="Confirmación explícita: sin ella el procesamiento se bloquea.",
+                help=(
+                    "Confirmación explícita: sin ella el procesamiento se "
+                    "bloquea. Cambiar cualquier campo invalida esta "
+                    "confirmación automáticamente."
+                ),
                 key="blast_geometry_confirmed",
+                disabled=not contract_complete,
             )
         )
+        if convention_confirmed:
+            st.session_state["blast_confirmed_contract_fingerprint"] = current_fingerprint
+
         if not convention_confirmed:
             st.warning(
                 "⚠️ **Convención geométrica no confirmada.** El procesamiento "
@@ -231,34 +332,100 @@ def render_upload_section() -> None:
         elif st.session_state.get("blast_incl_convention") is None:
             st.error("Seleccione una convención de inclinación para continuar.")
 
-    can_process = bool(st.session_state.get("blast_geometry_confirmed", False)) and \
-        st.session_state.get("blast_incl_convention") is not None
+    # Integración §5.5 — the operator can process ONLY when the
+    # confirmation checkbox is ticked AND the contract fingerprint still
+    # matches the one captured at confirmation time.
+    can_process = bool(
+        st.session_state.get("blast_geometry_confirmed", False)
+        and st.session_state.get("blast_confirmed_contract_fingerprint")
+        == st.session_state.get("blast_visible_contract_fingerprint")
+    )
 
     if st.button("🚀 Procesar Pozos", type="primary", key="process_blast", disabled=not can_process):
         progress = st.progress(0.0, text="Encolando trabajo de procesamiento…")
         status = st.empty()
         status.info("⏳ Procesando pozos en segundo plano…")
 
-        # Fase 1.1 cierre §2.3: la convención angular se selecciona y se
-        # persiste en la configuración reproducible del evento.
-        incl_conv_ui = st.session_state.get("blast_incl_convention", "from_vertical")
+        # Fase 1.1 cierre §2.3 + integración §3.2/4.2: la configuración
+        # geométrica se construye como un contrato versionado y validado
+        # que el operador confirma explícitamente. La confirmación visual
+        # se transmite como ``geometry_user_confirmed=True`` al backend.
+        incl_conv_ui = st.session_state.get("blast_incl_convention", None)
         bench_h_ui = st.session_state.get("blast_bench_height_m", None)
         try:
             bench_h_ui = float(bench_h_ui) if bench_h_ui not in (None, "") else None
         except (TypeError, ValueError):
             bench_h_ui = None
 
+        # Source columns: derived from the CONFIRMED column mapping (the
+        # operator selected these names). When the mapper didn't capture
+        # Incl/Az we cannot construct a v2 contract — surface the error.
+        incl_src_col = (confirmed_mapping or {}).get("Incl") or ""
+        az_src_col = (confirmed_mapping or {}).get("Az") or ""
+
+        # Build the v2 contract. ``geometry_user_confirmed`` is True ONLY
+        # when the operator ticked the confirmation checkbox in this UI.
+        # Integración §3.2 — the value MUST reach ``procesar_pozos``.
+        operator_confirmed = bool(
+            st.session_state.get("blast_geometry_confirmed", False)
+        )
+        cfg = GeometryConfiguration(
+            geometry_user_confirmed=operator_confirmed,
+            inclination_convention=(
+                {"from_vertical": "FROM_VERTICAL",
+                 "dip_from_horizontal": "DIP_FROM_HORIZONTAL"}.get(incl_conv_ui or "")
+                if incl_conv_ui else None
+            ),
+            inclination_sign_convention=st.session_state.get(
+                "blast_sign_rule"
+            ),
+            inclination_source_rule=st.session_state.get(
+                "blast_sign_source_rule_value", ""
+            ),
+            inclination_unit=(
+                {"Grados": "DEGREES", "Radianes": "RADIANS"}.get(
+                    st.session_state.get("blast_incl_unit_value")
+                )
+            ),
+            azimuth_convention=st.session_state.get(
+                "blast_az_convention"
+            ),
+            azimuth_unit=(
+                {"Grados": "DEGREES", "Radianes": "RADIANS"}.get(
+                    st.session_state.get("blast_az_unit_value")
+                )
+            ),
+            inclination_source_column=incl_src_col,
+            azimuth_source_column=az_src_col,
+        )
+        try:
+            cfg.validate()
+        except GeometryConfigurationError as exc:
+            st.error(f"Configuración geométrica inválida: {exc}")
+            set_blast_processed(False)
+            status.empty()
+            progress.empty()
+            return
+
         # procesar_pozos has a dedicated ``column_map`` branch that calls
         # apply_mapping once without round-tripping through _resolve_column_aliases.
         # That branch is what we want when the user just confirmed a mapping in
         # the UI. The legacy alias-based auto-detection is still available to
         # other callers (e.g. CLI ingestion) via procesar_pozos(df).
+        #
+        # Integración §5.6 — use return_result=True so we get the canonical
+        # ProcessingResult (accepted_rows + rejected_rows + event_warnings +
+        # blocking_errors + processing_summary + spatial_diagnostics). The
+        # structured result is displayed to the operator below.
+        from core.processing_result import ProcessingResult
         local_df = df.copy()
         try:
             def _run_with_progress(
                 source_df: pd.DataFrame,
                 cmap: dict[str, str | None] | None,
-            ) -> tuple[pd.DataFrame, Any, Any, Any]:
+                geometry_cfg: GeometryConfiguration,
+                bench_height: float | None,
+            ) -> ProcessingResult:
                 try:
                     progress.progress(0.1, text="Calculando trayectorias (toe)…")
                 except Exception:
@@ -266,15 +433,9 @@ def render_upload_section() -> None:
                 result = procesar_pozos(
                     source_df,
                     cmap,
-                    incl_convention=incl_conv_ui,
-                    bench_height_m=bench_h_ui,
-                    incl_sign_convention=st.session_state.get("blast_sign_rule", "ABSOLUTE_VALUE"),
-                    sign_source_rule=st.session_state.get("blast_sign_source_rule", None),
-                    az_convention=st.session_state.get("blast_az_convention", "CLOCKWISE_FROM_NORTH"),
-                    angle_unit=(
-                        "radians" if st.session_state.get("blast_angle_unit", "") == "Radianes"
-                        else "degrees"
-                    ),
+                    geometry_configuration=geometry_cfg,
+                    bench_height_m=bench_height,
+                    return_result=True,
                 )
                 try:
                     progress.progress(0.9, text="Empacando resultados…")
@@ -283,24 +444,64 @@ def render_upload_section() -> None:
                 return result
 
             with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(_run_with_progress, local_df, confirmed_mapping)
+                future = executor.submit(
+                    _run_with_progress, local_df, confirmed_mapping, cfg, bench_h_ui
+                )
                 try:
-                    df_clean, x_lines, y_lines, z_lines = future.result()
-                except KeyError as e:
+                    proc_result: ProcessingResult = future.result()
+                except (KeyError, GeometryConfigurationError) as e:
                     st.error(str(e))
                     set_blast_processed(False)
                     status.empty()
                     progress.empty()
                     return
 
-            df_clean = enrich_processed(
-                df_clean,
-                hardness_bytes=hardness_uploaded.getvalue() if hardness_uploaded is not None else None,
-            )
+            df_clean = proc_result.accepted_dataframe
+            x_lines, y_lines, z_lines = proc_result.scatter_lines
+            if df_clean is not None and not df_clean.empty:
+                df_clean = enrich_processed(
+                    df_clean,
+                    hardness_bytes=hardness_uploaded.getvalue() if hardness_uploaded is not None else None,
+                )
             set_blast_df(df_clean)
             set_blast_lines(x_lines, y_lines, z_lines)
             set_blast_processed(True)
-            status.success("✅ Pozos procesados correctamente")
+
+            # Integración §5.6 — render the structured processing result
+            # so the operator sees accepted / rejected / warnings /
+            # blocking_errors / summary explicitly.
+            summary = proc_result.processing_summary()
+            if proc_result.blocking_errors:
+                st.error(
+                    f"⛔ {len(proc_result.blocking_errors)} error(es) "
+                    f"bloqueante(s). Procesamiento falló para algunas filas."
+                )
+                for be in proc_result.blocking_errors:
+                    st.write(
+                        f"- **{be.get('error_code', '?')}**: "
+                        f"{be.get('message', '')}"
+                    )
+            if proc_result.rejected_rows:
+                with st.expander(
+                    f"⚠️ {proc_result.rejected_source_rows} fila(s) rechazada(s) "
+                    f"({proc_result.rejection_records} registro(s) de error)",
+                    expanded=False,
+                ):
+                    st.dataframe(pd.DataFrame(proc_result.rejected_rows), use_container_width=True)
+            if proc_result.event_warnings:
+                with st.expander(
+                    f"🔔 {len(proc_result.event_warnings)} advertencia(s)",
+                    expanded=False,
+                ):
+                    for w in proc_result.event_warnings:
+                        st.write(
+                            f"- **{w.get('warning_code', '?')}**: "
+                            f"{w.get('message', '')}"
+                        )
+            status.success(
+                f"✅ {summary['rows_accepted']} fila(s) aceptada(s) de "
+                f"{summary['rows_received']} recibida(s)."
+            )
             progress.progress(1.0, text="Listo")
         except Exception:
             logger.exception("Failed to process blast holes")

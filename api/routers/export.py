@@ -702,3 +702,102 @@ async def export_pdf(
     except Exception as exc:
         logger.exception("PDF export failed")
         raise HTTPException(500, detail=f"PDF export failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# GET /export/blast-diagnostics — structured processing diagnostics
+# ---------------------------------------------------------------------------
+
+
+def _build_blast_diagnostics_payload_sync(session_id: str) -> str:
+    """Build the multi-sheet blast-processing diagnostics workbook.
+
+    Reads the persisted structured payload (``accepted_rows``,
+    ``rejected_rows``, ``processing_summary``, ``event_warnings``,
+    ``blocking_errors``, ``spatial_diagnostics``,
+    ``geometry_configuration``) from the session settings and writes it
+    to a temp xlsx via :func:`core.blast_export.export_processing_diagnostics_excel`.
+    """
+    from core.blast_export import export_processing_diagnostics_excel
+
+    settings = db.get_settings(session_id) or {}
+    if not settings.get("blast_upload_meta") and not settings.get("accepted_rows"):
+        raise HTTPException(
+            404,
+            "La sesión no tiene un upload de tronadura persistido.",
+        )
+
+    payload = {
+        "accepted_rows": settings.get("accepted_rows") or settings.get("blast_holes") or [],
+        "rejected_rows": settings.get("rejected_rows") or [],
+        "event_warnings": settings.get("event_warnings") or [],
+        "blocking_errors": settings.get("blocking_errors") or [],
+        "processing_summary": settings.get("processing_summary") or {},
+        "geometry_configuration": settings.get("geometry_configuration") or {},
+        "spatial_diagnostics": settings.get("spatial_diagnostics") or {},
+    }
+    tmp = tempfile.NamedTemporaryFile(
+        prefix=f"blast_diag_{session_id}_",
+        suffix=".xlsx",
+        delete=False,
+    )
+    tmp.close()
+    export_processing_diagnostics_excel(payload, tmp.name)
+    return tmp.name
+
+
+@router.get("/blast-diagnostics")
+async def export_blast_diagnostics(request: Request):
+    """Export the structured blast-processing diagnostics workbook.
+
+    Returns a multi-sheet xlsx with: Pozos_Aceptados, Filas_Rechazadas,
+    Advertencias, Errores_Bloqueantes, Resumen_Procesamiento,
+    Configuracion_Geometrica, Diagnostico_Espacial. Returns HTTP 404
+    when the session has no blast upload persisted.
+    """
+    try:
+        session_id = db.get_or_create_session(request.state.session_id)
+        tmp = await _run_in_executor(_build_blast_diagnostics_payload_sync, session_id)
+        return FileResponse(
+            str(tmp),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename="Diagnostico_Tronadura.xlsx",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Blast diagnostics export failed")
+        raise HTTPException(500, detail=f"Export failed: {exc}") from exc
+
+
+@router.get("/blast-rejections")
+async def export_blast_rejections(request: Request):
+    """Export ONLY the rejected rows (standalone audit artifact)."""
+    from core.blast_export import export_rejected_rows_excel
+
+    try:
+        session_id = db.get_or_create_session(request.state.session_id)
+        settings = db.get_settings(session_id) or {}
+        rejected = settings.get("rejected_rows") or []
+        config = settings.get("geometry_configuration") or {}
+        if not rejected and not settings.get("blast_upload_meta"):
+            raise HTTPException(404, "Sin upload persistido para esta sesión.")
+
+        tmp = tempfile.NamedTemporaryFile(
+            prefix=f"blast_rej_{session_id}_", suffix=".xlsx", delete=False
+        )
+        tmp_path = tmp.name
+        tmp.close()
+        await _run_in_executor(
+            lambda: export_rejected_rows_excel(rejected, tmp_path, config=config)
+        )
+        return FileResponse(
+            str(tmp_path),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename="Filas_Rechazadas.xlsx",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Blast rejections export failed")
+        raise HTTPException(500, detail=f"Export failed: {exc}") from exc

@@ -432,7 +432,7 @@ class TestCalculoTronaduraNewColumns:
             Azimuth_Diseno=0.0,
             Inclinacion_Diseno=0.0,
         )
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         for col in (
             "Secuencia", "Retardo_ms", "Fila", "Carga_Fondo_kg",
             "Carga_Columna_kg", "Longitud_Carga_m", "Tipo_Pozo",
@@ -442,7 +442,7 @@ class TestCalculoTronaduraNewColumns:
 
     def test_handles_missing_new_columns(self):
         df = _enax_row()
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         for col in (
             "Secuencia", "Retardo_ms", "Fila", "Carga_Fondo_kg",
             "Carga_Columna_kg", "Longitud_Carga_m", "Tipo_Pozo",
@@ -462,7 +462,7 @@ class TestCalculoTronaduraNewColumns:
             Design_Azimuth=5.0,
             Design_Dip=3.0,
         )
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert int(out["Secuencia"].iloc[0]) == 7
         assert out["Retardo_ms"].iloc[0] == pytest.approx(42.0)
         assert int(out["Fila"].iloc[0]) == 1
@@ -475,7 +475,7 @@ class TestCalculoTronaduraNewColumns:
 
     def test_secuencia_is_integer_dtype(self):
         df = _enax_row(Secuencia=3)
-        out, *_ = procesar_pozos(df)
+        out, *_ = procesar_pozos(df, geometry_user_confirmed=True)
         assert pd.api.types.is_integer_dtype(out["Secuencia"])
         assert int(out["Secuencia"].iloc[0]) == 3
 

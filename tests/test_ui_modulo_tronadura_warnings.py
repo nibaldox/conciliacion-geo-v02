@@ -130,15 +130,35 @@ class TestPersistenciaOperacional:
             "105,205,4000,120,0,12,250,from_vertical,15\n"
         )
         client = TestClient(app)
-        resp = client.post(
-            "/api/v1/blast/upload",
-            files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data={"session_id": "warn-1", "incl_convention": "from_vertical"},
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        assert "data_warnings" in body
-        assert body["processing_summary"]["rows_received"] == 2
-        assert body["processing_summary"]["rows_accepted"] == 1
-        assert body["processing_summary"]["rows_rejected"] == 1
-        assert "rango" in body["processing_summary"]["rejected_reasons"].lower()
+        # Remediación 3.3: use the context manager so the lifespan runs
+        # init_db() and the schema exists on a clean DB.
+        with client:
+            resp = client.post(
+                "/api/v1/blast/upload",
+                files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
+            data={
+                "session_id": "warn-1",
+                "geometry_user_confirmed": "true",
+                "incl_convention": "from_vertical",
+                "incl_sign_convention": "ABSOLUTE_VALUE",
+                "az_convention": "CLOCKWISE_FROM_NORTH",
+                "angle_unit": "degrees",
+                "bench_height_m": "15.0",
+                "incl_source_column": "Inclinacion_real",
+                "az_source_column": "Azimuth_real",
+            },
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert "data_warnings" in body
+            assert body["processing_summary"]["rows_received"] == 2
+            assert body["processing_summary"]["rows_accepted"] == 1
+            assert body["processing_summary"]["rows_rejected"] == 1
+        # Remediación 3.2/4.2: structured rejected_rows carries the
+        # full diagnosis (error_code, source_column, original_value).
+        assert len(body["rejected_rows"]) == 1
+        rejection = body["rejected_rows"][0]
+        assert rejection["error_code"] == "INCL_OUT_OF_RANGE"
+        assert "rango" in rejection["rejection_reason"].lower()
+        assert rejection["source_column"] == "Incl"
+        assert rejection["row_processing_status"] == "rejected"

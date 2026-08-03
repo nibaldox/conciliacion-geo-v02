@@ -141,7 +141,7 @@ class TestEndToEnd:
         holes_df, sec_names = _synthetic_holes(n=20, sections=5)
 
         # 2. Procesar pozos
-        processed = procesar_pozos(holes_df)[0]
+        processed = procesar_pozos(holes_df, geometry_user_confirmed=True)[0]
         assert not processed.empty
         assert "X" in processed.columns
         assert "Z_collar" in processed.columns
@@ -200,7 +200,7 @@ class TestEndToEnd:
             n=15, sections=3, start_date="2024-01-01"
         )
 
-        processed = procesar_pozos(holes_df)[0]
+        processed = procesar_pozos(holes_df, geometry_user_confirmed=True)[0]
         assert "fecha_tronadura" in processed.columns
 
         # Fecha de corte: 2024-06-01 (excluir pozos de junio en adelante)
@@ -243,7 +243,7 @@ class TestEndToEnd:
     def test_end_to_end_integration_blast_correlation(self):
         """Integra compute_blast_geotech_correlation con datos completos."""
         holes_df, sec_names = _synthetic_holes(n=12, sections=3)
-        processed = procesar_pozos(holes_df)[0]
+        processed = procesar_pozos(holes_df, geometry_user_confirmed=True)[0]
         pf_df = compute_powder_factor(processed)
 
         # Crear secciones
@@ -305,7 +305,7 @@ class TestEdgeCases:
                 })
 
         df = pd.DataFrame(rows)
-        processed = procesar_pozos(df)[0]
+        processed = procesar_pozos(df, geometry_user_confirmed=True)[0]
 
         # Verificar que no hay Burden/Esp
         assert "Burden" not in processed.columns

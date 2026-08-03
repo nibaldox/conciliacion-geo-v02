@@ -17,18 +17,18 @@ import api.schemas as schemas
 from api.main import app
 
 
+# Remediación 3.3: use the centralized SQLite lifecycle fixture. The
+# previous per-test init was incomplete (it did not run the lifespan and
+# depended on the order of tests). The autouse `_api_reset_state_caches`
+# fixture in conftest.py also busts the trimesh lru_cache.
 @pytest.fixture(autouse=True)
-def isolated_db(tmp_path, monkeypatch):
-    """Use a temporary SQLite database per test."""
-    test_db = tmp_path / "test.db"
-    monkeypatch.setattr(db, "DB_PATH", test_db)
-    db.init_db()
+def isolated_db(api_isolated_db):
     yield
 
 
 @pytest.fixture()
-def client():
-    return TestClient(app)
+def client(api_test_client):
+    return api_test_client
 
 
 @pytest.fixture()
@@ -49,13 +49,26 @@ foo,bar,baz
 4,5,6
 """
 
+GEOMETRY_FORM = {
+    "geometry_user_confirmed": "true",
+    "incl_convention": "from_vertical",
+    "incl_sign_convention": "ABSOLUTE_VALUE",
+    "az_convention": "CLOCKWISE_FROM_NORTH",
+    "angle_unit": "degrees",
+    "bench_height_m": "15.0",
+    "incl_source_column": "Inclinacion_real",
+    "az_source_column": "Azimuth_real",
+}
+
 
 def _upload_csv(client: TestClient, session_id: str, csv_content: str) -> object:
-    """Helper: POST a CSV to /api/v1/blast/upload."""
+    """Helper: POST a CSV to /api/v1/blast/upload with a full geometry config."""
+    data = {"session_id": session_id}
+    data.update(GEOMETRY_FORM)
     return client.post(
         "/api/v1/blast/upload",
         files={"file": ("pozos.csv", io.BytesIO(csv_content.encode("utf-8")), "text/csv")},
-        data={"session_id": session_id, "incl_convention": "from_vertical"},
+        data=data,
     )
 
 
@@ -84,10 +97,15 @@ def test_upload_valid_csv_returns_summary(client, session_id):
 # ---------------------------------------------------------------------------
 
 
-def test_upload_invalid_csv_returns_400(client, session_id):
+def test_upload_invalid_csv_returns_blocking_errors(client, session_id):
+    """Remediación 3.2: invalid CSV returns 422 with structured blocking_errors."""
     resp = _upload_csv(client, session_id, INVALID_CSV)
-    assert resp.status_code == 400
-    assert "detail" in resp.json()
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    model = schemas.BlastUploadResponse.model_validate(body)
+    # The structured blocking error is preserved in the body — never hidden.
+    assert len(model.blocking_errors) > 0
+    assert model.blocking_errors[0]["error_code"] == "MISSING_REQUIRED_COLUMN"
 
 
 # ---------------------------------------------------------------------------
@@ -121,9 +139,12 @@ def test_get_holes_returns_persisted_holes(client, session_id):
 
 
 def test_upload_without_session_id_returns_422(client):
+    data = {}
+    data.update(GEOMETRY_FORM)
     resp = client.post(
         "/api/v1/blast/upload",
         files={"file": ("pozos.csv", io.BytesIO(VALID_CSV.encode("utf-8")), "text/csv")},
+        data=data,
     )
     assert resp.status_code == 422
     assert "detail" in resp.json()

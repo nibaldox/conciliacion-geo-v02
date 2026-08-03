@@ -2,6 +2,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
+from core.geometry_contract import GEOMETRY_CONFIGURATION_VERSION
+
 
 class MeshType(str, Enum):
     DESIGN = "design"
@@ -358,13 +360,64 @@ class BlastHolesResponse(BaseModel):
     holes: List[BlastHoleSummary] = Field(default_factory=list)
 
 
+class GeometryConfigurationSchema(BaseModel):
+    """Versioned geometric configuration — single contract across layers.
+
+    Mirrors :class:`core.geometry_contract.GeometryConfiguration`. The UI,
+    the API and the backend serialize EXACTLY the same fields so the
+    operator sees one consistent configuration object end-to-end.
+    """
+
+    geometry_configuration_version: str = GEOMETRY_CONFIGURATION_VERSION
+    geometry_user_confirmed: Optional[bool] = None
+
+    inclination_source_column: str = ""
+    inclination_convention: Optional[str] = None
+    inclination_sign_convention: Optional[str] = None
+    inclination_unit: Optional[str] = None
+    inclination_source_rule: str = ""
+
+    azimuth_source_column: str = ""
+    azimuth_convention: Optional[str] = None
+    azimuth_unit: Optional[str] = None
+
+
+class RejectedRowSchema(BaseModel):
+    """Structured per-row rejection record (remediación 3.2/4.2).
+
+    Every rejection preserves the full diagnosis: hole_id, source row,
+    source column, original value, error_code, rejection_reason, the
+    affected downstream calculations, the recommended action and the row
+    processing status. Multiple errors per row emit multiple records.
+    """
+
+    hole_id: str
+    source_row_index: int = 0
+    source_column: str = ""
+    original_value: Optional[Any] = None
+    error_code: str = ""
+    rejection_reason: str = ""
+    affected_calculations: str = ""
+    recommended_action: str = ""
+    row_processing_status: str = "rejected"
+
+
+class BlockingErrorSchema(BaseModel):
+    """Structured blocking error (zero accepted rows, invalid geometry, etc.)."""
+
+    error_code: str
+    message: str = ""
+    recommended_action: str = ""
+
+
 class BlastUploadResponse(BaseModel):
     """Response envelope for ``POST /api/v1/blast/upload``.
 
-    Mirrors the upload summary produced by the Streamlit reference flow:
-    hole counts, mean charge metrics, and a hardness category histogram.
-    ``hardness_distribution`` is empty when the uploaded CSV does not contain
-    drilling-hardness data.
+    Remediación 3.2/4.2 + integración 3.6: the structured
+    ``accepted_rows``, ``rejected_rows`` and ``blocking_errors`` survive
+    even when zero rows are accepted — the endpoint returns HTTP 422
+    (not 400) in that case so the operator can read the structured
+    diagnosis in the body.
     """
 
     session_id: str
@@ -374,8 +427,13 @@ class BlastUploadResponse(BaseModel):
     carga_mean: float
     descarga_mean: float
     hardness_distribution: Dict[str, int] = Field(default_factory=dict)
-    # Auditoría §3.4: advertencias y resumen de filas en la respuesta API.
+    # Structured processing output — single canonical contract across API,
+    # backend, persistence and export (integración §3.6/4.6).
     data_warnings: str = ""
     processing_summary: Dict[str, Any] = Field(default_factory=dict)
-    # Remediación 4.6: rejected rows as an independent structure.
+    accepted_rows: List[Dict[str, Any]] = Field(default_factory=list)
     rejected_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    event_warnings: List[Dict[str, Any]] = Field(default_factory=list)
+    blocking_errors: List[Dict[str, Any]] = Field(default_factory=list)
+    geometry_configuration: Dict[str, Any] = Field(default_factory=dict)
+    spatial_diagnostics: Dict[str, Any] = Field(default_factory=dict)

@@ -11,7 +11,6 @@ import trimesh
 from core import SectionLine, cut_mesh_with_section
 from core.section_cutter import generate_sections_along_crest
 
-
 def create_pit_surface(
     nx=100,
     ny=100,
@@ -203,3 +202,83 @@ def pytest_addoption(parser):
         default=False,
         help="Skip Electron/sidecar E2E tests that require the built bundle",
     )
+
+
+# ---------------------------------------------------------------------------
+# Remediación 3.3: centralized SQLite lifecycle fixtures for API tests
+# ---------------------------------------------------------------------------
+#
+# Every API test that hits the ``sessions`` table MUST depend on these
+# fixtures so the schema is created deterministically — independently of
+# the order in which tests run, and independently of whether the FastAPI
+# lifespan was executed (``TestClient(app)`` without a context manager
+# does NOT run the lifespan, so ``init_db()`` is never called).
+#
+# Usage in an API test file:
+#
+#     from fastapi.testclient import TestClient
+#     from api.main import app
+#
+#     @pytest.fixture(autouse=True)
+#     def isolated_db(self_isolated_db):
+#         # self_isolated_db (autouse below) already does everything.
+#         yield
+#
+#     @pytest.fixture()
+#     def client(self_client):
+#         return self_client
+#
+# Or — for finer control — depend on ``api_isolated_db`` explicitly.
+
+
+@pytest.fixture()
+def api_isolated_db(tmp_path, monkeypatch):
+    """Per-test isolated SQLite database with explicit schema creation.
+
+    * ``CONCILIACION_DATA_DIR`` is overridden to a per-test temp directory.
+    * ``db.DB_PATH`` is patched (some modules captured the original path).
+    * ``db.init_db()`` runs EXPLICITLY — the FastAPI lifespan is NOT
+      executed by ``TestClient(app)`` without a context manager, so the
+      schema must be created here (remediación 3.3).
+    * Dependency overrides are restored on teardown via the surrounding
+      ``api_test_client`` fixture when used together.
+    """
+    import api.database as db
+
+    test_db = tmp_path / "test.db"
+    monkeypatch.setattr(db, "DB_PATH", test_db)
+    monkeypatch.setenv("CONCILIACION_DATA_DIR", str(tmp_path))
+    db.init_db()
+    yield test_db
+
+
+@pytest.fixture()
+def api_test_client(api_isolated_db):
+    """A ``TestClient`` constructed WITH a context manager so the lifespan
+    runs (init_db + cleanup). Tests that just need the DB can use
+    ``api_isolated_db`` directly; tests that need a fully wired client
+    should use this one. Order-independent: every test gets its own DB.
+    """
+    from fastapi.testclient import TestClient
+    from api.main import app
+
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.fixture(autouse=True)
+def _api_reset_state_caches(monkeypatch):
+    """Bust any module-level caches that leak state across tests.
+
+    Specifically, ``api.database.get_trimesh_by_id`` is decorated with
+    ``functools.lru_cache`` and would otherwise retain meshes from
+    previous tests (and previous DB paths) — causing order-dependent
+    failures. Reset it before every test.
+    """
+    import api.database as db
+
+    try:
+        db.get_trimesh_by_id.cache_clear()
+    except Exception:
+        pass
+    yield

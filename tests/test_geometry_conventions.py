@@ -217,20 +217,30 @@ class TestParidadBackendAPI:
             "105,205,4000,-65,90,12,250,from_vertical,15\n"
         )
         client = TestClient(app)
-        resp = client.post(
-            "/api/v1/blast/upload",
-            files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data={
-                "session_id": "parity-1",
-                "incl_convention": "dip_from_horizontal",
-                "incl_sign_convention": "NEGATIVE_IS_DOWNWARD_DIP",
-                "az_convention": "COUNTERCLOCKWISE_FROM_NORTH",
-            },
-        )
-        assert resp.status_code == 200, resp.text
-        holes_resp = client.get("/api/v1/blast/parity-1/holes")
-        assert holes_resp.status_code == 200, holes_resp.text
-        api_hole = holes_resp.json()["holes"][0]
+        # Remediación 3.3: TestClient must be used as a context manager so
+        # the FastAPI lifespan runs init_db(). Otherwise the schema is
+        # never created on a clean DB and the request fails with
+        # OperationalError "no such table: sessions".
+        with client:
+            resp = client.post(
+                "/api/v1/blast/upload",
+                files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
+                data={
+                    "session_id": "parity-1",
+                    "geometry_user_confirmed": "true",
+                    "incl_convention": "dip_from_horizontal",
+                    "incl_sign_convention": "NEGATIVE_IS_DOWNWARD_DIP",
+                    "az_convention": "COUNTERCLOCKWISE_FROM_NORTH",
+                    "angle_unit": "degrees",
+                    "bench_height_m": "15.0",
+                    "incl_source_column": "Inclinacion_real",
+                    "az_source_column": "Azimuth_real",
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            holes_resp = client.get("/api/v1/blast/parity-1/holes")
+            assert holes_resp.status_code == 200, holes_resp.text
+            api_hole = holes_resp.json()["holes"][0]
 
         from core.calculo_tronadura import procesar_pozos
         import pandas as pd
@@ -242,7 +252,7 @@ class TestParidadBackendAPI:
             "bench_height_m": 15.0,
         }])
         out, *_ = procesar_pozos(
-            df, incl_convention="dip_from_horizontal",
+            df, geometry_user_confirmed=True, incl_convention="dip_from_horizontal",
             incl_sign_convention="NEGATIVE_IS_DOWNWARD_DIP",
             az_convention="COUNTERCLOCKWISE_FROM_NORTH",
         )

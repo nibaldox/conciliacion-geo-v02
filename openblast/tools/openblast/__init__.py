@@ -306,7 +306,11 @@ def convert_from_enaex(
     else:
         df_raw = pd.read_csv(path)
 
-    df_clean, *_ = procesar_pozos(df_raw)
+    df_clean, *_ = procesar_pozos(
+        df_raw,
+        geometry_user_confirmed=True,
+        incl_convention="from_vertical",
+    )
 
     hole_id_col = find_df_column(df_clean, ["Nombre", "label_pozo", "id_pozo"], raise_error=False)
     if not hole_id_col:
