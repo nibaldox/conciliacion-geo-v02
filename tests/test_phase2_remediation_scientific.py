@@ -622,11 +622,15 @@ class Test19NoPersistOnBlock:
 
 # --- 20. Mapas reales en React -----------------------------------------
 
+# Resolve repo root from this test file's location so the suite is
+# portable across machines (Falla 11 fix).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
 class Test20ReactMaps:
     def test_panel_renders_with_2d_arrays(self):
         # Verifica que el panel incluye el SliceHeatmap (data-testid)
-        from pathlib import Path
-        panel = Path("/home/xodla/archivos/12_WindSurf/46-conciliacion-geo-v02/web/src/components/results/BlastSimulationPanel.tsx")
+        panel = _REPO_ROOT / "web/src/components/results/BlastSimulationPanel.tsx"
         text = panel.read_text()
         assert "SliceHeatmap" in text or "CanvasHeatmap" in text
         assert "source_holes_projection" in text
@@ -636,8 +640,7 @@ class Test20ReactMaps:
 
 class Test21StreamlitMaps:
     def test_streamlit_renders_with_2d_arrays(self):
-        from pathlib import Path
-        sl = Path("/home/xodla/archivos/12_WindSurf/46-conciliacion-geo-v02/ui/modulo_tronadura/energy_simulation.py")
+        sl = _REPO_ROOT / "ui/modulo_tronadura/energy_simulation.py"
         text = sl.read_text()
         assert "go.Heatmap" in text or "plan_slice" in text
         assert "source_holes_projection" in text
@@ -647,9 +650,8 @@ class Test21StreamlitMaps:
 
 class Test22Parity:
     def test_both_consume_same_contract(self):
-        from pathlib import Path
-        react = Path("/home/xodla/archivos/12_WindSurf/46-conciliacion-geo-v02/web/src/components/results/BlastSimulationPanel.tsx").read_text()
-        streamlit = Path("/home/xodla/archivos/12_WindSurf/46-conciliacion-geo-v02/ui/modulo_tronadura/energy_simulation.py").read_text()
+        react = (_REPO_ROOT / "web/src/components/results/BlastSimulationPanel.tsx").read_text()
+        streamlit = (_REPO_ROOT / "ui/modulo_tronadura/energy_simulation.py").read_text()
         # Ambos importan SimulationConfiguration
         assert "SimulationConfiguration" in react or "SimulationCreateRequest" in react
         assert "SimulationConfiguration" in streamlit or "_build_config" in streamlit
