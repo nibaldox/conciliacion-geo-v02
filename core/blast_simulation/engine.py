@@ -283,11 +283,14 @@ def _accumulate_source(
 def _stable_hole_index(hole_id: str) -> int:
     """Stable non-negative int per hole_id (deterministic across runs).
 
-    Uses the first 8 bytes of SHA-256 so the same string always maps to
-    the same integer regardless of insertion order.
+    Uses the first 8 bytes of SHA-256 masked to 63 bits so the result
+    always fits in a signed int64 numpy array (the dominant_idx dtype).
+    The same string always maps to the same integer regardless of
+    insertion order.
     """
     h = hashlib.sha256(hole_id.encode("utf-8")).digest()
-    return int.from_bytes(h[:8], "little", signed=False)
+    raw = int.from_bytes(h[:8], "little", signed=False)
+    return raw & ((1 << 63) - 1)
 
 
 # ---------------------------------------------------------------------------
