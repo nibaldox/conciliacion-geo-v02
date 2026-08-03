@@ -333,7 +333,42 @@
       "temporal_status_not_available": "No disponible",
       "temporal_status_fallback": "Sigma por defecto",
       "energy_unit_j": "Julios",
-      "energy_unit_dimensionless": "Adimensional"
+      "energy_unit_dimensionless": "Adimensional",
+      "support_radius": "Radio de soporte (m, opcional)",
+      "warnings_title": "Advertencias",
+      "provenance_title": "Procedencia",
+      "provenance_engine": "Motor",
+      "provenance_config": "Versión de configuración",
+      "provenance_explosives": "Explosivos usados",
+      "provenance_rock_mass": "Macizo rocoso",
+      "provenance_velocity": "Velocidad",
+      "provenance_accepted_rows": "Hash de filas aceptadas",
+      "provenance_assumptions": "Supuestos",
+      "npz_sha": "NPZ sha256",
+      "tensor": {
+        "title": "Tensor anisotrópico (3×3 SPD)",
+        "identity_hint": "Usar identidad I=diag(1,1,1)",
+        "identity_help": "Pulse sólo si necesita reiniciar explícitamente el tensor a la identidad.",
+        "cell_label": "M{{row}}{{col}}",
+        "symmetry_error": "El tensor no es simétrico: Mij debe coincidir con Mji.",
+        "not_pd_error": "El tensor no es positivo definido: revise los menores principales (deben ser > 0).",
+        "nan_error": "El tensor contiene valores no finitos (NaN o infinito).",
+        "summary_label": "Tensor enviado",
+        "minors_label": "Menores principales"
+      },
+      "map": {
+        "title": "Mapa energético (corte 2D)",
+        "scale": "Escala",
+        "bands": "Bandas relativas",
+        "wells_overlay": "Pozos proyectados en el corte"
+      },
+      "profile": {
+        "title": "Perfil lineal",
+        "start_end": "Coordenada XYZ (x,y,z)",
+        "n_samples": "Número de muestras",
+        "run_button": "Calcular perfil",
+        "empty": "Perfil vacío."
+      }
     }
   },
   "section_list": {
