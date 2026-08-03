@@ -62,6 +62,21 @@ from core.blast_simulation.engine import (
     export_field_arrays,
     run_simulation,
 )
+from core.blast_simulation.export import (
+    export_simulation_xlsx,
+    read_back_simulation_xlsx,
+)
+from core.blast_simulation.persistence import (
+    PersistenceError,
+    npz_path_for,
+    read_npz_artifact,
+    read_summary_json,
+    sha256_file,
+    simulation_dir,
+    summary_path_for,
+    write_npz_artifact,
+    write_summary_json,
+)
 from core.blast_simulation.slicing import (
     attach_slices_to_result,
     compute_slices,
@@ -80,6 +95,7 @@ __all__ = [
     "EnergyPropagationConfiguration",
     "GridMetadata",
     "KernelType",
+    "PersistenceError",
     "PlanSlice",
     "ProcessingSummary",
     "RockMassConfiguration",
@@ -101,8 +117,18 @@ __all__ = [
     "compute_slices",
     "coverage_report",
     "export_field_arrays",
+    "export_simulation_xlsx",
+    "npz_path_for",
     "plan_slice",
+    "read_back_simulation_xlsx",
+    "read_npz_artifact",
+    "read_summary_json",
     "run_simulation",
     "section_slice",
+    "sha256_file",
     "statistical_summary",
+    "simulation_dir",
+    "summary_path_for",
+    "write_npz_artifact",
+    "write_summary_json",
 ]
