@@ -16,14 +16,14 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 import api.database as db
 import api.schemas as schemas
-from core.blast_metrics import enrich_blast_dataframe
 from core.calculo_tronadura import procesar_pozos
 from core.column_utils import KILOS_CANDIDATES, first_present_column
 from core.geometry_contract import (
+    GEOMETRY_CONFIGURATION_VERSION,
     GeometryConfiguration,
     GeometryConfigurationError,
 )
@@ -196,15 +196,16 @@ def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
 
 def _build_geometry_configuration(
     *,
+    geometry_configuration_version: Optional[str],
     geometry_user_confirmed: Optional[bool],
-    incl_convention: Optional[str],
-    incl_sign_convention: Optional[str],
-    sign_source_rule: Optional[str],
-    incl_unit: Optional[str],
-    az_convention: Optional[str],
-    az_unit: Optional[str],
-    incl_source_column: str = "",
-    az_source_column: str = "",
+    inclination_convention: Optional[str],
+    inclination_sign_convention: Optional[str],
+    inclination_source_rule: Optional[str],
+    inclination_unit: Optional[str],
+    azimuth_convention: Optional[str],
+    azimuth_unit: Optional[str],
+    inclination_source_column: str = "",
+    azimuth_source_column: str = "",
 ) -> GeometryConfiguration:
     """Translate the API Form fields into a validated GeometryConfiguration.
 
@@ -226,15 +227,16 @@ def _build_geometry_configuration(
         return v.upper() if v else None
 
     return GeometryConfiguration(
+        geometry_configuration_version=geometry_configuration_version or "",
         geometry_user_confirmed=geometry_user_confirmed,
-        inclination_source_column=incl_source_column,
-        inclination_convention=_upper(incl_convention),
-        inclination_sign_convention=_upper(incl_sign_convention),
-        inclination_unit=_upper(incl_unit),
-        inclination_source_rule=sign_source_rule or "",
-        azimuth_source_column=az_source_column,
-        azimuth_convention=_upper(az_convention),
-        azimuth_unit=_upper(az_unit),
+        inclination_source_column=inclination_source_column,
+        inclination_convention=_upper(inclination_convention),
+        inclination_sign_convention=_upper(inclination_sign_convention),
+        inclination_unit=_upper(inclination_unit),
+        inclination_source_rule=inclination_source_rule or "",
+        azimuth_source_column=azimuth_source_column,
+        azimuth_convention=_upper(azimuth_convention),
+        azimuth_unit=_upper(azimuth_unit),
     )
 
 
@@ -323,30 +325,10 @@ def _build_upload_payload(
     # canonical list reflects the additional carga/descarga columns.
     df_clean = result.accepted_dataframe
     if df_clean is not None and not df_clean.empty:
-        try:
-            df_clean = enrich_blast_dataframe(df_clean)
-        except Exception as exc:
-            logger.warning("Blast enrichment failed: %s", exc)
-        try:
-            from ui.modulo_tronadura.warnings import collect_data_warnings
-            df_clean = collect_data_warnings(df_clean, attach=True)
-        except Exception as exc:
-            logger.warning("Blast warnings attachment failed: %s", exc)
-        # Re-build accepted_rows with the enriched columns and refresh
-        # structured warnings (integración §5.9 — warnings survive as
-        # structured objects, never as a collapsed string).
-        from core.calculo_tronadura import (
-            _df_to_accepted_records,
-            _collect_structured_warnings,
-        )
-        result.accepted_rows = _df_to_accepted_records(df_clean)
-        result.event_warnings = _collect_structured_warnings(df_clean)
         carga_mean = _safe_mean(_compute_carga_series(df_clean))
         descarga_mean = _safe_mean(_compute_descarga_series(df_clean))
         hardness_dist = _hardness_distribution(df_clean)
-        data_warnings_text = (
-            str(df_clean["data_warnings"].iloc[0]) if "data_warnings" in df_clean.columns else ""
-        )
+        data_warnings_text = " | ".join(w["message"] for w in result.event_warnings)
     else:
         carga_mean = 0.0
         descarga_mean = 0.0
@@ -360,9 +342,6 @@ def _build_upload_payload(
     n_rows_skipped = result.rejected_source_rows
 
     summary = result.processing_summary()
-    summary["geometry_configuration"] = config.to_dict()
-    summary["blocking_errors"] = result.blocking_errors
-
 
     return {
         "n_holes": n_holes,
@@ -389,30 +368,34 @@ def _build_upload_payload(
 
 @router.post("/upload")
 async def upload_blast_csv(
+    request: Request,
     file: UploadFile = File(..., description="Blast-hole CSV"),
     session_id: str = Form(..., description="Session UUID"),
+    geometry_configuration_version: Optional[str] = Form(
+        None, description="OBLIGATORIO v2: versión exacta del contrato geométrico"
+    ),
     geometry_user_confirmed: Optional[bool] = Form(
         None,
         description="OBLIGATORIO: el evento debe declarar true (confirmado por el operador). "
         "false/ausente/None bloquean la geometría.",
     ),
-    incl_convention: Optional[str] = Form(
+    inclination_convention: Optional[str] = Form(
         None,
         description="OBLIGATORIO: from_vertical | dip_from_horizontal (sin default)",
     ),
     bench_height_m: Optional[float] = Form(
         None, description="Altura de banco confirmada del evento (m)"
     ),
-    az_convention: Optional[str] = Form(
+    azimuth_convention: Optional[str] = Form(
         None,
         description="OBLIGATORIO: CLOCKWISE_FROM_NORTH | COUNTERCLOCKWISE_FROM_NORTH | "
         "CLOCKWISE_FROM_EAST | COUNTERCLOCKWISE_FROM_EAST (sin default)",
     ),
-    incl_sign_convention: Optional[str] = Form(
+    inclination_sign_convention: Optional[str] = Form(
         None,
         description="OBLIGATORIO: ABSOLUTE_VALUE | NEGATIVE_IS_DOWNWARD_DIP | SOURCE_DEFINED (sin default)",
     ),
-    sign_source_rule: Optional[str] = Form(
+    inclination_source_rule: Optional[str] = Form(
         None, description="Regla explícita para SOURCE_DEFINED (obligatoria en ese caso)"
     ),
     inclination_unit: Optional[str] = Form(
@@ -443,6 +426,10 @@ async def upload_blast_csv(
     az_source_column: Optional[str] = Form(
         None, description="LEGACY: alias de azimuth_source_column"
     ),
+    incl_convention: Optional[str] = Form(None, description="LEGACY"),
+    incl_sign_convention: Optional[str] = Form(None, description="LEGACY"),
+    sign_source_rule: Optional[str] = Form(None, description="LEGACY"),
+    az_convention: Optional[str] = Form(None, description="LEGACY"),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
 
@@ -455,33 +442,137 @@ async def upload_blast_csv(
     carries the structured ``rejected_rows`` so the operator sees what to
     fix — never a bare HTTP 400 that hides the diagnosis.
     """
+    form = await request.form()
+    allowed_fields = {
+        "file", "session_id", "bench_height_m",
+        "geometry_configuration_version", "geometry_user_confirmed",
+        "inclination_source_column", "inclination_convention",
+        "inclination_sign_convention", "inclination_unit",
+        "inclination_source_rule", "azimuth_source_column",
+        "azimuth_convention", "azimuth_unit", "angle_unit",
+        "incl_source_column", "incl_convention", "incl_sign_convention",
+        "sign_source_rule", "az_source_column", "az_convention",
+    }
+    unknown_fields = sorted(set(form.keys()) - allowed_fields)
+    if unknown_fields:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "UNKNOWN_MULTIPART_FIELDS",
+                "message": "El formulario contiene campos no reconocidos.",
+                "details": {"unknown_fields": unknown_fields},
+            },
+        )
+    duplicate_fields = sorted(
+        key for key in set(form.keys()) if key != "file" and len(form.getlist(key)) > 1
+    )
+    if duplicate_fields:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "DUPLICATE_MULTIPART_FIELDS",
+                "message": "El formulario contiene campos duplicados.",
+                "details": {"duplicate_fields": duplicate_fields},
+            },
+        )
+
     if not session_id.strip():
         raise HTTPException(422, "session_id is required")
 
     try:
-        # Resolución de aliases legacy: inclination_source_column y
-        # azimuth_source_column son los nombres v2 canónicos; los alias
-        # incl_source_column / az_source_column se aceptan como fallback
-        # documentado pero NUNCA sobrescriben a los v2.
-        final_incl_col = inclination_source_column or (incl_source_column or "")
-        final_az_col = azimuth_source_column or (az_source_column or "")
-        # Unidades v2 independientes; angle_unit es legacy y sólo aplica
-        # cuando ambos campos v2 están ausentes.
-        final_incl_unit = inclination_unit
-        final_az_unit = azimuth_unit
-        if inclination_unit is None and azimuth_unit is None and angle_unit is not None:
-            final_incl_unit = angle_unit
-            final_az_unit = angle_unit
+        canonical_keys = {
+            "geometry_configuration_version", "geometry_user_confirmed",
+            "inclination_source_column",
+            "inclination_convention", "inclination_sign_convention",
+            "inclination_unit", "inclination_source_rule",
+            "azimuth_source_column", "azimuth_convention", "azimuth_unit",
+        }
+        is_v2 = bool({
+            "geometry_configuration_version",
+            "inclination_convention",
+            "inclination_sign_convention",
+            "inclination_source_rule",
+            "azimuth_convention",
+        } & set(form.keys()))
+        if is_v2:
+            missing = sorted(canonical_keys - set(form.keys()))
+            if missing:
+                raise GeometryConfigurationError(
+                    "El contrato multipart v2 está incompleto.",
+                    error_code="GEOMETRY_INCOMPLETE",
+                    details={"missing_fields": missing},
+                )
+            legacy_pairs = {
+                "incl_source_column": (incl_source_column, inclination_source_column),
+                "incl_convention": (incl_convention, inclination_convention),
+                "incl_sign_convention": (incl_sign_convention, inclination_sign_convention),
+                "sign_source_rule": (sign_source_rule, inclination_source_rule),
+                "az_source_column": (az_source_column, azimuth_source_column),
+                "az_convention": (az_convention, azimuth_convention),
+            }
+            conflicts = {
+                key: {"legacy": legacy, "v2": canonical}
+                for key, (legacy, canonical) in legacy_pairs.items()
+                if legacy is not None and str(legacy).upper() != str(canonical or "").upper()
+            }
+            if angle_unit is not None and (
+                str(angle_unit).upper() != str(inclination_unit or "").upper()
+                or str(angle_unit).upper() != str(azimuth_unit or "").upper()
+            ):
+                conflicts["angle_unit"] = {
+                    "legacy": angle_unit,
+                    "inclination_unit": inclination_unit,
+                    "azimuth_unit": azimuth_unit,
+                }
+            if conflicts:
+                raise GeometryConfigurationError(
+                    "Los campos legacy contradicen el contrato v2.",
+                    error_code="LEGACY_V2_CONFLICT",
+                    details={"conflicts": conflicts},
+                )
+            final_version = geometry_configuration_version
+            final_incl_col = inclination_source_column
+            final_incl_convention = inclination_convention
+            final_incl_sign = inclination_sign_convention
+            final_source_rule = inclination_source_rule
+            final_incl_unit = inclination_unit
+            final_az_col = azimuth_source_column
+            final_az_convention = azimuth_convention
+            final_az_unit = azimuth_unit
+        else:
+            final_version = GEOMETRY_CONFIGURATION_VERSION
+            final_incl_col = inclination_source_column or incl_source_column or ""
+            final_incl_convention = incl_convention
+            final_incl_sign = incl_sign_convention
+            final_source_rule = sign_source_rule
+            final_incl_unit = inclination_unit or angle_unit
+            final_az_col = azimuth_source_column or az_source_column or ""
+            final_az_convention = az_convention
+            final_az_unit = azimuth_unit or angle_unit
+            if angle_unit is not None and (
+                (inclination_unit is not None and str(angle_unit).upper() != str(inclination_unit).upper())
+                or (azimuth_unit is not None and str(angle_unit).upper() != str(azimuth_unit).upper())
+            ):
+                raise GeometryConfigurationError(
+                    "La unidad legacy contradice las unidades migradas.",
+                    error_code="LEGACY_V2_CONFLICT",
+                    details={
+                        "angle_unit": angle_unit,
+                        "inclination_unit": inclination_unit,
+                        "azimuth_unit": azimuth_unit,
+                    },
+                )
         config = _build_geometry_configuration(
+            geometry_configuration_version=final_version,
             geometry_user_confirmed=geometry_user_confirmed,
-            incl_convention=incl_convention,
-            incl_sign_convention=incl_sign_convention,
-            sign_source_rule=sign_source_rule,
-            incl_unit=final_incl_unit,
-            az_convention=az_convention,
-            az_unit=final_az_unit,
-            incl_source_column=final_incl_col,
-            az_source_column=final_az_col,
+            inclination_convention=final_incl_convention,
+            inclination_sign_convention=final_incl_sign,
+            inclination_source_rule=final_source_rule,
+            inclination_unit=final_incl_unit,
+            azimuth_convention=final_az_convention,
+            azimuth_unit=final_az_unit,
+            inclination_source_column=final_incl_col,
+            azimuth_source_column=final_az_col,
         )
         config.validate()
     except GeometryConfigurationError as exc:

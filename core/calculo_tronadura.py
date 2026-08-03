@@ -783,6 +783,10 @@ def procesar_pozos(
     # ``return_rejections`` and the positional return stay as a thin
     # deprecated adapter for legacy callers (integración §5.7).
     if return_result:
+        from core.blast_correlation import compute_powder_factor
+        from core.blast_metrics import enrich_blast_dataframe
+        df_work = compute_powder_factor(df_work, bench_height_m=bench_height_m)
+        df_work = enrich_blast_dataframe(df_work)
         accepted_rows = _df_to_accepted_records(df_work)
         event_warnings = _collect_structured_warnings(df_work)
         spatial_diagnostics = _collect_spatial_diagnostics(df_work)
@@ -884,35 +888,63 @@ def _df_to_accepted_records(df_work: pd.DataFrame) -> list[dict]:
 
 
 def _collect_structured_warnings(df_work: pd.DataFrame) -> list[dict]:
-    """Lift structured warnings from the accepted frame.
+    """Build structured warnings directly from canonical diagnostic columns."""
+    if df_work is None or df_work.empty:
+        return []
+    warnings: list[dict] = []
 
-    Previously the pipeline collapsed warnings into a single string in
-    ``data_warnings`` (integración §4.9/§5.9). This helper reverses the
-    collapse: it parses the string back into individual structured
-    warning records when possible. A future refactor should make the
-    upstream producer emit structured records directly.
-    """
-    if df_work is None or df_work.empty or "data_warnings" not in df_work.columns:
-        return []
-    raw = df_work["data_warnings"].iloc[0]
-    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
-        return []
-    text = str(raw).strip()
-    if not text:
-        return []
-    # The legacy producer emits a comma-separated list of short messages.
-    # Split by the documented separator and surface each one with its
-    # code + context so the downstream layers (export/UI) can show it.
-    parts = [p.strip() for p in text.split("|") if p.strip()]
-    return [
-        {
-            "warning_code": "DATA_WARNING",
-            "message": part,
-            "source": "core.blast_metrics.collect_data_warnings",
-            "context": {"raw": part},
-        }
-        for part in parts
-    ]
+    def add(code: str, message: str, *, context: dict | None = None) -> None:
+        warnings.append({
+            "warning_code": code,
+            "message": message,
+            "hole_id": None,
+            "source_row_index": None,
+            "context": context or {},
+        })
+
+    if "bench_height_status" in df_work.columns:
+        status = str(df_work["bench_height_status"].iloc[0])
+        if status in {"MISSING", "INVALID", "EXPLICIT_ASSUMPTION"}:
+            add(
+                f"BENCH_HEIGHT_{status}",
+                "La altura de banco requiere revisión antes de usar indicadores dependientes.",
+                context={
+                    "status": status,
+                    "validation_message": str(
+                        df_work.get("bench_height_validation_message", pd.Series([""])).iloc[0]
+                    ),
+                },
+            )
+    if "inclination_validation_status" in df_work.columns:
+        invalid = df_work["inclination_validation_status"].astype(str) == "OUT_OF_RANGE"
+        for idx in df_work.index[invalid]:
+            add(
+                "INCLINATION_OUT_OF_RANGE",
+                "La inclinación está fuera del dominio geométrico permitido.",
+                context={"value": df_work.loc[idx, "Incl_original"]},
+            )
+            warnings[-1]["source_row_index"] = int(idx) if isinstance(idx, (int, np.integer)) else str(idx)
+    if "voronoi_conservation_ok" in df_work.columns and not bool(
+        df_work["voronoi_conservation_ok"].iloc[0]
+    ):
+        add(
+            "VORONOI_CONSERVATION_FAILED",
+            "La conservación de área Voronoi falló; el PF por influencia está bloqueado.",
+            context={
+                "area_residual_pct": df_work.get("area_residual_pct", pd.Series([None])).iloc[0]
+            },
+        )
+    if "explosive_status" in df_work.columns:
+        counts = df_work["explosive_status"].astype(str).value_counts().to_dict()
+        for status in ("UNKNOWN", "UNVALIDATED_REFERENCE"):
+            count = int(counts.get(status, 0))
+            if count:
+                add(
+                    f"EXPLOSIVE_{status}",
+                    f"{count} pozo(s) tienen explosivo con estado {status}.",
+                    context={"status": status, "count": count},
+                )
+    return warnings
 
 
 def _collect_spatial_diagnostics(df_work: pd.DataFrame) -> dict:
@@ -921,10 +953,13 @@ def _collect_spatial_diagnostics(df_work: pd.DataFrame) -> dict:
         return {}
     diag: dict = {}
     for key in (
-        "area_m2",
+        "area_influence_m2",
         "area_status",
         "collar_domain_status",
         "domain_area_m2",
+        "voronoi_conservation_ok",
+        "area_residual_m2",
+        "area_residual_pct",
         "clip_warning",
         "domain_error_code",
         "domain_validation_reason",
@@ -932,7 +967,29 @@ def _collect_spatial_diagnostics(df_work: pd.DataFrame) -> dict:
         if key in df_work.columns:
             series = df_work[key].dropna()
             if not series.empty:
-                diag[key] = series.iloc[0]
+                value = series.iloc[0]
+                diag[key] = value.item() if isinstance(value, np.generic) else value
+    row_fields = (
+        "area_influence_m2",
+        "area_status",
+        "collar_domain_status",
+    )
+    present = [key for key in row_fields if key in df_work.columns]
+    if present:
+        rows = []
+        for idx, row in df_work[present].iterrows():
+            record = {
+                "source_row_index": int(idx) if isinstance(idx, (int, np.integer)) else str(idx)
+            }
+            for key in present:
+                value = row[key]
+                if isinstance(value, np.generic):
+                    value = value.item()
+                if isinstance(value, float) and not np.isfinite(value):
+                    value = None
+                record[key] = value
+            rows.append(record)
+        diag["rows"] = rows
     return diag
 
 
@@ -1034,6 +1091,3 @@ def proyectar_pozos_en_seccion(
     result['closest_point'] = closest
 
     return result.sort_values('dist_along').reset_index(drop=True)
-
-
-
