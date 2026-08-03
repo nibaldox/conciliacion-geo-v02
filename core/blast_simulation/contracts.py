@@ -288,9 +288,9 @@ class VoxelGridSpecification:
 
     @property
     def shape(self) -> tuple[int, int, int]:
-        nx = max(1, int(math.floor((self.bounds.x_max - self.bounds.x_min) / self.voxel_size_m)))
-        ny = max(1, int(math.floor((self.bounds.y_max - self.bounds.y_min) / self.voxel_size_m)))
-        nz = max(1, int(math.floor((self.bounds.z_max - self.bounds.z_min) / self.voxel_size_m)))
+        nx = max(1, int(math.ceil((self.bounds.x_max - self.bounds.x_min) / self.voxel_size_m)))
+        ny = max(1, int(math.ceil((self.bounds.y_max - self.bounds.y_min) / self.voxel_size_m)))
+        nz = max(1, int(math.ceil((self.bounds.z_max - self.bounds.z_min) / self.voxel_size_m)))
         return (nx, ny, nz)
 
     @property
@@ -449,6 +449,7 @@ class SimulationConfiguration:
     kernel_type: str = KernelType.EXPONENTIAL_INVERSE_SQUARE
     attenuation_coefficient_1_m: Optional[float] = None
     regularization_radius_m: Optional[float] = None
+    support_radius_m: Optional[float] = None
     coupling_efficiency: Optional[float] = None
 
     propagation_velocity_m_s: Optional[float] = None
@@ -499,6 +500,19 @@ class SimulationConfiguration:
             details["attenuation_coefficient_1_m"] = "required, >= 0"
         if self.regularization_radius_m is None or self.regularization_radius_m <= 0.0:
             details["regularization_radius_m"] = "required, > 0"
+        # support_radius_m defaults to SIMULATION.default_support_radius_m at runtime;
+        # if not provided here, validate() defers to the engine.
+        if self.support_radius_m is not None:
+            if self.support_radius_m <= 0.0:
+                details["support_radius_m"] = "must be > 0"
+            elif (
+                self.regularization_radius_m is not None
+                and self.regularization_radius_m > 0.0
+                and self.support_radius_m <= self.regularization_radius_m
+            ):
+                details["support_radius_m"] = (
+                    f"must be > regularization_radius_m (r0={self.regularization_radius_m})"
+                )
         if self.coupling_efficiency is None or not (0.0 <= self.coupling_efficiency <= 1.0):
             details["coupling_efficiency"] = "required, in [0, 1]"
         if self.temporal_mode == TemporalMode.TEMPORAL:
@@ -763,12 +777,11 @@ class SimulationProvenance:
 
 @dataclass(frozen=True)
 class VoxelEnergyField:
-    """The 3D energy field metadata. The raw array is persisted separately
-    as a compressed NPZ artifact (SHA-256 verified on read-back).
-
-    ``dominant_hole_id`` and ``contributing_sources`` are stored as
-    separate arrays in the NPZ; the JSON metadata keeps only aggregate
-    counts to avoid bloating SQLite.
+    """The 3D energy field metadata (Brecha 3.5). The raw per-voxel arrays
+    live in the compressed NPZ artifact; this dataclass carries the
+    aggregate scalars plus per-grid temporal scalars for convenient JSON
+    serialisation. Detailed per-voxel maps (values, valid_mask,
+    dominant_hole_id, contributing_count) MUST be read from the NPZ.
     """
     grid: GridMetadata
     represented_energy_j: float
@@ -780,6 +793,12 @@ class VoxelEnergyField:
     mean_energy_j_active: float
     npz_path: str = ""
     energy_unit: str = "J"
+    # Per-grid temporal scalars (Brecha 3.5)
+    first_arrival_s: Optional[float] = None  # min finite of first_arrival map
+    time_of_max_s: Optional[float] = None   # argmax of time_of_max map
+    dominant_hole_id: Optional[str] = None  # hole_id with the largest sum of contributions
+    contributor_count: int = 0              # vóxeles con al menos una fuente
+    units: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -793,6 +812,11 @@ class VoxelEnergyField:
             "mean_energy_j_active": self.mean_energy_j_active,
             "npz_path": self.npz_path,
             "energy_unit": self.energy_unit,
+            "first_arrival_s": self.first_arrival_s,
+            "time_of_max_s": self.time_of_max_s,
+            "dominant_hole_id": self.dominant_hole_id,
+            "contributor_count": self.contributor_count,
+            "units": dict(self.units),
         }
 
 

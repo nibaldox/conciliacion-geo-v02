@@ -235,13 +235,14 @@ class TestVoxelGrid:
         assert grid.voxel_count == 125
         assert grid.voxel_volume_m3 == 8.0
 
-    def test_non_integer_division_floors(self):
+    def test_non_integer_division_ceils(self):
         grid = VoxelGridSpecification(
             voxel_size_m=3.0,
             bounds=DomainBounds(0, 0, 0, 10, 10, 10),
         )
-        # 10/3 = 3.33 → floor = 3
-        assert grid.shape == (3, 3, 3)
+        # 10/3 = 3.33 → ceil = 4 (Brecha 3.4 — cobertura completa del dominio)
+        assert grid.shape == (4, 4, 4)
+        assert grid.voxel_count == 64
 
     def test_zero_voxel_size_blocked(self):
         with pytest.raises(SimulationConfigurationError):

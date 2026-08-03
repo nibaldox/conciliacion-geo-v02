@@ -511,7 +511,40 @@ def run_simulation(
     if first_arrival is not None:
         first_arrival[~np.isfinite(first_arrival)] = np.nan
 
+    # Compute temporal fields from per-source accumulated contributions.
+    if is_temporal and temporal_energy_contributions and len(temporal_energy_contributions) > 0:
+        energy_matrix = np.stack(temporal_energy_contributions, axis=0)  # (n_seg, n_vox)
+        distance_matrix = np.stack(temporal_distances, axis=0)        # (n_seg, n_vox)
+        # Functions expect (n_voxels, n_segments) layout.
+        distance_matrix_T = distance_matrix.T
+        detonation_array = np.asarray(temporal_detonation_times, dtype=np.float64)
+        first_arrival, _ = compute_first_arrival(
+            distances_per_voxel=distance_matrix_T,
+            propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
+            detonation_times_per_segment=detonation_array,
+            segment_mask=None,
+        )
+        time_of_max = compute_time_of_max(
+            energy_total_per_voxel=energy_total,
+            first_arrival_per_voxel=first_arrival,
+            distances_per_voxel=distance_matrix_T,
+            propagation_velocity_m_s=float(configuration.propagation_velocity_m_s),
+            sigma_s=float(pulse_sigma) if pulse_sigma is not None else 1e-3,
+        )
+
     energy_unit = "J" if configuration.energy_mode == EnergyMode.ABSOLUTE else "dimensionless"
+
+    # Compute per-grid temporal scalars for the canonical dataclass.
+    first_arrival_scalar: Optional[float] = None
+    time_of_max_scalar: Optional[float] = None
+    if first_arrival is not None and np.any(np.isfinite(first_arrival)):
+        first_arrival_scalar = float(np.nanmin(first_arrival))
+    if time_of_max is not None and np.any(np.isfinite(time_of_max)):
+        time_of_max_scalar = float(np.nanmin(time_of_max[np.isfinite(time_of_max)]))
+    # Dominant hole: the hole_id whose aggregate represented energy is largest.
+    dominant_hole_id_str: Optional[str] = None
+    if per_hole_energy:
+        dominant_hole_id_str = max(per_hole_energy.items(), key=lambda kv: kv[1])[0]
 
     # 9. Temporal status.
     temporal_status = resolve_temporal_status(
@@ -565,6 +598,12 @@ def run_simulation(
         mean_energy_j_active=mean_energy_active,
         npz_path="",  # filled by the persistence layer
         energy_unit=energy_unit,
+        first_arrival_s=first_arrival_scalar,
+        time_of_max_s=time_of_max_scalar,
+        dominant_hole_id=dominant_hole_id_str,
+        contributor_count=active_voxels,
+        units={"energy": energy_unit, "density": "J/m3" if energy_unit == "J" else "1/m3",
+               "time": "s", "length": "m"},
     )
 
     processing_summary = ProcessingSummary(
