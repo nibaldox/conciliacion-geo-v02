@@ -245,9 +245,45 @@ def _accumulate_source(
     src_iy = int(round((src[1] - b.y_min) / dx - 0.5))
     src_iz = int(round((src[2] - b.z_min) / dx - 0.5))
 
-    extent = max(1, int(math.ceil(R / dx)))
-    axis = np.arange(-extent, extent + 1, dtype=np.int64)
-    IX, IY, IZ = np.meshgrid(axis, axis, axis, indexing="ij")
+    # Conservative per-axis lattice extents that fully contain the
+    # kernel support (Falla 5 fix, audit v2 §5.2).
+    #
+    # Isotropic case (no tensor / identity): the support is a sphere of
+    # radius R, so extent_i = ceil(R/dx) suffices on every axis.
+    #
+    # Anisotropic case: the support is the ellipsoid
+    #   {Δx : Δxᵀ M Δx ≤ R²}. The maximum coordinate along axis i over
+    # the ellipsoid surface is R·sqrt((M⁻¹)_ii), so the conservative
+    # integer extent per axis is ceil(R·sqrt((M⁻¹)_ii) / dx). This is
+    # exact for diagonal tensors and conservative for rotated tensors
+    # (the bounding box of the rotated ellipsoid is contained).
+    if config.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR and tensor is not None:
+        try:
+            m_inv = np.linalg.inv(tensor)
+        except np.linalg.LinAlgError as exc:
+            raise SimulationConfigurationError(
+                "Anisotropy tensor is not invertible; cannot bound the "
+                "kernel support.",
+                error_code="ANISOTROPIC_TENSOR_SINGULAR",
+                details={"tensor": tensor.tolist()},
+            ) from exc
+        inv_diag = np.clip(np.diag(m_inv), 0.0, None)
+        half_widths_m = R * np.sqrt(inv_diag)
+        extent_x = max(1, int(math.ceil(half_widths_m[0] / dx)))
+        extent_y = max(1, int(math.ceil(half_widths_m[1] / dx)))
+        extent_z = max(1, int(math.ceil(half_widths_m[2] / dx)))
+    else:
+        extent_scalar = max(1, int(math.ceil(R / dx)))
+        extent_x = extent_y = extent_z = extent_scalar
+
+    # Build the (possibly non-symmetric) cartesian offset cube. Using
+    # separate arange per axis keeps memory bounded by the actual
+    # support size — a diagonal tensor with very different eigenvalues
+    # only allocates the bounding box it needs.
+    ax_x = np.arange(-extent_x, extent_x + 1, dtype=np.int64)
+    ax_y = np.arange(-extent_y, extent_y + 1, dtype=np.int64)
+    ax_z = np.arange(-extent_z, extent_z + 1, dtype=np.int64)
+    IX, IY, IZ = np.meshgrid(ax_x, ax_y, ax_z, indexing="ij")
     gx = (src_ix + IX).ravel()
     gy = (src_iy + IY).ravel()
     gz = (src_iz + IZ).ravel()

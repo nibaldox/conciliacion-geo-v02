@@ -156,9 +156,10 @@ class TestAnisotropicSupportTruncation:
         )
         # Source at (10, 10, 10) — the centre of the domain.
         # The point (19, 10, 10) is 9 m away in x → aniso distance 4.5 m.
+        # Use a short vertical hole so the segment sits near (10, 10, 10).
         rows = [{
             "hole_id": "H-1", "X": 10.0, "Y": 10.0, "Z_collar": 10.5,
-            "X_toe": 10.0, "Y_toe": 10.0, "Z_toe": 10.5,
+            "X_toe": 10.0, "Y_toe": 10.0, "Z_toe": 9.5,
             "Incl": 0.0, "Az": 0.0, "Len": 1.0, "Taco_m": 0.0,
             "descarga": 1.0, "Diam_mm": 100.0,
             "Kilos_Cargados_real": 50.0, "Tipo_Explosivo": "ANFO",
@@ -181,6 +182,105 @@ class TestAnisotropicSupportTruncation:
             f"got {energy[idx]:.6e} J. The support cube was truncated "
             f"to ±R instead of using M⁻¹-based extents."
         )
+
+    def test_rotated_tensor_does_not_truncate_support(self):
+        """A rotated SPD tensor must reach every point whose anisotropic
+        distance is ≤ R. We rotate diag(0.25, 1, 1) by 45° around z and
+        check the rotated point (0, 9, 0)*R45 = (-6.36, 6.36, 0) (which
+        has anisotropic distance 4.5 m in the rotated frame)."""
+        cos45 = math.sqrt(2.0) / 2.0
+        sin45 = cos45
+        # Build a rotated tensor: M = Rot(45) · diag(0.25,1,1) · Rot(45)ᵀ.
+        # Eigenvectors point along (cos45, sin45, 0) and (-sin45, cos45, 0).
+        # Equivalently, M_ij expressed in world axes has off-diagonal terms.
+        # M = [[a, b, 0], [b, c, 0], [0, 0, 1]] where
+        #   a = 0.25*cos² + 1*sin² = 0.25*0.5 + 0.5 = 0.625
+        #   c = 0.25*sin² + 1*cos² = 0.625
+        #   b = (0.25 - 1) * cos*sin = -0.75 * 0.5 = -0.375
+        a = 0.625
+        b = -0.375
+        c = 0.625
+        tensor = (
+            (a, b, 0.0),
+            (b, c, 0.0),
+            (0.0, 0.0, 1.0),
+        )
+        cfg = _cfg(
+            R=5.0,
+            anisotropy_mode=AnisotropyMode.ANISOTROPIC_TENSOR,
+            rock_mass=RockMassConfiguration(
+                rock_unit_id="t", source="t", status="VALIDATED",
+                anisotropy_mode=AnisotropyMode.ANISOTROPIC_TENSOR,
+                anisotropy_tensor=tensor,
+            ),
+        )
+        # Source at (10, 10, 10). Target at (10 + 9*cos45, 10 + 9*sin45, 10)
+        # = (16.36, 16.36, 10) — anisotropic distance 4.5 m.
+        tx = 10.0 + 9.0 * cos45
+        ty = 10.0 + 9.0 * sin45
+        rows = [{
+            "hole_id": "H-1", "X": 10.0, "Y": 10.0, "Z_collar": 10.5,
+            "X_toe": 10.0, "Y_toe": 10.0, "Z_toe": 9.5,
+            "Incl": 0.0, "Az": 0.0, "Len": 1.0, "Taco_m": 0.0,
+            "descarga": 1.0, "Diam_mm": 100.0,
+            "Kilos_Cargados_real": 50.0, "Tipo_Explosivo": "ANFO",
+            "source_row_index": 0, "Retardo_ms": 0.0,
+        }]
+        result = run_simulation(accepted_rows=rows, configuration=cfg)
+        arrays = compute_field_arrays(
+            result=result, accepted_rows=rows, configuration=cfg,
+        )
+        centres = arrays["voxel_centres"]
+        energy = arrays["energy_total"]
+        target = np.array([tx, ty, 10.0])
+        distances = np.linalg.norm(centres - target, axis=1)
+        idx = int(np.argmin(distances))
+        assert energy[idx] > 0.0, (
+            f"Rotated-tensor anisotropic point ({tx:.2f},{ty:.2f},10) "
+            f"should receive energy but got {energy[idx]:.6e} J"
+        )
+
+    def test_identity_tensor_matches_isotropic(self):
+        """The identity tensor must reproduce the isotropic kernel field
+        bit-for-bit (within float32 tolerance)."""
+        rows = _one_hole_identity_spot()
+        cfg_iso = _cfg(R=5.0)
+        result_iso = run_simulation(accepted_rows=rows, configuration=cfg_iso)
+        arrays_iso = compute_field_arrays(
+            result=result_iso, accepted_rows=rows, configuration=cfg_iso,
+        )
+
+        tensor_id = ((1.0, 0, 0), (0, 1.0, 0), (0, 0, 1.0))
+        cfg_aniso = _cfg(
+            R=5.0,
+            anisotropy_mode=AnisotropyMode.ANISOTROPIC_TENSOR,
+            rock_mass=RockMassConfiguration(
+                rock_unit_id="t", source="t", status="VALIDATED",
+                anisotropy_mode=AnisotropyMode.ANISOTROPIC_TENSOR,
+                anisotropy_tensor=tensor_id,
+            ),
+        )
+        result_aniso = run_simulation(accepted_rows=rows, configuration=cfg_aniso)
+        arrays_aniso = compute_field_arrays(
+            result=result_aniso, accepted_rows=rows, configuration=cfg_aniso,
+        )
+        np.testing.assert_allclose(
+            arrays_iso["energy_total"],
+            arrays_aniso["energy_total"],
+            rtol=1e-5, atol=1e-3,
+        )
+
+
+def _one_hole_identity_spot() -> list[dict[str, Any]]:
+    """One short hole at the centre of the default domain."""
+    return [{
+        "hole_id": "H-1", "X": 10.0, "Y": 10.0, "Z_collar": 11.0,
+        "X_toe": 10.0, "Y_toe": 10.0, "Z_toe": 9.0,
+        "Incl": 0.0, "Az": 0.0, "Len": 2.0, "Taco_m": 0.0,
+        "descarga": 2.0, "Diam_mm": 100.0,
+        "Kilos_Cargados_real": 50.0, "Tipo_Explosivo": "ANFO",
+        "source_row_index": 0, "Retardo_ms": 0.0,
+    }]
 
 
 # ---------------------------------------------------------------------------
