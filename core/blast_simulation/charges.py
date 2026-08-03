@@ -483,9 +483,29 @@ def _build_deck_charge_segments(
     if final_status not in ("OK", "OUT_OF_HOLE"):
         return [], final_validation
 
+    # Per-deck detonation delay (Falla 8 fix, audit 2026-08-03).
+    # Precedence — explicit higher-resolution field wins, then deck-level
+    # Retardo_ms, then the row-level Retardo_ms as a fallback:
+    #   1. deck["detonation_time_s"] (already normalised to seconds)
+    #   2. deck["Retardo_ms"] or deck["delay_ms"] (normalised ms → s)
+    #   3. row-level Retardo_ms (passed as row_delay_ms)
+    # The original field name and value are preserved in the deck marker
+    # for downstream provenance (no silent precedence overrides).
+    deck_delay_ms = _coerce_float(
+        deck.get("Retardo_ms")
+        if deck.get("Retardo_ms") is not None
+        else deck.get("delay_ms")
+    )
     detonation_time_s: Optional[float] = _coerce_float(deck.get("detonation_time_s"))
-    if detonation_time_s is None and row_delay_ms is not None:
+    deck_delay_provenance = ""
+    if detonation_time_s is not None:
+        deck_delay_provenance = "deck.detonation_time_s"
+    elif deck_delay_ms is not None:
+        detonation_time_s = deck_delay_ms / 1000.0
+        deck_delay_provenance = "deck.Retardo_ms->s"
+    elif row_delay_ms is not None:
         detonation_time_s = row_delay_ms / 1000.0
+        deck_delay_provenance = "row.Retardo_ms->s"
 
     mass_kg, _mass_source = _resolve_deck_mass(deck, validation.length_m)
     if mass_kg is None or mass_kg <= 0.0:
@@ -525,6 +545,15 @@ def _build_deck_charge_segments(
             validation.deck_id, validation.from_m, validation.to_m,
             validation.status,
         )
+        warnings_tuple: tuple[str, ...] = (warning,)
+        if deck_delay_provenance:
+            # Preserve per-deck delay provenance so downstream layers can
+            # trace which field supplied the detonation time (Falla 8).
+            warnings_tuple = (
+                *warnings_tuple,
+                f"deck_delay:{deck_delay_provenance}:"
+                f"{detonation_time_s if detonation_time_s is not None else 'None'}",
+            )
         seg = ChargeSegment(
             hole_id=hole_id,
             segment_type="charge",
@@ -540,7 +569,7 @@ def _build_deck_charge_segments(
             detonation_time_s=detonation_time_s,
             in_domain=in_domain,
             source_row_index=source_idx,
-            warnings=(warning,),
+            warnings=warnings_tuple,
         )
         segments.append(seg)
     return segments, final_validation

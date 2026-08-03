@@ -570,6 +570,7 @@ export interface SimulationCreateRequest {
   kernel_type?: KernelType;
   attenuation_coefficient_1_m: number;
   regularization_radius_m: number;
+  support_radius_m: number;
   coupling_efficiency: number;
   propagation_velocity_m_s?: number | null;
   propagation_velocity_source?: string;
@@ -582,25 +583,39 @@ export interface SimulationCreateRequest {
 
 export type AxisLiteral = 'x' | 'y';
 
-export interface PlanSliceWire {
-  elevation_m: number;
+/**
+ * Common shape shared by plan and section slices. Every field except
+ * ``grid_shape`` and ``unit`` is optional because the API may omit
+ * Falla-4 fields when the slice is empty (no active voxels in the
+ * plane). The frontend normalises missing fields via defensive
+ * defaults in ``SliceGrid``.
+ */
+export interface SliceWire {
+  elevation_m?: number;
+  axis?: AxisLiteral;
+  coordinate_m?: number;
   unit: string;
+  field_type?: string;
   grid_shape: [number, number];
-  data_sha256: string;
-  max_value: number;
-  mean_value: number;
-  represented_energy_j: number;
+  values?: number[];
+  x_coordinates_m?: number[];
+  y_coordinates_m?: number[];
+  along_coordinates_m?: number[];
+  vertical_coordinates_m?: number[];
+  valid_mask?: boolean[];
+  min?: number;
+  max?: number;
+  mean?: number;
+  percentiles?: Record<string, number>;
+  source_holes_projection?: Array<Record<string, unknown>>;
+  data_sha256?: string;
+  max_value?: number;
+  mean_value?: number;
+  represented_energy_j?: number;
 }
 
-export interface SectionSliceWire {
-  axis: AxisLiteral;
-  coordinate_m: number;
-  unit: string;
-  grid_shape: [number, number];
-  data_sha256: string;
-  max_value: number;
-  mean_value: number;
-}
+export type PlanSliceWire = SliceWire;
+export type SectionSliceWire = SliceWire;
 
 export interface SimulationProcessingSummary {
   accepted_holes: number;

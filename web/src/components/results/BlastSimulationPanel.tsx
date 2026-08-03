@@ -13,6 +13,8 @@ import type {
   TemporalMode,
   AnisotropyMode,
   BlockingError,
+  PlanSliceWire,
+  SectionSliceWire,
 } from '@/api/types';
 
 interface Props {
@@ -163,6 +165,7 @@ function buildRequest(
   const zMin = Number(s.zMin), zMax = Number(s.zMax);
   const attenuation = Number(s.attenuation);
   const regularization = Number(s.regularization);
+  const supportRadius = Number(s.supportRadius);
   const coupling = Number(s.coupling);
   if (![voxel, xMin, xMax, yMin, yMax, zMin, zMax, attenuation, regularization, coupling]
     .every((v) => Number.isFinite(v))) {
@@ -207,6 +210,7 @@ function buildRequest(
     kernel_type: 'EXPONENTIAL_INVERSE_SQUARE',
     attenuation_coefficient_1_m: attenuation,
     regularization_radius_m: regularization,
+    support_radius_m: supportRadius,
     coupling_efficiency: coupling,
     propagation_velocity_m_s: velocity,
     propagation_velocity_source: s.velocitySource,
@@ -512,7 +516,7 @@ function TensorEditor({
   onChangeCell: (idx: number, value: number) => void;
   onUseIdentity: () => void;
   errorKey: string | null;
-  validation: TensorValidation;
+  validation: TensorValidation | null;
 }) {
   const { t } = useTranslation();
   const cellValue = (idx: number): string => {
@@ -568,7 +572,7 @@ function TensorEditor({
           {t(errorKey)}
         </p>
       )}
-      {validation.positiveDefinite && (
+      {validation?.positiveDefinite && (
         <p
           className="text-xs font-mono"
           style={{ color: 'var(--color-text-muted)' }}
@@ -678,23 +682,7 @@ function SliceGrid({
   unitLabel,
 }: {
   title: string;
-  slices: Array<{
-    elevation_m?: number;
-    axis?: string;
-    coordinate_m?: number;
-    unit: string;
-    grid_shape: [number, number];
-    values: number[];
-    x_coordinates_m?: number[];
-    y_coordinates_m?: number[];
-    along_coordinates_m?: number[];
-    vertical_coordinates_m?: number[];
-    valid_mask?: boolean[];
-    min: number;
-    max: number;
-    mean: number;
-    source_holes_projection: Array<Record<string, unknown>>;
-  }>;
+  slices: Array<PlanSliceWire | SectionSliceWire>;
   emptyMessage: string;
   unitLabel: string;
 }) {
@@ -705,20 +693,41 @@ function SliceGrid({
         <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{emptyMessage}</p>
       ) : (
         <div className="space-y-3">
-          {slices.map((s, i: number) => (
-            <SliceHeatmap
-              key={i}
-              slice={s}
-              title={
-                s.elevation_m !== undefined
-                  ? `z = ${s.elevation_m.toFixed(2)} m`
-                  : `${s.axis} = ${(s.coordinate_m ?? 0).toFixed(2)} m`
-              }
-              xLabel={s.axis === 'x' ? 'Y (m)' : 'X (m)'}
-              yLabel={s.elevation_m !== undefined ? 'Y (m)' : 'Z (m)'}
-              unitLabel={s.unit === 'J' ? unitLabel : s.unit}
-            />
-          ))}
+          {slices.map((s, i: number) => {
+            const values = s.values ?? [];
+            const max = s.max ?? s.max_value ?? 0;
+            const mean = s.mean ?? s.mean_value ?? 0;
+            const min = s.min ?? 0;
+            const sourceProjection = s.source_holes_projection ?? [];
+            const validMask = s.valid_mask ?? values.map(() => true);
+            const normalizedSlice = {
+              grid_shape: s.grid_shape,
+              values,
+              x_coordinates_m: s.x_coordinates_m ?? [],
+              y_coordinates_m: s.y_coordinates_m ?? [],
+              along_coordinates_m: s.along_coordinates_m ?? [],
+              vertical_coordinates_m: s.vertical_coordinates_m ?? [],
+              valid_mask: validMask,
+              min,
+              max,
+              mean,
+              source_holes_projection: sourceProjection,
+            };
+            return (
+              <SliceHeatmap
+                key={i}
+                slice={normalizedSlice}
+                title={
+                  s.elevation_m !== undefined
+                    ? `z = ${s.elevation_m.toFixed(2)} m`
+                    : `${s.axis} = ${(s.coordinate_m ?? 0).toFixed(2)} m`
+                }
+                xLabel={s.axis === 'x' ? 'Y (m)' : 'X (m)'}
+                yLabel={s.elevation_m !== undefined ? 'Y (m)' : 'Z (m)'}
+                unitLabel={s.unit === 'J' ? unitLabel : s.unit}
+              />
+            );
+          })}
         </div>
       )}
     </div>

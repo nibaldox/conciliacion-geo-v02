@@ -129,7 +129,6 @@ __all__ = [
     "read_back_simulation_xlsx",
     "read_npz_artifact",
     "read_summary_json",
-    "reject_extra_fields",
     "run_simulation",
     "section_slice",
     "sha256_bytes",
