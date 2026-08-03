@@ -113,6 +113,17 @@ vi.mock('../../../api/hooks', () => ({
     error: null,
   })),
   useBlastHolesBySession: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  useCreateBlastSimulation: vi.fn(() => ({
+    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
+    isPending: false,
+    isError: false,
+    isSuccess: false,
+    data: undefined,
+    error: null,
+    reset: vi.fn(),
+  })),
+  extractSimulationErrorDiagnostics: vi.fn(() => ({})),
 }));
 
 vi.mock('@tanstack/react-query', async () => {
