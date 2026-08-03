@@ -214,6 +214,7 @@ def _build_config(state: dict[str, Any], geom_version: str) -> SimulationConfigu
         kernel_type=KernelType.EXPONENTIAL_INVERSE_SQUARE,
         attenuation_coefficient_1_m=float(state["attenuation_coefficient_1_m"]),
         regularization_radius_m=float(state["regularization_radius_m"]),
+        support_radius_m=float(state["support_radius_m"]),
         coupling_efficiency=float(state["coupling_efficiency"]),
         propagation_velocity_m_s=state.get("propagation_velocity_m_s"),
         propagation_velocity_source=state.get("propagation_velocity_source", ""),
@@ -854,12 +855,16 @@ def render_energy_simulation_section(
 
     # ── Kernel ─────────────────────────────────────────────────────────
     st.markdown("**Kernel de propagación**")
-    kcol1, kcol2, kcol3 = st.columns(3)
+    kcol1, kcol2, kcol3, kcol4 = st.columns(4)
     with kcol1:
         attenuation = st.number_input("Atenuación α (1/m)", value=None, step=0.05, key="sim_alpha")
     with kcol2:
         regularization = st.number_input("Radio de regularización r₀ (m)", value=None, step=0.1, key="sim_r0")
     with kcol3:
+        support_radius = st.number_input("Radio de soporte R (m)", value=None, step=0.5,
+                                         min_value=0.01, help="Soporte finito del kernel (Falla 5)",
+                                         key="sim_support_r")
+    with kcol4:
         coupling = st.number_input("Eficiencia de acoplamiento η (0–1)", value=None, step=0.05,
                                    min_value=0.0, max_value=1.0, key="sim_eta")
 
@@ -904,6 +909,7 @@ def render_energy_simulation_section(
         "anisotropy_tensor": list(anisotropy_tensor_state) if anisotropy_tensor_state else None,
         "attenuation_coefficient_1_m": attenuation,
         "regularization_radius_m": regularization,
+        "support_radius_m": support_radius,
         "coupling_efficiency": coupling,
         "propagation_velocity_m_s": velocity,
         "propagation_velocity_source": velocity_source,
@@ -939,6 +945,7 @@ def render_energy_simulation_section(
         and energy_mode and temporal_mode and anisotropy_mode
         and attenuation is not None and attenuation >= 0
         and regularization and regularization > 0
+        and support_radius is not None and support_radius > regularization
         and coupling is not None and 0.0 <= coupling <= 1.0
         and (anisotropy_mode != AnisotropyMode.ANISOTROPIC_TENSOR
              or (anisotropy_tensor_state is not None and not anisotropy_tensor_errors))

@@ -98,6 +98,7 @@ class TestStreamlitConfigurationBuilder:
             "anisotropy_mode": "ISOTROPIC",
             "attenuation_coefficient_1_m": 2.0,
             "regularization_radius_m": 0.5,
+            "support_radius_m": 5.0,
             "coupling_efficiency": 0.85,
         }
         cfg = _build_config(state, "2.0")
@@ -116,6 +117,7 @@ class TestStreamlitConfigurationBuilder:
             "anisotropy_mode": "ISOTROPIC",
             "attenuation_coefficient_1_m": 2.0,
             "regularization_radius_m": 0.5,
+            "support_radius_m": 5.0,
             "coupling_efficiency": 0.85,
         }
         with pytest.raises(SimulationConfigurationError):
