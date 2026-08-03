@@ -288,9 +288,9 @@ class VoxelGridSpecification:
 
     @property
     def shape(self) -> tuple[int, int, int]:
-        nx = max(1, int(math.floor((self.bounds.x_max - self.bounds.x_min) / self.voxel_size_m)))
-        ny = max(1, int(math.floor((self.bounds.y_max - self.bounds.y_min) / self.voxel_size_m)))
-        nz = max(1, int(math.floor((self.bounds.z_max - self.bounds.z_min) / self.voxel_size_m)))
+        nx = max(1, int(math.ceil((self.bounds.x_max - self.bounds.x_min) / self.voxel_size_m)))
+        ny = max(1, int(math.ceil((self.bounds.y_max - self.bounds.y_min) / self.voxel_size_m)))
+        nz = max(1, int(math.ceil((self.bounds.z_max - self.bounds.z_min) / self.voxel_size_m)))
         return (nx, ny, nz)
 
     @property
@@ -449,6 +449,7 @@ class SimulationConfiguration:
     kernel_type: str = KernelType.EXPONENTIAL_INVERSE_SQUARE
     attenuation_coefficient_1_m: Optional[float] = None
     regularization_radius_m: Optional[float] = None
+    support_radius_m: Optional[float] = None
     coupling_efficiency: Optional[float] = None
 
     propagation_velocity_m_s: Optional[float] = None
@@ -499,6 +500,19 @@ class SimulationConfiguration:
             details["attenuation_coefficient_1_m"] = "required, >= 0"
         if self.regularization_radius_m is None or self.regularization_radius_m <= 0.0:
             details["regularization_radius_m"] = "required, > 0"
+        # support_radius_m defaults to SIMULATION.default_support_radius_m at runtime;
+        # if not provided here, validate() defers to the engine.
+        if self.support_radius_m is not None:
+            if self.support_radius_m <= 0.0:
+                details["support_radius_m"] = "must be > 0"
+            elif (
+                self.regularization_radius_m is not None
+                and self.regularization_radius_m > 0.0
+                and self.support_radius_m <= self.regularization_radius_m
+            ):
+                details["support_radius_m"] = (
+                    f"must be > regularization_radius_m (r0={self.regularization_radius_m})"
+                )
         if self.coupling_efficiency is None or not (0.0 <= self.coupling_efficiency <= 1.0):
             details["coupling_efficiency"] = "required, in [0, 1]"
         if self.temporal_mode == TemporalMode.TEMPORAL:
@@ -564,6 +578,68 @@ class SimulationConfiguration:
 # ---------------------------------------------------------------------------
 # Result-side contracts
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DeckSegment:
+    """Real explosive deck inside a hole cylinder.
+
+    A deck is a contiguous block of explosive material that may carry a
+    different explosive product or density than its neighbours. The engine
+    uses decks to honour per-deck density / specific-energy overrides, tag
+    detonation times per deck and surface per-deck provenance.
+    """
+    hole_id: str = ""
+    deck_id: str = ""
+    from_m: float = 0.0
+    to_m: float = 0.0
+    length_m: float = 0.0
+    explosive_type: str = ""
+    density_kg_m3: Optional[float] = None
+    mass_kg: float = 0.0
+    specific_energy_j_kg: Optional[float] = None
+    detonation_time_s: Optional[float] = None
+    status: str = "OK"
+    source: str = ""
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "hole_id": self.hole_id,
+            "deck_id": self.deck_id,
+            "from_m": self.from_m,
+            "to_m": self.to_m,
+            "length_m": self.length_m,
+            "explosive_type": self.explosive_type,
+            "density_kg_m3": self.density_kg_m3,
+            "mass_kg": self.mass_kg,
+            "specific_energy_j_kg": self.specific_energy_j_kg,
+            "detonation_time_s": self.detonation_time_s,
+            "status": self.status,
+            "source": self.source,
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
+class SimulationAttempt:
+    """Registro de un intento fallido — NO es :class:`SimulationResult`."""
+    attempt_id: str = ""
+    attempted_at: str = ""
+    blocking_errors: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    configuration_fingerprint: str = ""
+    accepted_rows_hash: str = ""
+    status: str = "REJECTED"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "attempt_id": self.attempt_id,
+            "attempted_at": self.attempted_at,
+            "blocking_errors": [dict(err) for err in self.blocking_errors],
+            "configuration_fingerprint": self.configuration_fingerprint,
+            "accepted_rows_hash": self.accepted_rows_hash,
+            "status": self.status,
+        }
 
 
 @dataclass(frozen=True)
@@ -701,12 +777,11 @@ class SimulationProvenance:
 
 @dataclass(frozen=True)
 class VoxelEnergyField:
-    """The 3D energy field metadata. The raw array is persisted separately
-    as a compressed NPZ artifact (SHA-256 verified on read-back).
-
-    ``dominant_hole_id`` and ``contributing_sources`` are stored as
-    separate arrays in the NPZ; the JSON metadata keeps only aggregate
-    counts to avoid bloating SQLite.
+    """The 3D energy field metadata (Brecha 3.5). The raw per-voxel arrays
+    live in the compressed NPZ artifact; this dataclass carries the
+    aggregate scalars plus per-grid temporal scalars for convenient JSON
+    serialisation. Detailed per-voxel maps (values, valid_mask,
+    dominant_hole_id, contributing_count) MUST be read from the NPZ.
     """
     grid: GridMetadata
     represented_energy_j: float
@@ -718,6 +793,12 @@ class VoxelEnergyField:
     mean_energy_j_active: float
     npz_path: str = ""
     energy_unit: str = "J"
+    # Per-grid temporal scalars (Brecha 3.5)
+    first_arrival_s: Optional[float] = None  # min finite of first_arrival map
+    time_of_max_s: Optional[float] = None   # argmax of time_of_max map
+    dominant_hole_id: Optional[str] = None  # hole_id with the largest sum of contributions
+    contributor_count: int = 0              # vóxeles con al menos una fuente
+    units: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -731,41 +812,129 @@ class VoxelEnergyField:
             "mean_energy_j_active": self.mean_energy_j_active,
             "npz_path": self.npz_path,
             "energy_unit": self.energy_unit,
+            "first_arrival_s": self.first_arrival_s,
+            "time_of_max_s": self.time_of_max_s,
+            "dominant_hole_id": self.dominant_hole_id,
+            "contributor_count": self.contributor_count,
+            "units": dict(self.units),
         }
 
 
 @dataclass(frozen=True)
 class PlanSlice:
-    """Horizontal energy slice at a given elevation."""
+    """Horizontal energy slice at a given elevation.
+
+    The dataclass carries the full 2D matrix flattened in row-major
+    order plus its coordinates, the validity mask, percentile summary,
+    projection of the source holes onto the slice plane, and the
+    SHA-256 of the raw 2D array. Legacy aggregate fields
+    (``max_value``, ``mean_value``, ``represented_energy_j``) are kept
+    so the Excel export, NPZ round-trip and the API export endpoint
+    do not regress.
+    """
     elevation_m: float
     unit: str
-    grid_shape: tuple[int, int]
-    data_sha256: str
-    max_value: float
-    mean_value: float
-    represented_energy_j: float
+    field_type: str = "energy_j"
+    grid_shape: tuple[int, int] = (0, 0)
+    values: tuple[float, ...] = field(default_factory=tuple)
+    x_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    y_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    valid_mask: tuple[bool, ...] = field(default_factory=tuple)
+    min: float = 0.0
+    max: float = 0.0
+    mean: float = 0.0
+    percentiles: dict[str, float] = field(default_factory=dict)
+    source_holes_projection: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    data_sha256: str = ""
+    max_value: float = 0.0
+    mean_value: float = 0.0
+    represented_energy_j: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.max_value == 0.0 and self.max != 0.0:
+            object.__setattr__(self, "max_value", self.max)
+        if self.mean_value == 0.0 and self.mean != 0.0:
+            object.__setattr__(self, "mean_value", self.mean)
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["grid_shape"] = list(self.grid_shape)
-        return d
+        return {
+            "elevation_m": self.elevation_m,
+            "unit": self.unit,
+            "field_type": self.field_type,
+            "grid_shape": list(self.grid_shape),
+            "values": list(self.values),
+            "x_coordinates_m": list(self.x_coordinates_m),
+            "y_coordinates_m": list(self.y_coordinates_m),
+            "valid_mask": list(self.valid_mask),
+            "min": self.min,
+            "max": self.max,
+            "mean": self.mean,
+            "percentiles": dict(self.percentiles),
+            "source_holes_projection": [dict(p) for p in self.source_holes_projection],
+            "data_sha256": self.data_sha256,
+            "max_value": self.max_value,
+            "mean_value": self.mean_value,
+            "represented_energy_j": self.represented_energy_j,
+        }
 
 
 @dataclass(frozen=True)
 class SectionSlice:
-    """Vertical energy slice along an in-plane axis."""
+    """Vertical energy slice along an in-plane axis.
+
+    The dataclass carries the full 2D matrix flattened in row-major
+    order plus its along-axis and vertical coordinates, the validity
+    mask, percentile summary, projection of the source holes onto the
+    slice plane, and the SHA-256 of the raw 2D array. Legacy aggregate
+    fields (``max_value``, ``mean_value``, ``represented_energy_j``) are
+    kept so the existing consumers keep working.
+    """
     axis: str  # "x" | "y"
     coordinate_m: float
     unit: str
-    grid_shape: tuple[int, int]
-    data_sha256: str
-    max_value: float
-    mean_value: float
+    field_type: str = "energy_j"
+    grid_shape: tuple[int, int] = (0, 0)
+    values: tuple[float, ...] = field(default_factory=tuple)
+    along_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    vertical_coordinates_m: tuple[float, ...] = field(default_factory=tuple)
+    valid_mask: tuple[bool, ...] = field(default_factory=tuple)
+    min: float = 0.0
+    max: float = 0.0
+    mean: float = 0.0
+    percentiles: dict[str, float] = field(default_factory=dict)
+    source_holes_projection: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    data_sha256: str = ""
+    max_value: float = 0.0
+    mean_value: float = 0.0
+    represented_energy_j: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.max_value == 0.0 and self.max != 0.0:
+            object.__setattr__(self, "max_value", self.max)
+        if self.mean_value == 0.0 and self.mean != 0.0:
+            object.__setattr__(self, "mean_value", self.mean)
 
     def to_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["grid_shape"] = list(self.grid_shape)
-        return d
+        return {
+            "axis": self.axis,
+            "coordinate_m": self.coordinate_m,
+            "unit": self.unit,
+            "field_type": self.field_type,
+            "grid_shape": list(self.grid_shape),
+            "values": list(self.values),
+            "along_coordinates_m": list(self.along_coordinates_m),
+            "vertical_coordinates_m": list(self.vertical_coordinates_m),
+            "valid_mask": list(self.valid_mask),
+            "min": self.min,
+            "max": self.max,
+            "mean": self.mean,
+            "percentiles": dict(self.percentiles),
+            "source_holes_projection": [dict(p) for p in self.source_holes_projection],
+            "data_sha256": self.data_sha256,
+            "max_value": self.max_value,
+            "mean_value": self.mean_value,
+            "represented_energy_j": self.represented_energy_j,
+        }
 
 
 @dataclass(frozen=True)

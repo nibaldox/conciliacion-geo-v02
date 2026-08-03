@@ -202,6 +202,31 @@ def pytest_addoption(parser):
         default=False,
         help="Skip Electron/sidecar E2E tests that require the built bundle",
     )
+    parser.addoption(
+        "--benchmark-skip-slow",
+        action="store_true",
+        default=False,
+        help="Skip the 500-hole × 1M-voxel blast benchmark",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    skip_slow = config.getoption("--benchmark-skip-slow")
+    skip_marker = pytest.mark.skip(reason="Skipped via --benchmark-skip-slow")
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        if callspec is None:
+            continue
+        if (
+            callspec.params.get("n_holes") == 500
+            and callspec.params.get("n_voxels") == 1_000_000
+            and item.nodeid.startswith(
+                "tests/test_blast_simulation_benchmarks.py::test_benchmark_grid["
+            )
+        ):
+            item.add_marker(pytest.mark.slow)
+            if skip_slow:
+                item.add_marker(skip_marker)
 
 
 # ---------------------------------------------------------------------------

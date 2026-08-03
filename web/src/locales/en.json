@@ -333,7 +333,42 @@
       "temporal_status_not_available": "Not available",
       "temporal_status_fallback": "Default sigma",
       "energy_unit_j": "Joules",
-      "energy_unit_dimensionless": "Dimensionless"
+      "energy_unit_dimensionless": "Dimensionless",
+      "support_radius": "Support radius (m, optional)",
+      "warnings_title": "Warnings",
+      "provenance_title": "Provenance",
+      "provenance_engine": "Engine",
+      "provenance_config": "Configuration version",
+      "provenance_explosives": "Explosives used",
+      "provenance_rock_mass": "Rock mass",
+      "provenance_velocity": "Velocity",
+      "provenance_accepted_rows": "Accepted rows hash",
+      "provenance_assumptions": "Assumptions",
+      "npz_sha": "NPZ sha256",
+      "tensor": {
+        "title": "Anisotropic tensor (3×3 SPD)",
+        "identity_hint": "Use identity I=diag(1,1,1)",
+        "identity_help": "Only press if you need to explicitly reset the tensor to identity.",
+        "cell_label": "M{{row}}{{col}}",
+        "symmetry_error": "Tensor is not symmetric: Mij must match Mji.",
+        "not_pd_error": "Tensor is not positive definite: review the leading principal minors (must be > 0).",
+        "nan_error": "Tensor contains non-finite values (NaN or infinity).",
+        "summary_label": "Submitted tensor",
+        "minors_label": "Leading principal minors"
+      },
+      "map": {
+        "title": "Energy map (2D slice)",
+        "scale": "Scale",
+        "bands": "Relative bands",
+        "wells_overlay": "Holes projected on the slice"
+      },
+      "profile": {
+        "title": "Linear profile",
+        "start_end": "XYZ coordinate (x,y,z)",
+        "n_samples": "Number of samples",
+        "run_button": "Compute profile",
+        "empty": "Empty profile."
+      }
     }
   },
   "section_list": {

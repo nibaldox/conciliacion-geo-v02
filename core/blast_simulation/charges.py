@@ -1,7 +1,7 @@
 """Charge-segment builder — transforms accepted rows into discrete
 explosive-charge segments along each hole cylinder.
 
-Pipeline (spec §2, §4.1, §4.2):
+Pipeline (spec §2, §4.1, §4.2, Brecha 3.2):
 
     accepted_row (Fase 1 ProcessingResult)
       → oriented cylinder collar→toe
@@ -13,36 +13,97 @@ Pipeline (spec §2, §4.1, §4.2):
 Each segment is a :class:`ChargeSegment`. The engine later turns the
 list of valid segments into the voxel energy field.
 
+Two row-level modes are supported:
+
+* **Multi-deck mode** — when ``row["Decks"]`` is a non-empty list of
+  dicts. Each deck is validated independently (geometry, taco
+  invasion, zero-length, overlap, explosive resolution) and
+  discretized into ``n_segments_per_deck`` sub-segments. Inert gaps
+  between decks produce no segments at all.
+* **Legacy single-column mode** — when ``row["Decks"]`` is missing
+  or empty. The explosive column is treated as a single contiguous
+  cylinder between ``collar + Taco`` and ``toe``, distributed
+  uniformly over ``segments_per_hole`` segments.
+
 Hard rules (spec §4.1):
 
-* Unknown explosive → status ``UNKNOWN``; never an ANFO fallback.
-* Missing specific energy → ``energy_j=None``; ABSOLUTE mode blocked.
-* Missing kg → ``mass_kg=0.0`` + ``invalid`` flag; the segment is
+* Unknown explosive → status ``UNKNOWN_EXPLOSIVE``; never an ANFO fallback.
+* Missing specific energy → status ``MISSING_ENERGY``; the segment is
+  reported but excluded from the energy sum.
+* Missing kg → ``mass_kg=0.0`` + invalid flag; the segment is
   reported but excluded from the energy sum.
 * Charge length incompatible with the real hole length
   (``taco + charge > Len``) → segment truncated to ``Len - taco`` with
   a structured warning; never a negative length.
+
+Deck-info preservation
+----------------------
+
+The :class:`ChargeSegment` dataclass is frozen and owned by
+:mod:`core.blast_simulation.contracts`, which is managed by a parallel
+branch and cannot be extended here. Per-deck provenance
+(``deck_id``, ``from_m``, ``to_m``, ``status``) is therefore carried
+as a structured marker in the existing ``warnings`` tuple on every
+charge segment generated from a deck:
+
+    "deck:<deck_id>:<from_m>:<to_m>:<status>"
+
+The marker is stable, parseable, and survives ``to_dict()`` round-trip
+(``warnings`` is exposed verbatim). Downstream layers can grep the
+warnings tuple to recover per-deck metadata without modifying the
+frozen contract.
 """
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
 
 from core.blast_simulation.contracts import (
-    AnisotropyMode,
     ChargeSegment,
+    DeckSegment,
     DomainBounds,
     EnergyMode,
     SimulationConfiguration,
 )
-from core.blast_simulation.grid import point_in_domain_mask
 from core.explosive_properties import (
     ExplosiveProduct,
     get_explosive_status,
     resolve_explosive,
 )
+
+
+# ---------------------------------------------------------------------------
+# Public dataclass — per-deck validation result (Brecha 3.2)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DeckValidation:
+    """Result of validating a single deck against the geometry + explosive policy.
+
+    ``status`` is a closed set:
+
+    * ``OK`` — deck contributes charge segments.
+    * ``INVALID_GEOMETRY`` — ``from_m`` / ``to_m`` missing or non-finite.
+    * ``TACO_INVADED`` — ``from_m < Taco_m``; the deck overlaps the stemming.
+    * ``ZERO_LENGTH`` — ``to_m <= from_m`` after the geometric checks.
+    * ``OVERLAP`` — the deck range overlaps a previously-accepted deck.
+    * ``OUT_OF_HOLE`` — ``to_m`` exceeded the geometric hole length; the
+      deck was truncated to ``geom_len`` but still contributes (when
+      ``length_m > 0``).
+    * ``UNKNOWN_EXPLOSIVE`` — explosive product does not resolve to a
+      known record; deck contributes no segments (no ANFO fallback).
+    * ``MISSING_ENERGY`` — explosive resolved but ``energy_mj_kg is None``.
+    """
+    deck_id: str
+    status: str
+    from_m: float
+    to_m: float
+    length_m: float
+    reason: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -87,11 +148,6 @@ def _coerce_float(value: Any) -> Optional[float]:
     return f
 
 
-# ---------------------------------------------------------------------------
-# Domain membership
-# ---------------------------------------------------------------------------
-
-
 def _point_in_bounds(p: np.ndarray, bounds: DomainBounds) -> bool:
     return (
         bounds.x_min <= p[0] <= bounds.x_max
@@ -100,8 +156,564 @@ def _point_in_bounds(p: np.ndarray, bounds: DomainBounds) -> bool:
     )
 
 
+def _deck_warning_marker(
+    deck_id: str, from_m: float, to_m: float, status: str,
+) -> str:
+    """Structured marker that preserves per-deck metadata on ChargeSegment.
+
+    The :class:`ChargeSegment` dataclass is frozen and cannot be
+    extended (owned by :mod:`core.blast_simulation.contracts`), so
+    deck metadata is encoded into the existing ``warnings`` tuple in
+    a stable, parseable form. Format: ``"deck:<id>:<from>:<to>:<status>"``.
+    """
+    return f"deck:{deck_id}:{from_m:.4f}:{to_m:.4f}:{status}"
+
+
 # ---------------------------------------------------------------------------
-# Single-hole segmentation
+# Deck parsing
+# ---------------------------------------------------------------------------
+
+
+def parse_decks_from_row(row: dict[str, Any]) -> list[dict[str, Any]]:
+    """Read the ``Decks`` field from a row, returning a list of deck dicts.
+
+    Permissive semantics — never raises:
+
+    * Missing ``Decks`` key → ``[]`` (legacy single-column mode).
+    * ``Decks`` is ``None`` → ``[]`` (legacy single-column mode).
+    * ``Decks`` is empty list → ``[]`` (legacy single-column mode).
+    * ``Decks`` is non-list → ``[]`` (defensive; legacy mode).
+    * Non-dict entries inside ``Decks`` are filtered out silently.
+
+    The returned list preserves the caller's input order — the
+    builder relies on positional order for the deterministic
+    overlap-detection rule (first deck to claim a range wins).
+    """
+    decks = row.get("Decks")
+    if not decks:
+        return []
+    if not isinstance(decks, list):
+        return []
+    return [entry for entry in decks if isinstance(entry, dict)]
+
+
+# ---------------------------------------------------------------------------
+# Deck validation
+# ---------------------------------------------------------------------------
+
+
+def validate_deck(
+    deck: dict[str, Any],
+    *,
+    hole_id: str,
+    taco_m: float,
+    geom_len: float,
+    deck_id: str,
+    all_decks: list[dict[str, Any]],
+) -> DeckValidation:
+    """Validate a single deck and return its status + reason.
+
+    ``all_decks`` is the full list of decks for this hole (in input
+    order). The function checks the current deck against previously
+    validated entries by reading the ``_validation`` slot attached by
+    :func:`build_deck_segments`. The first deck to claim a range wins;
+    later overlapping decks are marked ``OVERLAP``.
+
+    Validation order (each step short-circuits on failure):
+
+    1. ``from_m`` / ``to_m`` must be finite numbers → otherwise
+       ``INVALID_GEOMETRY``.
+    2. ``from_m >= Taco_m`` → otherwise ``TACO_INVADED``.
+    3. ``to_m > from_m`` → otherwise ``ZERO_LENGTH``.
+    4. Range overlap with any previously-accepted deck
+       (``status`` in ``{"OK", "OUT_OF_HOLE"}``) → ``OVERLAP``.
+    5. ``to_m > geom_len`` → truncated to ``geom_len``; status
+       ``OUT_OF_HOLE`` but the deck still contributes (when the
+       remaining length is positive).
+    6. Explosive resolution is NOT performed here — the dedicated
+       ``_resolve_deck_explosive`` helper appends ``UNKNOWN_EXPLOSIVE``
+       or ``MISSING_ENERGY`` downstream when appropriate.
+    """
+    from_raw = deck.get("from_m")
+    to_raw = deck.get("to_m")
+    from_m = _coerce_float(from_raw)
+    to_m = _coerce_float(to_raw)
+    if from_m is None or to_m is None:
+        return DeckValidation(
+            deck_id=deck_id,
+            status="INVALID_GEOMETRY",
+            from_m=float("nan") if from_m is None else from_m,
+            to_m=float("nan") if to_m is None else to_m,
+            length_m=0.0,
+            reason="from_m or to_m is missing/NaN/inf",
+        )
+
+    if from_m < taco_m:
+        return DeckValidation(
+            deck_id=deck_id,
+            status="TACO_INVADED",
+            from_m=from_m,
+            to_m=to_m,
+            length_m=0.0,
+            reason=f"from_m={from_m:.4f} < taco_m={taco_m:.4f}",
+        )
+
+    if to_m <= from_m:
+        return DeckValidation(
+            deck_id=deck_id,
+            status="ZERO_LENGTH",
+            from_m=from_m,
+            to_m=to_m,
+            length_m=0.0,
+            reason=f"to_m ({to_m:.4f}) <= from_m ({from_m:.4f})",
+        )
+
+    out_of_hole = to_m > geom_len
+    effective_to = min(to_m, geom_len) if out_of_hole else to_m
+    if effective_to <= from_m:
+        return DeckValidation(
+            deck_id=deck_id,
+            status="OUT_OF_HOLE",
+            from_m=from_m,
+            to_m=to_m,
+            length_m=0.0,
+            reason=(
+                f"to_m={to_m:.4f} > geom_len={geom_len:.4f}; "
+                "truncation collapsed the deck"
+            ),
+        )
+    length_m = effective_to - from_m
+    status = "OUT_OF_HOLE" if out_of_hole else "OK"
+    reason = (
+        f"to_m={to_m:.4f} > geom_len={geom_len:.4f}; truncated to {effective_to:.4f}"
+        if out_of_hole
+        else ""
+    )
+
+    try:
+        deck_index = all_decks.index(deck)
+    except ValueError:
+        deck_index = -1
+    if deck_index > 0:
+        for prior in all_decks[:deck_index]:
+            prior_validation = prior.get("_validation")  # type: ignore[arg-type]
+            if not isinstance(prior_validation, DeckValidation):
+                continue
+            if prior_validation.status not in ("OK", "OUT_OF_HOLE"):
+                continue
+            if not (
+                effective_to <= prior_validation.from_m
+                or from_m >= prior_validation.to_m
+            ):
+                return DeckValidation(
+                    deck_id=deck_id,
+                    status="OVERLAP",
+                    from_m=from_m,
+                    to_m=effective_to,
+                    length_m=length_m,
+                    reason=(
+                        f"overlaps deck {prior_validation.deck_id} "
+                        f"[{prior_validation.from_m:.4f}, {prior_validation.to_m:.4f}]"
+                    ),
+                )
+
+    return DeckValidation(
+        deck_id=deck_id,
+        status=status,
+        from_m=from_m,
+        to_m=effective_to,
+        length_m=length_m,
+        reason=reason,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Explosive + mass resolution per deck
+# ---------------------------------------------------------------------------
+
+
+def _resolve_deck_explosive(
+    deck: dict[str, Any],
+) -> tuple[Optional[ExplosiveProduct], Optional[float], str, str]:
+    """Resolve the explosive product for a single deck.
+
+    Returns ``(product, energy_mj_kg, normalized_name, explosive_status)``.
+    ``product`` is ``None`` when the name does not resolve — callers
+    MUST treat that as ``UNKNOWN_EXPLOSIVE`` (no ANFO fallback).
+    """
+    name_raw = deck.get("explosive_type") or deck.get("Tipo_Explosivo") or ""
+    name = str(name_raw).strip()
+    if not name:
+        return None, None, "UNKNOWN", "UNKNOWN"
+    product = resolve_explosive(name)
+    status = get_explosive_status(name)
+    energy = product.energy_mj_kg if product else None
+    return product, energy, (product.normalized_name if product else name), status
+
+
+def _resolve_deck_mass(
+    deck: dict[str, Any], length_m: float,
+) -> tuple[Optional[float], str]:
+    """Compute the deck's mass in kg.
+
+    Priority:
+
+    1. ``mass_kg`` (explicit per-deck mass).
+    2. ``Kilos_Cargados_real`` (legacy single-row field; reused as a
+       per-deck mass when no explicit ``mass_kg`` is provided).
+    3. ``kg_per_m`` × ``length_m`` (linear density).
+    4. ``density_kg_m3`` × cross-section × ``length_m`` (when no
+       kg_per_m is available — uses the hole diameter as the section).
+
+    Returns ``(mass_kg, source)`` where ``source`` is one of
+    ``"mass_kg"``, ``"kg_per_m"``, ``"density"`` or ``"MISSING"``.
+    ``mass_kg`` is ``None`` when no mass could be derived.
+    """
+    mass_raw = _coerce_float(deck.get("mass_kg")) or _coerce_float(
+        deck.get("Kilos_Cargados_real")
+    )
+    if mass_raw is not None and mass_raw > 0.0:
+        return float(mass_raw), "mass_kg"
+
+    kg_per_m = _coerce_float(deck.get("kg_per_m"))
+    if kg_per_m is not None and kg_per_m > 0.0:
+        return float(kg_per_m * length_m), "kg_per_m"
+
+    density = _coerce_float(deck.get("density_kg_m3"))
+    if density is not None and density > 0.0 and length_m > 0.0:
+        diameter_mm = _coerce_float(deck.get("Diam_mm"))
+        if diameter_mm is not None and diameter_mm > 0.0:
+            radius_m = float(diameter_mm) / 2000.0
+            area_m2 = math.pi * radius_m * radius_m
+            return float(density * area_m2 * length_m), "density"
+    return None, "MISSING"
+
+
+# ---------------------------------------------------------------------------
+# Per-deck discretization
+# ---------------------------------------------------------------------------
+
+
+def _make_deck_marker(
+    *,
+    hole_id: str,
+    source_idx: Any,
+    collar: np.ndarray,
+    unit: np.ndarray,
+    validation: DeckValidation,
+    diameter_mm: float,
+    detonation_time_s: Optional[float],
+    explosive_name: str,
+    explosive_status: str,
+    config: SimulationConfiguration,
+    reason: str,
+) -> ChargeSegment:
+    """Build a zero-mass marker segment so the deck still appears in the source summary."""
+    centre_d = validation.from_m + max(validation.length_m, 0.0) / 2.0
+    centre = collar + unit * centre_d
+    warning = _deck_warning_marker(
+        validation.deck_id, validation.from_m, validation.to_m, validation.status,
+    )
+    return ChargeSegment(
+        hole_id=hole_id,
+        segment_type="taco" if validation.length_m <= 0.0 else "charge",
+        cx=float(centre[0]),
+        cy=float(centre[1]),
+        cz=float(centre[2]),
+        length_m=0.0,
+        diameter_mm=diameter_mm,
+        mass_kg=0.0,
+        energy_j=None,
+        explosive_name=explosive_name or "UNKNOWN",
+        explosive_status=explosive_status,
+        detonation_time_s=detonation_time_s,
+        in_domain=_point_in_bounds(centre, config.domain_bounds),
+        source_row_index=source_idx,
+        warnings=(warning, reason),
+    )
+
+
+def _build_deck_charge_segments(
+    *,
+    deck: dict[str, Any],
+    validation: DeckValidation,
+    hole_id: str,
+    source_idx: Any,
+    collar: np.ndarray,
+    unit: np.ndarray,
+    diameter_mm: float,
+    row_delay_ms: Optional[float],
+    config: SimulationConfiguration,
+    n_segments_per_deck: int,
+) -> tuple[list[ChargeSegment], DeckValidation]:
+    """Materialize one validated deck into ``n_segments_per_deck`` ChargeSegments.
+
+    Returns ``(segments, final_validation)``. ``final_validation`` may
+    carry an updated status (``UNKNOWN_EXPLOSIVE`` / ``MISSING_ENERGY``)
+    when the explosive resolution fails. When the final status is not
+    ``OK`` / ``OUT_OF_HOLE``, ``segments`` is empty (no charge
+    contribution). When the status is OK but mass is missing, a single
+    zero-mass marker segment is emitted so the deck still appears in
+    the source summary.
+    """
+    product, energy_mj_kg, exp_name, exp_status = _resolve_deck_explosive(deck)
+    final_status = validation.status
+    final_reason = validation.reason
+
+    if validation.status in ("OK", "OUT_OF_HOLE"):
+        if product is None:
+            final_status = "UNKNOWN_EXPLOSIVE"
+            final_reason = (
+                f"explosive '{deck.get('explosive_type') or ''}' does not "
+                "resolve; no ANFO fallback"
+            )
+        elif energy_mj_kg is None:
+            final_status = "MISSING_ENERGY"
+            final_reason = f"explosive '{exp_name}' has no energy_mj_kg"
+
+    final_validation = DeckValidation(
+        deck_id=validation.deck_id,
+        status=final_status,
+        from_m=validation.from_m,
+        to_m=validation.to_m,
+        length_m=validation.length_m,
+        reason=final_reason,
+    )
+
+    if final_status not in ("OK", "OUT_OF_HOLE"):
+        return [], final_validation
+
+    detonation_time_s: Optional[float] = _coerce_float(deck.get("detonation_time_s"))
+    if detonation_time_s is None and row_delay_ms is not None:
+        detonation_time_s = row_delay_ms / 1000.0
+
+    mass_kg, _mass_source = _resolve_deck_mass(deck, validation.length_m)
+    if mass_kg is None or mass_kg <= 0.0:
+        marker = _make_deck_marker(
+            hole_id=hole_id,
+            source_idx=source_idx,
+            collar=collar,
+            unit=unit,
+            validation=final_validation,
+            diameter_mm=diameter_mm,
+            detonation_time_s=detonation_time_s,
+            explosive_name=exp_name,
+            explosive_status=exp_status,
+            config=config,
+            reason="deck has no mass (mass_kg / kg_per_m / density all missing)",
+        )
+        return [marker], final_validation
+
+    seg_energy_total: Optional[float] = None
+    if energy_mj_kg is not None and product is not None:
+        seg_energy_total = mass_kg * energy_mj_kg * 1.0e6  # J
+
+    n = max(1, int(n_segments_per_deck))
+    seg_len = validation.length_m / n
+    seg_mass = mass_kg / n
+    seg_energy_each = (
+        seg_energy_total / n if seg_energy_total is not None else None
+    )
+
+    bounds = config.domain_bounds
+    segments: list[ChargeSegment] = []
+    for k in range(n):
+        start_d = validation.from_m + k * seg_len
+        centre = _segment_centre(collar, unit, start_d, seg_len / 2.0)
+        in_domain = _point_in_bounds(centre, bounds)
+        warning = _deck_warning_marker(
+            validation.deck_id, validation.from_m, validation.to_m,
+            validation.status,
+        )
+        seg = ChargeSegment(
+            hole_id=hole_id,
+            segment_type="charge",
+            cx=float(centre[0]),
+            cy=float(centre[1]),
+            cz=float(centre[2]),
+            length_m=seg_len,
+            diameter_mm=diameter_mm,
+            mass_kg=seg_mass,
+            energy_j=seg_energy_each,
+            explosive_name=exp_name,
+            explosive_status=exp_status,
+            detonation_time_s=detonation_time_s,
+            in_domain=in_domain,
+            source_row_index=source_idx,
+            warnings=(warning,),
+        )
+        segments.append(seg)
+    return segments, final_validation
+
+
+# ---------------------------------------------------------------------------
+# Row-level geometry helper
+# ---------------------------------------------------------------------------
+
+
+def _resolve_row_geometry(row: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """Resolve collar / toe / taco / length for one accepted row.
+
+    Returns ``None`` when collar/toe coordinates are missing or the
+    hole has zero length. The returned dict has the canonical geometry
+    context shared by both legacy and deck-aware code paths.
+    """
+    collar_x = _coerce_float(row.get("X"))
+    collar_y = _coerce_float(row.get("Y"))
+    collar_z = _coerce_float(row.get("Z_collar"))
+    toe_x = _coerce_float(row.get("X_toe"))
+    toe_y = _coerce_float(row.get("Y_toe"))
+    toe_z = _coerce_float(row.get("Z_toe"))
+    if None in (collar_x, collar_y, collar_z, toe_x, toe_y, toe_z):
+        return None
+    collar = np.asarray([collar_x, collar_y, collar_z], dtype=float)
+    toe = np.asarray([toe_x, toe_y, toe_z], dtype=float)
+    try:
+        unit = hole_axis_unit_vector(tuple(collar), tuple(toe))
+    except ValueError:
+        return None
+    geom_len = float(np.linalg.norm(toe - collar))
+    declared_len = _coerce_float(row.get("Len")) or geom_len
+    taco_m = _coerce_float(row.get("Taco_m")) or 0.0
+    return {
+        "collar": collar,
+        "toe": toe,
+        "unit": unit,
+        "geom_len": geom_len,
+        "declared_len": declared_len,
+        "taco_m": taco_m,
+    }
+
+
+def _row_common_fields(row: dict[str, Any]) -> dict[str, Any]:
+    """Extract fields shared by every row-level segment builder."""
+    return {
+        "hole_id": str(
+            row.get("hole_id") or row.get("pozo") or row.get("id_pozo") or "?"
+        ),
+        "source_idx": row.get("source_row_index"),
+        "diameter_mm": _coerce_float(row.get("Diam_mm")) or 0.0,
+        "delay_ms": _coerce_float(
+            row.get("Retardo_ms")
+            or row.get("delay_ms")
+            or row.get("Tiempo_Retardo")
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Per-row deck builder
+# ---------------------------------------------------------------------------
+
+
+def build_deck_segments(
+    row: dict[str, Any],
+    *,
+    config: SimulationConfiguration,
+    n_segments_per_deck: int = 4,
+) -> list[ChargeSegment]:
+    """Parse + validate + discretize every deck in ``row``.
+
+    Pipeline:
+
+    1. ``parse_decks_from_row`` → ``[]`` triggers early return
+       (legacy single-column mode is handled by the dispatcher).
+    2. Resolve row geometry (collar / toe / geom_len / Taco).
+    3. Per-deck validation in input order; the first deck to claim a
+       range wins, later overlaps are marked ``OVERLAP``.
+    4. Discretize each surviving deck into ``n_segments_per_deck``
+       charge segments with uniformly-distributed mass / energy.
+    5. The returned list contains charge segments only — invalid decks
+       contribute nothing (no charge segments). When every deck is
+       invalid, the caller (dispatcher) emits a single ``taco`` marker
+       so the hole still appears in the source summary.
+
+    Deck metadata (``deck_id``, ``from_m``, ``to_m``, ``status``) is
+    preserved on every emitted segment as a structured entry in
+    :attr:`ChargeSegment.warnings`.
+    """
+    decks_raw = parse_decks_from_row(row)
+    if not decks_raw:
+        return []
+
+    geom = _resolve_row_geometry(row)
+    if geom is None:
+        return []
+    common = _row_common_fields(row)
+
+    validations: list[DeckValidation] = []
+    for idx, deck in enumerate(decks_raw):
+        deck_id = str(deck.get("deck_id") or f"DK{idx + 1}")
+        deck["_validation"] = None  # type: ignore[index]
+        v = validate_deck(
+            deck,
+            hole_id=common["hole_id"],
+            taco_m=geom["taco_m"],
+            geom_len=geom["geom_len"],
+            deck_id=deck_id,
+            all_decks=decks_raw,
+        )
+        deck["_validation"] = v  # type: ignore[index]
+        validations.append(v)
+
+    out: list[ChargeSegment] = []
+    for deck, validation in zip(decks_raw, validations):
+        if validation.status in (
+            "INVALID_GEOMETRY", "TACO_INVADED", "ZERO_LENGTH", "OVERLAP",
+        ):
+            continue
+        segs, _ = _build_deck_charge_segments(
+            deck=deck,
+            validation=validation,
+            hole_id=common["hole_id"],
+            source_idx=common["source_idx"],
+            collar=geom["collar"],
+            unit=geom["unit"],
+            diameter_mm=common["diameter_mm"],
+            row_delay_ms=common["delay_ms"],
+            config=config,
+            n_segments_per_deck=n_segments_per_deck,
+        )
+        out.extend(segs)
+    return out
+
+
+def _empty_hole_marker(
+    row: dict[str, Any], *, config: SimulationConfiguration,
+) -> list[ChargeSegment]:
+    """Emit a single zero-length ``taco`` marker for a hole whose decks all failed."""
+    common = _row_common_fields(row)
+    geom = _resolve_row_geometry(row)
+    if geom is None:
+        return [_invalid_segment(common["hole_id"], common["source_idx"],
+                                 "missing collar/toe coordinates")]
+    collar = geom["collar"]
+    detonation_time_s = (
+        common["delay_ms"] / 1000.0 if common["delay_ms"] is not None else None
+    )
+    return [
+        ChargeSegment(
+            hole_id=common["hole_id"],
+            segment_type="taco",
+            cx=float(collar[0]),
+            cy=float(collar[1]),
+            cz=float(collar[2]),
+            length_m=0.0,
+            diameter_mm=common["diameter_mm"],
+            mass_kg=0.0,
+            energy_j=None,
+            explosive_name="UNKNOWN",
+            explosive_status="UNKNOWN",
+            detonation_time_s=detonation_time_s,
+            in_domain=_point_in_bounds(collar, config.domain_bounds),
+            source_row_index=common["source_idx"],
+            warnings=("all_decks_invalid",),
+        )
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Legacy single-column segmentation
 # ---------------------------------------------------------------------------
 
 
@@ -111,51 +723,39 @@ def _segment_single_hole(
     config: SimulationConfiguration,
     segments_per_hole: int,
 ) -> list[ChargeSegment]:
-    """Build the charge segments for one accepted row.
+    """Legacy single-column discretization (no decks).
 
-    The explosive column runs from ``collar + taco`` to ``toe``. If the
-    declared ``Len`` / ``descarga`` disagree with the geometric toe, the
-    shorter of the two is used and a structured warning is attached.
+    Kept verbatim from the original implementation: the explosive
+    column runs from ``collar + taco`` to ``toe`` and is split into
+    ``segments_per_hole`` equal sub-segments. Rows with no
+    explosive column or no declared mass produce a single ``taco``
+    marker so they still appear in the source summary.
     """
-    hole_id = str(row.get("hole_id") or row.get("pozo") or row.get("id_pozo") or "?")
-    source_idx = row.get("source_row_index")
+    common = _row_common_fields(row)
+    geom = _resolve_row_geometry(row)
+    if geom is None:
+        return [_invalid_segment(
+            common["hole_id"], common["source_idx"],
+            "missing collar/toe coordinates",
+        )]
 
-    collar_x = _coerce_float(row.get("X"))
-    collar_y = _coerce_float(row.get("Y"))
-    collar_z = _coerce_float(row.get("Z_collar"))
-    toe_x = _coerce_float(row.get("X_toe"))
-    toe_y = _coerce_float(row.get("Y_toe"))
-    toe_z = _coerce_float(row.get("Z_toe"))
-    if None in (collar_x, collar_y, collar_z, toe_x, toe_y, toe_z):
-        # Fase 1 should have rejected this row, but be defensive.
-        return [_invalid_segment(hole_id, source_idx, "missing collar/toe coordinates")]
+    collar = geom["collar"]
+    unit = geom["unit"]
+    geom_len = geom["geom_len"]
+    declared_len = geom["declared_len"]
+    taco_m = geom["taco_m"]
 
-    collar = np.asarray([collar_x, collar_y, collar_z], dtype=float)
-    toe = np.asarray([toe_x, toe_y, toe_z], dtype=float)
-    try:
-        unit = hole_axis_unit_vector(tuple(collar), tuple(toe))
-    except ValueError as exc:
-        return [_invalid_segment(hole_id, source_idx, str(exc))]
-
-    geom_len = float(np.linalg.norm(toe - collar))
-    declared_len = _coerce_float(row.get("Len")) or geom_len
-    taco_m = _coerce_float(row.get("Taco_m")) or 0.0
     descarga_m = _coerce_float(row.get("descarga"))
-    diameter_mm = _coerce_float(row.get("Diam_mm")) or 0.0
     kilos = _coerce_float(row.get("Kilos_Cargados_real"))
     explosive_name = str(row.get("Tipo_Explosivo") or "").strip()
-    delay_ms = _coerce_float(row.get("Retardo_ms") or row.get("delay_ms") or row.get("Tiempo_Retardo"))
+    delay_ms = common["delay_ms"]
+    diameter_mm = common["diameter_mm"]
 
     warnings: list[str] = []
 
-    # Resolve the effective charge length: prefer the declared descarga
-    # (Len - Taco) when consistent, otherwise fall back to the geometric
-    # length minus the taco. Never accept a negative charge length.
     candidate_charge = descarga_m if descarga_m is not None else (declared_len - taco_m)
     if candidate_charge is None or not math.isfinite(candidate_charge):
         candidate_charge = geom_len - taco_m
-    # If the taco alone is longer than (or equal to) the hole, there is
-    # no explosive column — clamp to zero with a warning (never negative).
     if taco_m >= declared_len:
         warnings.append(
             f"taco_m ({taco_m:.3f} m) >= hole length ({declared_len:.3f} m); "
@@ -173,32 +773,27 @@ def _segment_single_hole(
         candidate_charge = geom_len
     charge_length_m = float(candidate_charge)
 
-    # Explosive resolution — never ANFO fallback.
-    product: Optional[ExplosiveProduct] = resolve_explosive(explosive_name) if explosive_name else None
-    explosive_status = get_explosive_status(explosive_name) if explosive_name else "MISSING"
+    product: Optional[ExplosiveProduct] = (
+        resolve_explosive(explosive_name) if explosive_name else None
+    )
+    explosive_status = (
+        get_explosive_status(explosive_name) if explosive_name else "MISSING"
+    )
     energy_mj_kg = product.energy_mj_kg if product else None
 
-    # Energy mode policy.
     energy_mode = config.energy_mode or EnergyMode.RELATIVE
     if (
         energy_mode == EnergyMode.ABSOLUTE
         and (product is None or energy_mj_kg is None)
     ):
-        # ABSOLUTE mode is blocked — surface a structured warning. The
-        # engine will refuse to run; we still emit the segments so the
-        # diagnostics can show why.
         warnings.append(
             "ABSOLUTE mode blocked: explosive product or specific energy unavailable"
         )
 
-    # Discretize the explosive column.
     n_segs = max(1, int(segments_per_hole))
     if charge_length_m <= 0.0 or kilos is None or kilos <= 0.0:
-        # Hole has no explosive column (pure stemming or unloaded) or no
-        # mass declared — emit ONE marker segment so it appears in the
-        # source summary without contributing energy.
         marker = ChargeSegment(
-            hole_id=hole_id,
+            hole_id=common["hole_id"],
             segment_type="taco" if charge_length_m <= 0.0 else "charge",
             cx=float(collar[0]),
             cy=float(collar[1]),
@@ -211,7 +806,7 @@ def _segment_single_hole(
             explosive_status=explosive_status,
             detonation_time_s=(delay_ms / 1000.0) if delay_ms is not None else None,
             in_domain=_point_in_bounds(collar, config.domain_bounds),
-            source_row_index=source_idx,
+            source_row_index=common["source_idx"],
             warnings=tuple(warnings) if warnings else (),
         )
         return [marker]
@@ -220,19 +815,16 @@ def _segment_single_hole(
     seg_mass = kilos / n_segs
     seg_energy: Optional[float] = None
     if product is not None and energy_mj_kg is not None:
-        # E_acoplada per segment = (kg × MJ/kg × 1e6 J/MJ) × η / n_segs
-        # η applied later by the engine; here we store the chemical energy.
-        seg_energy = (seg_mass * energy_mj_kg * 1.0e6)
+        seg_energy = seg_mass * energy_mj_kg * 1.0e6
 
     bounds = config.domain_bounds
     segments: list[ChargeSegment] = []
-    # Segment k starts at distance (taco + k*seg_len) from collar.
     for k in range(n_segs):
         start_d = taco_m + k * seg_len
         centre = _segment_centre(collar, unit, start_d, seg_len / 2.0)
         in_domain = _point_in_bounds(centre, bounds)
         seg = ChargeSegment(
-            hole_id=hole_id,
+            hole_id=common["hole_id"],
             segment_type="charge",
             cx=float(centre[0]),
             cy=float(centre[1]),
@@ -245,11 +837,10 @@ def _segment_single_hole(
             explosive_status=explosive_status,
             detonation_time_s=(delay_ms / 1000.0) if delay_ms is not None else None,
             in_domain=in_domain,
-            source_row_index=source_idx,
+            source_row_index=common["source_idx"],
             warnings=tuple(warnings) if warnings else (),
         )
         segments.append(seg)
-
     return segments
 
 
@@ -283,24 +874,62 @@ def build_charge_segments(
     *,
     config: SimulationConfiguration,
     segments_per_hole: int = 8,
+    n_segments_per_deck: int = 4,
 ) -> list[ChargeSegment]:
     """Build the full list of charge segments from accepted rows.
 
-    Each row produces ``segments_per_hole`` explosive-charge segments
-    along its collar→toe axis (after the taco is sliced off). Rows with
-    no explosive column or no declared mass produce a single marker
-    segment so they still appear in the source summary.
+    Per-row dispatch:
 
-    The function NEVER silently substitutes ANFO for an unknown
-    explosive, NEVER invents a mass, and NEVER extends a charge beyond
-    the geometric collar→toe segment.
+    * **Decks mode** — when ``row["Decks"]`` is a non-empty list, each
+      deck is validated and discretized independently. The output
+      contains ``n_validated_decks × n_segments_per_deck`` charge
+      segments (from OK / OUT_OF_HOLE decks only). When every deck
+      failed validation, ONE ``taco`` marker is emitted so the hole
+      still appears in the source summary.
+    * **Legacy single-column mode** — when ``row["Decks"]`` is
+      missing, ``None`` or empty, the row is processed as a single
+      contiguous explosive cylinder between ``collar + Taco`` and
+      ``toe``, producing ``segments_per_hole`` charge segments (or
+      one ``taco`` marker when there is no explosive column).
+
+    Hard rules preserved across both modes:
+
+    * NEVER silently substitutes ANFO for an unknown explosive.
+    * NEVER invents a mass.
+    * NEVER extends a charge beyond the geometric collar→toe segment.
+    * NEVER emits a negative-length segment.
     """
     if segments_per_hole < 1:
         raise ValueError("segments_per_hole must be >= 1")
+    if n_segments_per_deck < 1:
+        raise ValueError("n_segments_per_deck must be >= 1")
+
     out: list[ChargeSegment] = []
     for row in accepted_rows:
-        out.extend(_segment_single_hole(row, config=config, segments_per_hole=segments_per_hole))
+        if parse_decks_from_row(row):
+            deck_segs = build_deck_segments(
+                row,
+                config=config,
+                n_segments_per_deck=n_segments_per_deck,
+            )
+            if not deck_segs:
+                out.extend(_empty_hole_marker(row, config=config))
+            else:
+                out.extend(deck_segs)
+        else:
+            out.extend(
+                _segment_single_hole(
+                    row,
+                    config=config,
+                    segments_per_hole=segments_per_hole,
+                )
+            )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Segment classification
+# ---------------------------------------------------------------------------
 
 
 def classify_segments(
@@ -354,3 +983,15 @@ def classify_segments(
         "invalid_nan_centre": n_nan_centre,
     }
     return valid, invalid, diagnostics
+
+
+__all__ = [
+    "DeckValidation",
+    "DeckSegment",
+    "build_charge_segments",
+    "build_deck_segments",
+    "classify_segments",
+    "hole_axis_unit_vector",
+    "parse_decks_from_row",
+    "validate_deck",
+]

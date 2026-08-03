@@ -156,9 +156,9 @@ class TestNpzRoundTrip:
             result=result, accepted_rows=rows, configuration=cfg, data_dir=tmp_path,
         )
         arrays, _, _ = read_npz_artifact(npz, expected_sha256=sha)
-        assert "energy_density" in arrays
+        assert "energy_density_j_m3" in arrays
         # Density is J/m³. Never kg/m³ (audit H-09).
-        assert arrays["energy_density"].shape == arrays["energy_total"].shape
+        assert arrays["energy_density_j_m3"].shape == arrays["energy_total"].shape
 
     def test_dominant_arrays_present(self, tmp_path):
         cfg = _cfg()

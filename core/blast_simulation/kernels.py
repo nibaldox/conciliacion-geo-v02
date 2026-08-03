@@ -28,6 +28,7 @@ Anisotropy:
 """
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import numpy as np
@@ -40,17 +41,29 @@ def radial_kernel(
     *,
     attenuation_coefficient_1_m: float,
     regularization_radius_m: float,
+    support_radius_m: float,
 ) -> np.ndarray:
-    """Vectorized regularized radial kernel ``K(r) = exp(-αr) / (r² + r0²)``.
+    """Vectorized regularized radial kernel with strict finite support.
 
-    ``r`` may be any shape; the return preserves it. The denominator is
-    strictly positive (``r0 > 0`` is enforced upstream) so the kernel is
-    finite everywhere including ``r=0``.
+    ``K(r) = exp(-αr) / (r² + r0²)`` and ``K(r) = 0`` for
+    ``r > support_radius_m``. ``support_radius_m`` MUST satisfy
+    ``support_radius_m > regularization_radius_m > 0`` so the regularised
+    kernel can be evaluated at sample points before truncation.
     """
     alpha = float(attenuation_coefficient_1_m)
     r0 = float(regularization_radius_m)
+    R = float(support_radius_m)
+    if not (alpha >= 0.0 and r0 > 0.0 and R > r0):
+        raise ValueError(
+            f"invalid kernel params: alpha={alpha}, r0={r0}, R={R}"
+        )
     r_arr = np.asarray(r, dtype=np.float64)
-    return np.exp(-alpha * r_arr) / (r_arr * r_arr + r0 * r0)
+    out = np.zeros_like(r_arr, dtype=np.float64)
+    inside = r_arr <= R
+    if np.any(inside):
+        r_in = r_arr[inside]
+        out[inside] = np.exp(-alpha * r_in) / (r_in * r_in + r0 * r0)
+    return out
 
 
 def isotropic_distance(
@@ -154,6 +167,69 @@ def kernel_total_mass(
     # numpy 2.x renamed np.trapz → np.trapezoid; older numpy keeps trapz.
     trapezoid = getattr(np, "trapezoid", None) or getattr(np, "trapz")
     return float(trapezoid(integrand, r))
+
+
+def discrete_total_mass(
+    *,
+    attenuation_coefficient_1_m: float,
+    regularization_radius_m: float,
+    support_radius_m: float,
+    voxel_size_m: float,
+    anisotropy_mode: str = AnisotropyMode.ISOTROPIC,
+    tensor: Optional[np.ndarray] = None,
+) -> float:
+    """Position-independent discrete total mass of the kernel over its finite support.
+
+    The radial kernel K(r) = exp(-αr)/(r²+r0²) is ISOTROPIC; its discrete
+    total mass over the support cube [-R, R]³, sampled at voxel centres
+    on a regular grid of step dx, depends only on dx and R — NOT on
+    the source position relative to the grid.
+
+    This function computes the integral
+
+        Q_total = ∫_0^R 4πr² · K(r) dr
+
+    by midpoint quadrature on concentric shells of thickness dx. The
+    shell midpoints are at r_k = (k + 0.5) · dx for k = 0, …, n-1 where
+    n = ceil(R/dx). Each shell contributes
+
+        4π · r_k² · K(r_k) · dx
+
+    This is the correct discrete normaliser because:
+
+    * The same radial partition is used regardless of source position.
+    * As dx → 0 the quadrature converges to the continuous integral.
+    * For a source AT a domain voxel centre, the in-domain sum of
+      K(r_j)·V_j over the support cube approaches Q_total; any
+      source-position offset only removes vóxeles outside the
+      domain, never adds spurious energy.
+
+    Therefore for any source fully contained in the domain,
+    Σ_{j in-domain, r_j ≤ R} K(r_j)·V_j ≤ Q_total; equality holds in
+    the limit of fine resolution and source at voxel centre.
+    """
+    alpha = float(attenuation_coefficient_1_m)
+    r0 = float(regularization_radius_m)
+    R = float(support_radius_m)
+    dx = float(voxel_size_m)
+    if not (alpha >= 0.0 and r0 > 0.0 and R > r0 and dx > 0.0):
+        return 0.0
+
+    # Midpoint quadrature on concentric shells of thickness dx.
+    n = max(1, int(math.ceil(R / dx)))
+    r_mid = (np.arange(n, dtype=np.float64) + 0.5) * dx
+    if anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR and tensor is not None:
+        # For anisotropic, the Jacobian shifts the volume element.
+        # We approximate by the isotropic form scaled by 1/sqrt(det M).
+        # (Full anisotropic integral is not radially symmetric.)
+        M = np.asarray(tensor, dtype=np.float64)
+        det_M = float(np.linalg.det(M))
+        jacobian = 1.0 / math.sqrt(det_M) if det_M > 0 else 1.0
+    else:
+        jacobian = 1.0
+    kernel_vals = np.exp(-alpha * r_mid) / (r_mid * r_mid + r0 * r0)
+    shell_volumes = 4.0 * np.pi * r_mid * r_mid * dx
+    return float(np.sum(kernel_vals * shell_volumes) * jacobian)
 
 
 def energy_split_for_source(

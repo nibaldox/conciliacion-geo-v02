@@ -166,7 +166,7 @@ class TestApiCoreNpzRoundTrip:
         assert metadata["simulation_id"] == sim_id
         assert metadata["voxel_count"] == arrays["energy_total"].size
         # The NPZ carries the density array too (never kg/m³ for a fraction).
-        assert "energy_density" in arrays
+        assert "energy_density_j_m3" in arrays
 
     def test_get_summary_returns_full_canonical_dict(self, client):
         sid = _seed_session_with_accepted_rows(client)

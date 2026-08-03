@@ -45,3 +45,6 @@ include = ["core*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: benchmarks that require a large voxel grid and may take several minutes",
+]
