@@ -210,6 +210,11 @@ def compute_field_arrays(
     arrays are reproduced deterministically from the same inputs so the
     NPZ artifact can be SHA-256 verified on read-back.
 
+    Falls back to the legacy ``support_radius_m`` parameter ONLY when
+    ``configuration.support_radius_m`` is ``None``. The contract wins
+    so changing the configuration's support radius deterministically
+    changes the persisted field (Falla 4.1 fix, audit v2 §4.2).
+
     Returns a dict suitable for ``np.savez_compressed``. All arrays are
     stored as native numpy dtypes — no pickle is required to read them
     back, and ``np.load(..., allow_pickle=False)`` succeeds.
@@ -250,11 +255,18 @@ def compute_field_arrays(
     )
     valid, _, _ = classify_segments(segments, energy_mode=configuration.energy_mode)
 
-    R_runtime = (
-        float(support_radius_m)
-        if support_radius_m is not None
-        else float(SIMULATION.default_support_radius_m)
-    )
+    # Authoritative support radius: the CONTRACT wins over the legacy
+    # parameter shadow. There is no implicit default of 5 m (Falla 4.1
+    # fix). The contract's validate() guarantees R > r0 > 0.
+    if configuration.support_radius_m is not None:
+        R_runtime = float(configuration.support_radius_m)
+    elif support_radius_m is not None:
+        R_runtime = float(support_radius_m)
+    else:
+        raise ValueError(
+            "compute_field_arrays requires configuration.support_radius_m "
+            "to be set (Falla 4.1: no hidden default allowed)"
+        )
 
     anisotropy_tensor = (
         np.asarray(configuration.rock_mass.anisotropy_tensor, dtype=np.float64)
