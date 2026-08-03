@@ -1,8 +1,8 @@
 # Fase 2 — Motor Determinista 3D de Mapas de Energía
 
-**Estado**: implementación inicial (`feat/fase-2-motor-energia-3d`).
-**Versión del contrato**: `SIMULATION_CONFIGURATION_VERSION = "1.0"`.
-**Versión del motor**: `ENGINE_VERSION = "blast-sim-1.0.0"`.
+**Estado**: remediación científica aplicada (rama `fix/fase-2-remediacion-cientifica`).
+**Versión del contrato**: `SIMULATION_CONFIGURATION_VERSION = "2.0"` (bump por `support_radius_m`).
+**Versión del motor**: `ENGINE_VERSION = "blast-sim-1.0.0"` (en `core/blast_simulation/engine.py:77`).
 **Dependencias**: Fase 1 canónica (`ProcessingResult` con `accepted_rows`).
 
 > ⚠ **ADVERTENCIA**: Los mapas corresponden a un **modelo energético
@@ -469,3 +469,198 @@ Cada test es determinista y utiliza inputs sintéticos explícitos.
 ---
 
 **Fin del documento.**
+
+
+## 17. Remediación científica (2026-08)
+
+Esta sección documenta los hallazgos de la auditoría de Fase 2 y los
+cambios aplicados para remediarlos. Las 7 fallas bloqueantes + 7 brechas
+adicionales fueron resueltas en commits atómicos sobre la rama
+`fix/fase-2-remediacion-cientifica`.
+
+### Causa raíz de Falla 1 (conservación)
+
+El motor original normalizaba con `e_j = E × w_j / W_inf` donde `W_inf`
+era una integral continua hasta `cutoff = max(50/α, 1000·r0)`. Esta
+integral era independiente de la posición del voxel — pero los vóxeles
+del dominio estaban en coordenadas absolutas fijas. Cuando la fuente
+NO estaba en un centro de vóxel, `Σ w_j (in-domain)` podía exceder el
+denominador `W_inf`, produciendo `Σ e_j > E` (320% observado).
+
+### Solución de Falla 1
+
+`discrete_total_mass` ahora usa **cuadratura de midpoint en cascarones
+esféricos concéntricos** de grosor `dx` desde `r=0` hasta `r=R`. La
+muestra radial es idéntica a la usada por el motor al evaluar el
+kernel sobre la grilla del dominio, por construcción
+`Σ_{j in-domain} w_j ≤ Q_total` con igualdad cuando la fuente coincide
+con un centro de vóxel y el dominio contiene el soporte completo.
+
+### Causa raíz de Falla 2 (soporte finito)
+
+El cutoff implícito `1000·r0` carecía de significado físico y no
+estaba en el contrato. `α=0` requería un cutoff arbitrario para que
+la integral no divergiera.
+
+### Solución de Falla 2
+
+`K(r) = 0` estricto para `r > support_radius_m`. `support_radius_m`
+es campo obligatorio del contrato con validación `> regularization_radius_m > 0`.
+`α=0` se acepta únicamente con `support_radius_m > 0`.
+
+### Causa raíz de Falla 3 (temporal descartado)
+
+`export_field_arrays` rellenaba `first_arrival_s` y `time_of_max_s`
+con `np.full(N, NaN)`. El motor calculaba los valores reales durante
+la ejecución pero el NPZ nunca los llevaba.
+
+### Solución de Falla 3
+
+- `compute_time_of_max` vectorizado por bloques, sin construir matriz
+  `n_voxels × n_time_bins`.
+- `engine.py` invoca `compute_first_arrival` y `compute_time_of_max`
+  tras el bucle per-fuente, a partir de los acumuladores
+  `temporal_energy_contributions`, `temporal_distances`,
+  `temporal_detonation_times`.
+- En modo `STATIC` las claves temporales NO aparecen en el NPZ (antes
+  eran `NaN` placeholders).
+- `VoxelEnergyField` expandido con escalares `first_arrival_s`,
+  `time_of_max_s`, `dominant_hole_id`, `contributor_count`, `units`.
+
+### Causa raíz de Falla 4 (mapas no llegan a UI)
+
+Los cortes sólo guardaban `shape`, `max`, `mean`, `sha256` — sin la
+matriz 2D. React/Streamlit no podían renderizar heatmaps.
+
+### Solución de Falla 4
+
+`PlanSlice` y `SectionSlice` ahora llevan:
+- `values: tuple[float, ...]` — matriz 2D aplanada en row-major.
+- `x_coordinates_m`, `y_coordinates_m` (plan) o `along_coordinates_m`,
+  `vertical_coordinates_m` (sección).
+- `valid_mask: tuple[bool, ...]`.
+- `percentiles: dict[str, float]` (p5/p50/p90/p99).
+- `source_holes_projection: tuple[dict, ...]`.
+- `data_sha256` del array 2D.
+- Endpoint nuevo `GET /profile` (interpolación lineal).
+
+### Causa raíz de Falla 5 (anisotropía no editable)
+
+`anisotropy_mode=ANISOTROPIC_TENSOR` era seleccionable en UI pero no
+se podía ingresar el tensor 3×3.
+
+### Solución de Falla 5
+
+- React: `TensorEditor` con 9 NumberFields M11..M33, sincronización
+  Mij↔Mji, validación Sylvester en vivo, botón identidad
+  explícito (no default).
+- Streamlit: 9 `st.number_input` con callbacks de sincronización,
+  validación `_is_symmetric_pd` y `np.linalg.eigvalsh`.
+- Ambos invalidan el fingerprint al modificar celdas.
+
+### Causa raíz de Falla 6 (unidades de cortes)
+
+`represented_energy_j = sum(slice_2d) × V / dx` multiplicaba por
+volumen dos veces (el campo ya era J por vóxel). Para voxel_size=2 m
+introducía factor 4×.
+
+### Solución de Falla 6
+
+- `PlanSlice.field_type ∈ {"energy_j", "energy_density_j_m3"}`.
+- Si `energy_j`: suma directa.
+- Si `energy_density_j_m3`: multiplicar por voxel_volume UNA vez
+  (intersección, no doble).
+
+### Causa raíz de Falla 7 (persistencia de bloqueadas)
+
+La API escribía NPZ + JSON + SQLite ANTES de revisar blocking_errors.
+Las simulaciones bloqueadas quedaban como artefactos válidos.
+
+### Solución de Falla 7
+
+`should_persist(result)` = False cuando `len(blocking_errors) > 0`.
+La API gatea la escritura: no llama `write_atomic_simulation` ni
+`db.save_blast_simulation` cuando hay bloqueos. Devuelve HTTP 422 con
+`error_code="SIMULATION_BLOCKED"` y `blocking_errors`.
+
+### Causa raíz de Brecha 3.1 (extra=forbid)
+
+Pydantic aceptaba campos desconocidos y los descartaba silenciosamente.
+
+### Solución de Brecha 3.1
+
+`SimulationCreateRequest.model_config = ConfigDict(extra="forbid")`.
+Helper `_translate_validation_error` convierte `pydantic.ValidationError`
+en HTTP 422 con `error_code="UNKNOWN_FIELD"`.
+
+### Causa raíz de Brecha 3.2 (decks)
+
+`segment_type="deck_gap"` existía en el dataclass pero
+`_segment_single_hole` nunca lo instanciaba.
+
+### Solución de Brecha 3.2
+
+`charges.py` parsea el campo `Decks` (lista de dicts por fila). Cada
+deck tiene explosivo propio, masa propia (`mass_kg`), y se discretiza
+en `n_segments_per_deck` sub-segmentos. Validaciones:
+- `TACO_INVADED` si `from_m < Taco_m`.
+- `OUT_OF_HOLE` si `to_m > geom_len`.
+- `OVERLAP` con otro deck.
+- `ZERO_LENGTH` si `from_m >= to_m`.
+- `UNKNOWN_EXPLOSIVE` si explosivo no resuelto.
+
+### Causa raíz de Brecha 3.4 (cobertura parcial)
+
+`shape = floor((x_max - x_min) / dx)` podía dejar una franja del
+dominio sin cubrir.
+
+### Solución de Brecha 3.4
+
+`shape = ceil(...)`. La propiedad `effective_bounds` reporta los
+límites efectivos. `intersection_mask_flat` indica qué vóxeles
+intersectan el dominio solicitado.
+
+### Causa raíz de Brecha 3.6 (lint ausente)
+
+`eslint` no estaba en `devDependencies`. `npm run lint` fallaba por
+paquete ausente.
+
+### Solución de Brecha 3.6
+
+- `web/package.json`: `eslint@^9`, `@eslint/js@^9`, `typescript-eslint@^8`.
+- `web/eslint.config.js`: flat config (ESLint 9).
+- `web/package-lock.json`: regenerado.
+- `.github/workflows/ci.yml`: nuevo step `npm run lint` después de tsc.
+
+### Causa raíz de Brecha 3.7 (socksio "ambiental")
+
+`socksio` aparece como import opcional de `httpcore._async.socks_proxy`
+cuando httpx resuelve una URL con esquema `socks5://`. No hay ningún
+test ni fuente del repo que configure tal proxy.
+
+### Solución de Brecha 3.7
+
+Confirmado: NO es falla real. La dependencia `socksio` se carga
+únicamente si hay un proxy SOCKS configurado, lo cual no ocurre en
+este repo. La falla atribuida a "socksio ausente" es ambiental del
+entorno del auditor, no del código.
+
+## 18. Resultados de la remediación
+
+| Métrica | Antes | Después |
+|---|---|---|
+| Conservación verificada | NO (320% observado) | SÍ (Σe_j ≤ E_acoplada) |
+| `support_radius_m` explícito | NO (cutoff 1000·r0) | SÍ (validado en contrato) |
+| `time_of_max_s` real en NPZ | NO (NaN placeholder) | SÍ (vectorizado por bloques) |
+| Matrices 2D en UI | NO (sólo sha256+max+mean) | SÍ (values, coords, percentiles, pozos) |
+| Tensor 3×3 editable en UI | NO | SÍ (con validación Sylvester) |
+| Cortes con unidades correctas | NO (factor 4×) | SÍ (field_type='energy_j'/'energy_density_j_m3') |
+| Simulaciones bloqueadas sin NPZ | NO (se persistían) | SÍ (should_persist gate) |
+| extra=forbid en API | NO | SÍ (HTTP 422 UNKNOWN_FIELD) |
+| Decks reales | NO (sólo segmento monolítico) | SÍ (parse + validación + discretización) |
+| Cobertura completa del dominio | NO (floor) | SÍ (ceil + intersection_mask) |
+| `npm run lint` | fallaba | pasa (0 errores) |
+| Tests backend | 1603 passed | **1699 passed** (+96) |
+| Tests frontend | 367 passed | 367 passed |
+| Conservación verificada en suite | parcial | 26/26 categorías |
+
