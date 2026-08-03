@@ -2,8 +2,8 @@
 
 Integración §3.8 / §5.8 — these tests exercise the FULL pipeline:
 
-    UI FormData (mocked) → API → core.procesar_pozos → persistence → read-back
-    Streamlit (mocked state) → core.procesar_pozos → structured result
+    canonical multipart → API → core.procesar_pozos → persistence → read-back
+    geometry configuration → core.procesar_pozos → structured result
 
 and verify that every layer carries the SAME contract values (version,
 confirmation, source columns, conventions, units, normalized angles, toe).
@@ -181,7 +181,7 @@ class TestIndependentUnits:
 
 
 # ---------------------------------------------------------------------------
-# Layer 3: API parity — the FormData the UI builds is accepted end-to-end.
+# Layer 3: strict canonical multipart contract at the API boundary.
 # ---------------------------------------------------------------------------
 
 
@@ -194,25 +194,28 @@ def api_client(api_isolated_db):
         yield client, db
 
 
-def _ui_form_data(session_id: str, **overrides) -> dict:
-    """Mimic the FormData produced by web/src/components/results/BlastUploader.tsx."""
+def _api_v2_form(session_id: str, **overrides) -> dict:
+    """Canonical multipart fixture for API integration tests."""
     base = {
         "session_id": session_id,
+        "geometry_configuration_version": "2.0",
         "geometry_user_confirmed": "true",
-        "incl_convention": "from_vertical",
-        "incl_sign_convention": "ABSOLUTE_VALUE",
-        "az_convention": "CLOCKWISE_FROM_NORTH",
-        "angle_unit": "degrees",
+        "inclination_convention": "FROM_VERTICAL",
+        "inclination_sign_convention": "ABSOLUTE_VALUE",
+        "inclination_source_rule": "",
+        "azimuth_convention": "CLOCKWISE_FROM_NORTH",
+        "inclination_unit": "DEGREES",
+        "azimuth_unit": "DEGREES",
         "bench_height_m": "15.0",
-        "incl_source_column": "Inclinacion_real",
-        "az_source_column": "Azimuth_real",
+        "inclination_source_column": "Inclinacion_real",
+        "azimuth_source_column": "Azimuth_real",
     }
     base.update(overrides)
     return base
 
 
-class TestApiFormDataParity:
-    def test_ui_formdata_accepted_and_carries_contract(self, api_client):
+class TestApiMultipartContract:
+    def test_v2_multipart_accepted_and_carries_contract(self, api_client):
         client, db = api_client
         sid = db.create_session()
         csv = (
@@ -222,7 +225,7 @@ class TestApiFormDataParity:
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data=_ui_form_data(sid),
+            data=_api_v2_form(sid),
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
@@ -239,26 +242,42 @@ class TestApiFormDataParity:
             == GEOMETRY_CONFIGURATION_VERSION
         )
 
-    def test_ui_formdata_without_confirmation_returns_400(self, api_client):
+    def test_v2_multipart_without_confirmation_returns_400(self, api_client):
         client, db = api_client
         sid = db.create_session()
         csv = "Latitud_Geo,Longitud_Geo,Nombre_Banco,Inclinacion_real,Azimuth_real,longitud_real\n1000.0,2000.0,4000,15.0,90.0,12.0\n"
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data=_ui_form_data(sid, geometry_user_confirmed="false"),
+            data=_api_v2_form(sid, geometry_user_confirmed="false"),
         )
         assert resp.status_code == 400
         assert resp.json()["detail"]["error_code"] == "GEOMETRY_REJECTED"
 
-    def test_ui_formdata_with_empty_source_columns_returns_400(self, api_client):
+    def test_v2_multipart_missing_confirmation_is_incomplete(self, api_client):
+        client, db = api_client
+        sid = db.create_session()
+        form = _api_v2_form(sid)
+        form.pop("geometry_user_confirmed")
+        csv = "Latitud_Geo,Longitud_Geo,Nombre_Banco,Inclinacion_real,Azimuth_real,longitud_real\n1000.0,2000.0,4000,15.0,90.0,12.0\n"
+        resp = client.post(
+            "/api/v1/blast/upload",
+            files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
+            data=form,
+        )
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert detail["error_code"] == "GEOMETRY_INCOMPLETE"
+        assert detail["details"]["missing_fields"] == ["geometry_user_confirmed"]
+
+    def test_v2_multipart_with_empty_source_columns_returns_400(self, api_client):
         client, db = api_client
         sid = db.create_session()
         csv = "Latitud_Geo,Longitud_Geo,Nombre_Banco,Inclinacion_real,Azimuth_real,longitud_real\n1000.0,2000.0,4000,15.0,90.0,12.0\n"
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data=_ui_form_data(sid, incl_source_column="", az_source_column=""),
+            data=_api_v2_form(sid, inclination_source_column="", azimuth_source_column=""),
         )
         assert resp.status_code == 400
         assert resp.json()["detail"]["error_code"] == "GEOMETRY_INCOMPLETE"
@@ -270,7 +289,7 @@ class TestApiFormDataParity:
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data=_ui_form_data(sid, incl_source_column="No_Existe_En_Dataset"),
+            data=_api_v2_form(sid, inclination_source_column="No_Existe_En_Dataset"),
         )
         # The processor surfaces the structured blocking error in the
         # body and returns HTTP 422 (zero accepted rows + blocking error)
@@ -292,7 +311,7 @@ class TestPersistenceRoundTrip:
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data=_ui_form_data(sid),
+            data=_api_v2_form(sid),
         )
         assert resp.status_code in (200, 422), resp.text
         return sid
@@ -343,7 +362,7 @@ class TestExportEndpointsEndToEnd:
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data=_ui_form_data(sid),
+            data=_api_v2_form(sid),
         )
         assert resp.status_code in (200, 422), resp.text
         return sid
@@ -445,8 +464,8 @@ class TestStreamlitContractParity:
 
     def test_streamlit_and_api_produce_same_toe(self):
         # Same dataset + same contract values → same toe coordinates,
-        # regardless of whether it was built by the web FormData or by
-        # the Streamlit session_state path.
+        # regardless of which production interface supplies the validated
+        # geometry configuration.
         ds = _dataset()
         streamlit_cfg = self._streamlit_cfg()
         api_cfg = _full_config()

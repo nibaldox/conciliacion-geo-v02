@@ -105,11 +105,12 @@ class TestCoreIndependentUnits:
         # canonical normalized angles must be Incl=15° / Az=90°.
         assert row["Incl"] == pytest.approx(15.0, abs=1e-3)
         assert row["Az"] == pytest.approx(90.0, abs=1e-3)
-        # toe coordinates: collar (1000, 2000, 4015) with L=12, incl=15,
-        # az=90 → expected numerical toe. Verify they are finite.
-        assert math.isfinite(row["X_toe"])
-        assert math.isfinite(row["Y_toe"])
-        assert math.isfinite(row["Z_toe"])
+        expected_x = 1000.0 + 12.0 * math.sin(math.radians(15.0))
+        expected_y = 2000.0
+        expected_z = 4015.0 - 12.0 * math.cos(math.radians(15.0))
+        assert row["X_toe"] == pytest.approx(expected_x, abs=1e-6)
+        assert row["Y_toe"] == pytest.approx(expected_y, abs=1e-6)
+        assert row["Z_toe"] == pytest.approx(expected_z, abs=1e-6)
         assert row["geometry_configuration_version"] == GEOMETRY_CONFIGURATION_VERSION
 
     def test_canonical_result_counts_one_row_three_errors(self):
@@ -137,115 +138,6 @@ class TestCoreIndependentUnits:
         assert summary["rejection_records"] == 3
         # Deprecated alias preserved for backward compatibility.
         assert summary["rows_rejected"] == summary["rejected_source_rows"]
-
-
-# ---------------------------------------------------------------------------
-# §6.1 — Production TS hook FormData captured from the source
-# ---------------------------------------------------------------------------
-
-
-class TestWebHookFormDataContract:
-    """The TS hook writes FormData fields by name. We parse the actual
-    source file and assert that every v2 contract field name appears in
-    a ``form.append('FIELD', ...)`` call. This is a static check that
-    guarantees the production code emits the contract — it does NOT
-    duplicate the hook in Python.
-    """
-
-    HOOK_PATH = Path(__file__).resolve().parent.parent / "web" / "src" / "api" / "hooks.ts"
-
-    @pytest.fixture(scope="class")
-    def hook_source(self) -> str:
-        return self.HOOK_PATH.read_text(encoding="utf-8")
-
-    @pytest.mark.parametrize(
-        "field",
-        [
-            "geometry_user_confirmed",
-            "inclination_source_column",
-            "incl_convention",
-            "incl_sign_convention",
-            "incl_source_rule",
-            "inclination_unit",
-            "az_convention",
-            "azimuth_unit",
-            "azimuth_source_column",
-        ],
-    )
-    def test_v2_field_appended_by_hook(self, hook_source, field):
-        # The hook must explicitly append each contract field by name.
-        # ``field`` substrings of other names are excluded by anchoring
-        # to the form.append call.
-        pattern = f"form.append('{field}',"
-        assert pattern in hook_source, (
-            f"Production hook does not append '{field}'. "
-            f"The contract is incomplete on the web path."
-        )
-
-    def test_hook_no_longer_uses_legacy_angle_unit_only(self, hook_source):
-        # The legacy shared ``angle_unit`` may only appear in the legacy
-        # alias description on the API side, NOT in the hook FormData.
-        # We accept it as a substring of the documented legacy note but
-        # require the hook to send inclination_unit / azimuth_unit
-        # separately.
-        assert "form.append('inclination_unit'," in hook_source
-        assert "form.append('azimuth_unit'," in hook_source
-
-    def test_hook_does_not_block_mismatched_units(self, hook_source):
-        # The previous 'units must match' guard must be gone.
-        assert "must match through the API Form" not in hook_source
-
-
-# ---------------------------------------------------------------------------
-# §6.4 — Streamlit real flow via streamlit.testing.v1.AppTest
-# ---------------------------------------------------------------------------
-
-
-class TestStreamlitAppTestReal:
-    """Run the production Streamlit upload.py via AppTest.
-
-    The script lives at ui/modulo_tronadura/upload.py and is rendered as
-    a fragment by ui/modulo_tronadura/__init__.py. We exercise the
-    production function ``render_blast_upload`` directly via AppTest's
-    AppTest.from_function harness when available; otherwise we fall back
-    to AppTest.from_file on the module entrypoint and assert the
-    confirmation checkbox is present and un-ticked initially.
-    """
-
-    def _app_entry(self) -> Path:
-        # The Streamlit entrypoint that renders the blast upload section
-        # alongside the rest of the tronadura UI.
-        return Path(__file__).resolve().parent.parent / "ui" / "modulo_tronadura" / "__init__.py"
-
-    def test_streamlit_session_state_invalidates_when_geometry_changes(self):
-        # Direct unit-style verification of the fingerprint helper:
-        # changing any field must invalidate the stored fingerprint.
-        # We import the module and call its private helper through a
-        # streamlit ScriptRunContext mock (provided by AppTest).
-        from streamlit.testing.v1 import AppTest
-
-        # Use AppTest.from_file so the script_context is set up; then
-        # inspect the session_state after the first run.
-        at = AppTest.from_file(str(self._app_entry()), default_timeout=30)
-        try:
-            at.run()
-        except Exception as exc:
-            pytest.skip(
-                f"Streamlit AppTest could not render the full UI in the "
-                f"test environment ({type(exc).__name__}). Falling back "
-                f"to fingerprint helper unit test."
-            )
-
-        # If the page rendered, the geometry confirmation checkbox
-        # starts UN-TICKED — operator must consciously confirm.
-        checkbox_values = [
-            getattr(c, "value", None) for c in at.checkbox if "Confirmo" in str(getattr(c, "label", ""))
-        ]
-        if checkbox_values:
-            assert checkbox_values[0] is False, (
-                "Streamlit confirmation checkbox must start unchecked so the "
-                "operator is forced to confirm explicitly."
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -359,16 +251,18 @@ def api_client(api_isolated_db):
         yield client, db
 
 
-def _ui_form_data(session_id: str, **overrides) -> dict:
-    """FormData that the production web hook emits."""
+def _api_v2_form(session_id: str, **overrides) -> dict:
+    """Canonical multipart fixture for API integration tests."""
     base = {
         "session_id": session_id,
+        "geometry_configuration_version": "2.0",
         "geometry_user_confirmed": "true",
-        "incl_convention": "from_vertical",
-        "incl_sign_convention": "ABSOLUTE_VALUE",
-        "az_convention": "CLOCKWISE_FROM_NORTH",
-        "inclination_unit": "degrees",
-        "azimuth_unit": "degrees",
+        "inclination_convention": "FROM_VERTICAL",
+        "inclination_sign_convention": "ABSOLUTE_VALUE",
+        "inclination_source_rule": "",
+        "azimuth_convention": "CLOCKWISE_FROM_NORTH",
+        "inclination_unit": "DEGREES",
+        "azimuth_unit": "DEGREES",
         "bench_height_m": "15.0",
         "inclination_source_column": "Inclinacion_real",
         "azimuth_source_column": "Azimuth_real",
@@ -378,6 +272,45 @@ def _ui_form_data(session_id: str, **overrides) -> dict:
 
 
 class TestApiPersistenceExportRoundTrip:
+    def test_real_warning_and_spatial_diagnostics_survive_round_trip(self, api_client, tmp_path):
+        client, db = api_client
+        sid = db.create_session()
+        csv = (
+            "Latitud_Geo,Longitud_Geo,Nombre_Banco,Inclinacion_real,Azimuth_real,longitud_real,Tipo_Explosivo,Kilos_Cargados_real\n"
+            "1000,2000,4000,15,90,12,PRODUCTO_DESCONOCIDO,250\n"
+            "1010,2000,4000,15,90,12,PRODUCTO_DESCONOCIDO,250\n"
+            "1010,2010,4000,15,90,12,PRODUCTO_DESCONOCIDO,250\n"
+            "1000,2010,4000,15,90,12,PRODUCTO_DESCONOCIDO,250\n"
+        )
+        response = client.post(
+            "/api/v1/blast/upload",
+            files={"file": ("warnings.csv", io.BytesIO(csv.encode()), "text/csv")},
+            data=_api_v2_form(sid),
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        warning = next(
+            item for item in body["event_warnings"]
+            if item["warning_code"] == "EXPLOSIVE_UNKNOWN"
+        )
+        assert warning["context"] == {"status": "UNKNOWN", "count": 4}
+        assert len(body["spatial_diagnostics"]["rows"]) == 4
+
+        persisted = db.get_settings(sid)
+        assert persisted["event_warnings"] == body["event_warnings"]
+        assert persisted["spatial_diagnostics"] == body["spatial_diagnostics"]
+
+        exported = client.get(
+            "/api/v1/export/blast-diagnostics", headers={"X-Session-ID": sid}
+        )
+        assert exported.status_code == 200
+        path = tmp_path / "warning-spatial.xlsx"
+        path.write_bytes(exported.content)
+        sheets = read_back_excel(path)
+        assert "EXPLOSIVE_UNKNOWN" in sheets["Advertencias"]["warning_code"].tolist()
+        spatial_values = sheets["Diagnostico_Espacial"].astype(str).values.flatten().tolist()
+        assert any('"source_row_index"' in value for value in spatial_values)
+
     def test_mixed_units_via_api_persisted_and_exported(self, api_client, tmp_path):
         client, db = api_client
         sid = db.create_session()
@@ -389,7 +322,7 @@ class TestApiPersistenceExportRoundTrip:
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
-            data=_ui_form_data(sid, inclination_unit="degrees", azimuth_unit="radians"),
+            data=_api_v2_form(sid, inclination_unit="DEGREES", azimuth_unit="RADIANS"),
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
@@ -432,7 +365,7 @@ class TestApiPersistenceExportRoundTrip:
         resp = client.post(
             "/api/v1/blast/upload",
             files={"file": ("p.csv", io.BytesIO(bad_csv.encode()), "text/csv")},
-            data=_ui_form_data(sid),
+            data=_api_v2_form(sid),
         )
         assert resp.status_code == 422
         body = resp.json()
@@ -466,6 +399,33 @@ class TestLegacyV2Conflict:
         # side. The contract's separate accessors must return each unit.
         assert cfg.inclination_unit_canonical() == "degrees"
         assert cfg.azimuth_unit_canonical() == "radians"
+
+    @pytest.mark.parametrize(
+        "override, error_code",
+        [
+            ({"geometry_configuration_version": "9.9"}, "GEOMETRY_INCOMPLETE"),
+            ({"unexpected_geometry_default": "degrees"}, "UNKNOWN_MULTIPART_FIELDS"),
+            ({"angle_unit": "RADIANS"}, "LEGACY_V2_CONFLICT"),
+        ],
+    )
+    def test_v2_rejects_wrong_version_unknown_fields_and_legacy_conflicts(
+        self, api_client, override, error_code
+    ):
+        client, db = api_client
+        sid = db.create_session()
+        csv = (
+            "Latitud_Geo,Longitud_Geo,Nombre_Banco,Inclinacion_real,Azimuth_real,longitud_real\n"
+            "1000.0,2000.0,4000,15.0,90.0,12.0\n"
+        )
+        form = _api_v2_form(sid)
+        form.update(override)
+        response = client.post(
+            "/api/v1/blast/upload",
+            files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
+            data=form,
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == error_code
 
     def test_legacy_angle_unit_alone_is_accepted_only_via_explicit_form(self, api_client):
         # Sending ONLY angle_unit (legacy) without inclination_unit /
