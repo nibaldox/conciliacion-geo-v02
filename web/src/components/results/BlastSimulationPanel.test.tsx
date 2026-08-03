@@ -38,7 +38,20 @@ type MutationShape = {
 
 function mockMutation(overrides: Partial<MutationShape> = {}): MutationShape {
   return {
-    mutateAsync: vi.fn().mockResolvedValue({ simulation_id: 'sim-1' }),
+    mutateAsync: vi.fn().mockResolvedValue({
+      simulation_id: 'sim-1',
+      persisted: true,
+      summary: {},
+      configuration: {},
+      grid_metadata: { energy_unit: 'J', dtype: 'float32', axes_order: 'xyz' },
+      energy_field: { energy_unit: 'J', represented_energy_j: 1.0e6, outside_domain_energy_j: 1.0e6, total_coupled_energy_j: 2.0e6, fraction_represented: 0.5, active_voxels: 100, max_energy_j: 50000, mean_energy_j_active: 1000, npz_path: '', first_arrival_s: null, time_of_max_s: null, dominant_hole_id: null, contributor_count: 100, units: { energy: 'J', density: 'J/m3', time: 's', length: 'm' } },
+      plan_slices: [],
+      section_slices: [],
+      warnings: [],
+      blocking_errors: [],
+      provenance: { explosive_products_used: [], assumptions: [], warnings: [], rock_mass_source: 'lab', propagation_velocity_source: 'lab', accepted_rows_hash: 'abc', engine_version: 'blast-sim-1.0.0', simulation_configuration_version: '2.0', geometry_configuration_version: '2.0', explosive_registry_source: 'core' },
+      npz_sha256: '',
+    }),
     isPending: false,
     isError: false,
     error: null,
@@ -261,7 +274,20 @@ describe('BlastSimulationPanel', () => {
   });
 
   it('Falla 8.1: transmits exact supportRadius in buildRequest payload', async () => {
-    const mutateAsync = vi.fn().mockResolvedValue({ simulation_id: 'sim-1' });
+    const mutateAsync = vi.fn().mockResolvedValue({
+      simulation_id: 'sim-1',
+      persisted: true,
+      summary: {},
+      configuration: {},
+      grid_metadata: { energy_unit: 'J', dtype: 'float32', axes_order: 'xyz' },
+      energy_field: { energy_unit: 'J', represented_energy_j: 1.0e6, outside_domain_energy_j: 1.0e6, total_coupled_energy_j: 2.0e6, fraction_represented: 0.5, active_voxels: 100, max_energy_j: 50000, mean_energy_j_active: 1000, npz_path: '', first_arrival_s: null, time_of_max_s: null, dominant_hole_id: null, contributor_count: 100, units: { energy: 'J', density: 'J/m3', time: 's', length: 'm' } },
+      plan_slices: [],
+      section_slices: [],
+      warnings: [],
+      blocking_errors: [],
+      provenance: { explosive_products_used: [], assumptions: [], warnings: [], rock_mass_source: 'lab', propagation_velocity_source: 'lab', accepted_rows_hash: 'abc', engine_version: 'blast-sim-1.0.0', simulation_configuration_version: '2.0', geometry_configuration_version: '2.0', explosive_registry_source: 'core' },
+      npz_sha256: '',
+    });
     vi.mocked(useCreateBlastSimulation).mockReturnValue({
       mutateAsync, isPending: false, isError: false, error: null,
     } as never);
