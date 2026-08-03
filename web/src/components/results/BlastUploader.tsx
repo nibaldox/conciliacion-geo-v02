@@ -8,12 +8,13 @@ import {
 } from '../../api/hooks';
 import { getSessionId } from '../../api/client';
 import type { BlastUploadResponse, BlockingError, RejectedRow } from '../../api/types';
+import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 
 export interface BlastUploaderProps {
   onUploaded?: (response: BlastUploadResponse) => void;
 }
 
-const INCL_CONVENTIONS = ['from_vertical', 'dip_from_horizontal'] as const;
+const INCL_CONVENTIONS = ['FROM_VERTICAL', 'DIP_FROM_HORIZONTAL'] as const;
 const SIGN_CONVENTIONS = [
   'ABSOLUTE_VALUE',
   'NEGATIVE_IS_DOWNWARD_DIP',
@@ -25,7 +26,7 @@ const AZ_CONVENTIONS = [
   'CLOCKWISE_FROM_EAST',
   'COUNTERCLOCKWISE_FROM_EAST',
 ] as const;
-const UNITS = ['degrees', 'radians'] as const;
+const UNITS = ['DEGREES', 'RADIANS'] as const;
 const SOURCE_RULES = ['negative_is_downward_dip', 'positive_only', 'absolute_value'] as const;
 
 type Empty = '';
@@ -83,6 +84,7 @@ function buildGeometry(state: GeometryState): BlastGeometryForm | null {
     return null;
   }
   return {
+    geometry_configuration_version: GEOMETRY_CONFIGURATION_VERSION,
     geometry_user_confirmed: true,
     inclination_source_column: state.inclinationSourceColumn.trim(),
     inclination_convention: state.inclinationConvention,
@@ -142,6 +144,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
     ? errorBlockingErrors
     : successBlockingErrors;
   const rejectedRows: RejectedRow[] = upload.isError ? errorRejectedRows : successRejectedRows;
+  const diagnostics = upload.isError ? errorDiagnostics : upload.data;
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -379,6 +382,24 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               <li>… +{rejectedRows.length - 10} más</li>
             )}
           </ul>
+        </div>
+      )}
+      {diagnostics && (
+        <div className="grid gap-2 text-xs" data-testid="processing-diagnostics">
+          <div data-testid="accepted-rows">{t('blast.accepted_rows_label')}: {diagnostics.accepted_rows?.length ?? 0}</div>
+          <div data-testid="event-warnings">{t('blast.event_warnings_label')}: {diagnostics.event_warnings?.length ?? 0}</div>
+          <div>
+            <strong>{t('blast.processing_summary_label')}</strong>
+            <pre data-testid="processing-summary">{JSON.stringify(diagnostics.processing_summary ?? {}, null, 2)}</pre>
+          </div>
+          <div>
+            <strong>{t('blast.geometry_configuration_label')}</strong>
+            <pre data-testid="geometry-configuration">{JSON.stringify(diagnostics.geometry_configuration ?? {}, null, 2)}</pre>
+          </div>
+          <div>
+            <strong>{t('blast.spatial_diagnostics_label')}</strong>
+            <pre data-testid="spatial-diagnostics">{JSON.stringify(diagnostics.spatial_diagnostics ?? {}, null, 2)}</pre>
+          </div>
         </div>
       )}
       {upload.isSuccess && upload.data && (

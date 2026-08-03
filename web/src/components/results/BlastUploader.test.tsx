@@ -89,19 +89,19 @@ function fillCompleteContract() {
     target: { value: 'Azimuth_real' },
   });
   fireEvent.change(screen.getByTestId('incl-convention'), {
-    target: { value: 'from_vertical' },
+    target: { value: 'FROM_VERTICAL' },
   });
   fireEvent.change(screen.getByTestId('incl-sign'), {
     target: { value: 'ABSOLUTE_VALUE' },
   });
   fireEvent.change(screen.getByTestId('incl-unit'), {
-    target: { value: 'degrees' },
+    target: { value: 'DEGREES' },
   });
   fireEvent.change(screen.getByTestId('az-convention'), {
     target: { value: 'CLOCKWISE_FROM_NORTH' },
   });
   fireEvent.change(screen.getByTestId('az-unit'), {
-    target: { value: 'degrees' },
+    target: { value: 'DEGREES' },
   });
 }
 
@@ -232,7 +232,7 @@ describe('<BlastUploader />', () => {
     mockHoles();
     renderUploader();
     fillCompleteContract();
-    fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'radians' } });
+    fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'RADIANS' } });
     // After editing the unit, the confirmation auto-clears but NO
     // units-mismatch warning is rendered (independent units are valid).
     expect(screen.queryByText(/Las unidades de inclinación y azimut difieren/)).toBeNull();
@@ -289,8 +289,8 @@ describe('<BlastUploader />', () => {
     renderUploader();
     fillCompleteContract();
     // Set differing units to prove they are transmitted independently.
-    fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'degrees' } });
-    fireEvent.change(screen.getByTestId('az-unit'), { target: { value: 'radians' } });
+    fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'DEGREES' } });
+    fireEvent.change(screen.getByTestId('az-unit'), { target: { value: 'RADIANS' } });
     // Re-fill the source column edited by the previous change handler.
     fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinacion_real' } });
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
@@ -300,8 +300,9 @@ describe('<BlastUploader />', () => {
 
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
     const call = mockMutateAsync.mock.calls[0][0];
-    expect(call.geometry.inclination_unit).toBe('degrees');
-    expect(call.geometry.azimuth_unit).toBe('radians');
+    expect(call.geometry.inclination_unit).toBe('DEGREES');
+    expect(call.geometry.azimuth_unit).toBe('RADIANS');
+    expect(call.geometry.geometry_configuration_version).toBe('2.0');
     expect(call.geometry.inclination_source_column).toBe('Inclinacion_real');
     expect(call.geometry.azimuth_source_column).toBe('Azimuth_real');
     expect(call.geometry.geometry_user_confirmed).toBe(true);

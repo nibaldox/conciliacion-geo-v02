@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import client, { getSessionId } from './client';
+import { GEOMETRY_CONFIGURATION_VERSION } from './types';
 import { useSession, DEMO_MESH_IDS, type DemoData } from '../stores/session';
 import type {
   MeshInfo,
@@ -470,11 +471,12 @@ export function useResults(section?: string) {
  * geometry without an explicit, complete and confirmed contract.
  */
 export interface BlastGeometryForm {
+  geometry_configuration_version: typeof GEOMETRY_CONFIGURATION_VERSION;
   geometry_user_confirmed: boolean;
   inclination_source_column: string;
-  inclination_convention: 'from_vertical' | 'dip_from_horizontal';
+  inclination_convention: 'FROM_VERTICAL' | 'DIP_FROM_HORIZONTAL';
   inclination_sign_convention: 'ABSOLUTE_VALUE' | 'NEGATIVE_IS_DOWNWARD_DIP' | 'SOURCE_DEFINED';
-  inclination_unit: 'degrees' | 'radians';
+  inclination_unit: 'DEGREES' | 'RADIANS';
   inclination_source_rule?: string;
   azimuth_source_column: string;
   azimuth_convention:
@@ -482,7 +484,7 @@ export interface BlastGeometryForm {
     | 'COUNTERCLOCKWISE_FROM_NORTH'
     | 'CLOCKWISE_FROM_EAST'
     | 'COUNTERCLOCKWISE_FROM_EAST';
-  azimuth_unit: 'degrees' | 'radians';
+  azimuth_unit: 'DEGREES' | 'RADIANS';
   bench_height_m?: number;
 }
 
@@ -501,7 +503,58 @@ export function extractBlastErrorDiagnostics(
   const anyErr = error as { response?: { data?: unknown }; data?: unknown };
   const data = anyErr.response?.data ?? anyErr.data;
   if (!data || typeof data !== 'object') return null;
-  return data as Partial<BlastUploadResponse>;
+  const envelope = data as Record<string, unknown>;
+  const detail = envelope.detail;
+  if (!detail || typeof detail !== 'object') {
+    return envelope as Partial<BlastUploadResponse>;
+  }
+  const structured = detail as Record<string, unknown>;
+  if (
+    'accepted_rows' in structured ||
+    'rejected_rows' in structured ||
+    'blocking_errors' in structured
+  ) {
+    return structured as Partial<BlastUploadResponse>;
+  }
+  return {
+    accepted_rows: [],
+    rejected_rows: [],
+    event_warnings: [],
+    blocking_errors: [{
+      error_code: String(structured.error_code ?? 'HTTP_REQUEST_REJECTED'),
+      message: String(structured.message ?? 'La API rechazó la solicitud.'),
+      details:
+        structured.details && typeof structured.details === 'object'
+          ? structured.details as Record<string, unknown>
+          : undefined,
+    }],
+    processing_summary: {},
+    spatial_diagnostics: {},
+  };
+}
+
+export function buildBlastUploadFormData(
+  sessionId: string,
+  file: File,
+  geometry: BlastGeometryForm,
+): FormData {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('session_id', sessionId);
+  form.append('geometry_configuration_version', geometry.geometry_configuration_version);
+  form.append('geometry_user_confirmed', String(geometry.geometry_user_confirmed));
+  form.append('inclination_source_column', geometry.inclination_source_column);
+  form.append('inclination_convention', geometry.inclination_convention);
+  form.append('inclination_sign_convention', geometry.inclination_sign_convention);
+  form.append('inclination_unit', geometry.inclination_unit);
+  form.append('inclination_source_rule', geometry.inclination_source_rule ?? '');
+  form.append('azimuth_source_column', geometry.azimuth_source_column);
+  form.append('azimuth_convention', geometry.azimuth_convention);
+  form.append('azimuth_unit', geometry.azimuth_unit);
+  if (geometry.bench_height_m != null) {
+    form.append('bench_height_m', String(geometry.bench_height_m));
+  }
+  return form;
 }
 
 export function useUploadBlastCsv() {
@@ -515,23 +568,7 @@ export function useUploadBlastCsv() {
       file: File;
       geometry: BlastGeometryForm;
     }) => {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('session_id', sessionId);
-      // v2 contract — exactly the field names expected by the API.
-      form.append('geometry_user_confirmed', String(geometry.geometry_user_confirmed));
-      form.append('inclination_source_column', geometry.inclination_source_column);
-      form.append('incl_convention', geometry.inclination_convention);
-      form.append('incl_sign_convention', geometry.inclination_sign_convention);
-      form.append('incl_source_rule', geometry.inclination_source_rule ?? '');
-      form.append('inclination_unit', geometry.inclination_unit);
-      form.append('az_convention', geometry.azimuth_convention);
-      form.append('azimuth_unit', geometry.azimuth_unit);
-      form.append('inclination_source_column', geometry.inclination_source_column);
-      form.append('azimuth_source_column', geometry.azimuth_source_column);
-      if (geometry.bench_height_m != null) {
-        form.append('bench_height_m', String(geometry.bench_height_m));
-      }
+      const form = buildBlastUploadFormData(sessionId, file, geometry);
       const { data } = await client.post<BlastUploadResponse>('/blast/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
