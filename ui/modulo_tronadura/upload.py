@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -40,7 +42,34 @@ from ui.modulo_tronadura.state import (
 logger = logging.getLogger(__name__)
 
 
-def render_upload_section() -> None:
+def geometry_contract_fingerprint(contract: dict[str, Any]) -> str:
+    payload = json.dumps(contract, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def geometry_contract_is_complete(contract: dict[str, Any]) -> bool:
+    required = (
+        "geometry_configuration_version",
+        "inclination_source_column",
+        "inclination_convention",
+        "inclination_sign_convention",
+        "inclination_unit",
+        "azimuth_source_column",
+        "azimuth_convention",
+        "azimuth_unit",
+    )
+    if any(not contract.get(field) for field in required):
+        return False
+    return not (
+        contract.get("inclination_sign_convention") == "SOURCE_DEFINED"
+        and not contract.get("inclination_source_rule")
+    )
+
+
+def render_upload_section(
+    source_df: pd.DataFrame | None = None,
+    confirmed_mapping_override: dict[str, str | None] | None = None,
+) -> None:
     """Render file uploaders, preview, process button and drill compliance."""
     ref_traces = get_ref_line_traces()
     if ref_traces:
@@ -52,52 +81,58 @@ def render_upload_section() -> None:
     Azimuth_real, longitud_real) y opcionalmente Kilos_Cargados_real para colorear.
     """)
 
-    uploaded = st.file_uploader(
-        "Archivo de pozos (CSV o Excel)",
-        type=["csv", "xlsx", "xls"],
-        key="blast_file",
-    )
-    design_uploaded = st.file_uploader(
-        "Diseño de perforación (CSV, opcional)",
-        type=["csv"],
-        key="blast_design_file",
-    )
-    hardness_uploaded = st.file_uploader(
-        "Reporte de perforación (rig) — CSV opcional",
-        type=["csv"],
-        key="blast_drill_hardness_file",
-        help="CSV con Pozo, Tiempo Inicial/Final, Profundidad, Equipo y coordenadas. Enriquece cada pozo con dureza, índice de dureza y tasa de penetración.",
-    )
-
-    if uploaded is None:
-        if not ref_traces:
-            st.info("⏳ Esperando archivo de pozos y/o líneas de referencia para procesar.")
-        return
-
-    try:
-        df = read_uploaded_bytes(uploaded.getvalue(), uploaded.name)
-    except Exception:
-        logger.exception("Failed to read blast file")
-        st.error("No se pudo leer el archivo de pozos. Revisa la consola para detalles.")
-        return
+    design_uploaded = None
+    hardness_uploaded = None
+    source_name = "embedded-blast.csv"
+    if source_df is None:
+        uploaded = st.file_uploader(
+            "Archivo de pozos (CSV o Excel)",
+            type=["csv", "xlsx", "xls"],
+            key="blast_file",
+        )
+        design_uploaded = st.file_uploader(
+            "Diseño de perforación (CSV, opcional)",
+            type=["csv"],
+            key="blast_design_file",
+        )
+        hardness_uploaded = st.file_uploader(
+            "Reporte de perforación (rig) — CSV opcional",
+            type=["csv"],
+            key="blast_drill_hardness_file",
+            help="CSV con Pozo, Tiempo Inicial/Final, Profundidad, Equipo y coordenadas. Enriquece cada pozo con dureza, índice de dureza y tasa de penetración.",
+        )
+        if uploaded is None:
+            if not ref_traces:
+                st.info("⏳ Esperando archivo de pozos y/o líneas de referencia para procesar.")
+            return
+        source_name = uploaded.name
+        try:
+            df = read_uploaded_bytes(uploaded.getvalue(), uploaded.name)
+        except Exception:
+            logger.exception("Failed to read blast file")
+            st.error("No se pudo leer el archivo de pozos. Revisa la consola para detalles.")
+            return
+    else:
+        df = source_df.copy()
 
     st.subheader("Vista previa del archivo")
     st.dataframe(df.head(20), width="stretch")
     st.caption(f"{len(df)} filas | Columnas: {', '.join(df.columns[:10])}{'...' if len(df.columns) > 10 else ''}")
 
     cached_name = get_blast_cached_name()
-    if cached_name != uploaded.name:
-        set_blast_cached_name(uploaded.name)
+    if cached_name != source_name:
+        set_blast_cached_name(source_name)
         reset_blast_processed_state()
         # New file — also reset the column-mapper confirmed mapping so the
         # next render starts from the auto-detected baseline.
-        clear_confirmed_mapping("blast")
+        if confirmed_mapping_override is None:
+            clear_confirmed_mapping("blast")
 
     # ── Column mapper ──────────────────────────────────────────────────────
     # The mapper is always rendered when a file is uploaded. It returns the
     # mapping dict if the user clicked "Confirmar mapeo", or None if the user
     # is still picking columns. We hold processing until then.
-    confirmed_mapping = render_column_mapper(df, key_prefix="blast")
+    confirmed_mapping = confirmed_mapping_override or render_column_mapper(df, key_prefix="blast")
 
     # Re-fetch from session_state in case a previous rerun had confirmed
     # but this rerun the user just opened the mapper again (e.g. scrolled
@@ -157,7 +192,7 @@ def render_upload_section() -> None:
 
         sign_label = st.selectbox(
             "Tratamiento del signo (controla la geometría)",
-            options=["Usar valor absoluto", "Signo negativo representa dip descendente", "Convención definida por la fuente"],
+            options=["Seleccione una convención", "Usar valor absoluto", "Signo negativo representa dip descendente", "Convención definida por la fuente"],
             index=0,
             help=(
                 "Política REAL de normalización: ABSOLUTE_VALUE usa la magnitud; "
@@ -171,18 +206,25 @@ def render_upload_section() -> None:
             st.session_state["blast_sign_rule"] = "ABSOLUTE_VALUE"
         elif sign_label.startswith("Signo negativo"):
             st.session_state["blast_sign_rule"] = "NEGATIVE_IS_DOWNWARD_DIP"
-        else:
+        elif sign_label.startswith("Convención definida"):
             st.session_state["blast_sign_rule"] = "SOURCE_DEFINED"
-            st.selectbox(
+            source_rule_label = st.selectbox(
                 "Regla de la fuente (obligatoria para SOURCE_DEFINED)",
-                options=["negative_is_downward_dip", "positive_only", "absolute_value"],
+                options=["Seleccione una regla", "negative_is_downward_dip", "positive_only", "absolute_value"],
                 index=0,
                 help="Sin una regla explícita la geometría se bloquea.",
                 key="blast_sign_source_rule",
             )
+            if source_rule_label == "Seleccione una regla":
+                st.session_state.pop("blast_sign_source_rule_value", None)
+            else:
+                st.session_state["blast_sign_source_rule_value"] = source_rule_label
+        else:
+            st.session_state.pop("blast_sign_rule", None)
+            st.session_state.pop("blast_sign_source_rule_value", None)
         az_label = st.selectbox(
             "Convención de azimut (controla la geometría)",
-            options=["Horario desde el Norte", "Antihorario desde el Norte", "Horario desde el Este", "Antihorario desde el Este"],
+            options=["Seleccione una convención", "Horario desde el Norte", "Antihorario desde el Norte", "Horario desde el Este", "Antihorario desde el Este"],
             index=0,
             key="blast_az_convention_selector",
         )
@@ -192,21 +234,32 @@ def render_upload_section() -> None:
             "Horario desde el Este": "CLOCKWISE_FROM_EAST",
             "Antihorario desde el Este": "COUNTERCLOCKWISE_FROM_EAST",
         }
-        st.session_state["blast_az_convention"] = az_map[az_label]
-        st.selectbox(
+        if az_label in az_map:
+            st.session_state["blast_az_convention"] = az_map[az_label]
+        else:
+            st.session_state.pop("blast_az_convention", None)
+        incl_unit_label = st.selectbox(
             "Unidad angular de INCLINACIÓN",
-            options=["Grados", "Radianes"],
+            options=["Seleccione una unidad", "Grados", "Radianes"],
             index=0,
             key="blast_incl_unit",
             help="Unidad independiente para la columna de inclinación.",
         )
-        st.selectbox(
+        if incl_unit_label == "Seleccione una unidad":
+            st.session_state.pop("blast_incl_unit_value", None)
+        else:
+            st.session_state["blast_incl_unit_value"] = incl_unit_label
+        az_unit_label = st.selectbox(
             "Unidad angular de AZIMUT",
-            options=["Grados", "Radianes"],
+            options=["Seleccione una unidad", "Grados", "Radianes"],
             index=0,
             key="blast_az_unit",
             help="Unidad independiente para la columna de azimut (puede diferir de incl).",
         )
+        if az_unit_label == "Seleccione una unidad":
+            st.session_state.pop("blast_az_unit_value", None)
+        else:
+            st.session_state["blast_az_unit_value"] = az_unit_label
         st.caption(
             "Azimut: grados en sentido horario desde el Norte (canónico). La "
             "selección se persiste en la configuración reproducible del evento "
@@ -231,29 +284,27 @@ def render_upload_section() -> None:
         # a deterministic hash of the CURRENT contract values and compare
         # it against the one stored at confirmation time. If any field
         # changed, the confirmation auto-clears.
-        def _contract_fingerprint() -> str:
-            import hashlib
-            payload = "|".join(
-                str(st.session_state.get(k, ""))
-                for k in (
-                    "blast_incl_convention", "blast_sign_rule",
-                    "blast_sign_source_rule", "blast_az_convention",
-                    "blast_incl_unit", "blast_az_unit",
-                    "blast_bench_height_m",
-                )
-            )
-            # Include the confirmed source columns in the fingerprint so
-            # editing the column mapper also invalidates the confirmation.
-            cmap = get_confirmed_mapping("blast") or {}
-            payload += f"|Incl={cmap.get('Incl', '')}|Az={cmap.get('Az', '')}"
-            return hashlib.sha1(payload.encode("utf-8")).hexdigest()
-
-        current_fingerprint = _contract_fingerprint()
-        if st.session_state.get("blast_contract_fingerprint") != current_fingerprint:
-            # The contract changed since the last confirmation → invalidate.
-            if st.session_state.get("blast_geometry_confirmed"):
-                st.session_state["blast_geometry_confirmed"] = False
-            st.session_state["blast_contract_fingerprint"] = current_fingerprint
+        cmap = confirmed_mapping or get_confirmed_mapping("blast") or {}
+        visible_contract = {
+            "geometry_configuration_version": GEOMETRY_CONFIGURATION_VERSION,
+            "inclination_source_column": cmap.get("Incl") or "",
+            "inclination_convention": st.session_state.get("blast_incl_convention"),
+            "inclination_sign_convention": st.session_state.get("blast_sign_rule"),
+            "inclination_unit": st.session_state.get("blast_incl_unit_value"),
+            "inclination_source_rule": st.session_state.get("blast_sign_source_rule_value", ""),
+            "azimuth_source_column": cmap.get("Az") or "",
+            "azimuth_convention": st.session_state.get("blast_az_convention"),
+            "azimuth_unit": st.session_state.get("blast_az_unit_value"),
+        }
+        current_fingerprint = geometry_contract_fingerprint(visible_contract)
+        previous_fingerprint = st.session_state.get("blast_visible_contract_fingerprint")
+        if previous_fingerprint is not None and previous_fingerprint != current_fingerprint:
+            st.session_state["blast_geometry_confirmed"] = False
+            st.session_state.pop("blast_confirmed_contract_fingerprint", None)
+        st.session_state["blast_visible_contract_fingerprint"] = current_fingerprint
+        contract_complete = geometry_contract_is_complete(visible_contract)
+        st.caption("Resumen del contrato a confirmar")
+        st.json(visible_contract)
 
         convention_confirmed = bool(
             st.checkbox(
@@ -265,12 +316,11 @@ def render_upload_section() -> None:
                     "confirmación automáticamente."
                 ),
                 key="blast_geometry_confirmed",
+                disabled=not contract_complete,
             )
         )
         if convention_confirmed:
-            # Record the fingerprint AT confirmation time so any later
-            # edit can be detected and auto-clear the checkbox.
-            st.session_state["blast_contract_fingerprint"] = current_fingerprint
+            st.session_state["blast_confirmed_contract_fingerprint"] = current_fingerprint
 
         if not convention_confirmed:
             st.warning(
@@ -287,8 +337,8 @@ def render_upload_section() -> None:
     # matches the one captured at confirmation time.
     can_process = bool(
         st.session_state.get("blast_geometry_confirmed", False)
-        and st.session_state.get("blast_contract_fingerprint") == _contract_fingerprint()
-        and st.session_state.get("blast_incl_convention") is not None
+        and st.session_state.get("blast_confirmed_contract_fingerprint")
+        == st.session_state.get("blast_visible_contract_fingerprint")
     )
 
     if st.button("🚀 Procesar Pozos", type="primary", key="process_blast", disabled=not can_process):
@@ -327,23 +377,23 @@ def render_upload_section() -> None:
                 if incl_conv_ui else None
             ),
             inclination_sign_convention=st.session_state.get(
-                "blast_sign_rule", "ABSOLUTE_VALUE"
+                "blast_sign_rule"
             ),
             inclination_source_rule=st.session_state.get(
-                "blast_sign_source_rule", ""
+                "blast_sign_source_rule_value", ""
             ),
             inclination_unit=(
-                "RADIANS"
-                if st.session_state.get("blast_incl_unit", "Grados") == "Radianes"
-                else "DEGREES"
+                {"Grados": "DEGREES", "Radianes": "RADIANS"}.get(
+                    st.session_state.get("blast_incl_unit_value")
+                )
             ),
             azimuth_convention=st.session_state.get(
-                "blast_az_convention", "CLOCKWISE_FROM_NORTH"
+                "blast_az_convention"
             ),
             azimuth_unit=(
-                "RADIANS"
-                if st.session_state.get("blast_az_unit", "Grados") == "Radianes"
-                else "DEGREES"
+                {"Grados": "DEGREES", "Radianes": "RADIANS"}.get(
+                    st.session_state.get("blast_az_unit_value")
+                )
             ),
             inclination_source_column=incl_src_col,
             azimuth_source_column=az_src_col,
@@ -412,16 +462,6 @@ def render_upload_section() -> None:
                 df_clean = enrich_processed(
                     df_clean,
                     hardness_bytes=hardness_uploaded.getvalue() if hardness_uploaded is not None else None,
-                )
-                # Refresh the canonical accepted_rows so the structured
-                # display below reflects the enriched columns.
-                from core.calculo_tronadura import (
-                    _df_to_accepted_records,
-                    _collect_structured_warnings,
-                )
-                proc_result.accepted_rows = _df_to_accepted_records(df_clean)
-                proc_result.event_warnings = (
-                    _collect_structured_warnings(df_clean) or proc_result.event_warnings
                 )
             set_blast_df(df_clean)
             set_blast_lines(x_lines, y_lines, z_lines)
