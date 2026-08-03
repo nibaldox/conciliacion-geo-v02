@@ -52,15 +52,19 @@ beforeEach(() => {
 });
 
 function fillForm() {
-  // Fill all numeric inputs in DOM order: xMin, yMin, zMin, xMax, yMax,
-  // zMax, voxelSize, then attenuation, regularization, coupling (in the
-  // kernel fieldset).
+  // Fill all numeric inputs in DOM order: xMin, yMin, zMin, xMax,
+  // yMax, zMax, voxelSize, then kernel fieldset
+  // (attenuation, regularization, coupling, supportRadius).
   const inputs = screen.getAllByRole('spinbutton');
-  const values = ['0', '0', '0', '10', '10', '10', '1.0', '2.0', '0.5', '0.85'];
+  const values = ['0', '0', '0', '10', '10', '10', '1.0', '2.0', '0.5', '0.85', '5.0'];
   values.forEach((v, i) => {
     fireEvent.change(inputs[i], { target: { value: v } });
   });
 }
+
+// Helper: index of supportRadius in DOM order (last input in the
+// kernel fieldset). Coupling is at index 9, supportRadius at 10.
+const SUPPORT_RADIUS_IDX = 10;
 
 describe('BlastSimulationPanel', () => {
   it('renders title and uncalibrated warning', () => {
@@ -212,5 +216,68 @@ describe('BlastSimulationPanel', () => {
 
     render(<BlastSimulationPanel sessionId="sess-1" geometryConfigurationVersion="2.0" />);
     expect(screen.getByText(/SIMULATION_REJECTED/)).toBeTruthy();
+  });
+
+  it('Falla 8.1: rejects empty supportRadius (Number("") !== 0)', () => {
+    render(<BlastSimulationPanel sessionId="sess-1" geometryConfigurationVersion="2.0" />);
+    fillForm();
+    // Wipe supportRadius (input index 9 in the kernel fieldset).
+    const inputs = screen.getAllByRole('spinbutton');
+    fireEvent.change(inputs[SUPPORT_RADIUS_IDX], { target: { value: '' } });
+    const selects = screen.getAllByRole('combobox');
+    fireEvent.change(selects[0], { target: { value: 'ABSOLUTE' } });
+    fireEvent.change(selects[1], { target: { value: 'STATIC' } });
+    fireEvent.change(selects[2], { target: { value: 'ISOTROPIC' } });
+    const checkbox = screen.getByTestId('sim-confirm-checkbox') as HTMLInputElement;
+    // Empty supportRadius MUST disable the confirmation.
+    expect(checkbox.disabled).toBe(true);
+  });
+
+  it('Falla 8.1: rejects supportRadius <= regularization', () => {
+    render(<BlastSimulationPanel sessionId="sess-1" geometryConfigurationVersion="2.0" />);
+    fillForm();
+    // Set supportRadius (index 9) equal to regularization (index 8 = 0.5).
+    const inputs = screen.getAllByRole('spinbutton');
+    fireEvent.change(inputs[SUPPORT_RADIUS_IDX], { target: { value: '0.5' } });
+    const selects = screen.getAllByRole('combobox');
+    fireEvent.change(selects[0], { target: { value: 'ABSOLUTE' } });
+    fireEvent.change(selects[1], { target: { value: 'STATIC' } });
+    fireEvent.change(selects[2], { target: { value: 'ISOTROPIC' } });
+    const checkbox = screen.getByTestId('sim-confirm-checkbox') as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+  });
+
+  it('Falla 8.1: rejects NaN textual in supportRadius', () => {
+    render(<BlastSimulationPanel sessionId="sess-1" geometryConfigurationVersion="2.0" />);
+    fillForm();
+    const inputs = screen.getAllByRole('spinbutton');
+    fireEvent.change(inputs[SUPPORT_RADIUS_IDX], { target: { value: 'NaN' } });
+    const selects = screen.getAllByRole('combobox');
+    fireEvent.change(selects[0], { target: { value: 'ABSOLUTE' } });
+    fireEvent.change(selects[1], { target: { value: 'STATIC' } });
+    fireEvent.change(selects[2], { target: { value: 'ISOTROPIC' } });
+    const checkbox = screen.getByTestId('sim-confirm-checkbox') as HTMLInputElement;
+    expect(checkbox.disabled).toBe(true);
+  });
+
+  it('Falla 8.1: transmits exact supportRadius in buildRequest payload', async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({ simulation_id: 'sim-1' });
+    vi.mocked(useCreateBlastSimulation).mockReturnValue({
+      mutateAsync, isPending: false, isError: false, error: null,
+    } as never);
+    render(<BlastSimulationPanel sessionId="sess-1" geometryConfigurationVersion="2.0" />);
+    fillForm();
+    // Set supportRadius to a distinctive value.
+    const inputs = screen.getAllByRole('spinbutton');
+    fireEvent.change(inputs[SUPPORT_RADIUS_IDX], { target: { value: '7.5' } });
+    const selects = screen.getAllByRole('combobox');
+    fireEvent.change(selects[0], { target: { value: 'ABSOLUTE' } });
+    fireEvent.change(selects[1], { target: { value: 'STATIC' } });
+    fireEvent.change(selects[2], { target: { value: 'ISOTROPIC' } });
+    fireEvent.click(screen.getByTestId('sim-confirm-checkbox'));
+    fireEvent.click(screen.getByTestId('sim-run-button'));
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1));
+    const body = mutateAsync.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.support_radius_m).toBe(7.5);
   });
 });

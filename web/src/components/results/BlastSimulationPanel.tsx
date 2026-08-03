@@ -159,18 +159,57 @@ function buildRequest(
   sessionId: string,
   geomVersion: string,
 ): SimulationCreateRequest | null {
-  const voxel = Number(s.voxelSize);
-  const xMin = Number(s.xMin), xMax = Number(s.xMax);
-  const yMin = Number(s.yMin), yMax = Number(s.yMax);
-  const zMin = Number(s.zMin), zMax = Number(s.zMax);
-  const attenuation = Number(s.attenuation);
-  const regularization = Number(s.regularization);
-  const supportRadius = Number(s.supportRadius);
-  const coupling = Number(s.coupling);
-  if (![voxel, xMin, xMax, yMin, yMax, zMin, zMax, attenuation, regularization, coupling]
-    .every((v) => Number.isFinite(v))) {
+  // Strict numeric parsing (Falla 8.1 fix, audit v2 §8.1).
+  // ``Number('') === 0`` in JavaScript, so an empty text field would
+  // otherwise be silently accepted as 0. ``parseFiniteNumber`` rejects
+  // empty / whitespace-only strings and any non-finite result, then
+  // returns ``null`` so the caller can short-circuit.
+  const parseFiniteNumber = (raw: string): number | null => {
+    if (raw === null || raw === undefined) return null;
+    const trimmed = String(raw).trim();
+    if (trimmed === '') return null;
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  };
+  const voxel = parseFiniteNumber(s.voxelSize);
+  const xMin = parseFiniteNumber(s.xMin);
+  const xMax = parseFiniteNumber(s.xMax);
+  const yMin = parseFiniteNumber(s.yMin);
+  const yMax = parseFiniteNumber(s.yMax);
+  const zMin = parseFiniteNumber(s.zMin);
+  const zMax = parseFiniteNumber(s.zMax);
+  const attenuation = parseFiniteNumber(s.attenuation);
+  const regularization = parseFiniteNumber(s.regularization);
+  const supportRadius = parseFiniteNumber(s.supportRadius);
+  const coupling = parseFiniteNumber(s.coupling);
+  const numerics = [
+    voxel, xMin, xMax, yMin, yMax, zMin, zMax,
+    attenuation, regularization, supportRadius, coupling,
+  ];
+  if (!numerics.every((v): v is number => v !== null)) {
     return null;
   }
+  // Type guard above guarantees every numeric is a finite number past
+  // this point. The local rebind keeps TS happy without ``as any``.
+  const voxelV = voxel as number;
+  const xMinV = xMin as number;
+  const xMaxV = xMax as number;
+  const yMinV = yMin as number;
+  const yMaxV = yMax as number;
+  const zMinV = zMin as number;
+  const zMaxV = zMax as number;
+  const attenuationV = attenuation as number;
+  const regularizationV = regularization as number;
+  const supportRadiusV = supportRadius as number;
+  const couplingV = coupling as number;
+  // Cross-field physical validation. The contract rejects these at the
+  // server too; failing early here gives the user a clearer error.
+  if (voxelV <= 0) return null;
+  if (regularizationV <= 0) return null;
+  if (supportRadiusV <= regularizationV) return null;
+  if (attenuationV < 0) return null;
+  if (couplingV < 0 || couplingV > 1) return null;
   if (!s.energyMode || !s.temporalMode || !s.anisotropyMode) return null;
   const plan_elevations = s.planElevations
     .split(',').map((x) => Number(x.trim())).filter(Number.isFinite);
@@ -199,19 +238,19 @@ function buildRequest(
     session_id: sessionId,
     geometry_configuration_version: geomVersion,
     user_confirmed: s.confirmed,
-    voxel_size_m: voxel,
+    voxel_size_m: voxelV,
     domain_bounds: {
-      x_min: xMin, y_min: yMin, z_min: zMin,
-      x_max: xMax, y_max: yMax, z_max: zMax,
+      x_min: xMinV, y_min: yMinV, z_min: zMinV,
+      x_max: xMaxV, y_max: yMaxV, z_max: zMaxV,
     },
     energy_mode: s.energyMode as EnergyMode,
     temporal_mode: s.temporalMode as TemporalMode,
     anisotropy_mode: s.anisotropyMode as AnisotropyMode,
     kernel_type: 'EXPONENTIAL_INVERSE_SQUARE',
-    attenuation_coefficient_1_m: attenuation,
-    regularization_radius_m: regularization,
-    support_radius_m: supportRadius,
-    coupling_efficiency: coupling,
+    attenuation_coefficient_1_m: attenuationV,
+    regularization_radius_m: regularizationV,
+    support_radius_m: supportRadiusV,
+    coupling_efficiency: couplingV,
     propagation_velocity_m_s: velocity,
     propagation_velocity_source: s.velocitySource,
     pulse_sigma_s: pulseSigma,
