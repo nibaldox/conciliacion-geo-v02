@@ -75,6 +75,22 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(session_id, section_name, type)
         );
+
+        CREATE TABLE IF NOT EXISTS blast_simulations (
+            simulation_id TEXT PRIMARY KEY,
+            session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+            configuration_json TEXT DEFAULT '{}',
+            summary_json TEXT DEFAULT '{}',
+            npz_path TEXT,
+            npz_sha256 TEXT,
+            engine_version TEXT,
+            energy_mode TEXT,
+            temporal_status TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_blast_simulations_session
+            ON blast_simulations(session_id);
     """)
     conn.commit()
     conn.close()
@@ -485,3 +501,74 @@ def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     }
     save_settings(session_id, settings)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — blast energy simulations
+# ---------------------------------------------------------------------------
+
+
+def save_blast_simulation(
+    session_id: str,
+    simulation_id: str,
+    *,
+    configuration: Dict[str, Any],
+    summary: Dict[str, Any],
+    npz_path: str,
+    npz_sha256: str,
+    engine_version: str,
+    energy_mode: str,
+    temporal_status: str,
+) -> None:
+    """Persist a simulation metadata row.
+
+    Only metadata + summary live in SQLite — the raw 3D volumetric
+    field is in the NPZ artifact referenced by ``npz_path`` and verified
+    by ``npz_sha256`` (spec §8).
+    """
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO blast_simulations
+            (simulation_id, session_id, configuration_json, summary_json,
+             npz_path, npz_sha256, engine_version, energy_mode, temporal_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            simulation_id, session_id,
+            json.dumps(configuration, default=str, sort_keys=True),
+            json.dumps(summary, default=str, sort_keys=True),
+            npz_path, npz_sha256, engine_version, energy_mode, temporal_status,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_blast_simulation(simulation_id: str) -> Optional[Dict[str, Any]]:
+    """Return the metadata row for a simulation, or None."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM blast_simulations WHERE simulation_id = ?",
+        (simulation_id,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    out = dict(row)
+    out["configuration"] = json.loads(out.pop("configuration_json") or "{}")
+    out["summary"] = json.loads(out.pop("summary_json") or "{}")
+    return out
+
+
+def list_blast_simulations(session_id: str) -> List[Dict[str, Any]]:
+    """List simulations for a session (newest first)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT simulation_id, engine_version, energy_mode, temporal_status, "
+        "npz_sha256, created_at FROM blast_simulations "
+        "WHERE session_id = ? ORDER BY created_at DESC",
+        (session_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
