@@ -330,6 +330,53 @@ class BackbreakDefaults:
     rock_factor_max: float = 1.3
 
 
+@dataclass(frozen=True)
+class SimulationDefaults:
+    """Phase 2 — deterministic voxel energy engine defaults.
+
+    These are PURELY NUMERICAL safety knobs (tolerances, chunk sizes,
+    resource ceilings). They never substitute operator physical
+    decisions: every field that selects a physical model
+    (energy_mode, temporal_mode, anisotropy_mode, kernel_type,
+    coupling_efficiency, attenuation_coefficient_1_m,
+    regularization_radius_m) MUST be declared explicitly by the caller
+    via :class:`core.blast_simulation.contracts.SimulationConfiguration`.
+
+    The proxy drilling-time → UCS heuristic for the geotechnical unit
+    ``1c (13)`` (drilling minutes → MPa reference) is intentionally
+    OFF by default; when enabled it is tagged as a local empirical
+    proxy, never a universal constant.
+    """
+    # Numerical tolerances
+    conservation_abs_tol_j: float = 1.0e-3
+    conservation_rel_tol: float = 1.0e-6
+    radial_symmetry_tol: float = 1.0e-9
+    psd_tolerance: float = 1.0e-9
+
+    # Resource ceilings (operator-visible, surfaced before execution)
+    max_voxel_count: int = 2_000_000
+    max_charge_segments: int = 50_000
+    max_estimated_memory_gb: float = 8.0
+    max_wall_time_seconds: float = 600.0
+
+    # Chunked processing
+    chunk_voxel_block: int = 100_000
+    chunk_source_block: int = 64
+
+    # Temporal pulse default sigma (only used when temporal_mode=TEMPORAL
+    # but the caller did not supply a sigma; the caller MUST still
+    # declare temporal_mode explicitly).
+    fallback_temporal_sigma_s: float = 0.025
+
+    # Local empirical UCS proxy for unit 1c (13). DISABLED by default —
+    # enabling it is a versioned, tagged strategy choice.
+    enable_drilling_time_ucs_proxy: bool = False
+    drilling_time_medium_min: float = 35.0
+    drilling_time_hard_min: float = 40.0
+    drilling_time_ucs_medium_mpa: float = 60.0
+    drilling_time_ucs_hard_mpa: float = 80.0
+
+
 # Singleton instances
 DEFAULTS = PipelineDefaults()
 DETECTION = DetectionDefaults()
@@ -346,3 +393,4 @@ BLAST = BlastDefaults()
 DRILL_COMPLIANCE = DrillComplianceDefaults()
 DRILL_HARDNESS = DrillHardnessDefaults()
 BACKBREAK = BackbreakDefaults()
+SIMULATION = SimulationDefaults()
