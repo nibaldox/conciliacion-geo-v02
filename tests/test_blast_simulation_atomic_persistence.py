@@ -102,43 +102,21 @@ def _run_simulation(cfg: SimulationConfiguration, tmp_path: Optional[Path]):
 
 class TestAtomicWriteCleanup:
     def test_atomic_write_cleans_up_on_failure(self, tmp_path, monkeypatch):
-        """A failure during field-array computation leaves no .tmp files."""
+        """A failure during NPZ write leaves no .tmp files."""
         cfg = _cfg()
         result = _run_simulation(cfg, tmp_path)
 
-        # Force compute_field_arrays to raise mid-flight. We clear
-        # result.field_arrays so the legacy recalculation path is taken
-        # (the canonical path copies the arrays directly and never
-        # calls compute_field_arrays).
-        from core.blast_simulation.contracts import SimulationResult as _SR
-        result = _SR(
-            simulation_id=result.simulation_id,
-            configuration=result.configuration,
-            grid_metadata=result.grid_metadata,
-            source_summary=result.source_summary,
-            energy_field=result.energy_field,
-            plan_slices=result.plan_slices,
-            section_slices=result.section_slices,
-            processing_summary=result.processing_summary,
-            warnings=result.warnings,
-            blocking_errors=result.blocking_errors,
-            spatial_diagnostics=result.spatial_diagnostics,
-            temporal_diagnostics=result.temporal_diagnostics,
-            provenance=result.provenance,
-            created_at=result.created_at,
-            engine_version=result.engine_version,
-            field_arrays=None,  # force legacy path
-        )
+        # V5-01: field_arrays is now mandatory. We simulate a failure
+        # during np.savez_compressed (the actual write step) to verify
+        # that the temp directory is cleaned up.
+        import core.blast_simulation.persistence as _persistence
 
-        def _boom(**kwargs):
-            raise RuntimeError("simulated field-array failure")
+        def _boom_savez(*args, **kwargs):
+            raise RuntimeError("simulated NPZ write failure")
 
-        monkeypatch.setattr(
-            "core.blast_simulation.persistence.compute_field_arrays",
-            _boom,
-        )
+        monkeypatch.setattr(_persistence.np, "savez_compressed", _boom_savez)
 
-        with pytest.raises(RuntimeError, match="simulated field-array failure"):
+        with pytest.raises(RuntimeError, match="simulated NPZ write failure"):
             write_atomic_simulation(
                 result=result,
                 accepted_rows=_rows(),

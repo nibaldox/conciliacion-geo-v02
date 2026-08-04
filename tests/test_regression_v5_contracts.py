@@ -141,3 +141,55 @@ class TestProxyHermeticity:
         assert r.status_code == 200, (
             f"Health check failed with proxy env vars set: {r.status_code}"
         )
+
+
+# ---------------------------------------------------------------------------
+# V5-01: Resultado canónico — sin recálculo downstream
+# ---------------------------------------------------------------------------
+
+
+class TestNoRecalculationAnywhereV5:
+    """compute_field_arrays MUST be called 0 times when the canonical
+    result carries field_arrays — across run_simulation, persistence,
+    API response and slice generation."""
+
+    def test_api_with_slices_does_not_recalculate(self):
+        """An API POST with plan_elevations + section_coordinates must
+        NOT call compute_field_arrays. It must use result.field_arrays
+        directly."""
+        import api.database as db
+        from unittest.mock import patch
+        from core.blast_simulation import persistence
+
+        db.init_db()
+        db.get_or_create_session("test-v5-norecalc")
+        db.save_settings("test-v5-norecalc", {
+            "accepted_rows": [{
+                "hole_id": "H-1", "X": 5.0, "Y": 5.0, "Z_collar": 8.0,
+                "X_toe": 5.0, "Y_toe": 5.0, "Z_toe": 2.0,
+                "Incl": 0.0, "Az": 0.0, "Len": 6.0, "Taco_m": 1.0,
+                "descarga": 5.0, "Diam_mm": 200.0,
+                "Kilos_Cargados_real": 50.0, "Tipo_Explosivo": "ANFO",
+                "source_row_index": 0, "Retardo_ms": 0.0,
+            }]
+        })
+
+        client = TestClient(app)
+        body = _valid_body(
+            session_id="test-v5-norecalc",
+            plan_elevations=[5.0],
+            section_coordinates=[["x", 5.0]],
+        )
+
+        import api.routers.simulations as _router_mod
+        with patch.object(
+            _router_mod, "compute_field_arrays",
+            wraps=persistence.compute_field_arrays,
+        ) as spy:
+            r = client.post("/api/v1/blast/simulations", json=body)
+            assert r.status_code == 200, f"Expected 200, got {r.status_code}: {r.text[:200]}"
+            assert spy.call_count == 0, (
+                f"compute_field_arrays was called {spy.call_count} times "
+                f"during API POST with slices — it must NEVER be called "
+                f"when result.field_arrays is populated"
+            )

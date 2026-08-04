@@ -471,23 +471,17 @@ def write_atomic_simulation(
         If any validation check fails. The ``.tmp/`` directory is
         cleaned up before the exception propagates.
     """
-    # Canonical-path: consume the arrays that run_simulation already
-    # computed (Falla 4 fix, audit v3 §4). Recalculation is forbidden
-    # when field_arrays is populated; it doubles compute cost and risks
-    # diverging from the in-memory result.
-    if result.field_arrays is not None:
-        arrays = dict(result.field_arrays)
-    else:
-        # Back-compat: direct callers that built SimulationResult
-        # without going through run_simulation still need the legacy
-        # recalculation path.
-        arrays = compute_field_arrays(
-            result=result,
-            accepted_rows=accepted_rows,
-            configuration=configuration,
-            segments_per_hole=segments_per_hole,
-            support_radius_m=support_radius_m,
+    # V5-01: consume the CANONICAL field_arrays directly. Recalculation
+    # is PROHIBITED — it doubles compute cost and risks divergence.
+    # If field_arrays is missing, this is a bug in the caller.
+    if result.field_arrays is None:
+        raise PersistenceError(
+            "Cannot persist: result.field_arrays is None. "
+            "The caller MUST use run_simulation() which populates "
+            "field_arrays. Recalculation via compute_field_arrays is "
+            "prohibited (V5-01).",
         )
+    arrays = dict(result.field_arrays)
 
     sim_dir = simulation_dir(result.simulation_id, data_dir=data_dir)
     tmp_dir = _tmp_dir_for(result.simulation_id, data_dir=data_dir)

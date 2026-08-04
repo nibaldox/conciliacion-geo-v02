@@ -694,13 +694,16 @@ async def create_simulation(request: Request) -> JSONResponse:
         )
 
         # 5. Attach plan / section slices when requested.
+        # V5-01: consume the CANONICAL field_arrays directly — no
+        # recalculation via compute_field_arrays.
         if req.plan_elevations or req.section_coordinates:
-            arrays = compute_field_arrays(
-                result=result,
-                accepted_rows=accepted_rows,
-                configuration=config,
-                segments_per_hole=req.segments_per_hole,
-            )
+            if result.field_arrays is None:
+                raise _structured_error(
+                    500,
+                    "Canonical field_arrays missing from result",
+                    error_code="CANONICAL_RESULT_MISSING",
+                )
+            arrays = result.field_arrays
             section_coords = [
                 (axis, coord) for axis, coord in req.section_coordinates
             ]
