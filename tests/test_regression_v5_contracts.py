@@ -114,3 +114,30 @@ class TestStrictContractsV5:
         body = _valid_body(support_radius_m=0.3, regularization_radius_m=0.5)
         r = _post_raw(client, body)
         assert r.status_code == 422, f"support_radius_m <= regularization must be rejected; got {r.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# V5-09: Hermeticidad frente a proxy
+# ---------------------------------------------------------------------------
+
+
+class TestProxyHermeticity:
+    """The backend MUST work when invalid SOCKS proxy variables are set
+    in the environment. The conftest fixture clears them, and this test
+    explicitly verifies that even with adversarial proxy settings the
+    TestClient succeeds."""
+
+    def test_api_works_with_invalid_socks_proxy(self, monkeypatch):
+        """Even with SOCKS5 proxy env vars pointing to an invalid host,
+        the TestClient (ASGI in-process transport) MUST succeed."""
+        import os
+        monkeypatch.setenv("HTTP_PROXY", "socks5://invalid.invalid:9999")
+        monkeypatch.setenv("HTTPS_PROXY", "socks5://invalid.invalid:9999")
+        monkeypatch.setenv("ALL_PROXY", "socks5://invalid.invalid:9999")
+        # NO_PROXY is already set to '*' by the conftest fixture, so
+        # httpx should never attempt the proxy.
+        client = TestClient(app)
+        r = client.get("/api/v1/health")
+        assert r.status_code == 200, (
+            f"Health check failed with proxy env vars set: {r.status_code}"
+        )
