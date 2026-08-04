@@ -335,8 +335,28 @@ def _accumulate_source(
         return
 
     # Pass 2: deposit energy using the converged Q_total.
-    deposit_idx_all = []
-    deposit_energies_all = []
+    #
+    # V6-03: stream per-block tuples directly into the temporal layer.
+    # The V5 code retained every block's deposit arrays in
+    # ``deposit_idx_all`` / ``deposit_energies_all`` and concatenated
+    # them into a single per-source tuple handed to the temporal layer
+    # — defeating ``spatial_voxel_block_size`` (an audit adversarial
+    # repro with block_size=1 produced a 520-element tuple). The new
+    # code appends one ``(src, dep_idx, dep_eng)`` tuple per (source,
+    # spatial-block) so the largest per-source auxiliary is bounded by
+    # ``spatial_voxel_block_size``. ``temporal_detonation_times`` stays
+    # in lockstep with ``temporal_energy_contributions``.
+    temporal_enabled = (
+        config.temporal_mode == TemporalMode.TEMPORAL
+        and config.propagation_velocity_m_s is not None
+        and pulse_sigma is not None
+        and temporal_energy_contributions is not None
+        and temporal_distances is not None
+        and temporal_detonation_times is not None
+    )
+    det_time = (
+        float(seg.detonation_time_s) if seg.detonation_time_s is not None else 0.0
+    )
     represented_weight_raw = 0.0
     for fs in range(0, total_offsets, spatial_block):
         fe = min(fs + spatial_block, total_offsets)
@@ -366,16 +386,15 @@ def _accumulate_source(
             if np.any(improved):
                 dominant_energy[dep_idx[improved]] = dep_eng[improved]
                 dominant_idx[dep_idx[improved]] = _stable_hole_index(seg.hole_id)
-            deposit_idx_all.append(dep_idx)
-            deposit_energies_all.append(dep_eng)
+            # V6-03: feed the temporal layer per-block. No global list
+            # / concatenation — the largest auxiliary per source is
+            # bounded by spatial_voxel_block_size.
+            if temporal_enabled and dep_idx.size > 0:
+                temporal_energy_contributions.append(
+                    (src.copy(), dep_idx.copy(), dep_eng.copy())
+                )
+                temporal_detonation_times.append(det_time)
             represented_weight_raw += float(w_s[deposit_mask].sum())
-
-    if deposit_idx_all:
-        deposit_idx = np.concatenate(deposit_idx_all)
-        deposit_energies = np.concatenate(deposit_energies_all)
-    else:
-        deposit_idx = np.array([], dtype=np.int64)
-        deposit_energies = np.array([], dtype=np.float64)
 
     # Conservation bookkeeping: use the raw weight sum (not a
     # back-calculation from deposit_energies) for exact float64 parity
@@ -390,33 +409,9 @@ def _accumulate_source(
     total_represented.append(represented)
     total_outside.append(outside)
     per_hole_energy[seg.hole_id] = per_hole_energy.get(seg.hole_id, 0.0) + represented
-
-    # Temporal layer — store COMPACT per-segment info for the streaming
-    # temporal computation (Falla 7 v4 fix, audit §7).
-    # Instead of appending full-length e_j[n_voxels] and r[n_voxels]
-    # arrays, we store:
-    #   - source position (3 floats)
-    #   - deposit_indices (compact: only voxels that received energy)
-    #   - deposit_energies (matching compact array)
-    #   - detonation_time_s (1 float)
-    # The downstream temporal functions reconstruct per-block distances
-    # on-the-fly, keeping auxiliary memory O(support_cube) per source
-    # instead of O(n_voxels).
-    if (
-        config.temporal_mode == TemporalMode.TEMPORAL
-        and config.propagation_velocity_m_s is not None
-        and pulse_sigma is not None
-        and temporal_energy_contributions is not None
-        and temporal_distances is not None
-        and temporal_detonation_times is not None
-    ):
-        if deposit_idx.size > 0:
-            temporal_energy_contributions.append(
-                (src.copy(), deposit_idx.copy(), deposit_energies.copy())
-            )
-            temporal_detonation_times.append(
-                float(seg.detonation_time_s) if seg.detonation_time_s is not None else 0.0
-            )
+    # V6-03: the temporal layer is now fed per-block inside the pass-2
+    # loop above. No trailing global concat — the segment tuples stay
+    # bounded by ``spatial_voxel_block_size``.
 
 
 # ---------------------------------------------------------------------------
