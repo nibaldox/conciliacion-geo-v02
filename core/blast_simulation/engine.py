@@ -1031,4 +1031,3 @@ def export_field_arrays(
         "populated (call run_simulation first). Recalculation is "
         "prohibited (V5-01/V5-02)."
     )
-
