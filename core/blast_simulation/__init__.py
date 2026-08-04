@@ -57,6 +57,7 @@ from core.blast_simulation.diagnostics import (
     coverage_report,
     statistical_summary,
 )
+from core.blast_simulation.memory_instrumentation import MemoryInstrumentation
 from core.blast_simulation.engine import (
     ENGINE_VERSION,
     export_field_arrays,
@@ -135,6 +136,7 @@ __all__ = [
     "sha256_file",
     "should_persist",
     "statistical_summary",
+    "MemoryInstrumentation",
     "simulation_dir",
     "summary_path_for",
     "write_atomic_simulation",
