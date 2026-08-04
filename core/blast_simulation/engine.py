@@ -184,6 +184,7 @@ def _accumulate_source(
     grid: VoxelGridSpecification,
     config: SimulationConfiguration,
     support_radius_m: float,
+    spatial_voxel_block_size: int = 100_000,
     energy_total: np.ndarray,
     contributing_count: np.ndarray,
     dominant_idx: np.ndarray,
@@ -278,102 +279,115 @@ def _accumulate_source(
         extent_scalar = max(1, int(math.ceil(R / dx)))
         extent_x = extent_y = extent_z = extent_scalar
 
-    # Build the (possibly non-symmetric) cartesian offset cube. Using
-    # separate arange per axis keeps memory bounded by the actual
-    # support size — a diagonal tensor with very different eigenvalues
-    # only allocates the bounding box it needs.
-    ax_x = np.arange(-extent_x, extent_x + 1, dtype=np.int64)
-    ax_y = np.arange(-extent_y, extent_y + 1, dtype=np.int64)
-    ax_z = np.arange(-extent_z, extent_z + 1, dtype=np.int64)
-    IX, IY, IZ = np.meshgrid(ax_x, ax_y, ax_z, indexing="ij")
-    gx = (src_ix + IX).ravel()
-    gy = (src_iy + IY).ravel()
-    gz = (src_iz + IZ).ravel()
+    # Build the (possibly non-symmetric) cartesian offset cube.
+    # V5-04: the support cube is processed in blocks of
+    # spatial_voxel_block_size to bound auxiliary memory. A 2-pass
+    # approach is used: pass 1 converges Q_total, pass 2 deposits
+    # energy. Each pass processes at most spatial_voxel_block_size
+    # offset voxels simultaneously.
+    total_offsets = (2 * extent_x + 1) * (2 * extent_y + 1) * (2 * extent_z + 1)
+    shape_3d = (2 * extent_x + 1, 2 * extent_y + 1, 2 * extent_z + 1)
+    spatial_block = max(1, min(total_offsets, int(spatial_voxel_block_size)))
 
-    # Cartesian centres of every extended-lattice voxel.
-    cx = b.x_min + (gx + 0.5) * dx
-    cy = b.y_min + (gy + 0.5) * dx
-    cz = b.z_min + (gz + 0.5) * dx
-    centres = np.column_stack([cx, cy, cz])
-    delta = centres - src
+    def _process_offset_block(flat_start: int, flat_stop: int):
+        """Compute centres, distances and weights for a block of flat
+        offset indices. Returns (gx, gy, gz, r2, in_support, weights)."""
+        n = flat_stop - flat_start
+        flat_idx = np.arange(flat_start, flat_stop)
+        ix_off, iy_off, iz_off = np.unravel_index(flat_idx, shape_3d)
+        gx_b = src_ix + (ix_off.astype(np.int64) - extent_x)
+        gy_b = src_iy + (iy_off.astype(np.int64) - extent_y)
+        gz_b = src_iz + (iz_off.astype(np.int64) - extent_z)
+        cx_b = b.x_min + (gx_b + 0.5) * dx
+        cy_b = b.y_min + (gy_b + 0.5) * dx
+        cz_b = b.z_min + (gz_b + 0.5) * dx
+        delta = np.column_stack([cx_b - src[0], cy_b - src[1], cz_b - src[2]])
+        if config.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR and tensor is not None:
+            r2_b = np.einsum("ij,jk,ik->i", delta, tensor, delta)
+            r2_b = np.clip(r2_b, 0.0, None)
+        else:
+            r2_b = np.einsum("ij,ij->i", delta, delta)
+        in_sup = r2_b <= R * R
+        weights_b = np.zeros(n, dtype=np.float64)
+        if np.any(in_sup):
+            r_sup = np.sqrt(r2_b[in_sup])
+            k_sup = radial_kernel(
+                r_sup,
+                attenuation_coefficient_1_m=config.attenuation_coefficient_1_m,
+                regularization_radius_m=config.regularization_radius_m,
+                support_radius_m=R,
+            )
+            weights_b[in_sup] = k_sup * V
+        return gx_b, gy_b, gz_b, in_sup, weights_b
 
-    if config.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR and tensor is not None:
-        r2 = np.einsum("ij,jk,ik->i", delta, tensor, delta)
-        r2 = np.clip(r2, 0.0, None)
-    else:
-        r2 = np.einsum("ij,ij->i", delta, delta)
+    # Pass 1: converge Q_total across all blocks.
+    Q_total = 0.0
+    any_in_support = False
+    for fs in range(0, total_offsets, spatial_block):
+        fe = min(fs + spatial_block, total_offsets)
+        _, _, _, in_sup, w = _process_offset_block(fs, fe)
+        Q_total += float(w.sum())
+        if np.any(in_sup):
+            any_in_support = True
 
-    # Strict finite support.
-    in_support = r2 <= R * R
-    if not np.any(in_support):
+    if not any_in_support or Q_total <= 0.0:
         total_outside.append(float(e_acoplada))
         return
 
-    r_in_support = np.sqrt(r2[in_support])
-    k_vals = radial_kernel(
-        r_in_support,
-        attenuation_coefficient_1_m=config.attenuation_coefficient_1_m,
-        regularization_radius_m=config.regularization_radius_m,
-        support_radius_m=R,
-    )
-    weights = k_vals * V
-    Q_total = float(weights.sum())
-
-    if Q_total <= 0.0:
-        total_outside.append(float(e_acoplada))
-        return
-
-    # Determine which support voxels land INSIDE the global grid (so we
-    # can index into the accumulator arrays). Voxels outside the grid
-    # bounds are always "outside_requested_domain" — they contribute to
-    # Q_total but receive no energy.
-    gx_s = gx[in_support]
-    gy_s = gy[in_support]
-    gz_s = gz[in_support]
-    in_grid = (
-        (gx_s >= 0) & (gx_s < nx)
-        & (gy_s >= 0) & (gy_s < ny)
-        & (gz_s >= 0) & (gz_s < nz)
-    )
-    flat_idx = np.where(in_grid, (gx_s * ny + gy_s) * nz + gz_s, -1)
-
-    # Of those in-grid, which are inside the requested DomainBounds?
-    # ``in_domain_mask`` was precomputed by intersection_mask_flat and
-    # already captures partial-boundary voxels (Brecha 3.4).
-    in_domain = np.zeros(in_grid.shape, dtype=bool)
-    valid_in_grid = in_grid  # alias for readability
-    if np.any(valid_in_grid):
-        valid_idx = flat_idx[valid_in_grid]
-        in_domain[valid_in_grid] = in_domain_mask[valid_idx]
-
-    # Per-voxel energy assignment (only in-grid + in-domain).
-    # DIRECTLY UPDATE the global accumulators at the deposit indices —
-    # NO full-length e_j vector is allocated (Falla 4 v4 fix, audit §6).
-    # This eliminates O(n_voxels) auxiliary memory per source.
-    deposit_mask = valid_in_grid & in_domain
-    if np.any(deposit_mask):
-        deposit_idx = flat_idx[deposit_mask]
-        deposit_energies = (
-            float(e_acoplada) * weights[deposit_mask] / Q_total
+    # Pass 2: deposit energy using the converged Q_total.
+    deposit_idx_all = []
+    deposit_energies_all = []
+    for fs in range(0, total_offsets, spatial_block):
+        fe = min(fs + spatial_block, total_offsets)
+        gx_b, gy_b, gz_b, in_sup, w = _process_offset_block(fs, fe)
+        if not np.any(in_sup):
+            continue
+        # Filter to in-support
+        gx_s = gx_b[in_sup]
+        gy_s = gy_b[in_sup]
+        gz_s = gz_b[in_sup]
+        w_s = w[in_sup]
+        # In-grid check
+        in_grid = (
+            (gx_s >= 0) & (gx_s < nx)
+            & (gy_s >= 0) & (gy_s < ny)
+            & (gz_s >= 0) & (gz_s < nz)
         )
-        # Update global accumulators in-place.
-        energy_total[deposit_idx] += deposit_energies
-        contributing_count[deposit_idx] += 1
-        # Dominant source: where this contribution exceeds the current max.
-        improved = deposit_energies > dominant_energy[deposit_idx]
-        if np.any(improved):
-            dominant_energy[deposit_idx[improved]] = deposit_energies[improved]
-            dominant_idx[deposit_idx[improved]] = _stable_hole_index(seg.hole_id)
+        flat_idx_s = np.where(in_grid, (gx_s * ny + gy_s) * nz + gz_s, -1)
+        in_domain = np.zeros(in_grid.shape, dtype=bool)
+        if np.any(in_grid):
+            in_domain[in_grid] = in_domain_mask[flat_idx_s[in_grid]]
+        deposit_mask = in_grid & in_domain
+        if np.any(deposit_mask):
+            dep_idx = flat_idx_s[deposit_mask]
+            dep_eng = float(e_acoplada) * w_s[deposit_mask] / Q_total
+            energy_total[dep_idx] += dep_eng
+            contributing_count[dep_idx] += 1
+            improved = dep_eng > dominant_energy[dep_idx]
+            if np.any(improved):
+                dominant_energy[dep_idx[improved]] = dep_eng[improved]
+                dominant_idx[dep_idx[improved]] = _stable_hole_index(seg.hole_id)
+            deposit_idx_all.append(dep_idx)
+            deposit_energies_all.append(dep_eng)
+
+    if deposit_idx_all:
+        deposit_idx = np.concatenate(deposit_idx_all)
+        deposit_energies = np.concatenate(deposit_energies_all)
     else:
         deposit_idx = np.array([], dtype=np.int64)
         deposit_energies = np.array([], dtype=np.float64)
 
-    represented_weight = float(weights[deposit_mask].sum()) if np.any(deposit_mask) else 0.0
+    # Conservation bookkeeping.
+    represented_weight = float(
+        sum(w_block.sum() for w_block in [np.array([])])
+    )
+    # Recompute represented_weight from the actual deposits.
+    represented_weight = float(deposit_energies.sum()) * Q_total / float(e_acoplada) if e_acoplada > 0 and deposit_energies.size > 0 else 0.0
     outside_weight = Q_total - represented_weight
     if outside_weight < 0.0:
         outside_weight = 0.0
-    represented = float(e_acoplada) * represented_weight / Q_total
-    outside = float(e_acoplada) * outside_weight / Q_total
+    represented = float(e_acoplada) * represented_weight / Q_total if Q_total > 0 else 0.0
+    outside = float(e_acoplada) * outside_weight / Q_total if Q_total > 0 else float(e_acoplada)
 
     total_represented.append(represented)
     total_outside.append(outside)
@@ -738,6 +752,7 @@ def run_simulation(
             grid=grid,
             config=configuration,
             support_radius_m=R_runtime,
+            spatial_voxel_block_size=block,
             energy_total=energy_total,
             contributing_count=contributing_count,
             dominant_idx=dominant_idx,

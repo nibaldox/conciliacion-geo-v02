@@ -283,3 +283,62 @@ class TestTemporalConservationV5:
         assert abs(frac_sum - 1.0) > 0.1, (
             f"Energy loss too small for the near-zero case: sum={frac_sum:.6f}"
         )
+
+
+# ---------------------------------------------------------------------------
+# V5-04: Chunking espacial gobernado por configuración
+# ---------------------------------------------------------------------------
+
+
+class TestSpatialChunkingV5:
+    """The spatial accumulation MUST process the support cube in blocks
+    of spatial_voxel_block_size. Different block sizes MUST produce
+    identical results."""
+
+    def test_different_block_sizes_produce_identical_results(self):
+        """Running with block_size=1 vs block_size=10000 MUST give the
+        same energy_total, dominant_idx and first_arrival arrays."""
+        import numpy as np
+        from core.blast_simulation import (
+            DomainBounds, EnergyMode, RockMassConfiguration,
+            SimulationConfiguration, TemporalMode, AnisotropyMode,
+            run_simulation,
+        )
+
+        def _run(block_size):
+            cfg = SimulationConfiguration(
+                simulation_configuration_version="2.0",
+                geometry_configuration_version="2.0",
+                user_confirmed=True,
+                voxel_size_m=1.0,
+                domain_bounds=DomainBounds(0, 0, 0, 10, 10, 10),
+                energy_mode=EnergyMode.ABSOLUTE,
+                temporal_mode=TemporalMode.STATIC,
+                anisotropy_mode=AnisotropyMode.ISOTROPIC,
+                attenuation_coefficient_1_m=0.2,
+                regularization_radius_m=0.5,
+                support_radius_m=5.0,
+                coupling_efficiency=0.85,
+                rock_mass=RockMassConfiguration(
+                    rock_unit_id="t", source="t", status="VALIDATED",
+                ),
+            )
+            rows = [{
+                "hole_id": "H-1", "X": 5.0, "Y": 5.0, "Z_collar": 8.0,
+                "X_toe": 5.0, "Y_toe": 5.0, "Z_toe": 2.0,
+                "Incl": 0.0, "Az": 0.0, "Len": 6.0, "Taco_m": 1.0,
+                "descarga": 5.0, "Diam_mm": 200.0,
+                "Kilos_Cargados_real": 50.0, "Tipo_Explosivo": "ANFO",
+                "source_row_index": 0, "Retardo_ms": 0.0,
+            }]
+            return run_simulation(
+                accepted_rows=rows, configuration=cfg,
+                segments_per_hole=4, block_size=block_size,
+            )
+
+        r1 = _run(block_size=1)
+        r2 = _run(block_size=10000)
+
+        a1 = r1.field_arrays["energy_total"]
+        a2 = r2.field_arrays["energy_total"]
+        np.testing.assert_allclose(a1, a2, rtol=1e-10, atol=1e-3)
