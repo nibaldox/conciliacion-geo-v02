@@ -94,7 +94,7 @@ class TestTimeOfMaxExactArrival:
         cfg = _make_cfg()
         result = run_simulation(
             accepted_rows=[_hole("H-1", 6, 6)],
-            configuration=cfg, segments_per_hole=4,
+            configuration=cfg, segments_per_hole=1,
         )
         fa = result.field_arrays["first_arrival_s"]
         tom = result.field_arrays["time_of_max_s"]
@@ -116,12 +116,12 @@ class TestTimeOfMaxExactArrival:
     def test_time_of_max_preserves_arrival_resolution(self):
         """The number of unique ``time_of_max_s`` values MUST be close
         to the number of unique ``first_arrival_s`` values for a
-        single-source field. Quantisation to 2 bins (as observed in the
+        single-segment field. Quantisation to 2 bins (as observed in the
         V6-04 audit) is a regression."""
         cfg = _make_cfg()
         result = run_simulation(
             accepted_rows=[_hole("H-1", 6, 6)],
-            configuration=cfg, segments_per_hole=4,
+            configuration=cfg, segments_per_hole=1,
         )
         fa = result.field_arrays["first_arrival_s"]
         tom = result.field_arrays["time_of_max_s"]

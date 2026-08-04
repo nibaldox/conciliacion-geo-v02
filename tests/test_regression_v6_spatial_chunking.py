@@ -128,42 +128,14 @@ def _capture_segment_infos():
 
 # ---------------------------------------------------------------------------
 # V6-03.a — Per-block streaming: largest aux respects block_size
+#
+# V6-04 follow-up: the spy on ``_compute_temporal_fields_streaming`` is
+# no longer applicable — that function was eliminated when the global
+# temporal list was removed. The "no retention" invariant is now covered
+# by ``test_regression_v6_temporal_retention.py::
+# TestNoGlobalTemporalRetention::test_temporal_post_pass_not_invoked``.
+# The spatial chunking parity tests below remain valid.
 # ---------------------------------------------------------------------------
-
-
-class TestSpatialChunkingBounded:
-    """With ``block_size=1``, no per-block deposit tuple handed to the
-    temporal layer may carry more than 1 element. The pre-fix V5 code
-    concatenates every block into a single tuple of ~536 elements per
-    source — this test detects that."""
-
-    @pytest.mark.parametrize("block_size", [1, 2, 5])
-    def test_largest_temporal_tuple_respects_block_limit(self, block_size):
-        spy, captured = _capture_segment_infos()
-        rows = [_single_hole()]
-        cfg = _make_config(temporal_mode=TemporalMode.TEMPORAL)
-        with patch(
-            "core.blast_simulation.engine._compute_temporal_fields_streaming",
-            side_effect=spy,
-        ):
-            result = run_simulation(
-                accepted_rows=rows, configuration=cfg,
-                segments_per_hole=4, block_size=block_size,
-            )
-        assert result.field_arrays is not None
-        segment_infos = captured.get("segment_infos")
-        assert segment_infos, (
-            "Temporal mode did not invoke _compute_temporal_fields_streaming "
-            "with segment_infos — the structural assertion cannot run."
-        )
-        sizes = [int(len(dep_idx)) for _, dep_idx, _ in segment_infos]
-        assert sizes, "segment_infos is empty but the source deposited energy"
-        largest = max(sizes)
-        assert largest <= block_size, (
-            f"Largest per-block deposit tuple = {largest}, exceeds "
-            f"block_size={block_size}. The engine is concatenating "
-            f"per-block deposits globally — V6-03 violation."
-        )
 
 
 # ---------------------------------------------------------------------------
