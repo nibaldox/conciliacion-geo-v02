@@ -43,12 +43,12 @@ import logging
 import math
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from core.blast_simulation import (
     DomainBounds,
@@ -85,11 +85,29 @@ router = APIRouter(prefix="/blast/simulations", tags=["blast-simulation"])
 # ---------------------------------------------------------------------------
 
 
+def _finite_float(v: Any) -> float:
+    """Coerce to float and reject NaN / ±Infinity."""
+    f = float(v)
+    if not math.isfinite(f):
+        raise ValueError("value must be finite (no NaN/inf)")
+    return f
+
+
+def _positive_finite(v: Any, *, allow_zero: bool = False) -> float:
+    """Reject NaN/inf and enforce positivity."""
+    f = _finite_float(v)
+    if allow_zero:
+        if f < 0.0:
+            raise ValueError("value must be >= 0")
+    else:
+        if f <= 0.0:
+            raise ValueError("value must be > 0")
+    return f
+
+
 class RockMassSchema(BaseModel):
     """Fase 1 → Fase 2 rock-mass carrier. ``extra='forbid'`` rejects any
-    field not enumerated here (Brecha 3.1) — typos and experimental
-    fields fail loudly with HTTP 422 + ``UNKNOWN_FIELD`` instead of being
-    silently ignored.
+    field not enumerated here. All numeric fields reject NaN/inf.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -104,6 +122,34 @@ class RockMassSchema(BaseModel):
     status: str = "MISSING"
     assumptions: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+    @field_validator("density_kg_m3")
+    @classmethod
+    def _density_positive(cls, v):
+        if v is not None:
+            return _positive_finite(v)
+        return v
+
+    @field_validator("ucs_mpa")
+    @classmethod
+    def _ucs_positive(cls, v):
+        if v is not None:
+            return _positive_finite(v)
+        return v
+
+    @field_validator("attenuation_coefficient_1_m")
+    @classmethod
+    def _att_finite(cls, v):
+        if v is not None:
+            return _positive_finite(v, allow_zero=True)
+        return v
+
+    @field_validator("wave_velocity_m_s")
+    @classmethod
+    def _velocity_positive(cls, v):
+        if v is not None:
+            return _positive_finite(v)
+        return v
 
 
 class DomainBoundsSchema(BaseModel):
@@ -136,10 +182,9 @@ class DomainBoundsSchema(BaseModel):
 class SimulationCreateRequest(BaseModel):
     """Body for ``POST /blast/simulations``.
 
-    Every physical decision must be supplied explicitly — there are no
-    silent defaults. ``extra='forbid'`` enforces the contract at the
-    boundary; the engine configuration is built downstream in
-    :func:`_config_from_request`.
+    Every physical decision must be supplied explicitly. All numeric
+    fields reject NaN / ±Infinity. ``extra='forbid'`` rejects unknown
+    fields.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -166,9 +211,82 @@ class SimulationCreateRequest(BaseModel):
 
     segments_per_hole: int = 8
     plan_elevations: List[float] = Field(default_factory=list)
-    section_coordinates: List[List[Any]] = Field(default_factory=list)
+    section_coordinates: List[Tuple[str, float]] = Field(default_factory=list)
 
     rock_mass: RockMassSchema = Field(default_factory=RockMassSchema)
+
+    @field_validator("voxel_size_m")
+    @classmethod
+    def _voxel_positive(cls, v):
+        return _positive_finite(v)
+
+    @field_validator("attenuation_coefficient_1_m")
+    @classmethod
+    def _att_positive_or_zero(cls, v):
+        return _positive_finite(v, allow_zero=True)
+
+    @field_validator("regularization_radius_m")
+    @classmethod
+    def _reg_positive(cls, v):
+        return _positive_finite(v)
+
+    @field_validator("support_radius_m")
+    @classmethod
+    def _support_positive(cls, v):
+        return _positive_finite(v)
+
+    @field_validator("coupling_efficiency")
+    @classmethod
+    def _coupling_range(cls, v):
+        f = _finite_float(v)
+        if not (0.0 <= f <= 1.0):
+            raise ValueError("coupling_efficiency must be in [0, 1]")
+        return f
+
+    @field_validator("segments_per_hole")
+    @classmethod
+    def _segments_positive(cls, v):
+        if v <= 0:
+            raise ValueError("segments_per_hole must be > 0")
+        return v
+
+    @field_validator("plan_elevations")
+    @classmethod
+    def _plan_elevations_finite(cls, v):
+        return [_finite_float(x) for x in v]
+
+    @field_validator("section_coordinates")
+    @classmethod
+    def _section_coords_finite(cls, v):
+        out = []
+        for pair in v:
+            axis, coord = pair
+            if axis not in ("x", "y"):
+                raise ValueError(f"section_coordinates axis must be 'x' or 'y'; got {axis!r}")
+            out.append((axis, _finite_float(coord)))
+        return out
+
+    @field_validator("propagation_velocity_m_s")
+    @classmethod
+    def _velocity_optional_positive(cls, v):
+        if v is not None:
+            return _positive_finite(v)
+        return v
+
+    @field_validator("pulse_sigma_s")
+    @classmethod
+    def _sigma_optional_positive(cls, v):
+        if v is not None:
+            return _positive_finite(v)
+        return v
+
+    @model_validator(mode="after")
+    def _support_gt_regularization(self):
+        if self.support_radius_m <= self.regularization_radius_m:
+            raise ValueError(
+                "support_radius_m must be > regularization_radius_m"
+            )
+        return self
 
 
 class SimulationCreateResponse(BaseModel):
@@ -266,8 +384,41 @@ def _translate_validation_error(exc: ValidationError) -> HTTPException:
         422,
         "Request body inválido.",
         error_code="INVALID_REQUEST",
-        details={"validation_errors": errors},
+        details={"validation_errors": _sanitize_errors(errors)},
     )
+
+
+def _sanitize_value(v: Any) -> Any:
+    """Recursively replace NaN/Infinity floats with their repr string."""
+    if isinstance(v, float):
+        if not math.isfinite(v):
+            return repr(v)
+        return v
+    if isinstance(v, dict):
+        return {k: _sanitize_value(val) for k, val in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_sanitize_value(x) for x in v]
+    if isinstance(v, (str, int, bool)) or v is None:
+        return v
+    return str(v)
+
+
+def _sanitize_errors(errors: list) -> list:
+    """Make Pydantic validation errors JSON-serializable.
+
+    Pydantic v2 error dicts may carry non-serializable values in
+    ``ctx`` and ``input`` (e.g. ``ValueError`` instances, NaN, Infinity).
+    We recursively sanitize anything that standard JSON cannot handle.
+    """
+    safe: list = []
+    for e in errors:
+        se = dict(e)
+        ctx = se.get("ctx")
+        if ctx and isinstance(ctx, dict):
+            se["ctx"] = {k: _sanitize_value(v) for k, v in ctx.items()}
+        se["input"] = _sanitize_value(se.get("input"))
+        safe.append(se)
+    return safe
 
 
 def _json_or_gzip(
@@ -551,7 +702,7 @@ async def create_simulation(request: Request) -> JSONResponse:
                 segments_per_hole=req.segments_per_hole,
             )
             section_coords = [
-                (str(c[0]), float(c[1])) for c in req.section_coordinates
+                (axis, coord) for axis, coord in req.section_coordinates
             ]
             result = attach_slices_to_result(
                 result,

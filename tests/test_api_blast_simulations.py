@@ -118,12 +118,13 @@ class TestPostErrors:
         assert r.status_code == 400
         assert r.json()["detail"]["error_code"] == "SIMULATION_INVALID"
 
-    def test_coupling_out_of_range_returns_400(self, client):
+    def test_coupling_out_of_range_returns_422(self, client):
+        """V5-07: invalid coupling is now rejected at the contract level
+        (HTTP 422) instead of being passed to the engine (HTTP 400)."""
         sid = _seed_session(client, [_single_hole()])
         body = _canonical_body(sid, coupling_efficiency=1.5)
         r = client.post("/api/v1/blast/simulations", json=body)
-        assert r.status_code == 400
-        assert r.json()["detail"]["error_code"] == "SIMULATION_INVALID"
+        assert r.status_code == 422
 
     def test_inverted_bounds_returns_400(self, client):
         sid = _seed_session(client, [_single_hole()])
