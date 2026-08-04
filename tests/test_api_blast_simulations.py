@@ -110,13 +110,15 @@ class TestPostErrors:
         assert r.status_code == 400
         assert r.json()["detail"]["error_code"] == "SIMULATION_REJECTED"
 
-    def test_missing_energy_mode_returns_400(self, client):
+    def test_missing_energy_mode_returns_422(self, client):
+        """V6-01: invalid energy_mode enum is now rejected at the
+        contract level (HTTP 422) instead of HTTP 400 via the engine."""
         sid = _seed_session(client, [_single_hole()])
         body = _canonical_body(sid)
         body["energy_mode"] = "JOULES"
         r = client.post("/api/v1/blast/simulations", json=body)
-        assert r.status_code == 400
-        assert r.json()["detail"]["error_code"] == "SIMULATION_INVALID"
+        assert r.status_code == 422
+        assert r.json()["detail"]["error_code"] == "INVALID_REQUEST"
 
     def test_coupling_out_of_range_returns_422(self, client):
         """V5-07: invalid coupling is now rejected at the contract level
@@ -126,7 +128,9 @@ class TestPostErrors:
         r = client.post("/api/v1/blast/simulations", json=body)
         assert r.status_code == 422
 
-    def test_inverted_bounds_returns_400(self, client):
+    def test_inverted_bounds_returns_422(self, client):
+        """V6-01: inverted domain_bounds are now rejected at the contract
+        level (HTTP 422) instead of HTTP 400 via the engine."""
         sid = _seed_session(client, [_single_hole()])
         body = _canonical_body(sid)
         body["domain_bounds"] = {
@@ -134,8 +138,7 @@ class TestPostErrors:
             "x_max": 0.0, "y_max": 10.0, "z_max": 10.0,
         }
         r = client.post("/api/v1/blast/simulations", json=body)
-        assert r.status_code == 400
-        assert r.json()["detail"]["error_code"] in ("SIMULATION_INVALID", "DOMAIN_INVERTED")
+        assert r.status_code == 422
 
     def test_no_accepted_rows_returns_400(self, client):
         sid = _seed_session(client, [])

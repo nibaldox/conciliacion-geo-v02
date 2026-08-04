@@ -43,12 +43,21 @@ import logging
 import math
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Annotated, Any, Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictInt,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from core.blast_simulation import (
     DomainBounds,
@@ -83,6 +92,44 @@ router = APIRouter(prefix="/blast/simulations", tags=["blast-simulation"])
 # ---------------------------------------------------------------------------
 # Request / response schemas — Brecha 3.1: extra="forbid"
 # ---------------------------------------------------------------------------
+#
+# V6-01: Every scientific numeric field uses ``StrictNumericFloat`` (or
+# ``StrictInt`` for counts) so Pydantic rejects ``str`` and ``bool``
+# payloads *before* lax coercion accepts them. Enumerated scientific
+# choices (energy_mode, temporal_mode, anisotropy_mode, kernel_type and
+# the section axis) use ``Literal[...]`` so any value outside the
+# closed set raises HTTP 422 at the body parser. Semantic body failures
+# (bounds ordering, tensor symmetry / positive-definiteness, support
+# radius relationship) live in Pydantic ``model_validator`` /
+# ``field_validator`` so they also surface as HTTP 422 rather than the
+# HTTP 400 channel fed by ``SimulationConfigurationError``.
+
+EnergyModeLiteral = Literal["ABSOLUTE", "RELATIVE"]
+TemporalModeLiteral = Literal["STATIC", "TEMPORAL"]
+AnisotropyModeLiteral = Literal["ISOTROPIC", "ANISOTROPIC_TENSOR"]
+KernelTypeLiteral = Literal["EXPONENTIAL_INVERSE_SQUARE"]
+SectionAxisLiteral = Literal["x", "y"]
+
+
+def _reject_str_or_bool(v: Any) -> Any:
+    """BeforeValidator: reject ``str`` and ``bool`` payloads for numeric
+    fields before Pydantic lax mode coerces them.
+
+    JSON numbers (Python ``int`` / ``float``) are passed through untouched
+    so an integer like ``1`` still satisfies a ``float`` annotation
+    (lax int→float coercion is preserved). ``None`` is passed through so
+    ``Optional`` fields keep working.
+    """
+    if v is None:
+        return v
+    if isinstance(v, bool):
+        raise ValueError("valor debe ser un número JSON, no bool")
+    if isinstance(v, str):
+        raise ValueError("valor debe ser un número JSON, no str")
+    return v
+
+
+StrictNumericFloat = Annotated[float, BeforeValidator(_reject_str_or_bool)]
 
 
 def _finite_float(v: Any) -> float:
@@ -107,17 +154,18 @@ def _positive_finite(v: Any, *, allow_zero: bool = False) -> float:
 
 class RockMassSchema(BaseModel):
     """Fase 1 → Fase 2 rock-mass carrier. ``extra='forbid'`` rejects any
-    field not enumerated here. All numeric fields reject NaN/inf.
+    field not enumerated here. All numeric fields reject NaN/inf and
+    str/bool coercion (V6-01).
     """
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_default=True)
 
     rock_unit_id: str = ""
-    density_kg_m3: Optional[float] = None
-    ucs_mpa: Optional[float] = None
-    attenuation_coefficient_1_m: Optional[float] = None
-    wave_velocity_m_s: Optional[float] = None
-    anisotropy_mode: str = "ISOTROPIC"
-    anisotropy_tensor: Optional[List[List[float]]] = None
+    density_kg_m3: Optional[StrictNumericFloat] = None
+    ucs_mpa: Optional[StrictNumericFloat] = None
+    attenuation_coefficient_1_m: Optional[StrictNumericFloat] = None
+    wave_velocity_m_s: Optional[StrictNumericFloat] = None
+    anisotropy_mode: AnisotropyModeLiteral = "ISOTROPIC"
+    anisotropy_tensor: Optional[List[List[StrictNumericFloat]]] = None
     source: str = ""
     status: str = "MISSING"
     assumptions: List[str] = Field(default_factory=list)
@@ -151,24 +199,67 @@ class RockMassSchema(BaseModel):
             return _positive_finite(v)
         return v
 
+    @field_validator("anisotropy_tensor")
+    @classmethod
+    def _validate_anisotropy_tensor(cls, v, info):
+        """Validate the 3×3 anisotropy tensor: required (symmetric +
+        positive-definite) when the rock mass is in
+        ``ANISOTROPIC_TENSOR`` mode, and shape/finiteness/symmetry/PD
+        checked whenever supplied.
+
+        Runs even when the field is at its default ``None`` thanks to
+        ``validate_default=True`` on the model config, so the
+        *required-when-mode* check fires at parse time. The raised
+        ``ValueError`` is reported with loc
+        ``body.rock_mass.anisotropy_tensor`` (V6 contract test).
+        """
+        mode = info.data.get("anisotropy_mode", "ISOTROPIC")
+        if v is None:
+            if mode == "ANISOTROPIC_TENSOR":
+                raise ValueError(
+                    "anisotropy_tensor es obligatorio cuando "
+                    "anisotropy_mode=ANISOTROPIC_TENSOR"
+                )
+            return v
+
+        if len(v) != 3 or any(len(row) != 3 for row in v):
+            raise ValueError("anisotropy_tensor debe ser una matriz 3x3")
+        flat = [float(c) for row in v for c in row]
+        if not all(math.isfinite(x) for x in flat):
+            raise ValueError("anisotropy_tensor debe ser finito (sin NaN/inf)")
+        m = np.array(flat, dtype=float).reshape(3, 3)
+        if not np.allclose(m, m.T, atol=1e-12):
+            raise ValueError("anisotropy_tensor debe ser simétrica")
+        d1 = m[0, 0]
+        d2 = m[0, 0] * m[1, 1] - m[0, 1] * m[1, 0]
+        d3 = float(np.linalg.det(m))
+        if not (d1 > 0.0 and d2 > 0.0 and d3 > 0.0):
+            raise ValueError(
+                "anisotropy_tensor debe ser definida positiva "
+                "(menores principales leading > 0)"
+            )
+        return v
+
 
 class DomainBoundsSchema(BaseModel):
     """Typed replacement for the free-form ``Dict[str, float]`` that
     previously carried the domain bounds (Falla 9 fix, audit v2 §9).
 
     ``extra='forbid'`` rejects unknown axes (e.g. ``w_axis``) with HTTP
-    422 + ``UNKNOWN_FIELD``. Numeric values are validated downstream by
-    the contract; NaN/inf are pre-rejected here via the ``finite``
-    validator.
+    422 + ``UNKNOWN_FIELD``. Numeric values reject ``str``/``bool``
+    coercion (V6-01) and NaN/inf via the ``finite`` validator. Bounds
+    ordering (``x_min < x_max`` etc.) is enforced here in Pydantic so
+    inverted or degenerate bounds return HTTP 422 instead of the
+    HTTP 400 channel fed by ``DomainBounds.validate()``.
     """
     model_config = ConfigDict(extra="forbid")
 
-    x_min: float
-    y_min: float
-    z_min: float
-    x_max: float
-    y_max: float
-    z_max: float
+    x_min: StrictNumericFloat
+    y_min: StrictNumericFloat
+    z_min: StrictNumericFloat
+    x_max: StrictNumericFloat
+    y_max: StrictNumericFloat
+    z_max: StrictNumericFloat
 
     @field_validator("x_min", "y_min", "z_min", "x_max", "y_max", "z_max")
     @classmethod
@@ -178,13 +269,29 @@ class DomainBoundsSchema(BaseModel):
             raise ValueError("domain_bounds values must be finite (no NaN/inf)")
         return v_f
 
+    @model_validator(mode="after")
+    def _bounds_ordered(self):
+        """Enforce strictly ordered, non-degenerate bounds on every axis.
+
+        Raises ``ValueError`` from the model so the failure is reported
+        with loc ``body.domain_bounds`` and HTTP 422.
+        """
+        if self.x_max <= self.x_min:
+            raise ValueError("x_max debe ser > x_min")
+        if self.y_max <= self.y_min:
+            raise ValueError("y_max debe ser > y_min")
+        if self.z_max <= self.z_min:
+            raise ValueError("z_max debe ser > z_min")
+        return self
+
 
 class SimulationCreateRequest(BaseModel):
     """Body for ``POST /blast/simulations``.
 
     Every physical decision must be supplied explicitly. All numeric
-    fields reject NaN / ±Infinity. ``extra='forbid'`` rejects unknown
-    fields.
+    fields reject NaN / ±Infinity and ``str`` / ``bool`` coercion
+    (V6-01). Enumerated scientific choices use ``Literal[...]``.
+    ``extra='forbid'`` rejects unknown fields.
     """
     model_config = ConfigDict(extra="forbid")
 
@@ -192,26 +299,26 @@ class SimulationCreateRequest(BaseModel):
     geometry_configuration_version: str
     user_confirmed: bool
 
-    voxel_size_m: float
+    voxel_size_m: StrictNumericFloat
     domain_bounds: DomainBoundsSchema
 
-    energy_mode: str
-    temporal_mode: str
-    anisotropy_mode: str
+    energy_mode: EnergyModeLiteral
+    temporal_mode: TemporalModeLiteral
+    anisotropy_mode: AnisotropyModeLiteral
 
-    kernel_type: str = KernelType.EXPONENTIAL_INVERSE_SQUARE
-    attenuation_coefficient_1_m: float
-    regularization_radius_m: float
-    support_radius_m: float
-    coupling_efficiency: float
+    kernel_type: KernelTypeLiteral = "EXPONENTIAL_INVERSE_SQUARE"
+    attenuation_coefficient_1_m: StrictNumericFloat
+    regularization_radius_m: StrictNumericFloat
+    support_radius_m: StrictNumericFloat
+    coupling_efficiency: StrictNumericFloat
 
-    propagation_velocity_m_s: Optional[float] = None
+    propagation_velocity_m_s: Optional[StrictNumericFloat] = None
     propagation_velocity_source: str = ""
-    pulse_sigma_s: Optional[float] = None
+    pulse_sigma_s: Optional[StrictNumericFloat] = None
 
-    segments_per_hole: int = 8
-    plan_elevations: List[float] = Field(default_factory=list)
-    section_coordinates: List[Tuple[str, float]] = Field(default_factory=list)
+    segments_per_hole: StrictInt = 8
+    plan_elevations: List[StrictNumericFloat] = Field(default_factory=list)
+    section_coordinates: List[Tuple[SectionAxisLiteral, StrictNumericFloat]] = Field(default_factory=list)
 
     rock_mass: RockMassSchema = Field(default_factory=RockMassSchema)
 
@@ -404,15 +511,29 @@ def _sanitize_value(v: Any) -> Any:
 
 
 def _sanitize_errors(errors: list) -> list:
-    """Make Pydantic validation errors JSON-serializable.
+    """Make Pydantic validation errors JSON-serializable and normalize
+    their ``loc`` to start with ``"body"``.
 
     Pydantic v2 error dicts may carry non-serializable values in
     ``ctx`` and ``input`` (e.g. ``ValueError`` instances, NaN, Infinity).
     We recursively sanitize anything that standard JSON cannot handle.
+
+    The router parses the request body via
+    ``SimulationCreateRequest.model_validate_json(...)`` instead of
+    FastAPI's default body parser, so Pydantic reports ``loc`` paths
+    starting at the schema root (``("domain_bounds",)``) rather than
+    including the conventional ``"body"`` prefix FastAPI emits
+    (``("body", "domain_bounds")``). V6-01 normalises every error to
+    the FastAPI convention so callers and tests can rely on a single
+    shape.
     """
     safe: list = []
     for e in errors:
         se = dict(e)
+        loc = list(se.get("loc") or ())
+        if not loc or str(loc[0]) != "body":
+            loc = ["body", *loc]
+        se["loc"] = tuple(loc)
         ctx = se.get("ctx")
         if ctx and isinstance(ctx, dict):
             se["ctx"] = {k: _sanitize_value(v) for k, v in ctx.items()}
