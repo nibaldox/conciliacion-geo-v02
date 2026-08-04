@@ -342,3 +342,133 @@ class TestSpatialChunkingV5:
         a1 = r1.field_arrays["energy_total"]
         a2 = r2.field_arrays["energy_total"]
         np.testing.assert_allclose(a1, a2, rtol=1e-10, atol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# V5-08: Paridad React–Streamlit
+# ---------------------------------------------------------------------------
+
+
+class TestReactStreamlitParityV5:
+    """React's buildRequest and Streamlit's _build_config MUST produce
+    equivalent SimulationConfiguration objects when given the same input
+    values."""
+
+    def test_same_input_produces_equivalent_config(self):
+        """Build a React payload and a Streamlit state dict with the
+        same physical parameters; verify the resulting configurations
+        match on every scientific field."""
+        # React payload (simulating buildRequest output)
+        react_payload = {
+            "voxel_size_m": 1.0,
+            "domain_bounds": {
+                "x_min": 0, "y_min": 0, "z_min": 0,
+                "x_max": 10, "y_max": 10, "z_max": 10,
+            },
+            "energy_mode": "ABSOLUTE",
+            "temporal_mode": "STATIC",
+            "anisotropy_mode": "ISOTROPIC",
+            "attenuation_coefficient_1_m": 0.2,
+            "regularization_radius_m": 0.5,
+            "support_radius_m": 5.0,
+            "coupling_efficiency": 0.85,
+            "rock_mass": {
+                "rock_unit_id": "1c", "source": "lab", "status": "VALIDATED",
+            },
+        }
+
+        # Streamlit state dict (simulating _build_config input)
+        streamlit_state = {
+            "voxel_size_m": 1.0,
+            "x_min": 0, "x_max": 10,
+            "y_min": 0, "y_max": 10,
+            "z_min": 0, "z_max": 10,
+            "energy_mode": "ABSOLUTE",
+            "temporal_mode": "STATIC",
+            "anisotropy_mode": "ISOTROPIC",
+            "anisotropy_tensor": None,
+            "attenuation_coefficient_1_m": 0.2,
+            "regularization_radius_m": 0.5,
+            "support_radius_m": 5.0,
+            "coupling_efficiency": 0.85,
+            "propagation_velocity_m_s": None,
+            "propagation_velocity_source": "",
+            "pulse_sigma_s": None,
+            "rock_unit_id": "1c",
+            "rock_density_kg_m3": None,
+            "rock_attenuation": None,
+            "rock_velocity": None,
+            "rock_ucs_mpa": None,
+            "rock_source": "lab",
+            "rock_status": "VALIDATED",
+        }
+
+        # Build configurations from both sources
+        from api.routers.simulations import DomainBoundsSchema, SimulationCreateRequest
+        from core.blast_simulation import DomainBounds, SimulationConfiguration, RockMassConfiguration
+
+        # React → API contract → SimulationConfiguration
+        req = SimulationCreateRequest(
+            session_id="parity",
+            geometry_configuration_version="2.0",
+            user_confirmed=True,
+            voxel_size_m=react_payload["voxel_size_m"],
+            domain_bounds=DomainBoundsSchema(**react_payload["domain_bounds"]),
+            energy_mode=react_payload["energy_mode"],
+            temporal_mode=react_payload["temporal_mode"],
+            anisotropy_mode=react_payload["anisotropy_mode"],
+            attenuation_coefficient_1_m=react_payload["attenuation_coefficient_1_m"],
+            regularization_radius_m=react_payload["regularization_radius_m"],
+            support_radius_m=react_payload["support_radius_m"],
+            coupling_efficiency=react_payload["coupling_efficiency"],
+            rock_mass=react_payload["rock_mass"],
+        )
+        react_cfg = SimulationConfiguration(
+            simulation_configuration_version="2.0",
+            geometry_configuration_version="2.0",
+            user_confirmed=True,
+            voxel_size_m=req.voxel_size_m,
+            domain_bounds=DomainBounds(**req.domain_bounds.model_dump()),
+            energy_mode=req.energy_mode,
+            temporal_mode=req.temporal_mode,
+            anisotropy_mode=req.anisotropy_mode,
+            attenuation_coefficient_1_m=req.attenuation_coefficient_1_m,
+            regularization_radius_m=req.regularization_radius_m,
+            support_radius_m=req.support_radius_m,
+            coupling_efficiency=req.coupling_efficiency,
+            rock_mass=RockMassConfiguration(
+                rock_unit_id=req.rock_mass.rock_unit_id,
+                source=req.rock_mass.source,
+                status=req.rock_mass.status,
+            ),
+        )
+
+        # Streamlit → _build_config → SimulationConfiguration
+        from ui.modulo_tronadura.energy_simulation import _build_config
+        streamlit_cfg = _build_config(streamlit_state, "2.0")
+
+        # Compare every scientific field
+        assert react_cfg.voxel_size_m == streamlit_cfg.voxel_size_m
+        assert react_cfg.energy_mode == streamlit_cfg.energy_mode
+        assert react_cfg.temporal_mode == streamlit_cfg.temporal_mode
+        assert react_cfg.anisotropy_mode == streamlit_cfg.anisotropy_mode
+        assert react_cfg.attenuation_coefficient_1_m == streamlit_cfg.attenuation_coefficient_1_m
+        assert react_cfg.regularization_radius_m == streamlit_cfg.regularization_radius_m
+        assert react_cfg.support_radius_m == streamlit_cfg.support_radius_m
+        assert react_cfg.coupling_efficiency == streamlit_cfg.coupling_efficiency
+        assert react_cfg.rock_mass.rock_unit_id == streamlit_cfg.rock_mass.rock_unit_id
+        assert react_cfg.rock_mass.source == streamlit_cfg.rock_mass.source
+        assert react_cfg.rock_mass.status == streamlit_cfg.rock_mass.status
+
+        # Compare fingerprints
+        import json, hashlib
+        react_fp = hashlib.sha256(
+            json.dumps(react_cfg.to_dict(), sort_keys=True, default=str).encode()
+        ).hexdigest()
+        streamlit_fp = hashlib.sha256(
+            json.dumps(streamlit_cfg.to_dict(), sort_keys=True, default=str).encode()
+        ).hexdigest()
+        assert react_fp == streamlit_fp, (
+            f"Fingerprint mismatch: React={react_fp[:16]}... "
+            f"Streamlit={streamlit_fp[:16]}..."
+        )
