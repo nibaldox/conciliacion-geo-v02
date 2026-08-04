@@ -53,6 +53,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    StrictBool,
     StrictInt,
     ValidationError,
     field_validator,
@@ -291,13 +292,19 @@ class SimulationCreateRequest(BaseModel):
     Every physical decision must be supplied explicitly. All numeric
     fields reject NaN / ±Infinity and ``str`` / ``bool`` coercion
     (V6-01). Enumerated scientific choices use ``Literal[...]``.
-    ``extra='forbid'`` rejects unknown fields.
+    ``user_confirmed`` uses ``StrictBool`` so ``"true"`` / ``1`` are
+    rejected. ``extra='forbid'`` rejects unknown fields. Cross-field
+    scientific requirements (TEMPORAL needs velocity + source,
+    anisotropy_mode consistency between the request and the rock mass)
+    are enforced by ``model_validator`` / ``field_validator`` so every
+    structural or semantic body failure returns HTTP 422 (V6-01
+    follow-up).
     """
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_default=True)
 
     session_id: str
     geometry_configuration_version: str
-    user_confirmed: bool
+    user_confirmed: StrictBool
 
     voxel_size_m: StrictNumericFloat
     domain_bounds: DomainBoundsSchema
@@ -375,9 +382,41 @@ class SimulationCreateRequest(BaseModel):
 
     @field_validator("propagation_velocity_m_s")
     @classmethod
-    def _velocity_optional_positive(cls, v):
+    def _velocity_required_when_temporal(cls, v, info):
+        """Cross-field: when ``temporal_mode == TEMPORAL`` the engine
+        cannot compute arrival times without a positive propagation
+        velocity. The V6-01 first pass left this to ``config.validate()``
+        which returned HTTP 400 — V6-01 follow-up rejects it here so
+        the failure is HTTP 422 with loc ``body.propagation_velocity_m_s``.
+
+        ``validate_default=True`` on the model ensures this fires even
+        when the caller omitted the key entirely (default ``None``).
+        """
+        mode = info.data.get("temporal_mode")
+        if mode == "TEMPORAL":
+            if v is None:
+                raise ValueError(
+                    "propagation_velocity_m_s es obligatorio cuando "
+                    "temporal_mode=TEMPORAL"
+                )
+            return _positive_finite(v)
         if v is not None:
             return _positive_finite(v)
+        return v
+
+    @field_validator("propagation_velocity_source")
+    @classmethod
+    def _velocity_source_required_when_temporal(cls, v, info):
+        """Cross-field: TEMPORAL mode requires provenance for the
+        propagation velocity. Empty / missing source is HTTP 422 with
+        loc ``body.propagation_velocity_source``.
+        """
+        mode = info.data.get("temporal_mode")
+        if mode == "TEMPORAL" and not v:
+            raise ValueError(
+                "propagation_velocity_source es obligatorio cuando "
+                "temporal_mode=TEMPORAL"
+            )
         return v
 
     @field_validator("pulse_sigma_s")
@@ -392,6 +431,28 @@ class SimulationCreateRequest(BaseModel):
         if self.support_radius_m <= self.regularization_radius_m:
             raise ValueError(
                 "support_radius_m must be > regularization_radius_m"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _anisotropy_mode_matches_rock_mass(self):
+        """Cross-field: the engine selects isotropic vs anisotropic
+        propagation using the TOP-LEVEL ``anisotropy_mode`` while the
+        rock mass carries its own mode as metadata. If they disagree,
+        the persisted configuration would describe an isotropic field
+        as anisotropic (or vice versa). Reject the contradiction at the
+        schema layer with HTTP 422 (V6-01 follow-up).
+
+        The tensor-shape / symmetric / PD requirement when both modes
+        are ``ANISOTROPIC_TENSOR`` is already enforced by
+        :meth:`RockMassSchema._validate_anisotropy_tensor`; this
+        validator only checks mode consistency.
+        """
+        if self.anisotropy_mode != self.rock_mass.anisotropy_mode:
+            raise ValueError(
+                f"anisotropy_mode ({self.anisotropy_mode!r}) debe "
+                f"coincidir con rock_mass.anisotropy_mode "
+                f"({self.rock_mass.anisotropy_mode!r})"
             )
         return self
 

@@ -146,12 +146,15 @@ class TestPostErrors:
         assert r.status_code == 400
         assert r.json()["detail"]["error_code"] == "NO_ACCEPTED_ROWS"
 
-    def test_temporal_without_velocity_returns_400(self, client):
+    def test_temporal_without_velocity_returns_422(self, client):
+        """V6-01 follow-up: TEMPORAL mode without propagation_velocity_m_s
+        is now rejected at the contract layer (HTTP 422) instead of
+        HTTP 400 via the engine."""
         sid = _seed_session(client, [_single_hole()])
         body = _canonical_body(sid, temporal_mode="TEMPORAL")
         r = client.post("/api/v1/blast/simulations", json=body)
-        assert r.status_code == 400
-        assert r.json()["detail"]["error_code"] == "SIMULATION_INVALID"
+        assert r.status_code == 422
+        assert r.json()["detail"]["error_code"] == "INVALID_REQUEST"
 
 
 # ---------------------------------------------------------------------------
