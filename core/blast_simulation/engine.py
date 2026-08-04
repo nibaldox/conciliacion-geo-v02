@@ -1018,128 +1018,17 @@ def export_field_arrays(
     NPZ artifact can be SHA-256 verified on read-back.
 
     Returns a dict suitable for ``np.savez_compressed``.
+
+    V5-02: delegates to ``result.field_arrays`` when available. The
+    canonical result is the single authority; recalculation is
+    prohibited.
     """
-    grid = VoxelGridSpecification(
-        voxel_size_m=configuration.voxel_size_m,
-        bounds=configuration.domain_bounds,
-    )
-    voxel_centres = voxel_centres_flat(grid)
+    if result.field_arrays is not None:
+        return dict(result.field_arrays)
 
-    segments = build_charge_segments(
-        accepted_rows,
-        config=configuration,
-        segments_per_hole=segments_per_hole,
-    )
-    valid, _, _ = classify_segments(segments, energy_mode=configuration.energy_mode)
-
-    # Authoritative support radius: the CONTRACT wins (Falla 4.1 fix).
-    # No hidden default of 5 m may leak into the persisted field.
-    if configuration.support_radius_m is not None:
-        R_runtime = float(configuration.support_radius_m)
-    elif support_radius_m is not None:
-        R_runtime = float(support_radius_m)
-    else:
-        raise ValueError(
-            "export_field_arrays requires configuration.support_radius_m "
-            "to be set (Falla 4.1: no hidden default allowed)"
-        )
-
-    anisotropy_tensor = (
-        np.asarray(configuration.rock_mass.anisotropy_tensor, dtype=np.float64)
-        if configuration.anisotropy_mode == AnisotropyMode.ANISOTROPIC_TENSOR
-        and configuration.rock_mass.anisotropy_tensor is not None
-        else None
-    )
-    # Q_total is computed inside _accumulate_source on the SAME cartesian
-    # lattice as the per-voxel weights (Falla 4 fix).
-    _ = discrete_total_mass(
-        attenuation_coefficient_1_m=configuration.attenuation_coefficient_1_m,
-        regularization_radius_m=configuration.regularization_radius_m,
-        support_radius_m=R_runtime,
-        voxel_size_m=grid.voxel_size_m,
-        anisotropy_mode=configuration.anisotropy_mode,
-        tensor=anisotropy_tensor,
+    raise ValueError(
+        "export_field_arrays requires result.field_arrays to be "
+        "populated (call run_simulation first). Recalculation is "
+        "prohibited (V5-01/V5-02)."
     )
 
-    energy_total = np.zeros(grid.voxel_count, dtype=np.float32)
-    contributing_count = np.zeros(grid.voxel_count, dtype=np.int32)
-    dominant_idx = np.zeros(grid.voxel_count, dtype=np.int64)
-    dominant_energy = np.zeros(grid.voxel_count, dtype=np.float32)
-    is_temporal = configuration.temporal_mode == TemporalMode.TEMPORAL
-    pulse_sigma = (
-        float(configuration.pulse_sigma_s)
-        if configuration.pulse_sigma_s is not None
-        else float(SIMULATION.fallback_temporal_sigma_s)
-    ) if is_temporal else None
-    temporal_energy_contributions: Optional[list[np.ndarray]] = [] if is_temporal else None
-    temporal_distances: Optional[list[np.ndarray]] = [] if is_temporal else None
-    temporal_detonation_times: Optional[list[float]] = [] if is_temporal else None
-    in_domain_mask_export = intersection_mask_flat(grid)
-
-    for seg in valid:
-        e_acoplada = _source_coupled_energy(
-            seg,
-            coupling_efficiency=configuration.coupling_efficiency,
-            energy_mode=configuration.energy_mode,
-        )
-        if e_acoplada is None or e_acoplada <= 0.0:
-            continue
-        _accumulate_source(
-            seg=seg,
-            e_acoplada=e_acoplada,
-            voxel_centres=voxel_centres,
-            in_domain_mask=in_domain_mask_export,
-            grid=grid,
-            config=configuration,
-            support_radius_m=R_runtime,
-            energy_total=energy_total,
-            contributing_count=contributing_count,
-            dominant_idx=dominant_idx,
-            dominant_energy=dominant_energy,
-            arrival_times=None,
-            first_arrival=None,
-            time_of_max=None,
-            pulse_sigma=pulse_sigma,
-            temporal_energy_contributions=temporal_energy_contributions,
-            temporal_distances=temporal_distances,
-            temporal_detonation_times=temporal_detonation_times,
-            total_represented=[],
-            total_outside=[],
-            per_hole_energy={},
-        )
-
-    out: dict[str, np.ndarray] = {
-        "energy_total": energy_total.astype(np.float32),
-        "energy_density": (energy_total / grid.voxel_volume_m3).astype(np.float32),
-        "contributing_count": contributing_count,
-        "dominant_idx": dominant_idx,
-        "dominant_energy": dominant_energy.astype(np.float32),
-        "voxel_centres": voxel_centres.astype(np.float32),
-    }
-    if is_temporal:
-        # Chunked canonical route — no dense (n_vox × n_seg) matrix.
-        first_arrival = np.full(grid.voxel_count, np.nan, dtype=np.float64)
-        time_of_max = np.full(grid.voxel_count, np.nan, dtype=np.float64)
-        if temporal_energy_contributions:
-            velocity = float(configuration.propagation_velocity_m_s)
-            sigma_value = float(pulse_sigma) if pulse_sigma is not None else 1e-3
-            first_arrival = compute_first_arrival_chunked(
-                distances_per_segment=temporal_distances,
-                energy_per_segment=temporal_energy_contributions,
-                propagation_velocity_m_s=velocity,
-                detonation_times_per_segment=temporal_detonation_times,
-                n_voxels=grid.voxel_count,
-            )
-            first_arrival[~np.isfinite(first_arrival)] = np.nan
-            time_of_max = compute_time_of_max_chunked(
-                energy_total_per_voxel=energy_total,
-                first_arrival_per_voxel=first_arrival,
-                distances_per_segment=temporal_distances,
-                energy_per_segment=temporal_energy_contributions,
-                propagation_velocity_m_s=velocity,
-                sigma_s=sigma_value,
-                detonation_times_per_segment=temporal_detonation_times,
-            )
-        out["first_arrival_s"] = first_arrival.astype(np.float32)
-        out["time_of_max_s"] = time_of_max.astype(np.float32)
-    return out
