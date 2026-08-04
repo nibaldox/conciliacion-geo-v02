@@ -416,6 +416,7 @@ def _accumulate_source(
 
 # ---------------------------------------------------------------------------
 # Streaming temporal computation — bounded memory (Falla 7 v4 fix, audit §7)
+# V6-04: explicit Bv / Bt / Bs blocks + common time grid for block-parity.
 # ---------------------------------------------------------------------------
 
 
@@ -430,29 +431,52 @@ def _compute_temporal_fields_streaming(
     anisotropy_mode: str,
     tensor: Optional[np.ndarray],
     n_voxels: int,
+    support_radius_m: float,
     voxel_block_size: int = 4096,
-    n_time_bins: int = 64,
+    time_block_size: int = 64,
+    segment_block_size: int = 128,
     t_window_factor: float = 6.0,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute first_arrival and time_of_max from compact segment info.
+    """Compute ``first_arrival`` and ``time_of_max`` from compact
+    per-block segment info using the explicit ``Bv / Bt / Bs`` blocking
+    required by V6-04.
 
-    Processes voxels in blocks. For each block, iterates segments and
-    computes distances ON-THE-FLY from the segment's source position to
-    the block's voxel centres. NO full-length per-segment arrays are
-    materialised.
+    Architecture (audit V6-04 target)::
 
-    Peak auxiliary memory: O(voxel_block_size × n_contributing_segments)
-    where n_contributing_segments is the number of segments that have
-    at least one deposit voxel in the current block — typically a small
-    fraction of the total.
+        common time grid (Bt bins) shared across voxel blocks
+        para bloque de vóxeles Bv:
+            response = zeros(Bv_active, Bt)          ← buffer principal
+            para bloque de segmentos Bs:
+                acumular contribuciones a response
+            actualizar time_of_max tras todos los Bs
+            liberar response
+
+    The time grid is COMMON (global ``t_min`` … ``t_max``) so that
+    different ``(Bv, Bs)`` combinations produce identical results —
+    only ``Bt`` (= ``time_block_size``) changes the bin resolution.
+
+    Peak auxiliary memory: ``O(Bv × Bt + Bv + Bs)`` — the response
+    matrix dominates; per-source scratch is ``O(Bt)`` (one voxel at a
+    time within the inner loop).
 
     Parameters
     ----------
     segment_infos
         List of ``(source_position, deposit_indices, deposit_energies)``
-        tuples, one per contributing segment. ``deposit_indices`` are
-        flat indices into the global voxel grid; only voxels that
-        received energy are included (compact representation).
+        tuples — one per (source, spatial-block) since V6-03. Each
+        ``deposit_indices`` entry is bounded by ``spatial_voxel_block_size``.
+    support_radius_m
+        Kernel support radius. Used to bound the common time grid
+        tightly (``max_travel = R / velocity``) without a pre-pass.
+    voxel_block_size (Bv)
+        Number of voxels per temporal voxel-block. Default 4096.
+    time_block_size (Bt)
+        Total number of time bins in the common grid. Default 64.
+        Replaces the hardcoded ``n_time_bins=64`` from V5.
+    segment_block_size (Bs)
+        Number of segments per chunk in the accumulation loop. Default
+        128. Controls how many segments are processed before the
+        response matrix is updated.
     """
     from scipy.special import ndtr
 
@@ -463,83 +487,96 @@ def _compute_temporal_fields_streaming(
         return first_arrival, time_of_max
 
     half_window = float(t_window_factor) / 2.0 * sigma
-    unit_edges = np.linspace(0.0, 1.0, n_time_bins + 1, dtype=np.float64)
-    block = max(1, int(voxel_block_size))
+    Bv = max(1, int(voxel_block_size))
+    Bt = max(1, int(time_block_size))
+    Bs = max(1, int(segment_block_size))
 
-    for start in range(0, n_voxels, block):
-        stop = min(start + block, n_voxels)
-        block_size = stop - start
+    # --- Common time grid (V6-04 invariant: shared across voxel blocks) ---
+    # Tight bound: earliest arrival = min(detonation); latest =
+    # max(detonation) + max_travel where max_travel = R / velocity
+    # (no voxel beyond the support radius receives energy).
+    det_array = np.asarray(detonation_times, dtype=np.float64)
+    det_min = float(det_array.min())
+    det_max = float(det_array.max())
+    max_travel = float(support_radius_m) / float(velocity)
+    starts_w = max(0.0, det_min - half_window)
+    stops_w = det_max + max_travel + half_window
+    if stops_w <= starts_w:
+        stops_w = starts_w + max(max_travel, half_window, 1.0)
+    edges = np.linspace(starts_w, stops_w, Bt + 1, dtype=np.float64)
+    bin_centers = 0.5 * (edges[:-1] + edges[1:])
 
-        # Collect per-segment data for voxels in THIS block only.
-        # Each entry: (local_indices, distances, energies, detonation).
-        block_segments: list[tuple[np.ndarray, np.ndarray, np.ndarray, float]] = []
-        for seg_idx, (src_pos, dep_idx, dep_energies) in enumerate(segment_infos):
+    # --- Process voxel blocks ---
+    n_segments = len(segment_infos)
+    for vb_start in range(0, n_voxels, Bv):
+        vb_stop = min(vb_start + Bv, n_voxels)
+        block_len = vb_stop - vb_start
+
+        # Pass 1: find active voxels + compute first_arrival.
+        active_mask = np.zeros(block_len, dtype=bool)
+        for seg_idx in range(n_segments):
+            dep_idx = segment_infos[seg_idx][1]
             if dep_idx.size == 0:
                 continue
-            in_block = (dep_idx >= start) & (dep_idx < stop)
+            in_block = (dep_idx >= vb_start) & (dep_idx < vb_stop)
             if not np.any(in_block):
                 continue
-            local_idx = dep_idx[in_block] - start
-            local_energy = dep_energies[in_block]
-            # Compute distances ON-THE-FLY for these few voxels.
-            local_centres = voxel_centres[start + local_idx]
+            src_pos = segment_infos[seg_idx][0]
+            local_idx = dep_idx[in_block] - vb_start
+            active_mask[local_idx] = True
+            local_centres = voxel_centres[vb_start + local_idx]
             delta = local_centres - src_pos
             r = compute_distance(delta, anisotropy_mode=anisotropy_mode, tensor=tensor)
             det = float(detonation_times[seg_idx]) if seg_idx < len(detonation_times) else 0.0
-            block_segments.append((local_idx, r, local_energy, det))
+            arrivals = det + r / velocity
+            np.minimum.at(first_arrival, dep_idx[in_block], arrivals)
 
-            # Update first_arrival at the global indices.
-            global_idx = dep_idx[in_block]
-            arrivals_seg = det + r / velocity
-            first_arrival[global_idx] = np.minimum(
-                first_arrival[global_idx], arrivals_seg,
-            )
-
-        if not block_segments:
+        active_local = np.where(active_mask)[0]
+        n_active = len(active_local)
+        if n_active == 0:
             continue
 
-        # Compute time_of_max for each active voxel in this block.
-        all_local = np.concatenate([d[0] for d in block_segments])
-        unique_local = np.unique(all_local)
+        local_to_row = np.full(block_len, -1, dtype=np.int64)
+        local_to_row[active_local] = np.arange(n_active)
 
-        for vl in unique_local:
-            arrivals_v = []
-            energies_v = []
-            for local_idx, r, energy, det in block_segments:
-                mask = local_idx == vl
-                if np.any(mask):
-                    arrivals_v.append(det + r[mask][0] / velocity)
-                    energies_v.append(energy[mask][0])
+        # THE main buffer: (Bv_active, Bt).
+        response = np.zeros((n_active, Bt), dtype=np.float64)
 
-            if not arrivals_v:
-                continue
+        # Pass 2: accumulate source contributions in Bs chunks.
+        # time_of_max is updated ONLY after every source has been
+        # accumulated (superposition invariant).
+        for bs_start in range(0, n_segments, Bs):
+            bs_stop = min(bs_start + Bs, n_segments)
+            for seg_idx in range(bs_start, bs_stop):
+                src_pos, dep_idx, dep_energies = segment_infos[seg_idx]
+                if dep_idx.size == 0:
+                    continue
+                in_block = (dep_idx >= vb_start) & (dep_idx < vb_stop)
+                if not np.any(in_block):
+                    continue
+                local_idx = dep_idx[in_block] - vb_start
+                rows = local_to_row[local_idx]
+                local_centres = voxel_centres[vb_start + local_idx]
+                delta = local_centres - src_pos
+                r = compute_distance(delta, anisotropy_mode=anisotropy_mode, tensor=tensor)
+                det = float(detonation_times[seg_idx]) if seg_idx < len(detonation_times) else 0.0
+                arrivals = det + r / velocity
+                energies = dep_energies[in_block]
 
-            arrivals_arr = np.array(arrivals_v, dtype=np.float64)
-            energies_arr = np.array(energies_v, dtype=np.float64)
+                # Inner loop: one voxel at a time to keep the peak at
+                # O(Bt) per source (response stays the only large buf).
+                for i in range(len(rows)):
+                    z = (edges - arrivals[i]) / sigma
+                    cdf = ndtr(z)
+                    fractions = np.diff(cdf)
+                    frac_sum = float(fractions.sum())
+                    if frac_sum > 1e-30:
+                        fractions = fractions / frac_sum
+                    response[rows[i], :] += energies[i] * fractions
 
-            t_min = float(arrivals_arr.min())
-            t_max = float(arrivals_arr.max())
-
-            if np.isclose(t_min, t_max, atol=1e-14):
-                time_of_max[start + vl] = t_min
-                continue
-
-            starts_w = max(0.0, t_min - half_window)
-            stops_w = t_max + half_window
-            edges = starts_w + (stops_w - starts_w) * unit_edges
-            z = (edges[:, None] - arrivals_arr[None, :]) / sigma
-            fractions = np.diff(ndtr(z), axis=0)
-            # V5-03: normalise fractions per source so that Σ_t f = 1.0
-            # within the finite window. Without normalisation, sources
-            # whose gaussian extends beyond the window boundaries (especially
-            # near t=0) lose energy — the audit measured residuals up to
-            # 15.9%.
-            frac_sums = fractions.sum(axis=0)
-            safe_sums = np.where(frac_sums > 1e-30, frac_sums, 1.0)
-            fractions = fractions / safe_sums[None, :]
-            response = np.sum(energies_arr[None, :] * fractions, axis=1)
-            best_bin = int(np.argmax(response))
-            time_of_max[start + vl] = 0.5 * (edges[best_bin] + edges[best_bin + 1])
+        # Update time_of_max for the active voxels in this block.
+        best_bins = np.argmax(response, axis=1)
+        time_of_max[vb_start + active_local] = bin_centers[best_bins]
 
     return first_arrival, time_of_max
 
@@ -569,6 +606,9 @@ def run_simulation(
     segments_per_hole: int = 8,
     block_size: Optional[int] = None,
     support_radius_m: Optional[float] = None,
+    temporal_voxel_block_size: Optional[int] = None,
+    temporal_time_bins: Optional[int] = None,
+    temporal_segment_block_size: Optional[int] = None,
 ) -> SimulationResult:
     """Run the deterministic voxel energy simulation.
 
@@ -593,6 +633,15 @@ def run_simulation(
         uses this value; otherwise the contract wins. New callers
         SHOULD set ``configuration.support_radius_m`` and leave this
         argument as ``None``.
+    temporal_voxel_block_size
+        V6-04: voxel block size (Bv) for the temporal layer. Defaults
+        to ``block_size`` (same as the spatial chunk).
+    temporal_time_bins
+        V6-04: total number of time bins (Bt) in the common temporal
+        grid. Replaces the hardcoded ``n_time_bins=64``. Default 64.
+    temporal_segment_block_size
+        V6-04: segment block size (Bs) for the temporal accumulation
+        loop. Default 128.
 
     Returns
     -------
@@ -802,7 +851,10 @@ def run_simulation(
             anisotropy_mode=configuration.anisotropy_mode,
             tensor=anisotropy_tensor,
             n_voxels=n_voxels,
-            voxel_block_size=block,
+            support_radius_m=R_runtime,
+            voxel_block_size=temporal_voxel_block_size or block,
+            time_block_size=temporal_time_bins or 64,
+            segment_block_size=temporal_segment_block_size or 128,
         )
         first_arrival[~np.isfinite(first_arrival)] = np.nan
 
