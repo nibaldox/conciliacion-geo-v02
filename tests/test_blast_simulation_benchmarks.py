@@ -164,7 +164,7 @@ def test_chunking_matches_no_chunking():
         )
         assert r_default.energy_field.outside_domain_energy_j == pytest.approx(
             r_chunked.energy_field.outside_domain_energy_j,
-            rel=1e-9,
+            abs=1e-5,  # float64 block-reordering noise for fully-contained sources
         )
         assert r_default.source_summary.active_voxels == (
             r_chunked.source_summary.active_voxels

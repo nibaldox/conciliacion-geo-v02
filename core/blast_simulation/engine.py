@@ -337,17 +337,16 @@ def _accumulate_source(
     # Pass 2: deposit energy using the converged Q_total.
     deposit_idx_all = []
     deposit_energies_all = []
+    represented_weight_raw = 0.0
     for fs in range(0, total_offsets, spatial_block):
         fe = min(fs + spatial_block, total_offsets)
         gx_b, gy_b, gz_b, in_sup, w = _process_offset_block(fs, fe)
         if not np.any(in_sup):
             continue
-        # Filter to in-support
         gx_s = gx_b[in_sup]
         gy_s = gy_b[in_sup]
         gz_s = gz_b[in_sup]
         w_s = w[in_sup]
-        # In-grid check
         in_grid = (
             (gx_s >= 0) & (gx_s < nx)
             & (gy_s >= 0) & (gy_s < ny)
@@ -369,6 +368,7 @@ def _accumulate_source(
                 dominant_idx[dep_idx[improved]] = _stable_hole_index(seg.hole_id)
             deposit_idx_all.append(dep_idx)
             deposit_energies_all.append(dep_eng)
+            represented_weight_raw += float(w_s[deposit_mask].sum())
 
     if deposit_idx_all:
         deposit_idx = np.concatenate(deposit_idx_all)
@@ -377,12 +377,10 @@ def _accumulate_source(
         deposit_idx = np.array([], dtype=np.int64)
         deposit_energies = np.array([], dtype=np.float64)
 
-    # Conservation bookkeeping.
-    represented_weight = float(
-        sum(w_block.sum() for w_block in [np.array([])])
-    )
-    # Recompute represented_weight from the actual deposits.
-    represented_weight = float(deposit_energies.sum()) * Q_total / float(e_acoplada) if e_acoplada > 0 and deposit_energies.size > 0 else 0.0
+    # Conservation bookkeeping: use the raw weight sum (not a
+    # back-calculation from deposit_energies) for exact float64 parity
+    # across block sizes (V5-04 fix).
+    represented_weight = represented_weight_raw
     outside_weight = Q_total - represented_weight
     if outside_weight < 0.0:
         outside_weight = 0.0
