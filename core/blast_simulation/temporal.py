@@ -344,6 +344,10 @@ def compute_time_of_max(
         edges = starts[:, None] + (stops - starts)[:, None] * unit_edges[None, :]
         z = (edges[:, :, None] - block_arrivals[:, None, :]) / sigma
         fractions = np.diff(ndtr(z), axis=1)
+        # V5-03: normalise per source so Σ_t f = 1 within the window.
+        frac_sums = fractions.sum(axis=1, keepdims=True)
+        frac_sums = np.where(frac_sums > 1e-30, frac_sums, 1.0)
+        fractions = fractions / frac_sums
         response = np.sum(block_contributions[:, None, :] * fractions, axis=2)
         centres = 0.5 * (edges[:, 1:] + edges[:, :-1])
         local_indices = np.argmax(response, axis=1)
@@ -496,6 +500,10 @@ def compute_time_of_max_chunked(
         # arrivals_block shape: (block_size, n_segments)
         z = (edges[:, :, None] - arrivals_block[:, None, :]) / sigma
         fractions = np.diff(ndtr(z), axis=1)
+        # V5-03: normalise per source so Σ_t f = 1 within the window.
+        frac_sums = fractions.sum(axis=1, keepdims=True)
+        frac_sums = np.where(frac_sums > 1e-30, frac_sums, 1.0)
+        fractions = fractions / frac_sums
         # response shape: (block_size, n_time_bins)
         response = np.sum(block_energy[:, None, :] * fractions, axis=2)
         centres = 0.5 * (edges[:, 1:] + edges[:, :-1])

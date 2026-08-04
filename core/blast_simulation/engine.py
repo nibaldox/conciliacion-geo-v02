@@ -522,6 +522,14 @@ def _compute_temporal_fields_streaming(
             edges = starts_w + (stops_w - starts_w) * unit_edges
             z = (edges[:, None] - arrivals_arr[None, :]) / sigma
             fractions = np.diff(ndtr(z), axis=0)
+            # V5-03: normalise fractions per source so that Σ_t f = 1.0
+            # within the finite window. Without normalisation, sources
+            # whose gaussian extends beyond the window boundaries (especially
+            # near t=0) lose energy — the audit measured residuals up to
+            # 15.9%.
+            frac_sums = fractions.sum(axis=0)
+            safe_sums = np.where(frac_sums > 1e-30, frac_sums, 1.0)
+            fractions = fractions / safe_sums[None, :]
             response = np.sum(energies_arr[None, :] * fractions, axis=1)
             best_bin = int(np.argmax(response))
             time_of_max[start + vl] = 0.5 * (edges[best_bin] + edges[best_bin + 1])

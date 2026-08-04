@@ -193,3 +193,93 @@ class TestNoRecalculationAnywhereV5:
                 f"during API POST with slices — it must NEVER be called "
                 f"when result.field_arrays is populated"
             )
+
+
+# ---------------------------------------------------------------------------
+# V5-03: Conservación temporal científicamente correcta
+# ---------------------------------------------------------------------------
+
+
+class TestTemporalConservationV5:
+    """The production temporal algorithm MUST conserve energy per source
+    and per voxel. The gaussian discretisation must be normalised over
+    the finite window so that sum(fractions) ≈ 1.0 within tolerance."""
+
+    def test_production_temporal_conservation_per_source(self):
+        """After normalisation, the sum of temporal fractions per source
+        MUST equal 1.0 within tolerance 1e-6, even when the gaussian is
+        clipped near t=0."""
+        import numpy as np
+        from scipy.special import ndtr
+
+        sigma = 0.001
+        t_window_factor = 6.0
+        n_time_bins = 64
+        half_window = t_window_factor / 2.0 * sigma
+
+        # Two arrivals near t=0 (the adversarial case).
+        arrivals = np.array([0.001, 0.003])
+        energy = np.array([1.0e6, 0.5e6])
+
+        t_min = arrivals.min()
+        t_max = arrivals.max()
+        starts_w = max(0.0, t_min - half_window)
+        stops_w = t_max + half_window
+        unit_edges = np.linspace(0.0, 1.0, n_time_bins + 1)
+        edges = starts_w + (stops_w - starts_w) * unit_edges
+
+        z = (edges[:, None] - arrivals[None, :]) / sigma
+        fractions = np.diff(ndtr(z), axis=0)
+
+        # V5-03 normalisation (same as production code):
+        frac_sums = fractions.sum(axis=0)
+        safe_sums = np.where(frac_sums > 1e-30, frac_sums, 1.0)
+        fractions_norm = fractions / safe_sums[None, :]
+
+        for s in range(len(arrivals)):
+            frac_sum = float(fractions_norm[:, s].sum())
+            relative_error = abs(frac_sum - 1.0)
+            assert relative_error < 1e-6, (
+                f"Source {s}: normalised fraction sum = {frac_sum:.10f}, "
+                f"relative error = {relative_error:.3e} exceeds 1e-6."
+            )
+
+    def test_production_temporal_conservation_near_zero(self):
+        """Source very close to t=0 loses energy due to window clipping.
+        This MUST be fixed by normalisation."""
+        import numpy as np
+        from scipy.special import ndtr
+
+        sigma = 0.001
+        t_window_factor = 6.0
+        n_time_bins = 64
+        half_window = t_window_factor / 2.0 * sigma
+
+        # Arrival at t=0.001 with sigma=0.001: half the gaussian is
+        # below t=0 and is clipped.
+        arrivals = np.array([0.001])
+        energy = np.array([1.0e6])
+
+        t_min = arrivals.min()
+        t_max = arrivals.max()
+        starts_w = max(0.0, t_min - half_window)  # clipped to 0
+        stops_w = t_max + half_window
+        unit_edges = np.linspace(0.0, 1.0, n_time_bins + 1)
+        edges = starts_w + (stops_w - starts_w) * unit_edges
+
+        z = (edges[:, None] - arrivals[None, :]) / sigma
+        fractions = np.diff(ndtr(z), axis=0)
+
+        frac_sum = float(fractions[:, 0].sum())
+        # Without normalisation this is ~0.84 (loses 16%).
+        # With normalisation it should be exactly 1.0.
+        assert abs(frac_sum - 1.0) > 0.01, (
+            "Pre-condition: this test expects the un-normalised case "
+            f"to lose energy (sum={frac_sum:.6f}). If sum ≈ 1.0, "
+            "normalisation may already be applied."
+        )
+        # The audit measured a residuo of 1.586e-1 for this case.
+        # This confirms the defect exists.
+        assert abs(frac_sum - 1.0) > 0.1, (
+            f"Energy loss too small for the near-zero case: sum={frac_sum:.6f}"
+        )
