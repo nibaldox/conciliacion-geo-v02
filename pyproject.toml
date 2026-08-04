@@ -51,4 +51,5 @@ markers = [
     "regression_v3: red regression tests for the v3 canonical result remediation",
     "regression_v4: red regression tests for the v4 streaming remediation",
     "regression_v5: red regression tests for the v5 strict contracts and hermeticity remediation",
+    "regression_v6: red regression tests for the v6 strict scientific contracts, real chunking/streaming, connected instrumentation, atomic persistence and production parity",
 ]
