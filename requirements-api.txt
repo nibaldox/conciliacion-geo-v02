@@ -52,7 +52,7 @@ ezdxf==1.4.4
     # via conciliacion-geotecnica
 fast-simplification==0.1.13
     # via conciliacion-geotecnica
-fastapi==0.136.3
+fastapi==0.141.1
     # via conciliacion-geotecnica
 fonttools==4.63.0
     # via
