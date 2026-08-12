@@ -27,10 +27,11 @@ jobs:
       
       - name: Install Python deps
         run: |
-          pip install pytest pytest-asyncio httpx
           pip install -r requirements-api.txt
-          pip install -e .
-      
+          # `test` extra (pyproject.toml) = declarative test deps (pytest, pytest-asyncio, httpx).
+          # No ad-hoc `pip install pytest ...`: it drifts and leaves async tests without the plugin.
+          pip install -e ".[test]"
+
       - name: Run unit tests
         run: python -m pytest tests/ -v --tb=short --ignore=tests/test_openblast.py
       

@@ -30,6 +30,17 @@ dependencies = [
     "networkx",
 ]
 
+[project.optional-dependencies]
+# Test-only deps. Install with:  pip install -e ".[test]"
+# pip does not read [dependency-groups] (PEP 735), so this extra — not the dev
+# group below — is the reproducible source of truth for pip-based CI. pytest-asyncio
+# is REQUIRED by the async tests in tests/test_ai_v2_*.py; httpx by FastAPI's TestClient.
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

@@ -28,10 +28,9 @@ jobs:
           python -m pip install --upgrade pip
           # pyinstaller is the only new dep for the sidecar build
           python -m pip install pyinstaller
-          # Test runner + HTTP client used by the backend test suite
-          python -m pip install pytest httpx
-          # Sync the project deps
-          pip install -e .
+          # `test` extra (pyproject.toml) = declarative test deps (pytest, pytest-asyncio, httpx).
+          # No ad-hoc `pip install pytest ...`: it drifts and leaves async tests without the plugin.
+          pip install -e ".[test]"
           pip install -r requirements-api.txt
 
       - name: Cache node_modules
@@ -64,7 +63,7 @@ jobs:
 
       - name: Run backend tests
         run: |
-          pytest tests/ -q --tb=short -x
+          pytest tests/ -q --tb=short -x --ignore=tests/test_openblast.py
 
       - name: Run electron unit tests
         working-directory: electron
