@@ -168,7 +168,10 @@ class TestGetEndpoints:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         assert r.json()["simulation_id"] == sim_id
 
@@ -181,7 +184,10 @@ class TestGetEndpoints:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}/plan?elevation=5.0")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}/plan?elevation=5.0",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         assert "elevation_m" in r.json()
 
@@ -190,7 +196,10 @@ class TestGetEndpoints:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}/section?axis=x&coordinate=5.0")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}/section?axis=x&coordinate=5.0",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         assert "coordinate_m" in r.json()
 
@@ -210,7 +219,10 @@ class TestExportEndpoints:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}/export?fmt=npz")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}/export?fmt=npz",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         assert len(r.content) > 0
         assert r.headers["content-type"] == "application/octet-stream"
@@ -220,7 +232,10 @@ class TestExportEndpoints:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}/export?fmt=xlsx")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}/export?fmt=xlsx",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         assert len(r.content) > 0
         # XLSX magic bytes: PK zip header.
@@ -231,6 +246,9 @@ class TestExportEndpoints:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}/export?fmt=json")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}/export?fmt=json",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         assert r.json()["simulation_id"] == sim_id

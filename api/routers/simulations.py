@@ -27,8 +27,13 @@ Discipline (Brecha 3.1, Falla 4, Falla 7):
   with ``error_code="SIMULATION_BLOCKED"`` and DO NOT write the NPZ
   artifact, the JSON summary, or insert a SQLite row (Falla 7).
 * When the JSON payload exceeds 1 MB, it is gzip-compressed and served
-  with ``Content-Type: application/octet-stream`` plus
-  ``X-Payload-Encoding: gzip`` and ``X-Original-Size``.
+  with the standard HTTP ``Content-Encoding: gzip`` and a semantic
+  ``Content-Type: application/json`` so browsers/Axios decompress it
+  transparently (plus an advisory ``X-Original-Size``).
+* Every read/export endpoint derives ownership from the session
+  middleware (``request.state.session_id``) and scopes the DB lookup by
+  session — a simulation owned by session A is invisible to session B
+  and to requests with no ``X-Session-ID`` (V6 P1).
 
 The router is a presentation layer only — every physical decision lives
 in :mod:`core.blast_simulation`. This module never re-implements the
@@ -611,20 +616,26 @@ def _json_or_gzip(
 ) -> Response:
     """Serialise the JSON; gzip it when the body exceeds ``threshold_bytes``.
 
-    Large payloads (typical for full plan/section matrices) are served
-    with ``Content-Type: application/octet-stream`` plus headers
-    ``X-Payload-Encoding: gzip`` and ``X-Original-Size: <bytes>``. Small
-    payloads remain plain ``application/json`` so the existing tests and
-    clients keep working without changes.
+    Large payloads (typical for full plan/section matrices) are served with
+    the **standard** HTTP ``Content-Encoding: gzip`` and a semantic
+    ``Content-Type: application/json``. Browsers (and Axios in the browser)
+    transparently decompress standard ``Content-Encoding``, so the panel
+    receives parsed JSON instead of opaque bytes. ``X-Original-Size`` is kept
+    as an advisory header for diagnostics. Small payloads remain plain
+    ``application/json`` so existing tests and clients keep working unchanged.
+
+    Earlier revisions used ``application/octet-stream`` plus a custom
+    ``X-Payload-Encoding: gzip`` header; Axios never inspected that custom
+    header, so compressed bodies reached the UI as binary "success" (V6 P0).
     """
     body_bytes = json.dumps(payload, default=str, ensure_ascii=False).encode("utf-8")
     if len(body_bytes) > threshold_bytes:
         return Response(
             content=gzip.compress(body_bytes),
             status_code=status_code,
-            media_type="application/octet-stream",
+            media_type="application/json",
             headers={
-                "X-Payload-Encoding": "gzip",
+                "Content-Encoding": "gzip",
                 "X-Original-Size": str(len(body_bytes)),
             },
         )
@@ -914,11 +925,20 @@ async def create_simulation(request: Request) -> JSONResponse:
         result = await _run_in_executor(_run)
     except SimulationConfigurationError as exc:
         raise _structured_error(400, exc, error_code=exc.error_code, details=exc.details)
-    except PersistenceError as exc:
-        raise _structured_error(500, exc, error_code="PERSISTENCE_ERROR")
-    except Exception as exc:
+    except PersistenceError:
+        logger.exception("Simulation persistence failed")
+        raise _structured_error(
+            500,
+            "Error de persistencia al guardar la simulación.",
+            error_code="PERSISTENCE_ERROR",
+        )
+    except Exception:
         logger.exception("Simulation failed")
-        raise _structured_error(500, exc, error_code="SIMULATION_FAILED")
+        raise _structured_error(
+            500,
+            "Error interno al ejecutar la simulación.",
+            error_code="SIMULATION_FAILED",
+        )
 
     # Falla 7 — blocked simulation: 422 + SIMULATION_BLOCKED, no NPZ,
     # no SQLite row. We surface the structured diagnostic + a subset of
@@ -970,13 +990,15 @@ async def create_simulation(request: Request) -> JSONResponse:
     response_class=JSONResponse,
     summary="Obtener el resumen canónico de la simulación (alias)",
 )
-async def get_simulation(simulation_id: str) -> Response:
+async def get_simulation(request: Request, simulation_id: str) -> Response:
     """Return the canonical ``SimulationResult.to_dict()`` payload.
 
     Kept as a backwards-compatible alias of ``GET /summary`` — the
     maintainer's Streamlit app reads this endpoint.
     """
-    row = db.get_blast_simulation(simulation_id)
+    row = db.get_blast_simulation(
+        simulation_id, session_id=request.state.session_id
+    )
     if row is None:
         raise _structured_error(
             404,
@@ -997,7 +1019,7 @@ async def get_simulation(simulation_id: str) -> Response:
     response_class=JSONResponse,
     summary="Obtener el resumen canónico (SimulationResult.to_dict())",
 )
-async def get_simulation_summary(simulation_id: str) -> Response:
+async def get_simulation_summary(request: Request, simulation_id: str) -> Response:
     """Return the canonical summary as a JSON document.
 
     Useful for cross-layer tests that need to verify the full canonical
@@ -1006,7 +1028,9 @@ async def get_simulation_summary(simulation_id: str) -> Response:
     ``SimulationResult.to_dict()`` exactly as it was written to SQLite
     by :func:`api.database.save_blast_simulation`.
     """
-    row = db.get_blast_simulation(simulation_id)
+    row = db.get_blast_simulation(
+        simulation_id, session_id=request.state.session_id
+    )
     if row is None:
         raise _structured_error(
             404,
@@ -1028,6 +1052,7 @@ async def get_simulation_summary(simulation_id: str) -> Response:
     summary="Perfil interpolado entre dos puntos a lo largo del campo 3D",
 )
 async def get_simulation_profile(
+    request: Request,
     simulation_id: str,
     start_xyz: str = Query(
         ...,
@@ -1057,7 +1082,9 @@ async def get_simulation_profile(
     summary statistics and the SHA-256 of the resulting profile (the
     canonical audit trail for the derived data).
     """
-    row = db.get_blast_simulation(simulation_id)
+    row = db.get_blast_simulation(
+        simulation_id, session_id=request.state.session_id
+    )
     if row is None:
         raise _structured_error(
             404,
@@ -1076,11 +1103,14 @@ async def get_simulation_profile(
         )
     npz_p = Path(npz_path)
     if not npz_p.exists():
+        logger.warning(
+            "NPZ artifact missing on disk for simulation %s", simulation_id
+        )
         raise _structured_error(
             404,
             "NPZ artifact not found on disk.",
             error_code="NO_ARTIFACT",
-            details={"simulation_id": simulation_id, "expected_path": npz_path},
+            details={"simulation_id": simulation_id},
         )
 
     start = _parse_xyz(start_xyz, "start_xyz")
@@ -1106,15 +1136,17 @@ async def get_simulation_profile(
         arrays, metadata, actual_sha = read_npz_artifact(
             npz_path, expected_sha256=expected_sha,
         )
-    except PersistenceError as exc:
+    except PersistenceError:
+        logger.exception(
+            "NPZ read failed for simulation %s", simulation_id
+        )
         raise _structured_error(
             500,
-            exc,
+            "No se pudo leer el artefacto NPZ de la simulación.",
             error_code="NPZ_READ_FAILED",
             details={
                 "simulation_id": simulation_id,
                 "expected_sha256": expected_sha,
-                "npz_path": npz_path,
             },
         )
 
@@ -1130,12 +1162,16 @@ async def get_simulation_profile(
             y_max=float(bounds_dict["y_max"]),
             z_max=float(bounds_dict["z_max"]),
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError):
+        logger.exception(
+            "Persisted grid metadata malformed for simulation %s",
+            simulation_id,
+        )
         raise _structured_error(
             500,
-            f"Persisted grid bounds are malformed: {exc}",
+            "Los metadatos de grilla persistidos están mal formados.",
             error_code="GRID_METADATA_INVALID",
-            details={"grid_metadata": grid_meta},
+            details={"simulation_id": simulation_id},
         )
     voxel_size_m = float(grid_meta.get("voxel_size_m", 1.0))
     grid = VoxelGridSpecification(voxel_size_m=voxel_size_m, bounds=bounds)
@@ -1184,6 +1220,7 @@ async def get_simulation_profile(
     summary="Slice horizontal — Falla 4: matriz 2D completa",
 )
 async def get_plan_slice(
+    request: Request,
     simulation_id: str,
     elevation: float = Query(..., description="Elevación (m) para el corte horizontal."),
 ) -> Response:
@@ -1194,7 +1231,9 @@ async def get_plan_slice(
     ``percentiles``, ``source_holes_projection`` and ``data_sha256`` —
     never only shape + aggregates.
     """
-    row = db.get_blast_simulation(simulation_id)
+    row = db.get_blast_simulation(
+        simulation_id, session_id=request.state.session_id
+    )
     if row is None:
         raise _structured_error(
             404,
@@ -1226,6 +1265,7 @@ async def get_plan_slice(
     summary="Slice vertical — Falla 4: matriz 2D completa",
 )
 async def get_section_slice(
+    request: Request,
     simulation_id: str,
     axis: str = Query(..., description="'x' o 'y'"),
     coordinate: float = Query(..., description="Coordenada (m) sobre el eje."),
@@ -1236,7 +1276,9 @@ async def get_section_slice(
     ``vertical_coordinates_m``, ``valid_mask``, ``percentiles``,
     ``source_holes_projection`` and ``data_sha256``.
     """
-    row = db.get_blast_simulation(simulation_id)
+    row = db.get_blast_simulation(
+        simulation_id, session_id=request.state.session_id
+    )
     if row is None:
         raise _structured_error(
             404,
@@ -1278,6 +1320,7 @@ async def get_section_slice(
 
 @router.get("/{simulation_id}/export")
 async def export_simulation(
+    request: Request,
     simulation_id: str,
     fmt: str = Query("xlsx", pattern="^(xlsx|npz|json|json_gz)$"),
 ):
@@ -1292,7 +1335,9 @@ async def export_simulation(
       Auto-gzipped when the payload exceeds 1 MB.
     * ``fmt=json_gz`` — always-gzipped canonical JSON.
     """
-    row = db.get_blast_simulation(simulation_id)
+    row = db.get_blast_simulation(
+        simulation_id, session_id=request.state.session_id
+    )
     if row is None:
         raise _structured_error(
             404,
@@ -1467,11 +1512,12 @@ async def export_simulation(
             ),
             filename=f"{simulation_id}_simulation.xlsx",
         )
-    except Exception as exc:
+    except Exception:
         Path(out.name).unlink(missing_ok=True)
         logger.exception("XLSX export failed for %s", simulation_id)
         raise _structured_error(
-            500, exc,
+            500,
+            "Error al exportar el libro XLSX de la simulación.",
             error_code="XLSX_EXPORT_FAILED",
             details={"simulation_id": simulation_id},
         )

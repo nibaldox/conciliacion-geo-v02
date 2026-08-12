@@ -174,7 +174,10 @@ class TestApiCoreNpzRoundTrip:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         body = r.json()
         # Canonical fields survive the SQLite JSON round-trip.
@@ -187,7 +190,10 @@ class TestApiCoreNpzRoundTrip:
         sim_id = client.post(
             "/api/v1/blast/simulations", json=_canonical_body(sid)
         ).json()["simulation_id"]
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}/export?fmt=xlsx")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}/export?fmt=xlsx",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         assert r.content[:2] == b"PK"  # XLSX zip magic
         out = tmp_path / "sim.xlsx"
@@ -205,7 +211,10 @@ class TestApiCoreNpzRoundTrip:
         sim_id = body["simulation_id"]
         persisted_sha = body["grid_metadata"]["npz_sha256"]
 
-        r = client.get(f"/api/v1/blast/simulations/{sim_id}/export?fmt=npz")
+        r = client.get(
+            f"/api/v1/blast/simulations/{sim_id}/export?fmt=npz",
+            headers={"X-Session-ID": sid},
+        )
         assert r.status_code == 200
         # The bytes served by the API match the persisted SHA.
         from core.blast_simulation import sha256_bytes

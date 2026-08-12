@@ -545,13 +545,32 @@ def save_blast_simulation(
     conn.close()
 
 
-def get_blast_simulation(simulation_id: str) -> Optional[Dict[str, Any]]:
-    """Return the metadata row for a simulation, or None."""
+def get_blast_simulation(
+    simulation_id: str,
+    *,
+    session_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return the metadata row for a simulation, or None.
+
+    When ``session_id`` is supplied the lookup is scoped to that session so
+    a reader cannot access a simulation owned by another session (V6 P1).
+    Not-found and not-owned are indistinguishable: both return ``None`` so
+    the router emits the same 404 ``SIMULATION_NOT_FOUND`` for either case.
+    Omitting ``session_id`` preserves the legacy unscoped behaviour used by
+    internal/admin callers.
+    """
     conn = get_connection()
-    row = conn.execute(
-        "SELECT * FROM blast_simulations WHERE simulation_id = ?",
-        (simulation_id,),
-    ).fetchone()
+    if session_id is None:
+        row = conn.execute(
+            "SELECT * FROM blast_simulations WHERE simulation_id = ?",
+            (simulation_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT * FROM blast_simulations "
+            "WHERE simulation_id = ? AND session_id = ?",
+            (simulation_id, session_id),
+        ).fetchone()
     conn.close()
     if row is None:
         return None
