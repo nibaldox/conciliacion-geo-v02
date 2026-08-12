@@ -36,6 +36,15 @@ RUN python -m venv /app/venv
 COPY requirements-api.txt .
 RUN /app/venv/bin/pip install -r requirements-api.txt
 
+# core/mesh_handler.py does `import plotly.graph_objects as go` at module
+# top level (only used by mesh_to_plotly, but the import fires anyway).
+# api/database.py pulls `from core import load_mesh`, so the API startup
+# chain transitively requires plotly. requirements-api.txt intentionally
+# excludes UI deps (Streamlit/Plotly), so install plotly explicitly here.
+# Without this, uvicorn crashes with ModuleNotFoundError on import and the
+# healthcheck never succeeds (container stays "unhealthy").
+RUN /app/venv/bin/pip install --no-cache-dir plotly
+
 # ── Stage 2: runtime ──────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
@@ -44,7 +53,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/venv/bin:$PATH" \
     # Defaults — override at runtime
     CONCILIACION_DATA_DIR=/app/data \
-    CONCILIACION_LOG_LEVEL=INFO
+    CONCILIACION_LOG_LEVEL=INFO \
+    # matplotlib tries to create ~/.config/matplotlib on import, but the
+    # conciliacion user has no home dir (--no-create-home). Point it at a
+    # writable cache under /tmp to avoid the "Permission denied" fallback
+    # (slow import + multiprocessing warnings in clean containers).
+    MPLCONFIGDIR=/tmp/matplotlib-cache
 
 # Runtime system deps only (no gcc)
 RUN apt-get update && \
@@ -68,6 +82,10 @@ COPY --chown=conciliacion:conciliacion api/ /app/api/
 
 # Data directory for SQLite (mounted as a volume in production)
 RUN mkdir -p /app/data && chown -R conciliacion:conciliacion /app/data
+
+# Pre-create the matplotlib cache dir referenced by MPLCONFIGDIR so the
+# non-root user does not depend on /tmp being writable at first import.
+RUN mkdir -p /tmp/matplotlib-cache && chmod 1777 /tmp/matplotlib-cache
 
 # Switch to non-root
 USER conciliacion
