@@ -1,36 +1,45 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Conciliación Geotécnica App', () => {
-  test('loads the app and shows step wizard', async ({ page }) => {
+  test('loads the app shell with brand header and 3D empty state', async ({ page }) => {
     await page.goto('/');
 
-    // Check title
     await expect(page).toHaveTitle(/Conciliación/);
 
-    // Check header
-    await expect(page.getByText('Conciliación Geotécnica')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Conciliación Geotécnica', level: 1 })).toBeVisible();
+    await expect(page.getByText('Diseño vs As-Built', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Nueva Sesión' })).toBeVisible();
 
-    // Check step navigation
-    await expect(page.getByText('Cargar Superficies')).toBeVisible();
-
-    // Check current step is Step 1
-    await expect(page.getByText('Paso 1:')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Vista 3D', level: 2, exact: true })).toBeVisible();
+    await expect(page.getByText('Cargue superficies para ver la vista 3D', { exact: true })).toBeVisible();
   });
 
-  test('step navigation shows all 4 steps', async ({ page }) => {
+  test('side panel lists current navigation and keeps surfaces section expanded', async ({ page }) => {
     await page.goto('/');
 
-    const steps = ['Cargar Superficies', 'Definir Secciones', 'Análisis', 'Resultados'];
-    for (const step of steps) {
-      await expect(page.getByText(step)).toBeVisible();
+    const navLabels = [
+      'Cargar Superficies',
+      'Definir Secciones',
+      'Parámetros de Procesamiento',
+      'Análisis',
+    ];
+    for (const label of navLabels) {
+      await expect(page.getByRole('button', { name: label })).toBeVisible();
     }
+
+    const uploadZones = page.getByRole('button', { name: 'Cargar archivo' });
+    await expect(uploadZones).toHaveCount(2);
+    await expect(uploadZones.first()).toBeVisible();
+    await expect(uploadZones.nth(1)).toBeVisible();
   });
 
-  test('upload zones are visible on step 1', async ({ page }) => {
+  test('design and topography upload zones are accessible', async ({ page }) => {
     await page.goto('/');
 
-    await expect(page.getByText('Diseño')).toBeVisible();
-    await expect(page.getByText('Topografía')).toBeVisible();
+    const uploadZones = page.getByRole('button', { name: 'Cargar archivo' });
+
+    await expect(uploadZones.filter({ hasText: 'Diseño' })).toBeVisible();
+    await expect(uploadZones.filter({ hasText: 'Topografía' })).toBeVisible();
   });
 
   test('API health endpoint responds', async ({ request }) => {
