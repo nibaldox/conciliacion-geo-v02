@@ -262,6 +262,13 @@ dependencies = [
     { name = "uvicorn" },
 ]
 
+[package.optional-dependencies]
+test = [
+    { name = "httpx" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
@@ -273,6 +280,7 @@ requires-dist = [
     { name = "ezdxf" },
     { name = "fast-simplification" },
     { name = "fastapi" },
+    { name = "httpx", marker = "extra == 'test'" },
     { name = "matplotlib" },
     { name = "networkx" },
     { name = "numpy" },
@@ -282,6 +290,8 @@ requires-dist = [
     { name = "plotly" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.24" },
     { name = "python-docx" },
     { name = "python-multipart" },
     { name = "reportlab" },
@@ -291,6 +301,7 @@ requires-dist = [
     { name = "trimesh" },
     { name = "uvicorn" },
 ]
+provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [
