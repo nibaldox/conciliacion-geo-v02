@@ -65,6 +65,10 @@ jobs:
         run: |
           pytest tests/ -q --tb=short -x --ignore=tests/test_openblast.py
 
+      - name: Install electron deps
+        working-directory: electron
+        run: npm ci
+
       - name: Run electron unit tests
         working-directory: electron
         run: npm test
@@ -107,9 +111,7 @@ jobs:
 
       - name: Build Electron AppImage
         working-directory: electron
-        run: |
-          npm ci
-          npm run build:linux
+        run: npm run build:linux
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
