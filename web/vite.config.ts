@@ -151,6 +151,13 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     include: ['src/**/*.test.{ts,tsx}', 'tests/**/*.test.{ts,tsx}'],
+    // V6-02: the fullstack integration tests spawn `uv run python ...`
+    // which has a cold-start of ~5-7 s on the audit host. The vitest
+    // default of 5 s killed them spuriously. 90 s gives generous
+    // margin without masking real hangs (the harness itself enforces
+    // a 60 s subprocess timeout via runIntegrationHarness).
+    testTimeout: 90_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html'],

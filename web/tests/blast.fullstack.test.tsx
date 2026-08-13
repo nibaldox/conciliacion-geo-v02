@@ -1,11 +1,10 @@
 import type { ReactNode } from 'react';
-import { spawnSync } from 'node:child_process';
-import path from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import client from '../src/api/client';
 import { useUploadBlastCsv, type BlastGeometryForm } from '../src/api/hooks';
+import { runIntegrationHarness } from './support/integrationHarness';
 
 const geometry: BlastGeometryForm = {
   geometry_configuration_version: '2.0',
@@ -53,17 +52,11 @@ describe('browser request to persisted and exported blast result', () => {
         .filter(([, value]) => typeof value === 'string')
         .map(([key, value]) => [key, value as string]),
     );
-    const integration = spawnSync(
-      'uv',
-      ['run', 'python', 'tests/support/frontend_api_integration_harness.py'],
-      {
-        cwd: path.resolve(process.cwd(), '..'),
-        env: process.env,
-        input: JSON.stringify({ fields, csv }),
-        encoding: 'utf8',
-      },
-    );
-    expect(integration.status, integration.stderr).toBe(0);
+    // V6-02: spawn via the hermetic launcher so the subprocess gets a
+    // writable UV_CACHE_DIR, stripped proxies and an explicit timeout.
+    const integration = runIntegrationHarness({ fields, csv });
+    expect(integration.status, integration.stderr || integration.stdout).toBe(0);
+    expect(integration.timedOut).toBe(false);
     expect(JSON.parse(integration.stdout)).toMatchObject({
       status_code: 200,
       accepted_rows: 4,

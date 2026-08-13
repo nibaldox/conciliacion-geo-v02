@@ -30,6 +30,17 @@ dependencies = [
     "networkx",
 ]
 
+[project.optional-dependencies]
+# Test-only deps. Install with:  pip install -e ".[test]"
+# pip does not read [dependency-groups] (PEP 735), so this extra — not the dev
+# group below — is the reproducible source of truth for pip-based CI. pytest-asyncio
+# is REQUIRED by the async tests in tests/test_ai_v2_*.py; httpx by FastAPI's TestClient.
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "httpx",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
@@ -45,3 +56,11 @@ include = ["core*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: benchmarks that require a large voxel grid and may take several minutes",
+    "regression_v2: red regression tests for the v2 blocking remediation",
+    "regression_v3: red regression tests for the v3 canonical result remediation",
+    "regression_v4: red regression tests for the v4 streaming remediation",
+    "regression_v5: red regression tests for the v5 strict contracts and hermeticity remediation",
+    "regression_v6: red regression tests for the v6 strict scientific contracts, real chunking/streaming, connected instrumentation, atomic persistence and production parity",
+]

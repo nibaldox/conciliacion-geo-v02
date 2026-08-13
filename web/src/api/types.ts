@@ -521,3 +521,161 @@ export interface ColumnSchemaResponse {
   fields: ColumnMappingField[];
   required_fields: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2 — blast energy simulation
+//
+// Mirrors the Pydantic schemas in `api/routers/simulations.py` and the
+// contracts in `core/blast_simulation/contracts.py`. The wire format
+// matches the JSON the FastAPI backend emits.
+// ---------------------------------------------------------------------------
+
+export type EnergyMode = 'ABSOLUTE' | 'RELATIVE';
+export type TemporalMode = 'STATIC' | 'TEMPORAL';
+export type AnisotropyMode = 'ISOTROPIC' | 'ANISOTROPIC_TENSOR';
+export type KernelType = 'EXPONENTIAL_INVERSE_SQUARE';
+
+export interface DomainBoundsWire {
+  x_min: number;
+  y_min: number;
+  z_min: number;
+  x_max: number;
+  y_max: number;
+  z_max: number;
+}
+
+export interface RockMassWire {
+  rock_unit_id?: string;
+  density_kg_m3?: number | null;
+  ucs_mpa?: number | null;
+  attenuation_coefficient_1_m?: number | null;
+  wave_velocity_m_s?: number | null;
+  anisotropy_mode?: AnisotropyMode;
+  anisotropy_tensor?: number[][] | null;
+  source?: string;
+  status?: string;
+  assumptions?: string[];
+  warnings?: string[];
+}
+
+export interface SimulationCreateRequest {
+  session_id: string;
+  geometry_configuration_version: string;
+  user_confirmed: boolean;
+  voxel_size_m: number;
+  domain_bounds: DomainBoundsWire;
+  energy_mode: EnergyMode;
+  temporal_mode: TemporalMode;
+  anisotropy_mode: AnisotropyMode;
+  kernel_type?: KernelType;
+  attenuation_coefficient_1_m: number;
+  regularization_radius_m: number;
+  support_radius_m: number;
+  coupling_efficiency: number;
+  propagation_velocity_m_s?: number | null;
+  propagation_velocity_source?: string;
+  pulse_sigma_s?: number | null;
+  segments_per_hole?: number;
+  plan_elevations?: number[];
+  section_coordinates?: [AxisLiteral, number][];
+  rock_mass?: RockMassWire;
+}
+
+export type AxisLiteral = 'x' | 'y';
+
+/**
+ * Common shape shared by plan and section slices. Every field except
+ * ``grid_shape`` and ``unit`` is optional because the API may omit
+ * Falla-4 fields when the slice is empty (no active voxels in the
+ * plane). The frontend normalises missing fields via defensive
+ * defaults in ``SliceGrid``.
+ */
+export interface SliceWire {
+  elevation_m?: number;
+  axis?: AxisLiteral;
+  coordinate_m?: number;
+  unit: string;
+  field_type?: string;
+  grid_shape: [number, number];
+  values?: number[];
+  x_coordinates_m?: number[];
+  y_coordinates_m?: number[];
+  along_coordinates_m?: number[];
+  vertical_coordinates_m?: number[];
+  valid_mask?: boolean[];
+  min?: number;
+  max?: number;
+  mean?: number;
+  percentiles?: Record<string, number>;
+  source_holes_projection?: Array<Record<string, unknown>>;
+  data_sha256?: string;
+  max_value?: number;
+  mean_value?: number;
+  represented_energy_j?: number;
+}
+
+export type PlanSliceWire = SliceWire;
+export type SectionSliceWire = SliceWire;
+
+export interface SimulationProcessingSummary {
+  accepted_holes: number;
+  charge_segments: number;
+  valid_sources: number;
+  invalid_sources: number;
+  voxel_count: number;
+  active_voxels: number;
+  represented_energy_j: number;
+  outside_domain_energy_j: number;
+  total_coupled_energy_j: number;
+  fraction_represented: number;
+  warning_records: number;
+  blocking_error_records: number;
+  temporal_status: 'AVAILABLE' | 'NOT_AVAILABLE' | 'PULSE_SIGMA_FALLBACK';
+  energy_mode: EnergyMode;
+}
+
+export interface SimulationCreateResponse {
+  simulation_id: string;
+  summary: SimulationProcessingSummary;
+  configuration: Record<string, unknown>;
+  grid_metadata: {
+    shape: [number, number, number];
+    voxel_size_m: number;
+    bounds: DomainBoundsWire;
+    axes_order: string;
+    energy_unit: string;
+    dtype: string;
+    voxel_count: number;
+    voxel_volume_m3: number;
+    npz_sha256: string;
+    created_at: string;
+  };
+  energy_field: {
+    represented_energy_j: number;
+    outside_domain_energy_j: number;
+    total_coupled_energy_j: number;
+    fraction_represented: number;
+    active_voxels: number;
+    max_energy_j: number;
+    mean_energy_j_active: number;
+    npz_path: string;
+    energy_unit: string;
+  };
+  plan_slices: PlanSliceWire[];
+  section_slices: SectionSliceWire[];
+  warnings: Record<string, unknown>[];
+  blocking_errors: BlockingError[];
+  provenance: {
+    engine_version: string;
+    simulation_configuration_version: string;
+    geometry_configuration_version: string;
+    explosive_registry_source: string;
+    explosive_products_used: string[];
+    rock_mass_source: string;
+    propagation_velocity_source: string;
+    assumptions: string[];
+    warnings: string[];
+    accepted_rows_hash: string;
+  };
+  npz_sha256: string;
+}

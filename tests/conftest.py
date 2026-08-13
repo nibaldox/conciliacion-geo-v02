@@ -202,6 +202,31 @@ def pytest_addoption(parser):
         default=False,
         help="Skip Electron/sidecar E2E tests that require the built bundle",
     )
+    parser.addoption(
+        "--benchmark-skip-slow",
+        action="store_true",
+        default=False,
+        help="Skip the 500-hole × 1M-voxel blast benchmark",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    skip_slow = config.getoption("--benchmark-skip-slow")
+    skip_marker = pytest.mark.skip(reason="Skipped via --benchmark-skip-slow")
+    for item in items:
+        callspec = getattr(item, "callspec", None)
+        if callspec is None:
+            continue
+        if (
+            callspec.params.get("n_holes") == 500
+            and callspec.params.get("n_voxels") == 1_000_000
+            and item.nodeid.startswith(
+                "tests/test_blast_simulation_benchmarks.py::test_benchmark_grid["
+            )
+        ):
+            item.add_marker(pytest.mark.slow)
+            if skip_slow:
+                item.add_marker(skip_marker)
 
 
 # ---------------------------------------------------------------------------
@@ -282,3 +307,46 @@ def _api_reset_state_caches(monkeypatch):
     except Exception:
         pass
     yield
+
+
+# ---------------------------------------------------------------------------
+# V5-09: Hermeticidad — isolate tests from environment proxy variables
+# ---------------------------------------------------------------------------
+
+_PROXY_VARS = (
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+    "http_proxy", "https_proxy", "all_proxy",
+    "NO_PROXY", "no_proxy",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_proxy_env(monkeypatch):
+    """Clear all proxy environment variables for every test so the suite
+    is hermetic regardless of the developer's shell configuration.
+
+    Starlette's TestClient uses httpx, which respects HTTP_PROXY /
+    HTTPS_PROXY / ALL_PROXY. If a developer has SOCKS proxies set
+    (common behind corporate firewalls), httpx may try to route the
+    in-process ASGI transport through the proxy, causing spurious
+    failures.
+
+    This fixture saves the original values, clears them for the test
+    body, and restores them on teardown. Tests that explicitly need
+    to verify proxy-independent behaviour can set the variables inside
+    the test body (the fixture's monkeypatch will still restore them
+    afterwards).
+    """
+    saved: dict[str, str] = {}
+    for var in _PROXY_VARS:
+        val = os.environ.pop(var, None)
+        if val is not None:
+            saved[var] = val
+    # Ensure localhost is never proxied.
+    monkeypatch.setenv("NO_PROXY", "*")
+    yield
+    # Restore original values.
+    os.environ.pop("NO_PROXY", None)
+    os.environ.pop("no_proxy", None)
+    for var, val in saved.items():
+        os.environ[var] = val

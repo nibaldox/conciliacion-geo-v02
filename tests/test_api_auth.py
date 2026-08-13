@@ -6,7 +6,15 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture()
-def client():
+def client(api_isolated_db):
+    """Build a TestClient against the isolated per-test SQLite DB.
+
+    Depends on the shared ``api_isolated_db`` fixture so the ``sessions``
+    table is created deterministically (remediación 3.3) — without this,
+    ``TestClient(app)`` does not run the lifespan and ``init_db()`` is
+    never called, leaving the schema empty and any endpoint that touches
+    ``sessions`` failing with ``sqlite3.OperationalError: no such table``.
+    """
     from api.main import app
     return TestClient(app)
 

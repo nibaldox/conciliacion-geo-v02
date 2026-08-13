@@ -900,3 +900,48 @@ export function useDetectColumnMapping() {
         .then((r) => r.data),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2 — blast energy simulation
+//
+// useCreateBlastSimulation wraps POST /blast/simulations and surfaces the
+// structured error body the backend emits on HTTP 400/422 so the UI can
+// render precise diagnostics instead of a bare string.
+// ---------------------------------------------------------------------------
+
+export interface SimulationErrorDiagnostics {
+  error_code: string;
+  message: string;
+  details: Record<string, unknown>;
+  blocking_errors?: import('./types').BlockingError[];
+}
+
+export function extractSimulationErrorDiagnostics(
+  error: unknown,
+): SimulationErrorDiagnostics | null {
+  if (!error || typeof error !== 'object') return null;
+  // Axios-shaped error.
+  const resp = (error as { response?: { data?: unknown }; data?: unknown }).response ?? error;
+  const data = (resp as { data?: unknown }).data ?? resp;
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  // FastAPI HTTPException wraps the payload under `detail`.
+  const detail = (d.detail ?? d) as Record<string, unknown>;
+  if (!detail || typeof detail !== 'object') return null;
+  if (typeof detail.error_code !== 'string') return null;
+  return {
+    error_code: detail.error_code as string,
+    message: (detail.message as string) ?? '',
+    details: (detail.details as Record<string, unknown>) ?? {},
+    blocking_errors: detail.blocking_errors as import('./types').BlockingError[] | undefined,
+  };
+}
+
+export function useCreateBlastSimulation() {
+  return useMutation({
+    mutationFn: (body: import('./types').SimulationCreateRequest) =>
+      client
+        .post<import('./types').SimulationCreateResponse>('/blast/simulations', body)
+        .then((r) => r.data),
+  });
+}

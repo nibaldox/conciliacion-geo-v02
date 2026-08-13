@@ -205,7 +205,6 @@ export function ColumnMapper({
     });
     // We intentionally only depend on `open` — `columns` is captured
     // fresh on each open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // When the detect call resolves, seed the local mapping from the
@@ -497,7 +496,6 @@ export function ColumnMapper({
                   <tbody>
                     {Array.from({ length: previewRowCount }).map((_, i) => (
                       <tr
-                        // eslint-disable-next-line react/no-array-index-key
                         key={i}
                         style={{ borderTop: '1px solid var(--color-border)' }}
                       >
