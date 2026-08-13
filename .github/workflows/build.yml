@@ -117,5 +117,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: conciliacion-portable-linux.AppImage
-          path: electron/dist-portable/*.AppImage
+          path: dist-portable/*.AppImage
           if-no-files-found: error
