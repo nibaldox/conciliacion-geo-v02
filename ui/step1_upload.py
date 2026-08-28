@@ -17,8 +17,30 @@ from ui.plots import draw_sections_on_figure, mesh_to_contour_data
 logger = logging.getLogger(__name__)
 
 
+def build_mesh_cache_key(role: str, mesh, filename=None, filesize=None) -> tuple:
+    """Build a hashable identity key for a mesh decimation cache entry.
+
+    ``st.cache_resource`` excludes underscore-prefixed arguments from its
+    hash, so a decimated design mesh and a decimated topo mesh with the
+    same ``target_faces`` would collide. The key keeps them apart: it
+    carries the role (design vs topo), the mesh object id, its vertex and
+    face counts and the originating file identity, so the entry also
+    changes whenever a new file or object is loaded.
+    """
+    vertices = getattr(mesh, 'vertices', None)
+    faces = getattr(mesh, 'faces', None)
+    return (
+        role,
+        id(mesh),
+        len(vertices) if vertices is not None else 0,
+        len(faces) if faces is not None else 0,
+        filename,
+        filesize,
+    )
+
+
 @st.cache_resource(show_spinner=False)
-def _cached_decimate(_mesh, target_faces):
+def _cached_decimate(mesh_cache_key, _mesh, target_faces):
     return decimate_mesh(_mesh, target_faces=target_faces)
 
 
@@ -45,16 +67,7 @@ def render_step1(config: dict) -> None:
         if st.button("🧹 Limpiar superficies cargadas", type="secondary"):
             st.cache_resource.clear()
             st.cache_data.clear()
-            st.session_state.mesh_design = None
-            st.session_state.mesh_topo = None
-            st.session_state.bounds_design = None
-            st.session_state.bounds_topo = None
-            st.session_state.decimated_mesh_design = None
-            st.session_state.decimated_mesh_topo = None
-            st.session_state.mesh_design_file_name = None
-            st.session_state.mesh_design_file_size = None
-            st.session_state.mesh_topo_file_name = None
-            st.session_state.mesh_topo_file_size = None
+            _clear_surface_state()
             st.session_state.step = 1
             st.rerun()
 
@@ -77,6 +90,27 @@ def render_step1(config: dict) -> None:
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
+
+def _clear_surface_state() -> None:
+    """Reset every surface mesh entry in session_state.
+
+    Wipes the raw, decimated and high-detail plan meshes together with the
+    file identity keys so a stale decimation can never leak across uploads
+    or a session cleanup.
+    """
+    st.session_state.mesh_design = None
+    st.session_state.mesh_topo = None
+    st.session_state.bounds_design = None
+    st.session_state.bounds_topo = None
+    st.session_state.decimated_mesh_design = None
+    st.session_state.decimated_mesh_topo = None
+    st.session_state.plan_mesh_topo = None
+    st.session_state.plan_mesh_topo_token = None
+    st.session_state.mesh_design_file_name = None
+    st.session_state.mesh_design_file_size = None
+    st.session_state.mesh_topo_file_name = None
+    st.session_state.mesh_topo_file_size = None
+
 
 @st.fragment
 def _render_3d_fragment() -> None:
@@ -113,6 +147,10 @@ def _render_mesh_info() -> None:
 def _load_meshes(file_design, file_topo) -> None:
     from pathlib import Path
 
+    # New uploads invalidate the lazily built high-detail plan mesh.
+    st.session_state.plan_mesh_topo = None
+    st.session_state.plan_mesh_topo_token = None
+
     ext_d = Path(file_design.name).suffix
     ext_t = Path(file_topo.name).suffix
     f_design = f_topo = None
@@ -133,9 +171,15 @@ def _load_meshes(file_design, file_topo) -> None:
             st.session_state.bounds_design = get_mesh_bounds(mesh_d)
             st.session_state.bounds_topo = get_mesh_bounds(mesh_t)
 
-            # Pre-decimate meshes for Plotly 3D visualization
-            st.session_state.decimated_mesh_design = _cached_decimate(mesh_d, DEFAULTS.target_faces_visual)
-            st.session_state.decimated_mesh_topo = _cached_decimate(mesh_t, DEFAULTS.target_faces_visual)
+            # Pre-decimate meshes for Plotly 3D visualization. Design and
+            # topo pass distinct cache keys so their decimations never
+            # collide under the same target face count.
+            st.session_state.decimated_mesh_design = _cached_decimate(
+                build_mesh_cache_key("design", mesh_d, file_design.name, file_design.size),
+                mesh_d, DEFAULTS.target_faces_visual)
+            st.session_state.decimated_mesh_topo = _cached_decimate(
+                build_mesh_cache_key("topo", mesh_t, file_topo.name, file_topo.size),
+                mesh_t, DEFAULTS.target_faces_visual)
 
             # Store cache keys
             st.session_state.mesh_design_file_name = file_design.name
@@ -168,8 +212,16 @@ def _build_or_get_3d_figure() -> None:
         return
 
     md = st.session_state.get('decimated_mesh_design') or _cached_decimate(
+        build_mesh_cache_key(
+            "design", st.session_state.mesh_design,
+            st.session_state.get('mesh_design_file_name'),
+            st.session_state.get('mesh_design_file_size')),
         st.session_state.mesh_design, DEFAULTS.target_faces_visual)
     mt = st.session_state.get('decimated_mesh_topo') or _cached_decimate(
+        build_mesh_cache_key(
+            "topo", st.session_state.mesh_topo,
+            st.session_state.get('mesh_topo_file_name'),
+            st.session_state.get('mesh_topo_file_size')),
         st.session_state.mesh_topo, DEFAULTS.target_faces_visual)
     st.session_state.decimated_mesh_design = md
     st.session_state.decimated_mesh_topo = mt

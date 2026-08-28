@@ -1,4 +1,5 @@
 """Tests for ui.tabs.dashboard_plan_view (compliance plan view helpers)."""
+import contextlib
 import numpy as np
 import plotly.graph_objects as go
 import pytest
@@ -8,7 +9,10 @@ from core.section_cutter import SectionLine
 from ui.tabs.dashboard_plan_view import (
     build_plan_view_figure,
     compute_section_status,
+    ensure_plan_mesh_topo,
+    plan_high_detail_needed,
     select_plan_mesh,
+    SURFACE_GRAY,
 )
 
 
@@ -72,6 +76,14 @@ def _legend_traces(fig):
     return [t for t in fig.data if t.showlegend]
 
 
+def _big_topo():
+    return trimesh.creation.icosphere(subdivisions=3, radius=25.0)
+
+
+def _source_token(mesh):
+    return (id(mesh), len(mesh.vertices), len(mesh.faces))
+
+
 # ---------------------------------------------------------------------------
 # Surface: Mesh3d from the real topo STL
 # ---------------------------------------------------------------------------
@@ -95,12 +107,41 @@ class TestSurfaceTrace:
         assert "contour" not in types
         assert "heatmap" not in types
 
-    def test_mesh_intensity_is_elevation(self):
-        mesh = _synthetic_topo()
-        fig = build_plan_view_figure(mesh, _sections(), _status())
+    def test_mesh_has_no_elevation_intensity_or_colorscale(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
 
         surface = _surface_traces(fig)[0]
-        np.testing.assert_allclose(surface.intensity, mesh.vertices[:, 2])
+        assert surface.intensity is None
+        assert surface.colorscale is None
+        assert surface.cmin is None
+        assert surface.cmax is None
+
+    def test_mesh_is_neutral_gray(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        surface = _surface_traces(fig)[0]
+        assert surface.color == SURFACE_GRAY
+
+    def test_mesh_flatshading_true(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        surface = _surface_traces(fig)[0]
+        assert surface.flatshading is True
+
+    def test_mesh_lighting_reveals_relief(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        light = _surface_traces(fig)[0].lighting
+        assert light.ambient <= 0.5
+        assert light.diffuse >= 0.8
+        assert light.specular <= 0.15
+        assert light.roughness >= 0.6
+
+    def test_mesh_lateral_lightposition(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        position = _surface_traces(fig)[0].lightposition
+        assert position.x != 0 or position.y != 0
 
     def test_mesh_hover_labels_and_hidden_scale_legend(self):
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
@@ -112,14 +153,6 @@ class TestSurfaceTrace:
         assert surface.showscale is False
         assert surface.showlegend is False
         assert surface.opacity == 1.0
-
-    def test_mesh_has_colorscale_and_lighting(self):
-        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
-
-        surface = _surface_traces(fig)[0]
-        assert surface.colorscale is not None
-        assert len(surface.colorscale) >= 2
-        assert surface.lighting is not None
 
 
 # ---------------------------------------------------------------------------
@@ -407,7 +440,7 @@ class TestComputeSectionStatus:
 
 
 # ---------------------------------------------------------------------------
-# select_plan_mesh: full vs decimated, never design
+# select_plan_mesh: full > high-detail plan > decimated, never design
 # ---------------------------------------------------------------------------
 
 class TestSelectPlanMesh:
@@ -448,6 +481,188 @@ class TestSelectPlanMesh:
 
     def test_returns_none_for_out_of_range_face_indices(self):
         assert select_plan_mesh(_out_of_range_faces_topo(), None) is None
+
+    def test_default_full_limit_is_plan_full_face_limit(self):
+        from ui.tabs.dashboard_plan_view import PLAN_FULL_FACE_LIMIT
+        assert PLAN_FULL_FACE_LIMIT == 500_000
+
+        full = _synthetic_topo()
+        assert select_plan_mesh(full, None) is full
+
+    def test_prefers_plan_high_detail_over_decimated_when_over_cap(self):
+        full = _synthetic_topo()
+        plan = _synthetic_topo()
+        decimated = _synthetic_topo()
+
+        assert select_plan_mesh(full, decimated, plan, max_full_faces=6) is plan
+        assert select_plan_mesh(full, decimated, None, max_full_faces=6) is decimated
+
+    def test_never_returns_design_mesh_as_fallback(self):
+        design_like = _synthetic_topo()
+
+        assert select_plan_mesh(None, design_like, plan_mesh_topo=design_like) is None
+        assert select_plan_mesh(_empty_topo(), design_like, plan_mesh_topo=design_like) is None
+
+
+# ---------------------------------------------------------------------------
+# ensure_plan_mesh_topo / plan_high_detail_needed: lazy high-detail plan mesh
+# ---------------------------------------------------------------------------
+
+class TestEnsurePlanMeshTopo:
+    def test_returns_full_when_under_limit_without_decimating(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        session = {}
+        calls = []
+
+        def fake_decimate(mesh, target_faces=None):
+            calls.append(target_faces)
+            return mesh
+
+        monkeypatch.setattr(dpv, "decimate_mesh", fake_decimate)
+
+        topo = _synthetic_topo()
+        assert dpv.ensure_plan_mesh_topo(topo, session, full_face_limit=100) is topo
+        assert calls == []
+        assert session.get('plan_mesh_topo') is None
+
+    def test_returns_none_for_missing_or_invalid_topo(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "decimate_mesh", lambda mesh, target_faces=None: mesh)
+        assert dpv.ensure_plan_mesh_topo(None, {}) is None
+        assert dpv.ensure_plan_mesh_topo(_empty_topo(), {}) is None
+        assert dpv.ensure_plan_mesh_topo(_nan_topo(), {}) is None
+
+    def test_builds_high_detail_once_and_reuses(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        topo = _big_topo()
+        calls = []
+
+        def fake_decimate(mesh, target_faces=None):
+            calls.append(target_faces)
+            out = trimesh.Trimesh(vertices=mesh.vertices.copy(),
+                                  faces=mesh.faces.copy(), process=False)
+            out._plan_tag = "high-detail"
+            return out
+
+        monkeypatch.setattr(dpv, "decimate_mesh", fake_decimate)
+
+        session = {}
+        first = dpv.ensure_plan_mesh_topo(topo, session,
+                                          full_face_limit=50, target_faces=30)
+        second = dpv.ensure_plan_mesh_topo(topo, session,
+                                           full_face_limit=50, target_faces=30)
+
+        assert getattr(first, "_plan_tag", None) == "high-detail"
+        assert first is second
+        assert calls == [30]
+        assert session.get('plan_mesh_topo') is first
+        assert session.get('plan_mesh_topo_token') == _source_token(topo)
+
+    def test_stale_token_rebuilds(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        calls = []
+
+        def fake_decimate(mesh, target_faces=None):
+            calls.append(target_faces)
+            out = trimesh.Trimesh(vertices=mesh.vertices.copy(),
+                                  faces=mesh.faces.copy(), process=False)
+            out._plan_tag = "high-detail"
+            return out
+
+        monkeypatch.setattr(dpv, "decimate_mesh", fake_decimate)
+
+        session = {}
+        topo_a = _big_topo()
+        first = dpv.ensure_plan_mesh_topo(topo_a, session,
+                                          full_face_limit=50, target_faces=30)
+
+        topo_b = _big_topo()
+        second = dpv.ensure_plan_mesh_topo(topo_b, session,
+                                           full_face_limit=50, target_faces=30)
+
+        assert calls == [30, 30]
+        assert second is not first
+        assert session.get('plan_mesh_topo') is second
+        assert session.get('plan_mesh_topo_token') == _source_token(topo_b)
+
+    def test_returns_none_when_decimation_fails(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        def boom(mesh, target_faces=None):
+            raise RuntimeError("decimation failed")
+
+        monkeypatch.setattr(dpv, "decimate_mesh", boom)
+
+        session = {}
+        result = dpv.ensure_plan_mesh_topo(_big_topo(), session,
+                                           full_face_limit=50, target_faces=30)
+
+        assert result is None
+        assert session.get('plan_mesh_topo') is None
+        assert session.get('plan_mesh_topo_token') is None
+
+    def test_returns_none_when_high_detail_not_renderable(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        def empty(mesh, target_faces=None):
+            return _empty_topo()
+
+        monkeypatch.setattr(dpv, "decimate_mesh", empty)
+
+        assert dpv.ensure_plan_mesh_topo(_big_topo(), {},
+                                         full_face_limit=50, target_faces=30) is None
+
+
+class TestPlanHighDetailNeeded:
+    def test_false_when_no_renderable_topo(self):
+        assert plan_high_detail_needed(None, {}) is False
+        assert plan_high_detail_needed(_empty_topo(), {}) is False
+
+    def test_false_when_full_under_limit(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 100)
+        assert plan_high_detail_needed(_synthetic_topo(), {}) is False
+
+    def test_true_when_full_over_limit_and_nothing_cached(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        assert plan_high_detail_needed(_big_topo(), {}) is True
+
+    def test_false_when_cached_plan_matches_token(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        topo = _big_topo()
+        session = {
+            'plan_mesh_topo': _synthetic_topo(),
+            'plan_mesh_topo_token': _source_token(topo),
+        }
+        assert plan_high_detail_needed(topo, session) is False
+
+    def test_true_when_cached_token_is_stale(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        topo = _big_topo()
+        session = {
+            'plan_mesh_topo': _synthetic_topo(),
+            'plan_mesh_topo_token': _source_token(_big_topo()),
+        }
+        assert plan_high_detail_needed(topo, session) is True
+
+    def test_true_when_cached_plan_is_not_renderable(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        topo = _big_topo()
+        session = {'plan_mesh_topo': _empty_topo(), 'plan_mesh_topo_token': _source_token(topo)}
+        assert plan_high_detail_needed(topo, session) is True
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +736,12 @@ class _FakeSession:
     def get(self, key, default=None):
         return self.data.get(key, default)
 
+    def __getitem__(self, key):
+        return self.data[key]
+
+    def __setitem__(self, key, value):
+        self.data[key] = value
+
 
 class _FakeSt:
     def __init__(self, session_data):
@@ -529,6 +750,7 @@ class _FakeSt:
         self.infos = []
         self.subheaders = []
         self.charts = []
+        self.spinners = []
 
     def subheader(self, text):
         self.subheaders.append(text)
@@ -541,6 +763,11 @@ class _FakeSt:
 
     def plotly_chart(self, fig, use_container_width=None):
         self.charts.append(fig)
+
+    @contextlib.contextmanager
+    def spinner(self, text):
+        self.spinners.append(text)
+        yield
 
 
 class TestRenderPlanView:
@@ -604,3 +831,153 @@ class TestRenderPlanView:
         assert st.warnings
         assert any("geometría renderizable" in w for w in st.warnings)
         assert [t.type for t in st.charts[0].data].count("mesh3d") == 0
+
+
+# ---------------------------------------------------------------------------
+# Adapter lazy high-detail plan mesh (hot reload / big STL)
+# ---------------------------------------------------------------------------
+
+class TestRenderPlanViewHighDetail:
+    def _render(self, monkeypatch, session_data, results=None):
+        import ui.tabs.dashboard as dashboard
+
+        st = _FakeSt(session_data)
+        monkeypatch.setattr(dashboard, "st", st)
+        dashboard._render_plan_view(results or [], {})
+        return st
+
+    def _big_session(self):
+        return {
+            "sections": _sections(),
+            "mesh_topo": _big_topo(),
+            "decimated_mesh_topo": None,
+        }
+
+    def test_builds_high_detail_lazily_with_spanish_spinner(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        monkeypatch.setattr(dpv, "PLAN_TARGET_FACES", 30)
+        calls = []
+
+        def fake_decimate(mesh, target_faces=None):
+            calls.append(target_faces)
+            out = trimesh.Trimesh(vertices=mesh.vertices.copy(),
+                                  faces=mesh.faces.copy(), process=False)
+            out._plan_tag = "high-detail"
+            return out
+
+        monkeypatch.setattr(dpv, "decimate_mesh", fake_decimate)
+
+        session_data = self._big_session()
+        st = self._render(monkeypatch, session_data)
+
+        assert calls == [30]
+        assert st.spinners and "Preparando superficie" in st.spinners[0]
+        plan = st.session_state.data.get('plan_mesh_topo')
+        assert getattr(plan, "_plan_tag", None) == "high-detail"
+        assert (st.session_state.data.get('plan_mesh_topo_token')
+                == _source_token(session_data['mesh_topo']))
+
+    def test_reuses_cached_high_detail_on_second_rerun(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        monkeypatch.setattr(dpv, "PLAN_TARGET_FACES", 30)
+        calls = []
+
+        def fake_decimate(mesh, target_faces=None):
+            calls.append(target_faces)
+            out = trimesh.Trimesh(vertices=mesh.vertices.copy(),
+                                  faces=mesh.faces.copy(), process=False)
+            out._plan_tag = "high-detail"
+            return out
+
+        monkeypatch.setattr(dpv, "decimate_mesh", fake_decimate)
+
+        session_data = self._big_session()
+        first = self._render(monkeypatch, session_data)
+        plan = first.session_state.data.get('plan_mesh_topo')
+        assert calls == [30]
+
+        second = self._render(monkeypatch, session_data)
+
+        assert calls == [30]
+        assert second.session_state.data.get('plan_mesh_topo') is plan
+        assert second.spinners == []
+
+    def test_stale_token_rebuilds_after_hot_reload(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        monkeypatch.setattr(dpv, "PLAN_TARGET_FACES", 30)
+        calls = []
+
+        def fake_decimate(mesh, target_faces=None):
+            calls.append(target_faces)
+            out = trimesh.Trimesh(vertices=mesh.vertices.copy(),
+                                  faces=mesh.faces.copy(), process=False)
+            out._plan_tag = "high-detail"
+            return out
+
+        monkeypatch.setattr(dpv, "decimate_mesh", fake_decimate)
+
+        session_data = self._big_session()
+        first = self._render(monkeypatch, session_data)
+        first_plan = first.session_state.data.get('plan_mesh_topo')
+        assert calls == [30]
+
+        session_data['mesh_topo'] = _big_topo()
+        second = self._render(monkeypatch, session_data)
+
+        assert calls == [30, 30]
+        plan = second.session_state.data.get('plan_mesh_topo')
+        assert plan is not first_plan
+        assert second.session_state.data.get('plan_mesh_topo_token') == _source_token(session_data['mesh_topo'])
+
+    def test_falls_back_to_decimated_when_high_detail_fails(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        monkeypatch.setattr(dpv, "PLAN_TARGET_FACES", 30)
+
+        def boom(mesh, target_faces=None):
+            raise RuntimeError("decimation failed")
+
+        monkeypatch.setattr(dpv, "decimate_mesh", boom)
+
+        decimated = _synthetic_topo()
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _big_topo(),
+            "decimated_mesh_topo": decimated,
+        })
+
+        assert st.session_state.data.get('plan_mesh_topo') is None
+        fig = st.charts[0]
+        surface = _surface_traces(fig)
+        assert len(surface) == 1
+        assert len(surface[0].x) == len(decimated.vertices)
+
+    def test_never_renders_design_mesh_when_high_detail_fails(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        monkeypatch.setattr(dpv, "PLAN_TARGET_FACES", 30)
+
+        def boom(mesh, target_faces=None):
+            raise RuntimeError("decimation failed")
+
+        monkeypatch.setattr(dpv, "decimate_mesh", boom)
+
+        design = _synthetic_topo()
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _big_topo(),
+            "decimated_mesh_topo": design,
+        })
+
+        fig = st.charts[0]
+        surface = _surface_traces(fig)
+        assert len(surface) == 1
+        assert len(surface[0].x) == len(design.vertices)

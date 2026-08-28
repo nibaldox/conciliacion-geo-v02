@@ -2,7 +2,8 @@
 Pure helpers for the compliance plan view in the dashboard tab.
 
 The plan view renders the real topographic STL surface as a ``go.Mesh3d``
-colored by elevation and overlays one ``go.Scatter3d`` line per section,
+in neutral gray (flatshaded, lit from the side so slopes read in the
+top-down camera) and overlays one ``go.Scatter3d`` line per section,
 colored green when the section complies and red otherwise.
 
 Everything in this module is a pure function of its inputs so it stays
@@ -11,6 +12,7 @@ unit-testable without a running Streamlit server.
 import numpy as np
 import plotly.graph_objects as go
 
+from core import decimate_mesh
 from core.section_cutter import azimuth_to_direction
 
 PLAN_TITLE = "Plano de Cumplimiento — STL Topográfico Real + Cumplimiento por Perfil"
@@ -19,15 +21,17 @@ COMPLIANCE_THRESHOLD = 70.0
 COLOR_CUMPLE = "#2E7D32"
 COLOR_NO_CUMPLE = "#C62828"
 
-# Terrain-like colorscale that stays readable over a dark background:
-# low ground in deep brown, mid slopes in olive, crests in pale sand.
-TERRAIN_COLORSCALE = [
-    [0.0, "#2E2A25"],
-    [0.25, "#4E4A3F"],
-    [0.5, "#558B2F"],
-    [0.75, "#F9A825"],
-    [1.0, "#FFF8E1"],
-]
+# Maximum detail rendered in the plan view. Full topo is used directly up to
+# PLAN_FULL_FACE_LIMIT; beyond that a high-detail plan mesh decimated to
+# PLAN_TARGET_FACES is built once and reused across reruns.
+PLAN_FULL_FACE_LIMIT = 500_000
+PLAN_TARGET_FACES = 250_000
+
+# Neutral gray visible on the dark theme; elevation is not used for coloring.
+SURFACE_GRAY = "#9A9A9A"
+
+PLAN_MESH_STATE_KEY = "plan_mesh_topo"
+PLAN_MESH_TOKEN_KEY = "plan_mesh_topo_token"
 
 
 def compute_section_status(results) -> dict:
@@ -65,21 +69,80 @@ def compute_section_status(results) -> dict:
     return status
 
 
-def select_plan_mesh(mesh_topo, decimated_mesh_topo, max_full_faces: int = 100_000):
+def select_plan_mesh(mesh_topo, decimated_mesh_topo, plan_mesh_topo=None,
+                     max_full_faces=None):
     """Pick the mesh to render in the plan view.
 
     Uses the full-resolution topography when it is renderable and small
-    enough; when it exceeds ``max_full_faces`` falls back to the decimated
-    mesh. Never uses the design mesh. Returns None when no renderable topo
-    exists — empty, NaN/Inf or otherwise invalid meshes are never returned.
+    enough (default ``PLAN_FULL_FACE_LIMIT``); when it exceeds the limit it
+    prefers the high-detail ``plan_mesh_topo`` and only then falls back to
+    the decimated mesh. Never uses the design mesh. Returns None when no
+    renderable topo exists — empty, NaN/Inf or otherwise invalid meshes are
+    never returned.
     """
+    max_full_faces = PLAN_FULL_FACE_LIMIT if max_full_faces is None else max_full_faces
     if not _is_renderable_mesh(mesh_topo):
         return None
     if len(mesh_topo.faces) <= max_full_faces:
         return mesh_topo
+    if _is_renderable_mesh(plan_mesh_topo):
+        return plan_mesh_topo
     if _is_renderable_mesh(decimated_mesh_topo):
         return decimated_mesh_topo
     return None
+
+
+def plan_high_detail_needed(mesh_topo, session_state) -> bool:
+    """Whether a lazily built high-detail plan mesh is required.
+
+    True only when the full topo exceeds ``PLAN_FULL_FACE_LIMIT`` and no
+    renderable high-detail mesh is cached for the current source token.
+    """
+    if not _is_renderable_mesh(mesh_topo):
+        return False
+    if len(mesh_topo.faces) <= PLAN_FULL_FACE_LIMIT:
+        return False
+    cached = session_state.get(PLAN_MESH_STATE_KEY)
+    return not (
+        _is_renderable_mesh(cached)
+        and session_state.get(PLAN_MESH_TOKEN_KEY) == _mesh_source_token(mesh_topo)
+    )
+
+
+def ensure_plan_mesh_topo(mesh_topo, session_state, *, full_face_limit=None,
+                          target_faces=None):
+    """Return the highest-detail renderable topo mesh for the plan view.
+
+    Uses the full topo when it is renderable and at or below
+    ``full_face_limit``. When the full topo is too large it builds (once) a
+    high-detail ``plan_mesh_topo`` decimated to ``target_faces`` through
+    the public ``core.decimate_mesh`` and caches it in ``session_state``
+    next to a source token; subsequent reruns reuse it while the token
+    matches. Returns None when the high-detail mesh cannot be built or is
+    not renderable — the caller then falls back to the existing decimated
+    topo. Never returns the design mesh.
+    """
+    full_face_limit = PLAN_FULL_FACE_LIMIT if full_face_limit is None else full_face_limit
+    target_faces = PLAN_TARGET_FACES if target_faces is None else target_faces
+    if not _is_renderable_mesh(mesh_topo):
+        return None
+    if len(mesh_topo.faces) <= full_face_limit:
+        return mesh_topo
+    token = _mesh_source_token(mesh_topo)
+    cached = session_state.get(PLAN_MESH_STATE_KEY)
+    if (_is_renderable_mesh(cached)
+            and session_state.get(PLAN_MESH_TOKEN_KEY) == token):
+        return cached
+    plan = None
+    try:
+        plan = decimate_mesh(mesh_topo, target_faces=target_faces)
+    except Exception:
+        plan = None
+    if not _is_renderable_mesh(plan):
+        return None
+    session_state[PLAN_MESH_STATE_KEY] = plan
+    session_state[PLAN_MESH_TOKEN_KEY] = token
+    return plan
 
 
 def build_plan_view_figure(mesh_topo, sections, section_status) -> go.Figure:
@@ -154,6 +217,21 @@ def _is_renderable_mesh(mesh) -> bool:
     return True
 
 
+def _mesh_source_token(mesh) -> tuple:
+    """Hashable token identifying the current topo source object.
+
+    Changes whenever a different mesh object is loaded, so a stale cached
+    high-detail mesh is rebuilt after a new upload or a hot reload.
+    """
+    vertices = getattr(mesh, 'vertices', None)
+    faces = getattr(mesh, 'faces', None)
+    return (
+        id(mesh),
+        len(vertices) if vertices is not None else 0,
+        len(faces) if faces is not None else 0,
+    )
+
+
 def _mesh_bounds(mesh) -> dict:
     """Axis-aligned bounds of a mesh as a dict of (min, max) tuples."""
     if mesh is None:
@@ -169,10 +247,14 @@ def _mesh_bounds(mesh) -> dict:
 
 
 def _add_surface_trace(fig: go.Figure, mesh) -> None:
-    """Add the real topo surface as a Mesh3d colored by elevation."""
+    """Add the real topo surface as a neutral gray Mesh3d.
+
+    Elevation is not used for coloring: a single flat gray keeps the
+    surface legible over the dark theme while flatshading plus a lateral
+    light reveals faces and slopes in the top-down camera.
+    """
     verts = np.asarray(mesh.vertices, dtype=float)
     faces = np.asarray(mesh.faces)
-    elevations = verts[:, 2]
     fig.add_trace(go.Mesh3d(
         x=verts[:, 0],
         y=verts[:, 1],
@@ -180,11 +262,9 @@ def _add_surface_trace(fig: go.Figure, mesh) -> None:
         i=faces[:, 0],
         j=faces[:, 1],
         k=faces[:, 2],
-        intensity=elevations,
-        colorscale=TERRAIN_COLORSCALE,
-        cmin=float(elevations.min()),
-        cmax=float(elevations.max()),
+        color=SURFACE_GRAY,
         opacity=1.0,
+        flatshading=True,
         showscale=False,
         name=MESH_NAME,
         showlegend=False,
@@ -193,10 +273,10 @@ def _add_surface_trace(fig: go.Figure, mesh) -> None:
             "Elevación: %{z:.1f} m<extra></extra>"
         ),
         lighting=dict(
-            ambient=0.6, diffuse=0.85, specular=0.15,
-            roughness=0.5, fresnel=0.2,
+            ambient=0.35, diffuse=0.95, specular=0.05,
+            roughness=0.9, fresnel=0.1,
         ),
-        lightposition=dict(x=5.0e4, y=5.0e4, z=1.0e5),
+        lightposition=dict(x=-9.0e4, y=9.0e4, z=4.0e4),
     ))
 
 

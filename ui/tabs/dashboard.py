@@ -269,17 +269,22 @@ def _render_sector_compliance_map(results) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_plan_view(results, config: dict) -> None:
-    """Vista en planta: topografía STL real (Mesh3d) + perfiles por score.
+    """Vista en planta: topografía STL real (Mesh3d gris) + perfiles por score.
 
-    Fondo: malla STL de topografía real coloreada por elevación.
+    Fondo: malla STL de topografía real en gris neutro, con el máximo
+    detalle razonable (full hasta 500k caras; high-detail 250k por encima).
     Líneas: cada perfil como segmento 3D verde (CUMPLE) o rojo (NO CUMPLE).
 
     Score por sección = media de bench_score (MATCH) o section_score
     canónico; verde si score >= 70, rojo si < 70.
     """
+    from contextlib import nullcontext
+
     from ui.tabs.dashboard_plan_view import (
         build_plan_view_figure,
         compute_section_status,
+        ensure_plan_mesh_topo,
+        plan_high_detail_needed,
         select_plan_mesh,
     )
 
@@ -294,7 +299,14 @@ def _render_plan_view(results, config: dict) -> None:
 
     mesh_topo = st.session_state.get('mesh_topo')
     decimated_mesh_topo = st.session_state.get('decimated_mesh_topo')
-    mesh = select_plan_mesh(mesh_topo, decimated_mesh_topo)
+
+    spinner = (st.spinner("Preparando superficie de detalle...")
+               if plan_high_detail_needed(mesh_topo, st.session_state)
+               else nullcontext())
+    with spinner:
+        plan_mesh_topo = ensure_plan_mesh_topo(mesh_topo, st.session_state)
+
+    mesh = select_plan_mesh(mesh_topo, decimated_mesh_topo, plan_mesh_topo)
 
     if mesh_topo is None:
         st.warning("⚠️ No hay STL topográfico real cargado; no se dibuja la superficie.")
