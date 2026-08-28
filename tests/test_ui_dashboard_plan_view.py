@@ -246,8 +246,30 @@ class TestLegend:
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
 
         by_name = {t.name: t for t in _legend_traces(fig)}
-        assert by_name["Cumple"].marker.color == "#2E7D32"
-        assert by_name["No cumple"].marker.color == "#C62828"
+        assert by_name["Cumple"].line.color == "#2E7D32"
+        assert by_name["No cumple"].line.color == "#C62828"
+
+    def test_legend_traces_carry_a_single_none_point(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        for trace in _legend_traces(fig):
+            assert list(trace.x) == [None]
+            assert list(trace.y) == [None]
+            assert list(trace.z) == [None]
+
+    def test_legend_traces_are_lines_with_visible_width(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        for trace in _legend_traces(fig):
+            assert trace.mode == "lines"
+            assert trace.line is not None
+            assert trace.line.width > 0
+
+    def test_legend_traces_have_hover_disabled(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        for trace in _legend_traces(fig):
+            assert trace.hoverinfo == "none"
 
 
 # ---------------------------------------------------------------------------

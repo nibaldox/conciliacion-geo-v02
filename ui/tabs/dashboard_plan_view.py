@@ -230,15 +230,20 @@ def _add_section_trace(fig: go.Figure, section, status: dict, z_overlay: float) 
 
 
 def _add_legend_traces(fig: go.Figure) -> None:
-    """Add two empty legend traces so the Cumple / No cumple legend reads cleanly."""
-    fig.add_trace(go.Scatter3d(
-        x=[], y=[], z=[], mode='markers', name='Cumple',
-        marker=dict(color=COLOR_CUMPLE, size=10), showlegend=True,
-    ))
-    fig.add_trace(go.Scatter3d(
-        x=[], y=[], z=[], mode='markers', name='No cumple',
-        marker=dict(color=COLOR_NO_CUMPLE, size=10), showlegend=True,
-    ))
+    """Add two legend traces so the Cumple / No cumple legend renders.
+
+    Plotly drops fully empty traces (``x=[], y=[], z=[]``) from the legend,
+    so each trace carries a single ``None`` point: it counts as data for the
+    legend while drawing no geometry and leaving the scene bounds untouched.
+    A thin lines style keeps the legend swatch visible.
+    """
+    for name, color in (('Cumple', COLOR_CUMPLE),
+                        ('No cumple', COLOR_NO_CUMPLE)):
+        fig.add_trace(go.Scatter3d(
+            x=[None], y=[None], z=[None], mode='lines',
+            line=dict(color=color, width=10),
+            name=name, showlegend=True, hoverinfo='none',
+        ))
 
 
 def _update_layout(fig: go.Figure) -> None:
