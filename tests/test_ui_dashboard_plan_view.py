@@ -110,6 +110,17 @@ class TestCameraAndLayout:
         assert abs(cam.eye.x - cam.center.x) < 1e-9
         assert abs(cam.eye.y - cam.center.y) < 1e-9
 
+    def test_camera_normalized_for_large_coordinates(self):
+        mesh = _synthetic_topo()
+        mesh.apply_translation([93378.6, 20810.2, 3046.1])
+        fig = build_plan_view_figure(mesh, _sections(), _status())
+
+        cam = fig.layout.scene.camera
+        assert cam.center.to_plotly_json() == dict(x=0.0, y=0.0, z=0.0)
+        assert cam.eye.x == 0.0
+        assert cam.eye.y == 0.0
+        assert cam.eye.z > 0.0
+
     def test_axes_titled_and_z_hidden(self):
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
 
@@ -181,6 +192,15 @@ class TestProfileTraces:
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
 
         assert all(t.showlegend is False for t in _profile_traces(fig))
+
+    def test_omits_sections_missing_from_status(self):
+        sections = _sections()
+        status = {"S01": {"score": 82.0, "cumple": True}}
+        fig = build_plan_view_figure(_synthetic_topo(), sections, status)
+
+        profiles = _profile_traces(fig)
+        assert [t.name for t in profiles] == ["S01"]
+        assert all("NO CUMPLE" not in t.hovertemplate for t in profiles)
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +275,17 @@ class TestComputeSectionStatus:
         status = compute_section_status(results)
 
         assert status["G"]["score"] == 80.0
+
+    def test_fallback_to_mean_when_one_row_missing_section_score(self):
+        results = [
+            self._row("H", 80.0, section_score=95.0),
+            self._row("H", 60.0),
+        ]
+
+        status = compute_section_status(results)
+
+        assert status["H"]["score"] == 70.0
+        assert status["H"]["cumple"] is True
 
     def test_threshold_cumple_at_70(self):
         status = compute_section_status([self._row("E", 70.0)])

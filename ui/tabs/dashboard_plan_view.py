@@ -34,9 +34,10 @@ def compute_section_status(results) -> dict:
     """Compute per-section compliance status from comparison results.
 
     Only MATCH rows participate. Prefers the canonical ``section_score``
-    when every MATCH row of a section agrees on it; otherwise falls back
-    to the mean of ``bench_score``. The resulting score is rounded to one
-    decimal and a section is compliant when score >= 70.
+    when every MATCH row of a section carries a numeric ``section_score``
+    and they all agree; otherwise falls back to the mean of
+    ``bench_score``. The resulting score is rounded to one decimal and a
+    section is compliant when score >= 70.
     """
     rows_by_section: dict = {}
     for r in results:
@@ -48,7 +49,8 @@ def compute_section_status(results) -> dict:
     for section, rows in rows_by_section.items():
         canonical = [r['section_score'] for r in rows
                      if isinstance(r.get('section_score'), (int, float))]
-        if canonical and all(abs(c - canonical[0]) <= 1e-9 for c in canonical):
+        if len(canonical) == len(rows) and all(
+                abs(c - canonical[0]) <= 1e-9 for c in canonical):
             raw = float(canonical[0])
         else:
             scores = [float(r.get('bench_score', 0.0)) for r in rows]
@@ -96,11 +98,13 @@ def build_plan_view_figure(mesh_topo, sections, section_status) -> go.Figure:
         _add_surface_trace(fig, mesh_topo)
 
     for sec in sections:
-        status = section_status.get(sec.name, {'score': 0.0, 'cumple': False})
+        status = section_status.get(sec.name)
+        if status is None:
+            continue
         _add_section_trace(fig, sec, status, z_overlay)
 
     _add_legend_traces(fig)
-    _update_layout(fig, bounds)
+    _update_layout(fig)
     return fig
 
 
@@ -195,17 +199,13 @@ def _add_legend_traces(fig: go.Figure) -> None:
     ))
 
 
-def _update_layout(fig: go.Figure, bounds: dict) -> None:
-    """Configure a top-down orthographic plan view with Este/Norte axes."""
-    cx = (bounds['x'][0] + bounds['x'][1]) / 2.0
-    cy = (bounds['y'][0] + bounds['y'][1]) / 2.0
-    cz = (bounds['z'][0] + bounds['z'][1]) / 2.0
-    span = max(
-        bounds['x'][1] - bounds['x'][0],
-        bounds['y'][1] - bounds['y'][0],
-        bounds['z'][1] - bounds['z'][0],
-        1.0,
-    )
+def _update_layout(fig: go.Figure) -> None:
+    """Configure a top-down orthographic plan view with Este/Norte axes.
+
+    Camera values are normalized scene coordinates, not geographic ones:
+    the center is the scene origin and the eye sits directly above it, so
+    the framing is independent of where the mesh is located in the world.
+    """
     fig.update_layout(
         title=PLAN_TITLE,
         height=700,
@@ -216,8 +216,8 @@ def _update_layout(fig: go.Figure, bounds: dict) -> None:
             zaxis=dict(title='Elevación (m)', visible=False),
             camera=dict(
                 projection=dict(type='orthographic'),
-                center=dict(x=cx, y=cy, z=cz),
-                eye=dict(x=cx, y=cy, z=cz + span * 2.5),
+                center=dict(x=0.0, y=0.0, z=0.0),
+                eye=dict(x=0.0, y=0.0, z=2.5),
                 up=dict(x=0.0, y=1.0, z=0.0),
             ),
         ),
