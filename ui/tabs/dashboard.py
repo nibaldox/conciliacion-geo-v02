@@ -300,8 +300,8 @@ def _render_plan_view(results, config: dict) -> None:
         st.warning("⚠️ No hay STL topográfico real cargado; no se dibuja la superficie.")
     elif mesh is None:
         st.warning(
-            "⚠️ La topografía supera el límite de caras y no hay "
-            "malla decimada disponible."
+            "⚠️ La topografía no contiene geometría renderizable "
+            "o no hay una malla optimizada disponible."
         )
 
     fig = build_plan_view_figure(mesh, sections, section_status)

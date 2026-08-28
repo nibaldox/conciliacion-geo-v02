@@ -36,6 +36,33 @@ def _surface_traces(fig):
     return [t for t in fig.data if t.type == "mesh3d"]
 
 
+def _empty_topo():
+    return trimesh.Trimesh(vertices=[], faces=[])
+
+
+def _nan_topo():
+    mesh = _synthetic_topo()
+    verts = np.asarray(mesh.vertices, dtype=float).copy()
+    verts[0, 2] = np.nan
+    mesh.vertices = verts
+    return mesh
+
+
+def _inf_topo():
+    mesh = _synthetic_topo()
+    verts = np.asarray(mesh.vertices, dtype=float).copy()
+    verts[0, 2] = np.inf
+    mesh.vertices = verts
+    return mesh
+
+
+def _out_of_range_faces_topo():
+    base = _synthetic_topo()
+    faces = np.asarray(base.faces, dtype=int).copy()
+    faces[0, 0] = 9999
+    return trimesh.Trimesh(vertices=base.vertices, faces=faces, process=False)
+
+
 def _profile_traces(fig):
     return [t for t in fig.data if t.type == "scatter3d"
             and t.hovertemplate and "Puntaje de logro" in t.hovertemplate]
@@ -304,6 +331,58 @@ class TestComputeSectionStatus:
 
         assert compute_section_status(results) == {}
 
+    def test_omits_section_when_only_nan_bench_score(self):
+        status = compute_section_status([self._row("A", np.nan)])
+
+        assert "A" not in status
+
+    def test_omits_section_when_only_nan_section_score(self):
+        status = compute_section_status([self._row("A", np.nan, section_score=np.nan)])
+
+        assert "A" not in status
+
+    def test_fallback_uses_only_finite_bench_scores(self):
+        results = [
+            self._row("A", 80.0),
+            self._row("A", np.nan),
+            self._row("A", 60.0),
+        ]
+
+        status = compute_section_status(results)
+
+        assert status["A"]["score"] == 70.0
+        assert status["A"]["cumple"] is True
+
+    def test_canonical_requires_all_finite_section_scores(self):
+        results = [
+            self._row("A", 80.0, section_score=95.0),
+            self._row("A", 60.0, section_score=np.nan),
+        ]
+
+        status = compute_section_status(results)
+
+        assert status["A"]["score"] == 70.0
+
+    def test_nan_section_score_falls_back_to_finite_bench(self):
+        results = [
+            self._row("A", 80.0, section_score=np.nan),
+            self._row("A", 60.0, section_score=np.nan),
+        ]
+
+        status = compute_section_status(results)
+
+        assert status["A"]["score"] == 70.0
+        assert status["A"]["cumple"] is True
+
+    def test_omitted_nan_section_is_not_painted_red(self):
+        results = [self._row("A", np.nan)]
+        status = compute_section_status(results)
+        sections = [SectionLine(name="A", origin=np.array([0.0, 0.0]),
+                                azimuth=0.0, length=20.0, sector="Norte")]
+        fig = build_plan_view_figure(_synthetic_topo(), sections, status)
+
+        assert _profile_traces(fig) == []
+
 
 # ---------------------------------------------------------------------------
 # select_plan_mesh: full vs decimated, never design
@@ -333,6 +412,21 @@ class TestSelectPlanMesh:
     def test_returns_none_when_both_none(self):
         assert select_plan_mesh(None, None) is None
 
+    def test_returns_none_for_empty_mesh(self):
+        assert select_plan_mesh(_empty_topo(), None) is None
+
+    def test_returns_none_for_empty_mesh_even_with_renderable_decimated(self):
+        assert select_plan_mesh(_empty_topo(), _synthetic_topo()) is None
+
+    def test_returns_none_for_nan_vertices(self):
+        assert select_plan_mesh(_nan_topo(), None) is None
+
+    def test_returns_none_for_inf_vertices(self):
+        assert select_plan_mesh(_inf_topo(), None) is None
+
+    def test_returns_none_for_out_of_range_face_indices(self):
+        assert select_plan_mesh(_out_of_range_faces_topo(), None) is None
+
 
 # ---------------------------------------------------------------------------
 # build_plan_view_figure with no mesh: no fabricated surface
@@ -351,6 +445,47 @@ class TestBuildWithoutMesh:
 
         assert len(_surface_traces(fig)) == 1
         assert len(_legend_traces(fig)) == 2
+
+
+# ---------------------------------------------------------------------------
+# build_plan_view_figure with invalid mesh: no crash, no Mesh3d, z=0 profiles
+# ---------------------------------------------------------------------------
+
+class TestBuildWithInvalidMesh:
+    def test_empty_mesh_no_crash_no_surface(self):
+        fig = build_plan_view_figure(_empty_topo(), _sections(), _status())
+
+        assert _surface_traces(fig) == []
+        assert len(_profile_traces(fig)) == 2
+        assert len(_legend_traces(fig)) == 2
+
+    def test_empty_mesh_profiles_at_z0(self):
+        fig = build_plan_view_figure(_empty_topo(), _sections(), _status())
+
+        for trace in _profile_traces(fig):
+            assert list(trace.z) == [0.0, 0.0]
+
+    def test_nan_vertices_no_crash_no_surface(self):
+        fig = build_plan_view_figure(_nan_topo(), _sections(), _status())
+
+        assert _surface_traces(fig) == []
+        assert len(_profile_traces(fig)) == 2
+        for trace in _profile_traces(fig):
+            assert list(trace.z) == [0.0, 0.0]
+
+    def test_inf_vertices_no_crash_no_surface(self):
+        fig = build_plan_view_figure(_inf_topo(), _sections(), _status())
+
+        assert _surface_traces(fig) == []
+        assert len(_profile_traces(fig)) == 2
+        for trace in _profile_traces(fig):
+            assert list(trace.z) == [0.0, 0.0]
+
+    def test_out_of_range_faces_no_crash_no_surface(self):
+        fig = build_plan_view_figure(_out_of_range_faces_topo(), _sections(), _status())
+
+        assert _surface_traces(fig) == []
+        assert len(_profile_traces(fig)) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -423,3 +558,27 @@ class TestRenderPlanView:
         assert len(st.charts) == 1
         fig = st.charts[0]
         assert [t.type for t in fig.data].count("mesh3d") == 1
+
+    def test_warns_when_topo_mesh_is_unrenderable(self, monkeypatch):
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _empty_topo(),
+            "decimated_mesh_topo": None,
+        })
+
+        assert st.warnings
+        assert any("geometría renderizable" in w for w in st.warnings)
+        assert len(st.charts) == 1
+        fig = st.charts[0]
+        assert [t.type for t in fig.data].count("mesh3d") == 0
+
+    def test_warns_when_nan_topo_mesh_is_unrenderable(self, monkeypatch):
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _nan_topo(),
+            "decimated_mesh_topo": None,
+        })
+
+        assert st.warnings
+        assert any("geometría renderizable" in w for w in st.warnings)
+        assert [t.type for t in st.charts[0].data].count("mesh3d") == 0

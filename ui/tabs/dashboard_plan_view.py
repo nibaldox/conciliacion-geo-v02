@@ -34,10 +34,12 @@ def compute_section_status(results) -> dict:
     """Compute per-section compliance status from comparison results.
 
     Only MATCH rows participate. Prefers the canonical ``section_score``
-    when every MATCH row of a section carries a numeric ``section_score``
-    and they all agree; otherwise falls back to the mean of
-    ``bench_score``. The resulting score is rounded to one decimal and a
-    section is compliant when score >= 70.
+    when every MATCH row of a section carries a finite numeric
+    ``section_score`` and they all agree; otherwise falls back to the mean
+    of the finite ``bench_score`` values. Sections with no finite
+    ``bench_score`` are omitted entirely — a missing score must never be
+    rendered as a red (NO CUMPLE) profile. The resulting score is rounded
+    to one decimal and a section is compliant when score >= 70.
     """
     rows_by_section: dict = {}
     for r in results:
@@ -48,13 +50,16 @@ def compute_section_status(results) -> dict:
     status: dict = {}
     for section, rows in rows_by_section.items():
         canonical = [r['section_score'] for r in rows
-                     if isinstance(r.get('section_score'), (int, float))]
+                     if _is_finite_number(r.get('section_score'))]
         if len(canonical) == len(rows) and all(
                 abs(c - canonical[0]) <= 1e-9 for c in canonical):
             raw = float(canonical[0])
         else:
-            scores = [float(r.get('bench_score', 0.0)) for r in rows]
-            raw = sum(scores) / len(scores) if scores else 0.0
+            scores = [float(r['bench_score']) for r in rows
+                      if _is_finite_number(r.get('bench_score'))]
+            if not scores:
+                continue
+            raw = sum(scores) / len(scores)
         score = round(raw, 1)
         status[section] = {'score': score, 'cumple': score >= COMPLIANCE_THRESHOLD}
     return status
@@ -63,15 +68,16 @@ def compute_section_status(results) -> dict:
 def select_plan_mesh(mesh_topo, decimated_mesh_topo, max_full_faces: int = 100_000):
     """Pick the mesh to render in the plan view.
 
-    Uses the full-resolution topography when it is small enough; when it
-    exceeds ``max_full_faces`` falls back to the decimated mesh. Never
-    uses the design mesh. Returns None when no renderable topo exists.
+    Uses the full-resolution topography when it is renderable and small
+    enough; when it exceeds ``max_full_faces`` falls back to the decimated
+    mesh. Never uses the design mesh. Returns None when no renderable topo
+    exists — empty, NaN/Inf or otherwise invalid meshes are never returned.
     """
-    if mesh_topo is None:
+    if not _is_renderable_mesh(mesh_topo):
         return None
     if len(mesh_topo.faces) <= max_full_faces:
         return mesh_topo
-    if decimated_mesh_topo is not None:
+    if _is_renderable_mesh(decimated_mesh_topo):
         return decimated_mesh_topo
     return None
 
@@ -82,15 +88,16 @@ def build_plan_view_figure(mesh_topo, sections, section_status) -> go.Figure:
     Parameters
     ----------
     mesh_topo:        Already-selected real topo mesh (full or decimated),
-                      possibly None. When None no surface is drawn and the
-                      section lines are placed at z=0.
+                      possibly None. When None or not renderable (empty,
+                      NaN/Inf vertices, invalid faces) no surface is drawn
+                      and the section lines are placed at z=0.
     sections:         Iterable of SectionLine objects.
     section_status:   Mapping section name -> {'score', 'cumple'}.
     """
     fig = go.Figure()
-    bounds = _mesh_bounds(mesh_topo)
     z_overlay = 0.0
-    if mesh_topo is not None:
+    if _is_renderable_mesh(mesh_topo):
+        bounds = _mesh_bounds(mesh_topo)
         xspan = bounds['x'][1] - bounds['x'][0]
         yspan = bounds['y'][1] - bounds['y'][0]
         zspan = bounds['z'][1] - bounds['z'][0]
@@ -111,6 +118,41 @@ def build_plan_view_figure(mesh_topo, sections, section_status) -> go.Figure:
 # ---------------------------------------------------------------------------
 # Private builders
 # ---------------------------------------------------------------------------
+
+def _is_finite_number(value) -> bool:
+    """True only for real, finite numbers (bool excluded)."""
+    if isinstance(value, bool):
+        return False
+    if not isinstance(value, (int, float)):
+        return False
+    return bool(np.isfinite(float(value)))
+
+
+def _is_renderable_mesh(mesh) -> bool:
+    """Whether a mesh holds geometry safe to render as a Mesh3d surface.
+
+    Requires non-empty triangular faces with all vertex indices in range
+    and a non-empty set of finite vertices. Invalid meshes (empty, or
+    carrying NaN/Inf vertices or out-of-range face indices) must never
+    reach the Mesh3d builder.
+    """
+    if mesh is None:
+        return False
+    try:
+        verts = np.asarray(mesh.vertices)
+        faces = np.asarray(mesh.faces)
+    except (TypeError, ValueError):
+        return False
+    if verts.ndim != 2 or verts.shape[0] == 0 or verts.shape[1] != 3:
+        return False
+    if faces.ndim != 2 or faces.shape[0] == 0 or faces.shape[1] != 3:
+        return False
+    if not np.isfinite(verts).all():
+        return False
+    if faces.min() < 0 or faces.max() >= verts.shape[0]:
+        return False
+    return True
+
 
 def _mesh_bounds(mesh) -> dict:
     """Axis-aligned bounds of a mesh as a dict of (min, max) tuples."""
