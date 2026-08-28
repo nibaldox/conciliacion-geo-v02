@@ -11,6 +11,7 @@ arguments, mirroring the real behaviour.
 """
 import contextlib
 import functools
+import hashlib
 import importlib
 import inspect
 import sys
@@ -178,6 +179,62 @@ class TestMeshCacheKey:
         b = step1.build_mesh_cache_key("topo", mesh, "t.stl", 200)
         assert a == b
 
+    def test_distinct_digests_never_collide_with_same_identity(self):
+        mesh = _box()
+        a = step1.build_mesh_cache_key(
+            "topo", mesh, "t.stl", 200, source_sha256="a" * 64)
+        b = step1.build_mesh_cache_key(
+            "topo", mesh, "t.stl", 200, source_sha256="b" * 64)
+        assert a != b
+
+    def test_role_stays_separate_across_same_digest(self):
+        mesh = _box()
+        design = step1.build_mesh_cache_key(
+            "design", mesh, "d.stl", 100, source_sha256="a" * 64)
+        topo = step1.build_mesh_cache_key(
+            "topo", mesh, "d.stl", 100, source_sha256="a" * 64)
+        assert design != topo
+
+
+# ---------------------------------------------------------------------------
+# compute_file_sha256: deterministic chunked source digest
+# ---------------------------------------------------------------------------
+
+class TestFileSha256:
+    def test_returns_64_hex_digest(self, tmp_path):
+        p = tmp_path / "source.stl"
+        p.write_bytes(b"STL content")
+
+        digest = step1.compute_file_sha256(str(p))
+
+        assert isinstance(digest, str)
+        assert len(digest) == 64
+        assert all(c in "0123456789abcdef" for c in digest)
+
+    def test_deterministic_for_same_file(self, tmp_path):
+        p = tmp_path / "source.stl"
+        p.write_bytes(b"STL content")
+
+        assert step1.compute_file_sha256(str(p)) == step1.compute_file_sha256(str(p))
+
+    def test_changes_with_a_single_byte(self, tmp_path):
+        p = tmp_path / "source.stl"
+        p.write_bytes(b"STL content A")
+        base = step1.compute_file_sha256(str(p))
+
+        p.write_bytes(b"STL content B")
+
+        assert step1.compute_file_sha256(str(p)) != base
+
+    def test_chunked_digest_matches_reference(self, tmp_path):
+        p = tmp_path / "big.stl"
+        p.write_bytes(b"abcdefghijklmnopqrstuvwxyz" * 1000)
+
+        got = step1.compute_file_sha256(str(p), chunk_size=7)
+        expected = hashlib.sha256(p.read_bytes()).hexdigest()
+
+        assert got == expected
+
 
 # ---------------------------------------------------------------------------
 # _cached_decimate: no cross-mesh collision under the same target
@@ -276,6 +333,21 @@ class TestSurfaceStateCleanup:
         assert ss.get('mesh_design') is None
         assert ss.get('decimated_mesh_design') is None
 
+    def test_clear_surface_state_resets_digests_and_figures(self, monkeypatch):
+        mod = _fresh_step1(monkeypatch)
+        ss = mod.st.session_state
+        ss.mesh_design_source_sha256 = "a" * 64
+        ss.mesh_topo_source_sha256 = "b" * 64
+        ss['_3d_fig'] = ("stale", object())
+        ss['_contour_fig'] = ("stale", object())
+
+        mod._clear_surface_state()
+
+        assert ss.get('mesh_design_source_sha256') is None
+        assert ss.get('mesh_topo_source_sha256') is None
+        assert ss.get('_3d_fig') is None
+        assert ss.get('_contour_fig') is None
+
     def test_load_meshes_clears_plan_and_uses_distinct_keys(self, monkeypatch):
         mod = _fresh_step1(monkeypatch)
         mod.st.session_state.step = 1
@@ -292,7 +364,7 @@ class TestSurfaceStateCleanup:
                 self.size = size
 
             def read(self):
-                return b""
+                return b"design-bytes" if "design" in self.name else b"topo-bytes"
 
         mod._load_meshes(FakeFile("design.stl", 100), FakeFile("topo.stl", 200))
 
@@ -302,3 +374,8 @@ class TestSurfaceStateCleanup:
         assert ss.decimated_mesh_design is not None
         assert ss.decimated_mesh_topo is not None
         assert _cache_roles(mod.st.cache_resource) == {"design", "topo"}
+        digest_design = ss.get('mesh_design_source_sha256')
+        digest_topo = ss.get('mesh_topo_source_sha256')
+        assert digest_design and digest_topo
+        assert len(digest_design) == 64 and len(digest_topo) == 64
+        assert digest_design != digest_topo

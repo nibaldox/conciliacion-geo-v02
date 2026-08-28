@@ -2,6 +2,7 @@
 Step 1: Load design and topographic surfaces (STL/OBJ/PLY/DXF).
 Renders the file upload widgets, 3D view, and plan/contour view.
 """
+import hashlib
 import logging
 import os
 import tempfile
@@ -17,26 +18,46 @@ from ui.plots import draw_sections_on_figure, mesh_to_contour_data
 logger = logging.getLogger(__name__)
 
 
-def build_mesh_cache_key(role: str, mesh, filename=None, filesize=None) -> tuple:
+def build_mesh_cache_key(role: str, mesh, filename=None, filesize=None,
+                         source_sha256=None) -> tuple:
     """Build a hashable identity key for a mesh decimation cache entry.
 
     ``st.cache_resource`` excludes underscore-prefixed arguments from its
     hash, so a decimated design mesh and a decimated topo mesh with the
     same ``target_faces`` would collide. The key keeps them apart: it
-    carries the role (design vs topo), the mesh object id, its vertex and
-    face counts and the originating file identity, so the entry also
-    changes whenever a new file or object is loaded.
+    carries the role (design vs topo), the source content digest, the mesh
+    vertex and face counts and the originating file identity, so the entry
+    changes whenever a new file or object is loaded. When no source digest
+    is available (legacy / hot reload) the mesh object id is kept as a
+    fallback identity.
     """
     vertices = getattr(mesh, 'vertices', None)
     faces = getattr(mesh, 'faces', None)
+    source = source_sha256 if source_sha256 is not None else id(mesh)
     return (
         role,
-        id(mesh),
+        source,
         len(vertices) if vertices is not None else 0,
         len(faces) if faces is not None else 0,
         filename,
         filesize,
     )
+
+
+def compute_file_sha256(path: str, chunk_size: int = 1024 * 1024) -> str:
+    """SHA-256 hex digest of a file, read in chunks.
+
+    Streams the file so a large STL is not loaded into memory twice: only
+    the digest is exposed, never the file content.
+    """
+    digest = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        while True:
+            chunk = fh.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 @st.cache_resource(show_spinner=False)
@@ -110,6 +131,10 @@ def _clear_surface_state() -> None:
     st.session_state.mesh_design_file_size = None
     st.session_state.mesh_topo_file_name = None
     st.session_state.mesh_topo_file_size = None
+    st.session_state.mesh_design_source_sha256 = None
+    st.session_state.mesh_topo_source_sha256 = None
+    st.session_state['_3d_fig'] = None
+    st.session_state['_contour_fig'] = None
 
 
 @st.fragment
@@ -162,6 +187,9 @@ def _load_meshes(file_design, file_topo) -> None:
             f.write(file_topo.read())
             f_topo = f.name
 
+        digest_design = compute_file_sha256(f_design)
+        digest_topo = compute_file_sha256(f_topo)
+
         with st.spinner("Cargando y decimando superficies..."):
             mesh_d = load_mesh(f_design)
             mesh_t = load_mesh(f_topo)
@@ -175,10 +203,12 @@ def _load_meshes(file_design, file_topo) -> None:
             # topo pass distinct cache keys so their decimations never
             # collide under the same target face count.
             st.session_state.decimated_mesh_design = _cached_decimate(
-                build_mesh_cache_key("design", mesh_d, file_design.name, file_design.size),
+                build_mesh_cache_key("design", mesh_d, file_design.name,
+                                     file_design.size, digest_design),
                 mesh_d, DEFAULTS.target_faces_visual)
             st.session_state.decimated_mesh_topo = _cached_decimate(
-                build_mesh_cache_key("topo", mesh_t, file_topo.name, file_topo.size),
+                build_mesh_cache_key("topo", mesh_t, file_topo.name,
+                                     file_topo.size, digest_topo),
                 mesh_t, DEFAULTS.target_faces_visual)
 
             # Store cache keys
@@ -186,6 +216,8 @@ def _load_meshes(file_design, file_topo) -> None:
             st.session_state.mesh_design_file_size = file_design.size
             st.session_state.mesh_topo_file_name = file_topo.name
             st.session_state.mesh_topo_file_size = file_topo.size
+            st.session_state.mesh_design_source_sha256 = digest_design
+            st.session_state.mesh_topo_source_sha256 = digest_topo
 
         st.session_state.step = max(st.session_state.step, 2)
 
@@ -215,13 +247,15 @@ def _build_or_get_3d_figure() -> None:
         build_mesh_cache_key(
             "design", st.session_state.mesh_design,
             st.session_state.get('mesh_design_file_name'),
-            st.session_state.get('mesh_design_file_size')),
+            st.session_state.get('mesh_design_file_size'),
+            st.session_state.get('mesh_design_source_sha256')),
         st.session_state.mesh_design, DEFAULTS.target_faces_visual)
     mt = st.session_state.get('decimated_mesh_topo') or _cached_decimate(
         build_mesh_cache_key(
             "topo", st.session_state.mesh_topo,
             st.session_state.get('mesh_topo_file_name'),
-            st.session_state.get('mesh_topo_file_size')),
+            st.session_state.get('mesh_topo_file_size'),
+            st.session_state.get('mesh_topo_source_sha256')),
         st.session_state.mesh_topo, DEFAULTS.target_faces_visual)
     st.session_state.decimated_mesh_design = md
     st.session_state.decimated_mesh_topo = mt

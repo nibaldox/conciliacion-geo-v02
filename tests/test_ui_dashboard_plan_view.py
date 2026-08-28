@@ -1069,11 +1069,34 @@ class TestRenderPlanViewHighDetail:
         design = _synthetic_topo()
         st = self._render(monkeypatch, {
             "sections": _sections(),
+            "mesh_design": design,
             "mesh_topo": _big_topo(),
-            "decimated_mesh_topo": design,
+            "decimated_mesh_topo": None,
         })
 
-        fig = st.charts[0]
-        surface = _surface_traces(fig)
+        assert _surface_traces(st.charts[0]) == []
+
+    def test_uses_decimated_topo_never_design_when_high_detail_fails(self, monkeypatch):
+        import ui.tabs.dashboard_plan_view as dpv
+
+        monkeypatch.setattr(dpv, "PLAN_FULL_FACE_LIMIT", 50)
+        monkeypatch.setattr(dpv, "PLAN_TARGET_FACES", 30)
+
+        def boom(mesh, target_faces=None):
+            raise RuntimeError("decimation failed")
+
+        monkeypatch.setattr(dpv, "decimate_mesh", boom)
+
+        design = _synthetic_topo()
+        fallback = _big_topo()
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_design": design,
+            "mesh_topo": fallback,
+            "decimated_mesh_topo": fallback,
+        })
+
+        surface = _surface_traces(st.charts[0])
         assert len(surface) == 1
-        assert len(surface[0].x) == len(design.vertices)
+        assert len(surface[0].x) == len(fallback.vertices)
+        assert len(surface[0].x) != len(design.vertices)
