@@ -7,12 +7,12 @@ import trimesh
 
 from core.section_cutter import SectionLine
 from ui.tabs.dashboard_plan_view import (
+    _face_hillshade,
     build_plan_view_figure,
     compute_section_status,
     ensure_plan_mesh_topo,
     plan_high_detail_needed,
     select_plan_mesh,
-    SURFACE_GRAY,
 )
 
 
@@ -107,20 +107,31 @@ class TestSurfaceTrace:
         assert "contour" not in types
         assert "heatmap" not in types
 
-    def test_mesh_has_no_elevation_intensity_or_colorscale(self):
+    def test_mesh_uses_per_face_grayscale_intensity(self):
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
 
         surface = _surface_traces(fig)[0]
-        assert surface.intensity is None
-        assert surface.colorscale is None
-        assert surface.cmin is None
-        assert surface.cmax is None
+        assert surface.intensity is not None
+        assert len(surface.intensity) == len(surface.i)
+        assert surface.intensitymode == "cell"
+        assert surface.cmin == 0.0
+        assert surface.cmax == 1.0
+        assert surface.showscale is False
 
-    def test_mesh_is_neutral_gray(self):
+    def test_mesh_colorscale_is_grayscale_only(self):
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
 
         surface = _surface_traces(fig)[0]
-        assert surface.color == SURFACE_GRAY
+        assert surface.colorscale is not None
+        for _, color in surface.colorscale:
+            assert color.startswith('#') and len(color) == 7
+            assert color[1:3] == color[3:5] == color[5:7]
+
+    def test_mesh_has_no_flat_color_override(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        surface = _surface_traces(fig)[0]
+        assert surface.color is None
 
     def test_mesh_flatshading_true(self):
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
@@ -153,6 +164,91 @@ class TestSurfaceTrace:
         assert surface.showscale is False
         assert surface.showlegend is False
         assert surface.opacity == 1.0
+
+
+# ---------------------------------------------------------------------------
+# _face_hillshade: pure per-face grayscale intensity
+# ---------------------------------------------------------------------------
+
+class TestFaceHillshade:
+    def _mesh_from_arrays(self, verts, faces):
+        return trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+
+    def test_output_length_matches_face_count(self):
+        mesh = _synthetic_topo()
+        intensity = _face_hillshade(mesh.vertices, mesh.faces)
+
+        assert len(intensity) == len(mesh.faces)
+        assert isinstance(intensity, np.ndarray)
+
+    def test_output_finite_and_in_unit_interval(self):
+        mesh = _synthetic_topo()
+        intensity = _face_hillshade(mesh.vertices, mesh.faces)
+
+        assert np.isfinite(intensity).all()
+        assert intensity.min() >= 0.0
+        assert intensity.max() <= 1.0
+
+    def test_different_normal_orientations_yield_different_intensity(self):
+        verts = np.array([
+            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0],   # horizontal up
+            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 1.0],   # vertical xz
+        ])
+        faces = np.array([[0, 1, 2], [3, 4, 5]])
+
+        intensity = _face_hillshade(verts, faces)
+
+        assert intensity[0] != intensity[1]
+
+    def test_horizontal_levels_at_different_elevation_differ_subtly(self):
+        verts = np.array([
+            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0],   # low bench
+            [0.0, 0.0, 5.0], [1.0, 0.0, 5.0], [0.0, 1.0, 5.0],   # high bench
+        ])
+        faces = np.array([[0, 1, 2], [3, 4, 5]])
+
+        intensity = _face_hillshade(verts, faces)
+
+        assert intensity[1] != intensity[0]
+        assert abs(intensity[1] - intensity[0]) < 0.5
+
+    def test_inverted_winding_does_not_break_or_nan(self):
+        verts = np.array([
+            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [0.0, 1.0, 1.0],
+        ])
+        faces = np.array([[0, 1, 2], [3, 4, 5]])
+
+        inverted = np.array([[0, 2, 1], [5, 4, 3]])
+
+        intensity = _face_hillshade(verts, inverted)
+
+        assert np.isfinite(intensity).all()
+        assert intensity.min() >= 0.0
+        assert intensity.max() <= 1.0
+
+    def test_inverted_winding_yields_robust_direction(self):
+        verts = np.array([
+            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0],
+        ])
+        faces_fwd = np.array([[0, 1, 2]])
+        faces_inv = np.array([[0, 2, 1]])
+
+        a = _face_hillshade(verts, faces_fwd)
+        b = _face_hillshade(verts, faces_inv)
+
+        assert abs(float(a[0] - b[0])) < 1e-6
+
+    def test_degenerate_face_yields_finite_value(self):
+        verts = np.array([
+            [0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0],   # collinear
+        ])
+        faces = np.array([[0, 1, 2]])
+
+        intensity = _face_hillshade(verts, faces)
+
+        assert np.isfinite(intensity).all()
+        assert 0.0 <= intensity[0] <= 1.0
 
 
 # ---------------------------------------------------------------------------

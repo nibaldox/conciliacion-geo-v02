@@ -2,9 +2,10 @@
 Pure helpers for the compliance plan view in the dashboard tab.
 
 The plan view renders the real topographic STL surface as a ``go.Mesh3d``
-in neutral gray (flatshaded, lit from the side so slopes read in the
-top-down camera) and overlays one ``go.Scatter3d`` line per section,
-colored green when the section complies and red otherwise.
+shaded in grayscale per face (geometric hillshade through a pure gray
+colorscale so benches and slopes read in the top-down camera) and overlays
+one ``go.Scatter3d`` line per section, colored green when the section
+complies and red otherwise.
 
 Everything in this module is a pure function of its inputs so it stays
 unit-testable without a running Streamlit server.
@@ -27,8 +28,21 @@ COLOR_NO_CUMPLE = "#C62828"
 PLAN_FULL_FACE_LIMIT = 500_000
 PLAN_TARGET_FACES = 250_000
 
-# Neutral gray visible on the dark theme; elevation is not used for coloring.
-SURFACE_GRAY = "#9A9A9A"
+# Per-face grayscale shading. A lateral + zenithal light fixed in scene
+# coordinates modulates intensity by face orientation (hillshade); a small
+# normalized-elevation term separates horizontal benches without dominating.
+# The result is an intensity per face mapped through a pure gray colorscale,
+# so slopes read in the top-down camera while staying strictly grayscale.
+LIGHT_DIRECTION = np.array([1.0, 0.6, 0.8])
+LIGHT_DIRECTION = LIGHT_DIRECTION / np.linalg.norm(LIGHT_DIRECTION)
+HILLSHADE_WEIGHT = 0.9
+ELEVATION_WEIGHT = 0.1
+
+SURFACE_COLORSCALE = [
+    [0.0, "#000000"],
+    [0.5, "#808080"],
+    [1.0, "#FFFFFF"],
+]
 
 PLAN_MESH_STATE_KEY = "plan_mesh_topo"
 PLAN_MESH_TOKEN_KEY = "plan_mesh_topo_token"
@@ -246,15 +260,58 @@ def _mesh_bounds(mesh) -> dict:
     }
 
 
-def _add_surface_trace(fig: go.Figure, mesh) -> None:
-    """Add the real topo surface as a neutral gray Mesh3d.
+def _face_hillshade(vertices, faces) -> np.ndarray:
+    """Per-face grayscale intensity that reveals relief in the plan view.
 
-    Elevation is not used for coloring: a single flat gray keeps the
-    surface legible over the dark theme while flatshading plus a lateral
-    light reveals faces and slopes in the top-down camera.
+    Each face normal is computed as the cross product of its three
+    vertices, normalized with a fallback of ``[0, 0, 1]`` for degenerate
+    (zero-area) triangles so they never produce NaN. A fixed lateral +
+    zenithal light in scene coordinates (``LIGHT_DIRECTION``) shades each
+    face by the absolute cosine of the angle to the light — ``abs`` makes
+    the shading robust to inverted winding. A subtle component based on the
+    normalized centroid elevation separates horizontal benches (same
+    normal) without dominating the hillshade. The result is finite and
+    clipped to ``[0, 1]``.
+    """
+    verts = np.asarray(vertices, dtype=float)
+    faces = np.asarray(faces, dtype=int)
+
+    v0 = verts[faces[:, 0]]
+    v1 = verts[faces[:, 1]]
+    v2 = verts[faces[:, 2]]
+
+    normals = np.cross(v1 - v0, v2 - v0)
+    lengths = np.linalg.norm(normals, axis=1)
+    degenerate = lengths < 1e-12
+    unit = np.where(degenerate, 1.0, lengths)
+    normals = np.where(degenerate[:, None], [0.0, 0.0, 1.0], normals / unit[:, None])
+
+    hillshade = np.abs(normals @ LIGHT_DIRECTION)
+
+    centroids_z = (v0[:, 2] + v1[:, 2] + v2[:, 2]) / 3.0
+    zmin = float(centroids_z.min())
+    zmax = float(centroids_z.max())
+    zspan = zmax - zmin
+    if zspan > 1e-12:
+        elevation = (centroids_z - zmin) / zspan
+    else:
+        elevation = np.zeros_like(centroids_z)
+
+    intensity = HILLSHADE_WEIGHT * hillshade + ELEVATION_WEIGHT * elevation
+    return np.clip(intensity, 0.0, 1.0)
+
+
+def _add_surface_trace(fig: go.Figure, mesh) -> None:
+    """Add the real topo surface as a grayscale Mesh3d shaded per face.
+
+    Per-face geometric hillshade (``_face_hillshade``) is mapped through a
+    pure gray colorscale with cell intensity so benches and slopes are
+    distinguishable in the top-down camera without leaving grayscale. No
+    flat ``color`` is set, which would override the intensity.
     """
     verts = np.asarray(mesh.vertices, dtype=float)
     faces = np.asarray(mesh.faces)
+    intensity = _face_hillshade(verts, faces)
     fig.add_trace(go.Mesh3d(
         x=verts[:, 0],
         y=verts[:, 1],
@@ -262,7 +319,11 @@ def _add_surface_trace(fig: go.Figure, mesh) -> None:
         i=faces[:, 0],
         j=faces[:, 1],
         k=faces[:, 2],
-        color=SURFACE_GRAY,
+        intensity=intensity,
+        intensitymode='cell',
+        colorscale=SURFACE_COLORSCALE,
+        cmin=0.0,
+        cmax=1.0,
         opacity=1.0,
         flatshading=True,
         showscale=False,
