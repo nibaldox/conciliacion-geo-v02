@@ -269,20 +269,19 @@ def _render_sector_compliance_map(results) -> None:
 # ---------------------------------------------------------------------------
 
 def _render_plan_view(results, config: dict) -> None:
-    """Vista en planta con topografía + perfiles coloreados por score.
+    """Vista en planta: topografía STL real (Mesh3d) + perfiles por score.
 
-    Fondo: curvas de nivel de la topografía (espaciado 5m, cota base
-           = grid_ref de la barra lateral).
-    Líneas: cada perfil como segmento verde (CUMPLE) o rojo (NO CUMPLE).
+    Fondo: malla STL de topografía real coloreada por elevación.
+    Líneas: cada perfil como segmento 3D verde (CUMPLE) o rojo (NO CUMPLE).
 
-    Score por banco: berma=60, ángulo=20, altura=20.
-    Score por sección = promedio de bench_score.
-    Verde si score >= 70, rojo si < 70.
+    Score por sección = media de bench_score (MATCH) o section_score
+    canónico; verde si score >= 70, rojo si < 70.
     """
-    import numpy as np
-    from core.section_cutter import azimuth_to_direction
-    from ui.plots import mesh_to_contour_data
-    from core.config import VISUALIZATION
+    from ui.tabs.dashboard_plan_view import (
+        build_plan_view_figure,
+        compute_section_status,
+        select_plan_mesh,
+    )
 
     st.subheader("🗺️ Plano de Cumplimiento por Perfil")
 
@@ -291,127 +290,22 @@ def _render_plan_view(results, config: dict) -> None:
         st.info("No hay secciones disponibles para dibujar el plano.")
         return
 
-    # Calcular score por sección desde los resultados
-    section_scores = {}
-    section_status = {}
-    for r in results:
-        sec_name = r.get('section', '')
-        if sec_name not in section_scores:
-            section_scores[sec_name] = []
-        match_type = r.get('type', 'MATCH')
-        if match_type == 'MATCH':
-            section_scores[sec_name].append(r.get('bench_score', 0))
+    section_status = compute_section_status(results)
 
-    for sec_name, scores in section_scores.items():
-        avg = sum(scores) / len(scores) if scores else 0
-        section_status[sec_name] = {
-            'score': round(avg, 1),
-            'cumple': avg >= 70,
-        }
-
-    fig = go.Figure()
-
-    # ── Fondo: curvas de nivel de la topografía ──
-    # Espaciado fijo de 5m, cota base = grid_ref de la barra lateral.
     mesh_topo = st.session_state.get('mesh_topo')
-    if mesh_topo is not None:
-        xi, yi, _, _, zig = mesh_to_contour_data(mesh_topo, grid_size=300)
-        if xi is not None and zig is not None:
-            z_min = float(np.nanmin(zig))
-            z_max = float(np.nanmax(zig))
-            grid_ref = float(config.get('grid_ref', VISUALIZATION.grid_ref))
-            contour_interval = 5.0  # metros
-            fig.add_trace(go.Contour(
-                x=xi, y=yi, z=zig,
-                contours=dict(
-                    start=grid_ref,
-                    end=z_max,
-                    size=contour_interval,
-                    showlabels=True,
-                    labelfont=dict(size=8, color='#5D4037'),
-                    coloring='lines',
-                ),
-                line=dict(color='#8D6E63', width=1.0),
-                showscale=False,
-                name='Curvas de Nivel',
-                hovertemplate='E: %{x:.1f}<br>N: %{y:.1f}<br>Elev: %{z:.1f}m<extra>Topo</extra>',
-            ))
+    decimated_mesh_topo = st.session_state.get('decimated_mesh_topo')
+    mesh = select_plan_mesh(mesh_topo, decimated_mesh_topo)
 
-    # ── Perfiles: líneas verde/rojo sobre las curvas ──
-    for sec in sections:
-        name = sec.name
-        status = section_status.get(name, {'score': 0, 'cumple': False})
-        color = '#2E7D32' if status['cumple'] else '#C62828'
-        score = status['score']
+    if mesh_topo is None:
+        st.warning("⚠️ No hay STL topográfico real cargado; no se dibuja la superficie.")
+    elif mesh is None:
+        st.warning(
+            "⚠️ La topografía supera el límite de caras y no hay "
+            "malla decimada disponible."
+        )
 
-        # Calcular endpoints de la sección
-        origin = np.asarray(sec.origin)
-        direction = azimuth_to_direction(sec.azimuth)
-        half_len = sec.length / 2.0
-        p1 = origin - direction * half_len
-        p2 = origin + direction * half_len
-
-        # Línea del perfil
-        fig.add_trace(go.Scatter(
-            x=[p1[0], p2[0]],
-            y=[p1[1], p2[1]],
-            mode='lines+text',
-            line=dict(color=color, width=5),
-            text=[None, f"{name}<br>{score:.0f}"],
-            textposition='top center',
-            textfont=dict(size=9, color=color),
-            name=f"{name} ({'✅' if status['cumple'] else '❌'} {score:.0f})",
-            hovertemplate=(
-                f"<b>{name}</b><br>"
-                f"Score: {score:.0f}/100<br>"
-                f"Estado: {'CUMPLE' if status['cumple'] else 'NO CUMPLE'}<br>"
-                f"Azimut: {sec.azimuth:.0f}°<br>"
-                f"Sector: {sec.sector or 'N/A'}"
-                "<extra></extra>"
-            ),
-            showlegend=True,
-        ))
-
-    # Layout
-    fig.update_layout(
-        title="Vista en Planta — Topografía + Cumplimiento por Perfil",
-        xaxis_title='Este (m)',
-        yaxis_title='Norte (m)',
-        yaxis=dict(scaleanchor='x', scaleratio=1),
-        height=600,
-        margin=dict(l=40, r=60, t=50, b=40),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.2,
-            xanchor="center",
-            x=0.5,
-            font=dict(size=8),
-        ),
-    )
-
+    fig = build_plan_view_figure(mesh, sections, section_status)
     st.plotly_chart(fig, use_container_width=True)
-
-    # Leyenda explicativa
-    cols = st.columns(2)
-    with cols[0]:
-        st.markdown(
-            "<div style='background:rgba(46,125,50,0.1); padding:0.8rem; "
-            "border-radius:8px; border-left:4px solid #2E7D32;'>"
-            "<b>🟢 Verde (≥ 70 pts)</b><br>"
-            "<span style='font-size:0.85rem;'>Berma (60) + Ángulo (20) + Altura (20)</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-    with cols[1]:
-        st.markdown(
-            "<div style='background:rgba(198,40,40,0.1); padding:0.8rem; "
-            "border-radius:8px; border-left:4px solid #C62828;'>"
-            "<b>🔴 Rojo (&lt; 70 pts)</b><br>"
-            "<span style='font-size:0.85rem;'>No cumple con la ponderación mínima</span>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
 
 
 # ---------------------------------------------------------------------------
