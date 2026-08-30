@@ -127,6 +127,27 @@ class TestSurfaceTrace:
             assert color.startswith('#') and len(color) == 7
             assert color[1:3] == color[3:5] == color[5:7]
 
+    def test_mesh_colorscale_stops_are_exact_positions(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        surface = _surface_traces(fig)[0]
+        assert [pos for pos, _ in surface.colorscale] == [0.0, 0.5, 1.0]
+
+    def test_mesh_colorscale_is_ascending_light_gray(self):
+        fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
+
+        surface = _surface_traces(fig)[0]
+        assert surface.colorscale is not None
+        values = []
+        for _, color in surface.colorscale:
+            assert color.startswith('#') and len(color) == 7
+            assert color[1:3] == color[3:5] == color[5:7]
+            values.append(int(color[1:3], 16))
+        assert values == sorted(values)
+        assert values[0] >= 0x60, "shadow stop must not be darker than #606060"
+        assert values[1] >= 0xB0, "mid stop must be at least #B0B0B0"
+        assert values[-1] < 0xFF, "top stop must stay below pure white"
+
     def test_mesh_has_no_flat_color_override(self):
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
 

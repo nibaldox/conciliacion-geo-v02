@@ -39,9 +39,9 @@ HILLSHADE_WEIGHT = 0.9
 ELEVATION_WEIGHT = 0.1
 
 SURFACE_COLORSCALE = [
-    [0.0, "#000000"],
-    [0.5, "#808080"],
-    [1.0, "#FFFFFF"],
+    [0.0, "#686868"],
+    [0.5, "#B8B8B8"],
+    [1.0, "#F4F4F4"],
 ]
 
 PLAN_MESH_STATE_KEY = "plan_mesh_topo"
