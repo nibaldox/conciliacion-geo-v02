@@ -4,6 +4,7 @@ from typing import List
 import streamlit as st
 
 from core.section_cutter import SectionLine
+from ui.state import invalidate_analysis_results
 
 
 def ensure_sections_list() -> None:
@@ -23,7 +24,12 @@ def get_pending_names() -> set:
 
 
 def add_sections(new_sections: List[SectionLine]) -> List[SectionLine]:
-    """Append new sections to session state, suffixing names on collision."""
+    """Append new sections to session state, suffixing names on collision.
+
+    Any real change to the section list invalidates every analysis-derived
+    result: canonical profiles no longer match the new section set. A no-op
+    call (empty input) leaves the analysis untouched.
+    """
     ensure_sections_list()
     existing_names = {s.name for s in st.session_state.sections}
     added: List[SectionLine] = []
@@ -38,22 +44,40 @@ def add_sections(new_sections: List[SectionLine]) -> List[SectionLine]:
         existing_names.add(sec.name)
         st.session_state.pending_section_names.add(sec.name)
         added.append(sec)
+    if added:
+        invalidate_analysis_results()
     return added
 
 
 def clear_pending_sections() -> None:
-    """Remove pending sections and clear the pending set."""
-    st.session_state.sections = [
-        s for s in st.session_state.sections
-        if s.name not in st.session_state.pending_section_names
-    ]
+    """Remove pending sections and clear the pending set.
+
+    Only invalidates derived results when at least one section is actually
+    removed; a no-op clear leaves the analysis untouched.
+    """
+    pending = st.session_state.pending_section_names
+    if not pending:
+        return
+    kept = [s for s in st.session_state.sections if s.name not in pending]
+    removed_any = len(kept) != len(st.session_state.sections)
+    st.session_state.sections = kept
     st.session_state.pending_section_names.clear()
+    if removed_any:
+        invalidate_analysis_results()
 
 
 def clear_all_sections() -> None:
-    """Remove all sections and clear the pending set."""
+    """Remove all sections and clear the pending set.
+
+    Only invalidates derived results when sections actually existed; a
+    no-op clear (already empty) leaves the analysis untouched.
+    """
+    if not st.session_state.get('sections'):
+        st.session_state.pending_section_names.clear()
+        return
     st.session_state.sections = []
     st.session_state.pending_section_names.clear()
+    invalidate_analysis_results()
 
 
 def advance_step() -> None:
@@ -70,7 +94,7 @@ def append_interactive_section(section: SectionLine) -> None:
     """Append a single interactive section and mark it pending."""
     st.session_state.sections.append(section)
     st.session_state.pending_section_names.add(section.name)
-    invalidate_profile_cache()
+    invalidate_analysis_results()
 
 
 def clear_pending_names() -> None:

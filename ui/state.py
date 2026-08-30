@@ -56,4 +56,45 @@ def reset_all() -> None:
         st.session_state[key] = default
 
 
-__all__ = ["init_defaults", "reset_all"]
+# Every key holding a result derived from a mesh/section analysis. They are
+# invalidated together whenever the surfaces or the section list change so a
+# stale profile can never be draped over the current geometry (HIGH: stale
+# draped profiles after mesh/section changes).
+_ANALYSIS_RESULT_KEYS: tuple[str, ...] = (
+    K.PROFILES_DESIGN,
+    K.PROFILES_TOPO,
+    K.PARAMS_DESIGN,
+    K.PARAMS_TOPO,
+    K.COMPARISON_RESULTS,
+    "processed_sections",
+    "reconciled_design",
+    "reconciled_topo",
+    "area_fill_design",
+    "area_fill_topo",
+)
+
+# Derived figure caches that must be dropped together with the analysis.
+_ANALYSIS_CACHE_KEYS: tuple[str, ...] = (
+    "_profile_figs",
+)
+
+_MISSING = object()
+
+
+def invalidate_analysis_results() -> None:
+    """Reset every result derived from a mesh/section analysis.
+
+    Call whenever the surfaces change (new upload, surface cleanup) or the
+    section list changes (add/clear/recreate) so stale profiles are never
+    draped over the current geometry. Keys that already hold a value are
+    reset to the default empty list and derived figure caches are emptied;
+    surfaces, sections and the workflow step are left untouched.
+    """
+    for key in _ANALYSIS_RESULT_KEYS:
+        if st.session_state.get(key, _MISSING) is not _MISSING:
+            st.session_state[key] = []
+    for key in _ANALYSIS_CACHE_KEYS:
+        st.session_state[key] = {}
+
+
+__all__ = ["init_defaults", "reset_all", "invalidate_analysis_results"]

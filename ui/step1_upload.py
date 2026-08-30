@@ -14,6 +14,7 @@ import streamlit as st
 from core import load_mesh, get_mesh_bounds, mesh_to_plotly, decimate_mesh
 from core.config import DEFAULTS, VISUALIZATION
 from ui.plots import draw_sections_on_figure, mesh_to_contour_data
+from ui.state import invalidate_analysis_results
 
 logger = logging.getLogger(__name__)
 
@@ -135,6 +136,8 @@ def _clear_surface_state() -> None:
     st.session_state.mesh_topo_source_sha256 = None
     st.session_state['_3d_fig'] = None
     st.session_state['_contour_fig'] = None
+    # The surfaces changed: no analysis result survives a cleanup.
+    invalidate_analysis_results()
 
 
 @st.fragment
@@ -219,7 +222,14 @@ def _load_meshes(file_design, file_topo) -> None:
             st.session_state.mesh_design_source_sha256 = digest_design
             st.session_state.mesh_topo_source_sha256 = digest_topo
 
-        st.session_state.step = max(st.session_state.step, 2)
+            # Both new meshes loaded correctly: only now is it safe to drop the
+            # analysis derived from the previous surfaces. A failed upload keeps
+            # the previous session intact (nothing above invalidated it).
+            invalidate_analysis_results()
+            # The workflow must never keep step 4 with stale analysis: with
+            # sections present the user must re-run analysis (step 3), without
+            # them go back to defining sections (step 2). Sections are kept.
+            st.session_state.step = 3 if st.session_state.get('sections') else 2
 
     except Exception as e:
         logger.exception("Failed to load mesh")
