@@ -282,6 +282,7 @@ def _render_plan_view(results, config: dict) -> None:
 
     from ui.tabs.dashboard_plan_view import (
         build_plan_view_figure,
+        build_topo_profile_map,
         compute_section_status,
         ensure_plan_mesh_topo,
         plan_high_detail_needed,
@@ -316,7 +317,16 @@ def _render_plan_view(results, config: dict) -> None:
             "o no hay una malla optimizada disponible."
         )
 
-    fig = build_plan_view_figure(mesh, sections, section_status)
+    # Drape the compliance profiles on the real topographic surface using
+    # the canonical cuts already computed in step 3 (profiles_topo in
+    # parallel with processed_sections). No mesh cut is repeated here; a
+    # section without a canonical profile is simply not drawn.
+    profiles_topo = st.session_state.get('profiles_topo') or []
+    processed_sections = st.session_state.get('processed_sections') or []
+    profiles_by_name = build_topo_profile_map(processed_sections, profiles_topo)
+
+    fig = build_plan_view_figure(mesh, sections, section_status,
+                                 profiles_by_name=profiles_by_name)
     st.plotly_chart(fig, use_container_width=True)
 
 

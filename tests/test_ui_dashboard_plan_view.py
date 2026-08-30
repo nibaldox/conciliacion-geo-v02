@@ -5,11 +5,13 @@ import plotly.graph_objects as go
 import pytest
 import trimesh
 
-from core.section_cutter import SectionLine
+from core.section_cutter import ProfileResult, SectionLine
 from ui.tabs.dashboard_plan_view import (
     _face_hillshade,
     build_plan_view_figure,
+    build_topo_profile_map,
     compute_section_status,
+    drape_section_profile,
     ensure_plan_mesh_topo,
     plan_high_detail_needed,
     select_plan_mesh,
@@ -34,6 +36,24 @@ def _status():
         "S01": {"score": 82.0, "cumple": True},
         "S02": {"score": 45.0, "cumple": False},
     }
+
+
+def _topo_profile(distances=None, elevations=None):
+    return ProfileResult(
+        distances=np.array(
+            distances if distances is not None else [-3.0, -1.0, 0.0, 1.0, 3.0]),
+        elevations=np.array(
+            elevations if elevations is not None else [1.0, 1.5, 2.0, 1.8, 1.2]),
+    )
+
+
+def _status_rows():
+    return [
+        {"section": "S01", "type": "MATCH", "bench_score": 82.0,
+         "section_score": 82.0},
+        {"section": "S02", "type": "MATCH", "bench_score": 45.0,
+         "section_score": 45.0},
+    ]
 
 
 def _surface_traces(fig):
@@ -333,14 +353,31 @@ class TestProfileTraces:
             assert trace.mode == "lines"
             assert trace.text is None
 
-    def test_profile_z_overlay_above_mesh_zmax(self):
+    def test_profile_draped_on_real_elevations_when_mapping_provided(self):
+        mesh = _synthetic_topo()
+        prof = _topo_profile()
+        fig = build_plan_view_figure(mesh, _sections(), _status(),
+                                     profiles_by_name={"S01": prof})
+
+        zmax = float(mesh.vertices[:, 2].max())
+        trace = _profile_traces(fig)[0]
+        assert trace.name == "S01"
+        assert len(trace.z) == len(prof.elevations)
+        assert len(set(float(v) for v in trace.z)) > 1, "draped Z must not be constant"
+        # Synthetic box zspan = 5.0 -> offset = max(5*0.001, 0.05) = 0.05
+        assert np.allclose(np.asarray(trace.z, dtype=float),
+                           prof.elevations + 0.05)
+        assert float(np.max(trace.z)) < zmax + 1.0, "draped profile must sit on the topo"
+
+    def test_legacy_fallback_without_mapping_keeps_flat_overlay(self):
         mesh = _synthetic_topo()
         fig = build_plan_view_figure(mesh, _sections(), _status())
 
         zmax = float(mesh.vertices[:, 2].max())
         for trace in _profile_traces(fig):
+            assert len(trace.x) == 2
+            assert float(trace.z[0]) == float(trace.z[1])
             assert float(trace.z[0]) > zmax
-            assert float(trace.z[1]) > zmax
 
     def test_profile_hover_includes_score_and_state(self):
         fig = build_plan_view_figure(_synthetic_topo(), _sections(), _status())
@@ -378,6 +415,298 @@ class TestProfileTraces:
         profiles = _profile_traces(fig)
         assert [t.name for t in profiles] == ["S01"]
         assert all("NO CUMPLE" not in t.hovertemplate for t in profiles)
+
+
+# ---------------------------------------------------------------------------
+# build_topo_profile_map: name-based matching of canonical topo profiles
+# ---------------------------------------------------------------------------
+
+class TestBuildTopoProfileMap:
+    def test_maps_by_name_with_subset_and_different_order(self):
+        s01 = SectionLine(name="S01", origin=np.array([0.0, 0.0]),
+                          azimuth=0.0, length=20.0, sector="Norte")
+        s02 = SectionLine(name="S02", origin=np.array([0.0, 5.0]),
+                          azimuth=90.0, length=20.0, sector="Sur")
+        s03 = SectionLine(name="S03", origin=np.array([5.0, 5.0]),
+                          azimuth=45.0, length=20.0, sector="Este")
+        # Global order is S01, S02, S03 but only S03 + S01 were processed
+        # (subset, different order). Positional zip with the global list
+        # would wrongly bind p3 -> S01; name matching must not.
+        processed = [s03, s01]
+        p1 = _topo_profile()
+        p3 = _topo_profile(distances=np.array([-4.0, 4.0]),
+                           elevations=np.array([2.0, 2.0]))
+
+        mapping = build_topo_profile_map(processed, [p3, p1])
+
+        assert set(mapping) == {"S01", "S03"}
+        assert mapping["S01"] is p1
+        assert mapping["S03"] is p3
+        assert "S02" not in mapping
+
+    def test_ignores_none_profiles(self):
+        s01 = SectionLine(name="S01", origin=np.array([0.0, 0.0]),
+                          azimuth=0.0, length=20.0)
+        s02 = SectionLine(name="S02", origin=np.array([0.0, 5.0]),
+                          azimuth=90.0, length=20.0)
+        p1 = _topo_profile()
+
+        mapping = build_topo_profile_map([s01, s02], [p1, None])
+
+        assert mapping == {"S01": p1}
+
+    def test_ignores_entries_without_name(self):
+        unnamed = SectionLine(name="", origin=np.array([0.0, 0.0]),
+                              azimuth=0.0, length=20.0)
+        nonamed = SectionLine(name=None, origin=np.array([1.0, 1.0]),
+                              azimuth=0.0, length=20.0)
+        s01 = SectionLine(name="S01", origin=np.array([2.0, 2.0]),
+                          azimuth=0.0, length=20.0)
+        p1 = _topo_profile()
+
+        mapping = build_topo_profile_map([unnamed, nonamed, s01],
+                                         [_topo_profile(), _topo_profile(), p1])
+
+        assert mapping == {"S01": p1}
+
+    def test_tolerates_shorter_profiles_list(self):
+        s01 = SectionLine(name="S01", origin=np.array([0.0, 0.0]),
+                          azimuth=0.0, length=20.0)
+        s02 = SectionLine(name="S02", origin=np.array([0.0, 5.0]),
+                          azimuth=90.0, length=20.0)
+        s03 = SectionLine(name="S03", origin=np.array([5.0, 5.0]),
+                          azimuth=45.0, length=20.0)
+        p1 = _topo_profile()
+
+        mapping = build_topo_profile_map([s01, s02, s03], [p1])
+
+        assert mapping == {"S01": p1}
+
+    def test_tolerates_longer_profiles_list(self):
+        s01 = SectionLine(name="S01", origin=np.array([0.0, 0.0]),
+                          azimuth=0.0, length=20.0)
+        first, second, third = _topo_profile(), _topo_profile(), _topo_profile()
+
+        mapping = build_topo_profile_map([s01], [first, second, third])
+
+        assert list(mapping) == ["S01"]
+        assert mapping["S01"] is first
+
+    def test_empty_inputs_return_empty_mapping(self):
+        assert build_topo_profile_map(None, None) == {}
+        assert build_topo_profile_map([], []) == {}
+
+
+# ---------------------------------------------------------------------------
+# drape_section_profile: vectorized 3D polyline over the real topo cut
+# ---------------------------------------------------------------------------
+
+class TestDrapeSectionProfile:
+    def _section(self, az=0.0, origin=(100.0, 200.0), length=40.0,
+                 length_up=None, length_down=None):
+        return SectionLine(name="S01", origin=np.array(origin, dtype=float),
+                           azimuth=az, length=length, sector="Norte",
+                           length_up=length_up, length_down=length_down)
+
+    def test_azimuth_0_with_negative_and_positive_distances(self):
+        sec = self._section(az=0.0)
+        prof = _topo_profile(distances=np.array([-5.0, 0.0, 5.0]),
+                             elevations=np.array([10.0, 12.0, 14.0]))
+
+        x, y, z = drape_section_profile(sec, prof, z_offset=0.25)
+
+        assert np.allclose(x, [100.0, 100.0, 100.0])
+        assert np.allclose(y, [195.0, 200.0, 205.0])
+        assert np.allclose(z, [10.25, 12.25, 14.25])
+
+    def test_azimuth_90_with_negative_and_positive_distances(self):
+        sec = self._section(az=90.0)
+        prof = _topo_profile(distances=np.array([-5.0, 0.0, 5.0]),
+                             elevations=np.array([10.0, 12.0, 14.0]))
+
+        x, y, z = drape_section_profile(sec, prof)
+
+        assert np.allclose(x, [95.0, 100.0, 105.0])
+        assert np.allclose(y, [200.0, 200.0, 200.0])
+        assert np.allclose(z, [10.0, 12.0, 14.0])
+
+    def test_zero_offset_by_default(self):
+        sec = self._section(az=0.0)
+        prof = _topo_profile(distances=np.array([0.0, 2.0]),
+                             elevations=np.array([7.0, 9.0]))
+
+        _, _, z = drape_section_profile(sec, prof)
+
+        assert np.allclose(z, [7.0, 9.0])
+
+    def test_preserves_real_clipped_extremes(self):
+        # Mesh edge clips the cut: real distances span [-8.2, 21.7] although
+        # the nominal section half-length is 20. The drape must keep the real
+        # range, never extend back to +-half_len.
+        sec = self._section(az=0.0, length=40.0)
+        prof = _topo_profile(distances=np.array([-8.2, 0.0, 21.7]),
+                             elevations=np.array([5.0, 6.0, 4.0]))
+
+        _, y, z = drape_section_profile(sec, prof, z_offset=0.1)
+
+        assert np.allclose(y, [200.0 - 8.2, 200.0, 200.0 + 21.7])
+        assert np.allclose(z, [5.1, 6.1, 4.1])
+        assert not np.allclose(y[0], 200.0 - 20.0)
+        assert not np.allclose(y[-1], 200.0 + 20.0)
+
+    def test_respects_asymmetric_length_up_down(self):
+        sec = self._section(az=90.0, length=40.0, length_up=30.0,
+                            length_down=10.0)
+        prof = _topo_profile(distances=np.array([-10.0, 0.0, 30.0]),
+                             elevations=np.array([3.0, 4.0, 5.0]))
+
+        x, _, _ = drape_section_profile(sec, prof)
+
+        assert np.allclose(x, [90.0, 100.0, 130.0])
+
+    def test_offset_only_applies_to_elevations(self):
+        sec = self._section(az=90.0)
+        prof = _topo_profile(distances=np.array([-2.0, 2.0]),
+                             elevations=np.array([1.0, 3.0]))
+
+        x, y, z = drape_section_profile(sec, prof, z_offset=0.5)
+
+        assert np.allclose(x, [98.0, 102.0])
+        assert np.allclose(y, [200.0, 200.0])
+        assert np.allclose(z, [1.5, 3.5])
+
+    def test_rejects_nan_distances(self):
+        sec = self._section()
+        prof = _topo_profile(distances=np.array([0.0, np.nan]),
+                             elevations=np.array([1.0, 2.0]))
+
+        assert drape_section_profile(sec, prof) is None
+
+    def test_rejects_inf_elevations(self):
+        sec = self._section()
+        prof = _topo_profile(distances=np.array([0.0, 1.0]),
+                             elevations=np.array([1.0, np.inf]))
+
+        assert drape_section_profile(sec, prof) is None
+
+    def test_rejects_length_mismatch(self):
+        sec = self._section()
+        prof = _topo_profile(distances=np.array([0.0, 1.0, 2.0]),
+                             elevations=np.array([1.0, 2.0]))
+
+        assert drape_section_profile(sec, prof) is None
+
+    def test_rejects_single_sample(self):
+        sec = self._section()
+        prof = _topo_profile(distances=np.array([0.0]),
+                             elevations=np.array([1.0]))
+
+        assert drape_section_profile(sec, prof) is None
+
+    def test_rejects_empty_arrays(self):
+        sec = self._section()
+        prof = _topo_profile(distances=np.array([]), elevations=np.array([]))
+
+        assert drape_section_profile(sec, prof) is None
+
+    def test_rejects_2d_arrays(self):
+        sec = self._section()
+        prof = ProfileResult(
+            distances=np.array([[0.0, 1.0], [2.0, 3.0]]),
+            elevations=np.array([[1.0, 2.0], [3.0, 4.0]]))
+
+        assert drape_section_profile(sec, prof) is None
+
+    def test_returns_none_for_none_inputs(self):
+        sec = self._section()
+        prof = _topo_profile()
+
+        assert drape_section_profile(None, prof) is None
+        assert drape_section_profile(sec, None) is None
+        assert drape_section_profile(None, None) is None
+
+
+# ---------------------------------------------------------------------------
+# Draped figure: profiles_by_name turns profiles into 3D polylines on the topo
+# ---------------------------------------------------------------------------
+
+class TestDrapedProfileTraces:
+    def _fig(self, mapping, mesh=None, sections=None, status=None):
+        return build_plan_view_figure(
+            mesh if mesh is not None else _synthetic_topo(),
+            sections if sections is not None else _sections(),
+            status if status is not None else _status(),
+            profiles_by_name=mapping)
+
+    def test_valid_profile_uses_all_points_with_real_z_plus_offset(self):
+        prof = _topo_profile()
+        fig = self._fig({"S01": prof})
+
+        traces = _profile_traces(fig)
+        assert [t.name for t in traces] == ["S01"]
+        trace = traces[0]
+        assert len(trace.x) == 5
+        assert len(trace.y) == 5
+        assert len(trace.z) == 5
+        assert len(set(float(v) for v in trace.z)) > 1
+        # Synthetic box zspan = 5.0 -> offset = max(5*0.001, 0.05) = 0.05
+        assert np.allclose(np.asarray(trace.z, dtype=float),
+                           prof.elevations + 0.05)
+        # S01 azimuth 0: x stays at origin, y follows the distances
+        assert np.allclose(np.asarray(trace.x, dtype=float), 0.0)
+        assert np.allclose(np.asarray(trace.y, dtype=float), prof.distances)
+
+    def test_azimuth_90_section_follows_x_axis(self):
+        prof = _topo_profile(distances=np.array([-1.0, 1.0, 3.0]),
+                             elevations=np.array([2.0, 2.5, 2.2]))
+        fig = self._fig({"S02": prof})
+
+        trace = _profile_traces(fig)[0]
+        assert trace.name == "S02"
+        assert np.allclose(np.asarray(trace.x, dtype=float), prof.distances)
+        assert np.allclose(np.asarray(trace.y, dtype=float), 5.0)
+
+    def test_empty_mapping_draws_no_floating_lines(self):
+        fig = self._fig({})
+
+        assert _profile_traces(fig) == []
+
+    def test_missing_profile_is_omitted_not_floating(self):
+        prof = _topo_profile()
+        fig = self._fig({"S02": prof})
+
+        assert [t.name for t in _profile_traces(fig)] == ["S02"]
+
+    def test_invalid_profile_is_omitted_not_floating(self):
+        bad = ProfileResult(distances=np.array([0.0, 1.0]),
+                            elevations=np.array([np.nan, 2.0]))
+        fig = self._fig({"S01": bad})
+
+        assert _profile_traces(fig) == []
+
+    def test_offset_fallback_0_05_without_renderable_mesh(self):
+        prof = _topo_profile()
+        fig = build_plan_view_figure(None, _sections(), _status(),
+                                     profiles_by_name={"S01": prof})
+
+        trace = _profile_traces(fig)[0]
+        assert np.allclose(np.asarray(trace.z, dtype=float),
+                           prof.elevations + 0.05)
+
+    def test_draped_hover_colors_and_legend_intact(self):
+        fig = self._fig({"S01": _topo_profile(), "S02": _topo_profile()})
+
+        profiles = {t.name: t for t in _profile_traces(fig)}
+        assert profiles["S01"].line.color == "#2E7D32"
+        assert profiles["S02"].line.color == "#C62828"
+        assert profiles["S01"].line.width == 6
+        assert "Puntaje de logro: 82.0/100" in profiles["S01"].hovertemplate
+        assert "Estado: CUMPLE" in profiles["S01"].hovertemplate
+        assert "Estado: NO CUMPLE" in profiles["S02"].hovertemplate
+        assert profiles["S01"].showlegend is False
+        legends = _legend_traces(fig)
+        assert len(legends) == 2
+        assert {t.name for t in legends} == {"Cumple", "No cumple"}
 
 
 # ---------------------------------------------------------------------------
@@ -912,6 +1241,76 @@ class TestRenderPlanView:
 
         assert st.infos
         assert st.charts == []
+
+    def test_adapter_drapes_profiles_by_name_from_processed_sections(self, monkeypatch):
+        prof_s02 = _topo_profile(distances=np.array([-2.0, 0.0, 2.0]),
+                                 elevations=np.array([1.0, 2.0, 1.5]))
+        processed_s02 = SectionLine(name="S02", origin=np.array([0.0, 5.0]),
+                                    azimuth=90.0, length=20.0, sector="Sur")
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _synthetic_topo(),
+            "decimated_mesh_topo": None,
+            "processed_sections": [processed_s02],
+            "profiles_topo": [prof_s02],
+        }, results=_status_rows())
+
+        fig = st.charts[0]
+        profiles = {t.name: t for t in _profile_traces(fig)}
+        assert list(profiles) == ["S02"]
+        assert len(profiles["S02"].z) == 3
+        # Synthetic box zspan = 5.0 -> offset = 0.05
+        assert np.allclose(np.asarray(profiles["S02"].z, dtype=float),
+                           prof_s02.elevations + 0.05)
+        # S02 azimuth 90: x follows distances, y stays at origin
+        assert np.allclose(np.asarray(profiles["S02"].x, dtype=float),
+                           prof_s02.distances)
+        assert np.allclose(np.asarray(profiles["S02"].y, dtype=float), 5.0)
+
+    def test_adapter_omits_sections_without_processed_profile(self, monkeypatch):
+        prof_s01 = _topo_profile()
+        processed_s01 = SectionLine(name="S01", origin=np.array([0.0, 0.0]),
+                                    azimuth=0.0, length=20.0, sector="Norte")
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _synthetic_topo(),
+            "decimated_mesh_topo": None,
+            "processed_sections": [processed_s01],
+            "profiles_topo": [prof_s01],
+        }, results=_status_rows())
+
+        profiles = {t.name: t for t in _profile_traces(st.charts[0])}
+        assert list(profiles) == ["S01"]
+        assert "S02" not in profiles
+
+    def test_adapter_without_profiles_draws_no_floating_lines(self, monkeypatch):
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _synthetic_topo(),
+            "decimated_mesh_topo": None,
+        }, results=_status_rows())
+
+        assert _profile_traces(st.charts[0]) == []
+
+    def test_adapter_never_cuts_mesh_during_render(self, monkeypatch):
+        import core.section_cutter as section_cutter
+
+        def boom(*args, **kwargs):
+            raise AssertionError("cut_mesh_with_section must not run during plan render")
+
+        monkeypatch.setattr(section_cutter, "cut_mesh_with_section", boom)
+
+        st = self._render(monkeypatch, {
+            "sections": _sections(),
+            "mesh_topo": _synthetic_topo(),
+            "decimated_mesh_topo": None,
+            "processed_sections": [SectionLine(name="S01", origin=np.array([0.0, 0.0]),
+                                              azimuth=0.0, length=20.0, sector="Norte")],
+            "profiles_topo": [_topo_profile()],
+        }, results=_status_rows())
+
+        assert st.charts
+        assert len(_profile_traces(st.charts[0])) == 1
 
     def test_renders_surface_when_mesh_available(self, monkeypatch):
         st = self._render(monkeypatch, {

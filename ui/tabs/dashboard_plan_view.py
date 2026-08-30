@@ -159,7 +159,80 @@ def ensure_plan_mesh_topo(mesh_topo, session_state, *, full_face_limit=None,
     return plan
 
 
-def build_plan_view_figure(mesh_topo, sections, section_status) -> go.Figure:
+def build_topo_profile_map(processed_sections, profiles_topo) -> dict:
+    """Map section name -> canonical topo ProfileResult, matched by name.
+
+    ``processed_sections`` and ``profiles_topo`` are the parallel lists
+    stashed by step 3 (``ui/step3_analysis.py``). Matching is by section
+    name, never by position in the global ``sections`` list, so a processed
+    subset in any order resolves correctly. None profiles and entries
+    without a name are ignored, and the two lists may differ in length —
+    entries beyond the shorter list simply produce no mapping.
+    """
+    mapping: dict = {}
+    processed = list(processed_sections or [])
+    profiles = list(profiles_topo or [])
+    for idx, sec in enumerate(processed):
+        name = getattr(sec, 'name', None)
+        if not name:
+            continue
+        profile = profiles[idx] if idx < len(profiles) else None
+        if profile is None:
+            continue
+        mapping[name] = profile
+    return mapping
+
+
+def drape_section_profile(section, profile, *, z_offset=0.0):
+    """Convert a canonical topo profile into a vectorized 3D polyline.
+
+    Reconstructs the 3D path exactly as the section was cut against the
+    full topo mesh: ``direction = azimuth_to_direction(section.azimuth)``,
+    ``x = origin[0] + distance * direction[0]``,
+    ``y = origin[1] + distance * direction[1]`` and ``z = elevation``.
+    The real distance range of the cut is preserved — asymmetric sections
+    (``length_up``/``length_down``) and extremes clipped by the mesh edge
+    keep their actual samples, never re-extended to the nominal
+    half-length. Only ``z_offset`` is applied to the elevations.
+
+    Returns ``(x, y, z)`` numpy arrays when the profile is valid, else
+    None. Invalid means: arrays not 1D, of unequal length, with fewer than
+    2 samples, containing NaN/Inf, or a section without a usable
+    finite origin/azimuth.
+    """
+    if section is None or profile is None:
+        return None
+    try:
+        distances = np.asarray(profile.distances, dtype=float)
+        elevations = np.asarray(profile.elevations, dtype=float)
+    except (TypeError, ValueError):
+        return None
+    if distances.ndim != 1 or elevations.ndim != 1:
+        return None
+    if distances.shape[0] != elevations.shape[0] or distances.shape[0] < 2:
+        return None
+    if not (np.isfinite(distances).all() and np.isfinite(elevations).all()):
+        return None
+    try:
+        origin = np.asarray(section.origin, dtype=float)
+        azimuth = float(section.azimuth)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if origin.ndim != 1 or origin.shape[0] < 2:
+        return None
+    if not np.isfinite(origin[:2]).all() or not np.isfinite(azimuth):
+        return None
+    direction = azimuth_to_direction(azimuth)
+    z = elevations + float(z_offset)
+    if not np.isfinite(z).all():
+        return None
+    x = origin[0] + distances * direction[0]
+    y = origin[1] + distances * direction[1]
+    return x, y, z
+
+
+def build_plan_view_figure(mesh_topo, sections, section_status,
+                           profiles_by_name=None) -> go.Figure:
     """Build the pure Plotly figure for the compliance plan view.
 
     Parameters
@@ -167,25 +240,42 @@ def build_plan_view_figure(mesh_topo, sections, section_status) -> go.Figure:
     mesh_topo:        Already-selected real topo mesh (full or decimated),
                       possibly None. When None or not renderable (empty,
                       NaN/Inf vertices, invalid faces) no surface is drawn
-                      and the section lines are placed at z=0.
+                      and the draped offset falls back to 0.05 m.
     sections:         Iterable of SectionLine objects.
     section_status:   Mapping section name -> {'score', 'cumple'}.
+    profiles_by_name: Optional mapping section name -> ProfileResult from
+                      the canonical topo cuts. When provided (even empty),
+                      every section with a status is drawn only if it has a
+                      valid drapeable profile; sections without one are
+                      omitted so no floating line is ever shown. When None
+                      the historical fallback is kept for legacy callers:
+                      each section is drawn as a flat 2-point line at
+                      ``z_overlay`` above the mesh.
     """
     fig = go.Figure()
     z_overlay = 0.0
+    z_offset = 0.05
     if _is_renderable_mesh(mesh_topo):
         bounds = _mesh_bounds(mesh_topo)
         xspan = bounds['x'][1] - bounds['x'][0]
         yspan = bounds['y'][1] - bounds['y'][0]
         zspan = bounds['z'][1] - bounds['z'][0]
         z_overlay = bounds['z'][1] + max(xspan, yspan, zspan) * 0.05 + 1.0
+        z_offset = max(zspan * 0.001, 0.05)
         _add_surface_trace(fig, mesh_topo)
 
+    draped = profiles_by_name is not None
     for sec in sections:
         status = section_status.get(sec.name)
         if status is None:
             continue
-        _add_section_trace(fig, sec, status, z_overlay)
+        if draped:
+            profile = (profiles_by_name or {}).get(sec.name)
+            if profile is None:
+                continue
+            _add_draped_section_trace(fig, sec, status, profile, z_offset)
+        else:
+            _add_section_trace(fig, sec, status, z_overlay)
 
     _add_legend_traces(fig)
     _update_layout(fig)
@@ -355,6 +445,43 @@ def _add_section_trace(fig: go.Figure, section, status: dict, z_overlay: float) 
         x=[p1[0], p2[0]],
         y=[p1[1], p2[1]],
         z=[z_overlay, z_overlay],
+        mode='lines',
+        line=dict(color=color, width=6),
+        name=section.name,
+        showlegend=False,
+        hovertemplate=(
+            f"<b>{section.name}</b><br>"
+            f"Puntaje de logro: {score:.1f}/100<br>"
+            f"Estado: {'CUMPLE' if status['cumple'] else 'NO CUMPLE'}<br>"
+            f"Azimut: {section.azimuth:.0f}°<br>"
+            f"Sector: {section.sector or 'N/A'}"
+            "<extra></extra>"
+        ),
+    ))
+
+
+def _add_draped_section_trace(fig: go.Figure, section, status: dict,
+                              profile, z_offset: float) -> None:
+    """Add one section as a 3D polyline draped on the real topo cut.
+
+    Every sample of the canonical profile is used, with real elevation
+    plus the small visual ``z_offset``; the line follows the topographic
+    surface instead of floating at a constant overlay. Invalid profiles
+    are silently skipped (no trace added) so an absent or broken cut never
+    renders a floating line. Hover, color, width and legend behavior are
+    identical to the legacy overlay trace.
+    """
+    xyz = drape_section_profile(section, profile, z_offset=z_offset)
+    if xyz is None:
+        return
+    x, y, z = xyz
+    color = COLOR_CUMPLE if status['cumple'] else COLOR_NO_CUMPLE
+    score = status['score']
+
+    fig.add_trace(go.Scatter3d(
+        x=x,
+        y=y,
+        z=z,
         mode='lines',
         line=dict(color=color, width=6),
         name=section.name,
