@@ -125,3 +125,229 @@ class TestComputeDesignAchievementScore:
         res = compute_design_achievement_score(None)
         assert res["global"] == 0
         assert res["n_total"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Signed (per-side) crest/toe tolerances
+# ---------------------------------------------------------------------------
+
+
+class TestSignedToleranceClassification:
+    """Core classification: delta<0 uses tol_neg, delta>=0 uses tol_pos."""
+
+    def _row(self, delta_crest, delta_toe, berm_status=STATUS_CUMPLE, section="S1"):
+        return {
+            "section": section,
+            "delta_crest": delta_crest,
+            "delta_toe": delta_toe,
+            "berm_status": berm_status,
+        }
+
+    def test_default_symmetric_signed(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        res = compute_design_achievement_score(
+            [self._row(-1.0, 1.0), self._row(-1.2, 1.2)]
+        )
+        # -1.0/+1.0 CUMPLE (credit 1.0); -1.2/+1.2 FUERA (credit 0.5)
+        # row2 = 0.4*0.5 + 0.3*0.5 + 0.3*1.0 = 0.65; mean = 0.825 -> 82 (round-half-even)
+        assert res["global"] == 82
+        assert res["n_passing_crest"] == 1
+        assert res["n_passing_toe"] == 1
+
+    def test_default_beyond_1_5x_no_credit(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        res = compute_design_achievement_score(
+            [self._row(-1.6, 1.6)]
+        )
+        # ±1.6 > 1.5 -> NO CUMPLE both sides; berm still CUMPLE -> 0.3 -> 30
+        assert res["global"] == 30
+        assert res["n_passing_crest"] == 0
+        assert res["n_passing_toe"] == 0
+
+    def test_asymmetric_tolerance(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        # neg=1.5, pos=0.8 per contract:
+        # -1.2 CUMPLE; +0.9 FUERA; +0.8 CUMPLE; -1.6 FUERA; -2.3 NO CUMPLE
+        crest_deltas = [-1.2, 0.9, 0.8, -1.6, -2.3]
+        comps = [self._row(d, 0.0) for d in crest_deltas]
+        res = compute_design_achievement_score(
+            comps,
+            crest_tolerance_neg_m=1.5,
+            crest_tolerance_pos_m=0.8,
+            toe_tolerance_neg_m=1.0,
+            toe_tolerance_pos_m=1.0,
+        )
+        assert res["n_passing_crest"] == 2  # -1.2 and +0.8
+        assert res["n_passing_toe"] == 5  # all 0.0 within symmetric 1.0
+
+    def test_legacy_scalar_equivalent_to_signed_kwargs(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        rows = [self._row(-1.2, 1.2), self._row(0.9, -0.9), self._row(-1.6, 1.6)]
+        res_scalar = compute_design_achievement_score(
+            [dict(r) for r in rows], crest_tolerance_m=1.0, toe_tolerance_m=1.0
+        )
+        res_signed = compute_design_achievement_score(
+            [dict(r) for r in rows],
+            crest_tolerance_neg_m=1.0,
+            crest_tolerance_pos_m=1.0,
+            toe_tolerance_neg_m=1.0,
+            toe_tolerance_pos_m=1.0,
+        )
+        assert res_scalar["global"] == res_signed["global"]
+        assert res_scalar["n_passing_crest"] == res_signed["n_passing_crest"]
+        assert res_scalar["n_passing_toe"] == res_signed["n_passing_toe"]
+
+    def test_legacy_scalar_symmetric_by_side(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        # scalar 1.5 -> -1.2 CUMPLE, +1.5 CUMPLE (inclusive)
+        res = compute_design_achievement_score(
+            [self._row(-1.2, 1.5)], crest_tolerance_m=1.5, toe_tolerance_m=1.5
+        )
+        assert res["n_passing_crest"] == 1
+        assert res["n_passing_toe"] == 1
+
+    def test_precedence_signed_over_scalar(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        # signed kwarg wins over legacy scalar for that side
+        res = compute_design_achievement_score(
+            [self._row(-1.2, 0.0)],
+            crest_tolerance_m=1.0,
+            crest_tolerance_neg_m=1.5,
+        )
+        assert res["n_passing_crest"] == 1
+
+    def test_precedence_scalar_over_config_default(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        # scalar 0.5: -0.8 FUERA (<=0.75? no, 0.8 > 0.75 -> NO CUMPLE)
+        res = compute_design_achievement_score(
+            [self._row(-0.8, 0.0)], crest_tolerance_m=0.5
+        )
+        assert res["n_passing_crest"] == 0
+        # but with default (1.0) it would CUMPLE
+        res2 = compute_design_achievement_score([self._row(-0.8, 0.0)])
+        assert res2["n_passing_crest"] == 1
+
+    def test_single_signed_kwarg_other_side_falls_back(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        # only crest_tolerance_neg_m=1.5 -> crest pos side falls back to config 1.0
+        res = compute_design_achievement_score(
+            [self._row(-1.2, 0.0)], crest_tolerance_neg_m=1.5
+        )
+        assert res["n_passing_crest"] == 1
+        # and toe unaffected (default symmetric 1.0)
+        assert res["n_passing_toe"] == 1
+
+    def test_invalid_tolerance_negative_raises(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        with pytest.raises(ValueError):
+            compute_design_achievement_score(
+                [self._row(0.0, 0.0)], crest_tolerance_neg_m=-1.0
+            )
+
+    def test_invalid_tolerance_nan_raises(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        with pytest.raises(ValueError):
+            compute_design_achievement_score(
+                [self._row(0.0, 0.0)], toe_tolerance_pos_m=float("nan")
+            )
+
+    def test_invalid_tolerance_inf_raises(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        with pytest.raises(ValueError):
+            compute_design_achievement_score(
+                [self._row(0.0, 0.0)], crest_tolerance_pos_m=float("inf")
+            )
+
+    def test_zero_tolerance_semantics(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        res = compute_design_achievement_score(
+            [self._row(0.0, 0.0), self._row(0.01, -0.01)],
+            crest_tolerance_neg_m=0.0,
+            crest_tolerance_pos_m=0.0,
+            toe_tolerance_neg_m=0.0,
+            toe_tolerance_pos_m=0.0,
+        )
+        assert res["n_passing_crest"] == 1
+        assert res["n_passing_toe"] == 1
+
+    def test_none_nan_string_no_crash_zero_credit(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        comps = [
+            self._row(None, None),
+            self._row(float("nan"), float("nan")),
+            self._row("abc", None),
+        ]
+        res = compute_design_achievement_score(comps)
+        assert res["n_total"] == 3
+        # crest/toe sin crédito; berm CUMPLE en las 3 filas -> 30
+        assert res["global"] == 30
+        assert res["n_passing_crest"] == 0
+        assert res["n_passing_toe"] == 0
+
+    def test_tolerances_key_returned(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        res = compute_design_achievement_score([self._row(0.5, 0.5)])
+        assert res["tolerances"] == {
+            "crest": {"neg": 1.0, "pos": 1.0},
+            "toe": {"neg": 1.0, "pos": 1.0},
+        }
+
+    def test_tolerances_key_reflects_resolution(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        res = compute_design_achievement_score(
+            [self._row(0.5, 0.5)],
+            crest_tolerance_m=1.2,
+            toe_tolerance_neg_m=0.7,
+        )
+        assert res["tolerances"]["crest"] == {"neg": 1.2, "pos": 1.2}
+        assert res["tolerances"]["toe"] == {"neg": 0.7, "pos": 1.0}
+
+    def test_empty_input_returns_tolerances_structure(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        res = compute_design_achievement_score([])
+        assert res["tolerances"] == {
+            "crest": {"neg": 1.0, "pos": 1.0},
+            "toe": {"neg": 1.0, "pos": 1.0},
+        }
+
+    def test_per_malla_uses_signed_limits(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        comps = [
+            self._row(-1.2, -1.2, section="S1"),
+            self._row(-1.6, -1.6, section="S2"),
+        ]
+        m2s = {"A": ["S1"], "B": ["S2"]}
+        res = compute_design_achievement_score(
+            comps,
+            malla_to_section=m2s,
+            crest_tolerance_neg_m=1.5,
+            crest_tolerance_pos_m=1.5,
+            toe_tolerance_neg_m=1.5,
+            toe_tolerance_pos_m=1.5,
+        )
+        assert res["per_malla"]["A"] == 100  # deuda CUMPLE both sides
+        assert res["per_malla"]["B"] == 65  # FUERA both sides: (0.5*0.4 + 0.5*0.3 + 1.0*0.3)
+
+    def test_weights_and_formula_unchanged(self):
+        from core.blast_achievement import W_BERM, W_CREST, W_TOE
+
+        assert W_CREST == 0.4
+        assert W_TOE == 0.3
+        assert W_BERM == 0.3

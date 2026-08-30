@@ -14,6 +14,7 @@ deltas, berm_status, section name). Tests live in
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional
 
 from core.compliance_status import STATUS_CUMPLE, STATUS_FUERA
@@ -53,11 +54,27 @@ def np_isnan(x: float) -> bool:
     return x != x
 
 
-def _delta_status(delta: Optional[float], tol: float) -> Optional[str]:
+def _validate_tolerance(value: float, name: str) -> float:
+    """Validate a tolerance value: finite and >= 0."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite number >= 0, got {value!r}")
+    if math.isnan(v) or math.isinf(v):
+        raise ValueError(f"{name} must be finite, got {v!r}")
+    if v < 0:
+        raise ValueError(f"{name} must be >= 0, got {v!r}")
+    return v
+
+
+def _delta_status(delta: Optional[float], tol_neg: float, tol_pos: float) -> Optional[str]:
     """Classify a signed crest/toe deviation into the three-tier model.
 
-    Returns ``STATUS_CUMPLE`` when ``|delta| <= tol``, ``STATUS_FUERA``
-    when ``|delta| <= 1.5 * tol``, otherwise ``None`` (NO CUMPLE /
+    Signed-side classification: ``delta < 0`` (deuda) is compared against
+    ``tol_neg`` (allowed debt magnitude); ``delta >= 0``
+    (sobre-excavación) against ``tol_pos``. A side CUMPLE when
+    ``abs(delta) <= tol_side`` (inclusive), is ``STATUS_FUERA`` when
+    ``abs(delta) <= 1.5 * tol_side``, otherwise ``None`` (NO CUMPLE /
     unscored). ``None`` / NaN / non-numeric deltas return ``None``.
     """
     if delta is None:
@@ -68,6 +85,7 @@ def _delta_status(delta: Optional[float], tol: float) -> Optional[str]:
         return None
     if np_isnan(v):
         return None
+    tol = tol_neg if v < 0 else tol_pos
     a = abs(v)
     if a <= tol:
         return STATUS_CUMPLE
@@ -76,7 +94,13 @@ def _delta_status(delta: Optional[float], tol: float) -> Optional[str]:
     return None
 
 
-def _score_subset(rows: List[dict], crest_tol: float, toe_tol: float) -> Dict[str, Any]:
+def _score_subset(
+    rows: List[dict],
+    crest_tol_neg: float,
+    crest_tol_pos: float,
+    toe_tol_neg: float,
+    toe_tol_pos: float,
+) -> Dict[str, Any]:
     """Score a list of comparison rows.
 
     Returns the breakdown shape consumed by callers. Note the deliberate
@@ -97,8 +121,8 @@ def _score_subset(rows: List[dict], crest_tol: float, toe_tol: float) -> Dict[st
     for row in rows:
         if not isinstance(row, dict):
             continue
-        crest_st = _delta_status(row.get("delta_crest"), crest_tol)
-        toe_st = _delta_status(row.get("delta_toe"), toe_tol)
+        crest_st = _delta_status(row.get("delta_crest"), crest_tol_neg, crest_tol_pos)
+        toe_st = _delta_status(row.get("delta_toe"), toe_tol_neg, toe_tol_pos)
         berm_st = row.get("berm_status")
 
         crest_credit = _row_credit(crest_st)
@@ -146,11 +170,63 @@ def _score_subset(rows: List[dict], crest_tol: float, toe_tol: float) -> Dict[st
     }
 
 
+def _resolve_tolerances(
+    crest_tolerance_m: Optional[float] = None,
+    toe_tolerance_m: Optional[float] = None,
+    crest_tolerance_neg_m: Optional[float] = None,
+    crest_tolerance_pos_m: Optional[float] = None,
+    toe_tolerance_neg_m: Optional[float] = None,
+    toe_tolerance_pos_m: Optional[float] = None,
+) -> Dict[str, Dict[str, float]]:
+    """Resolve per-side (signed) crest/toe tolerances.
+
+    Precedence per side: signed kwarg (if present) > legacy scalar for
+    the feature (if present) > ``TOLERANCES.crest_toe_deviation``. The
+    legacy scalars apply symmetrically to both sides of their feature.
+    All values are validated (finite, >= 0).
+    """
+    default = TOLERANCES.crest_toe_deviation
+    crest_neg = (
+        crest_tolerance_neg_m
+        if crest_tolerance_neg_m is not None
+        else (crest_tolerance_m if crest_tolerance_m is not None else default["neg"])
+    )
+    crest_pos = (
+        crest_tolerance_pos_m
+        if crest_tolerance_pos_m is not None
+        else (crest_tolerance_m if crest_tolerance_m is not None else default["pos"])
+    )
+    toe_neg = (
+        toe_tolerance_neg_m
+        if toe_tolerance_neg_m is not None
+        else (toe_tolerance_m if toe_tolerance_m is not None else default["neg"])
+    )
+    toe_pos = (
+        toe_tolerance_pos_m
+        if toe_tolerance_pos_m is not None
+        else (toe_tolerance_m if toe_tolerance_m is not None else default["pos"])
+    )
+    return {
+        "crest": {
+            "neg": _validate_tolerance(crest_neg, "crest_tolerance_neg_m"),
+            "pos": _validate_tolerance(crest_pos, "crest_tolerance_pos_m"),
+        },
+        "toe": {
+            "neg": _validate_tolerance(toe_neg, "toe_tolerance_neg_m"),
+            "pos": _validate_tolerance(toe_pos, "toe_tolerance_pos_m"),
+        },
+    }
+
+
 def compute_design_achievement_score(
     comparisons: Optional[List[dict]],
     malla_to_section: Optional[Dict[str, List[str]]] = None,
     crest_tolerance_m: Optional[float] = None,
     toe_tolerance_m: Optional[float] = None,
+    crest_tolerance_neg_m: Optional[float] = None,
+    crest_tolerance_pos_m: Optional[float] = None,
+    toe_tolerance_neg_m: Optional[float] = None,
+    toe_tolerance_pos_m: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Weighted 0-100 design-achievement score per (per-malla) section.
 
@@ -192,9 +268,18 @@ def compute_design_achievement_score(
           ``STATUS_CUMPLE``
         - ``per_malla``: dict[str, int] or ``None``
     """
+    tolerances = _resolve_tolerances(
+        crest_tolerance_m,
+        toe_tolerance_m,
+        crest_tolerance_neg_m,
+        crest_tolerance_pos_m,
+        toe_tolerance_neg_m,
+        toe_tolerance_pos_m,
+    )
+
     if not comparisons:
         empty_breakdown = {"crest": 0, "toe": 0, "berm": 0}
-        return {
+        result = {
             "global": 0,
             "breakdown": empty_breakdown,
             "n_total": 0,
@@ -202,20 +287,18 @@ def compute_design_achievement_score(
             "n_passing_toe": 0,
             "n_passing_berm": 0,
             "per_malla": None,
+            "tolerances": tolerances,
         }
+        return result
 
-    crest_tol = (
-        float(crest_tolerance_m)
-        if crest_tolerance_m is not None
-        else float(TOLERANCES.crest_toe_deviation["pos"])
-    )
-    toe_tol = (
-        float(toe_tolerance_m)
-        if toe_tolerance_m is not None
-        else float(TOLERANCES.crest_toe_deviation["pos"])
-    )
+    crest_tol_neg = tolerances["crest"]["neg"]
+    crest_tol_pos = tolerances["crest"]["pos"]
+    toe_tol_neg = tolerances["toe"]["neg"]
+    toe_tol_pos = tolerances["toe"]["pos"]
 
-    overall = _score_subset(list(comparisons), crest_tol, toe_tol)
+    overall = _score_subset(
+        list(comparisons), crest_tol_neg, crest_tol_pos, toe_tol_neg, toe_tol_pos
+    )
 
     per_malla: Optional[Dict[str, int]] = None
     if malla_to_section:
@@ -225,7 +308,9 @@ def compute_design_achievement_score(
                 continue
             section_set = set(sections)
             sub = [r for r in comparisons if r.get("section") in section_set]
-            sub_score = _score_subset(sub, crest_tol, toe_tol)
+            sub_score = _score_subset(
+                sub, crest_tol_neg, crest_tol_pos, toe_tol_neg, toe_tol_pos
+            )
             per_malla[str(malla)] = sub_score["score_0_100"]
 
     return {
@@ -236,4 +321,5 @@ def compute_design_achievement_score(
         "n_passing_toe": overall["n_passing_toe"],
         "n_passing_berm": overall["n_passing_berm"],
         "per_malla": per_malla,
+        "tolerances": tolerances,
     }

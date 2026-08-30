@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.blast_advisor import format_recommendation_text
-from core.config import ADVISOR, BACKBREAK, DEFAULTS
+from core.config import ADVISOR, BACKBREAK, DEFAULTS, TOLERANCES
 from core.geom_utils import find_df_column
 from ui.filter_cache import _ensure_filter_values
 from ui.tabs.blast_correlation import backbreak, blocks, data, energy, multivariate, powder_factor, state, temporal
@@ -208,6 +208,9 @@ def render_tab_blast_correlation(config: dict) -> None:
         )
 
     with tab_mal:
+        ct_tol = config.get("tolerances", {}).get(
+            "crest_toe_deviation", TOLERANCES.crest_toe_deviation
+        )
         _render_malla_tab(
             sections,
             blast_df,
@@ -219,6 +222,7 @@ def render_tab_blast_correlation(config: dict) -> None:
             comparison_results,
             fecha_corte_str,
             sel_mallas,
+            ct_tol,
         )
 
 
@@ -453,6 +457,16 @@ def _render_bench_tab(
     _render_attribution_block(attribution_results)
 
 
+def format_achievement_caption(ct_tol: dict) -> str:
+    """Pure helper: audit caption with the effective crest/toe limits."""
+    neg = float(ct_tol.get("neg", TOLERANCES.crest_toe_deviation["neg"]))
+    pos = float(ct_tol.get("pos", TOLERANCES.crest_toe_deviation["pos"]))
+    return (
+        f"Criterio cresta/pata: deuda hasta −{neg:.1f} m · "
+        f"sobre-excavación hasta +{pos:.1f} m"
+    )
+
+
 def _render_malla_tab(
     sections: list,
     blast_df: pd.DataFrame,
@@ -464,9 +478,12 @@ def _render_malla_tab(
     comparison_results: list,
     fecha_corte_str: str | None,
     sel_mallas: list,
+    ct_tol: dict | None = None,
 ) -> None:
     st.markdown("#### Evaluación de Daño Geotécnico por Malla / Polígono de Tronadura")
 
+    if ct_tol is None:
+        ct_tol = TOLERANCES.crest_toe_deviation
     df_malla_corr, global_score_pct = data.compute_malla_correlation(
         sections,
         blast_df,
@@ -476,6 +493,7 @@ def _render_malla_tab(
         malla_col,
         comparison_results,
         fecha_corte_str,
+        achievement_tolerances=ct_tol,
     )
     if df_malla_corr.empty:
         st.info("No se identificaron mallas o polígonos de tronadura válidos en los datos cargados.")
@@ -512,6 +530,7 @@ def _render_malla_tab(
         "score_pct": "Logro Diseño (%)",
     }
     st.metric("Logro Diseño Global", f"{global_score_pct}%")
+    st.caption(format_achievement_caption(ct_tol))
     df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
     st.dataframe(df_m_disp, width="stretch", height=300)
 

@@ -31,6 +31,20 @@ def render_sidebar() -> dict:
         min_berm_width = st.number_input("Berma mínima (m)", value=TOLERANCES.berm_width['min'], step=0.5, key="min_berm")
         tol_ir_neg = st.number_input("Áng. Inter-Rampa: Tol. (-) °", value=TOLERANCES.inter_ramp_angle['neg'], step=1.0, key="tol_ir_neg")
         tol_ir_pos = st.number_input("Áng. Inter-Rampa: Tol. (+) °", value=TOLERANCES.inter_ramp_angle['pos'], step=1.0, key="tol_ir_pos")
+        tol_ct_neg = st.number_input(
+            "Deuda cresta/pata: Tol. (-) m",
+            value=TOLERANCES.crest_toe_deviation['neg'],
+            min_value=0.0,
+            step=0.1,
+            key="tol_crest_toe_neg",
+        )
+        tol_ct_pos = st.number_input(
+            "Sobre-excavación cresta/pata: Tol. (+) m",
+            value=TOLERANCES.crest_toe_deviation['pos'],
+            min_value=0.0,
+            step=0.1,
+            key="tol_crest_toe_pos",
+        )
 
         # --- Detección ---
         st.subheader("🔧 Detección de Bancos")
@@ -60,6 +74,7 @@ def render_sidebar() -> dict:
         'berm_width': {'min': min_berm_width},
         'inter_ramp_angle': {'neg': tol_ir_neg, 'pos': tol_ir_pos},
         'overall_angle': {'neg': TOLERANCES.overall_angle['neg'], 'pos': TOLERANCES.overall_angle['pos']},
+        'crest_toe_deviation': {'neg': tol_ct_neg, 'pos': tol_ct_pos},
     }
 
     return {
@@ -70,6 +85,8 @@ def render_sidebar() -> dict:
         'tolerances': tolerances,
         'tol_h_neg': tol_h_neg,
         'tol_h_pos': tol_h_pos,
+        'tol_ct_neg': tol_ct_neg,
+        'tol_ct_pos': tol_ct_pos,
         'tol_a_neg': tol_a_neg,
         'tol_a_pos': tol_a_pos,
         'min_berm_width': min_berm_width,

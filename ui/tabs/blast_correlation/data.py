@@ -295,8 +295,14 @@ def compute_malla_correlation(
     malla_col: str | None,
     comparison_results: list,
     fecha_corte: str | None = None,
+    achievement_tolerances: dict | None = None,
 ) -> Tuple[pd.DataFrame, int]:
-    """Aggregate blast data and deviations per malla / polígono."""
+    """Aggregate blast data and deviations per malla / polígono.
+
+    ``achievement_tolerances`` (optional dict ``{'neg': float, 'pos':
+    float}``) is forwarded to the design-achievement score as the signed
+    crest/toe tolerances (same neg/pos for both crest and toe).
+    """
     if not malla_col or malla_col not in blast_df.columns:
         return pd.DataFrame(), 0
 
@@ -390,8 +396,18 @@ def compute_malla_correlation(
     df_out = pd.DataFrame(malla_stats).reset_index(drop=True)
 
     if comparison_results and not df_out.empty:
+        tol_kwargs = {}
+        if achievement_tolerances is not None:
+            tol_kwargs = {
+                "crest_tolerance_neg_m": achievement_tolerances["neg"],
+                "crest_tolerance_pos_m": achievement_tolerances["pos"],
+                "toe_tolerance_neg_m": achievement_tolerances["neg"],
+                "toe_tolerance_pos_m": achievement_tolerances["pos"],
+            }
         score = compute_design_achievement_score(
-            comparison_results, malla_to_section=malla_to_section
+            comparison_results,
+            malla_to_section=malla_to_section,
+            **tol_kwargs,
         )
         df_out["score_pct"] = df_out["malla"].map(score.get("per_malla") or {}).fillna(0).astype(int)
         global_score = int(score.get("global", 0))
