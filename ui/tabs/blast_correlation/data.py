@@ -12,7 +12,7 @@ from core.blast_correlation import (
     compute_signed_deviations,
 )
 from core.calculo_tronadura import proyectar_pozos_en_seccion
-from core.config import DEFAULTS
+from core.config import DEFAULTS, TOLERANCES
 from core.geom_utils import calculate_area_between_profiles, find_df_column
 from core.section_cutter import cut_both_surfaces
 from ui.blast_analysis import project_powder_factor_per_section
@@ -286,6 +286,38 @@ def compute_bench_correlation(
     return df_b.drop(columns=["sort_level"])
 
 
+def resolve_achievement_tolerances(ct_tol: dict | None) -> dict:
+    """Resolve a (possibly partial) ``{'neg','pos'}`` dict against core defaults.
+
+    Missing keys fall back to ``TOLERANCES.crest_toe_deviation``; ``None``
+    returns the core defaults. The caller's dict is never mutated. A
+    non-mapping input or non-numeric values raise ``ValueError``/``TypeError``
+    with a clear message.
+    """
+    defaults = TOLERANCES.crest_toe_deviation
+    if ct_tol is None:
+        return {"neg": float(defaults["neg"]), "pos": float(defaults["pos"])}
+    if not isinstance(ct_tol, dict):
+        raise TypeError(
+            "achievement_tolerances must be a dict {'neg': float, 'pos': float}, "
+            f"got {type(ct_tol).__name__}"
+        )
+    resolved = {}
+    for key in ("neg", "pos"):
+        value = ct_tol.get(key, defaults[key])
+        if isinstance(value, bool):
+            raise ValueError(
+                f"achievement_tolerances[{key!r}] must be a number, got bool {value!r}"
+            )
+        try:
+            resolved[key] = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"achievement_tolerances[{key!r}] must be a number, got {value!r}"
+            ) from exc
+    return resolved
+
+
 def compute_malla_correlation(
     sections: list,
     blast_df: pd.DataFrame,
@@ -398,11 +430,12 @@ def compute_malla_correlation(
     if comparison_results and not df_out.empty:
         tol_kwargs = {}
         if achievement_tolerances is not None:
+            resolved = resolve_achievement_tolerances(achievement_tolerances)
             tol_kwargs = {
-                "crest_tolerance_neg_m": achievement_tolerances["neg"],
-                "crest_tolerance_pos_m": achievement_tolerances["pos"],
-                "toe_tolerance_neg_m": achievement_tolerances["neg"],
-                "toe_tolerance_pos_m": achievement_tolerances["pos"],
+                "crest_tolerance_neg_m": resolved["neg"],
+                "crest_tolerance_pos_m": resolved["pos"],
+                "toe_tolerance_neg_m": resolved["neg"],
+                "toe_tolerance_pos_m": resolved["pos"],
             }
         score = compute_design_achievement_score(
             comparison_results,

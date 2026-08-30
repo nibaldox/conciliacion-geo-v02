@@ -351,3 +351,19 @@ class TestSignedToleranceClassification:
         assert W_CREST == 0.4
         assert W_TOE == 0.3
         assert W_BERM == 0.3
+
+    def test_invalid_tolerance_bool_true_raises(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        with pytest.raises(ValueError):
+            compute_design_achievement_score(
+                [self._row(0.0, 0.0)], crest_tolerance_neg_m=True
+            )
+
+    def test_invalid_tolerance_bool_false_raises(self):
+        from core.blast_achievement import compute_design_achievement_score
+
+        with pytest.raises(ValueError):
+            compute_design_achievement_score(
+                [self._row(0.0, 0.0)], toe_tolerance_pos_m=False
+            )

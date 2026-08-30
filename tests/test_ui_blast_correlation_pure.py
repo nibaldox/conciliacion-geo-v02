@@ -251,3 +251,55 @@ class TestTemporalHelpers:
         fig = temporal.build_temporal_figure(trend_df)
         assert fig is not None
         assert len(fig.data) == 2
+
+
+class TestResolveAchievementTolerances:
+    """Partial dicts must resolve against core defaults, without KeyError."""
+
+    def test_partial_neg_dict_fills_pos_default(self):
+        resolved = data.resolve_achievement_tolerances({"neg": 1.5})
+        assert resolved == {"neg": 1.5, "pos": 1.0}
+        assert resolved is not data.TOLERANCES.crest_toe_deviation
+
+    def test_partial_pos_dict_fills_neg_default(self):
+        resolved = data.resolve_achievement_tolerances({"pos": 0.8})
+        assert resolved == {"neg": 1.0, "pos": 0.8}
+
+    def test_full_dict_preserved(self):
+        resolved = data.resolve_achievement_tolerances({"neg": 2.0, "pos": 0.5})
+        assert resolved == {"neg": 2.0, "pos": 0.5}
+
+    def test_none_uses_core_defaults(self):
+        assert data.resolve_achievement_tolerances(None) == {"neg": 1.0, "pos": 1.0}
+
+    def test_does_not_mutate_caller_dict(self):
+        original = {"neg": 1.5}
+        data.resolve_achievement_tolerances(original)
+        assert original == {"neg": 1.5}
+
+    def test_invalid_structure_raises_clearly(self):
+        with pytest.raises((TypeError, ValueError)):
+            data.resolve_achievement_tolerances({"neg": "abc", "pos": 0.8})
+        with pytest.raises((TypeError, ValueError)):
+            data.resolve_achievement_tolerances([1.0, 0.5])
+
+    def test_compute_malla_correlation_partial_dict_no_keyerror(
+        self, blast_df_with_kg
+    ):
+        df = pd.DataFrame(
+            {
+                "Nombre_Malla_Original": ["M1", "M1"],
+                "Kilos_Cargados_real": [100.0, 100.0],
+            }
+        )
+        df_out, _ = data.compute_malla_correlation(
+            [],
+            df,
+            pd.DataFrame(),
+            15.0,
+            "Kilos_Cargados_real",
+            "Nombre_Malla_Original",
+            [{"section": "S01", "delta_crest": -1.2, "delta_toe": 0.0}],
+            achievement_tolerances={"neg": 1.5},
+        )
+        assert not df_out.empty

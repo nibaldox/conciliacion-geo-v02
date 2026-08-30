@@ -484,6 +484,10 @@ def _render_malla_tab(
 
     if ct_tol is None:
         ct_tol = TOLERANCES.crest_toe_deviation
+    # Normalize once: partial dicts get core defaults filled in, so the
+    # caption and the achievement score share exactly the same effective
+    # limits.
+    ct_tol = data.resolve_achievement_tolerances(ct_tol)
     df_malla_corr, global_score_pct = data.compute_malla_correlation(
         sections,
         blast_df,

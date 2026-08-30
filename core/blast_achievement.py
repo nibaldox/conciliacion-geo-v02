@@ -56,6 +56,8 @@ def np_isnan(x: float) -> bool:
 
 def _validate_tolerance(value: float, name: str) -> float:
     """Validate a tolerance value: finite and >= 0."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number >= 0, got bool {value!r}")
     try:
         v = float(value)
     except (TypeError, ValueError):
