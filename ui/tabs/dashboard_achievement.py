@@ -18,6 +18,21 @@ from core.compliance_status import STATUS_CUMPLE
 from ui.tabs.blast_correlation.data import resolve_achievement_tolerances
 
 
+def achievement_pct_color(pct: Optional[float], denom: Any) -> str:
+    """Semantic color for a strict-percentage card.
+
+    ``denom`` 0 (or missing pct) -> muted grey; ``pct >= 70`` green;
+    ``>= 50`` orange; otherwise red. Mirrors the global card palette.
+    """
+    if not denom or not isinstance(pct, (int, float)) or isinstance(pct, bool):
+        return "#888888"
+    if pct >= 70:
+        return "green"
+    if pct >= 50:
+        return "orange"
+    return "#B22222"
+
+
 def _finite(x: Any) -> bool:
     if x is None or isinstance(x, bool):
         return False
@@ -107,7 +122,7 @@ def build_parameter_breakdown_rows(results: List[dict], ct_tol: Optional[dict]) 
     ]:
         valid = [r for r in (results or []) if r.get(key) and r[key] != "-"]
         total = len(valid)
-        cumple = sum(1 for r in valid if r[key] == "CUMPLE")
+        cumple = sum(1 for r in valid if r[key] == STATUS_CUMPLE)
         pct = (cumple / total * 100) if total > 0 else 0
         real_values = [r[real_field] for r in valid if r.get(real_field) is not None]
         avg_real = _signed_mean(real_values)
@@ -159,7 +174,7 @@ def build_sector_rows(results: List[dict], ct_tol: Optional[dict]) -> List[Dict[
             s = r.get(key)
             if s and s != "-":
                 d["total"] += 1
-                if s == "CUMPLE":
+                if s == STATUS_CUMPLE:
                     d["cumple"] += 1
                 else:
                     d["no_cumple"] += 1

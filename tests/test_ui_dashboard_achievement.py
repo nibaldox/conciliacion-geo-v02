@@ -243,3 +243,30 @@ class TestDashboardWiring:
 
         sig = inspect.signature(dash._render_global_kpi)
         assert list(sig.parameters) == ["results"]
+
+    def test_deviation_histograms_receives_ct_tol(self):
+        import inspect
+
+        import ui.tabs.dashboard as dash
+
+        sig = inspect.signature(dash._render_deviation_histograms)
+        assert "ct_tol" in sig.parameters
+
+
+class TestAchievementPctColor:
+    def test_denom_zero_is_muted(self):
+        from ui.tabs.dashboard_achievement import achievement_pct_color
+
+        assert achievement_pct_color(0, 0) == "#888888"
+        assert achievement_pct_color(100, 0) == "#888888"
+        assert achievement_pct_color(None, 0) == "#888888"
+
+    def test_thresholds(self):
+        from ui.tabs.dashboard_achievement import achievement_pct_color
+
+        assert achievement_pct_color(80, 10) == "green"
+        assert achievement_pct_color(70, 10) == "green"
+        assert achievement_pct_color(55, 10) == "orange"
+        assert achievement_pct_color(50, 10) == "orange"
+        assert achievement_pct_color(0, 10) == "#B22222"
+        assert achievement_pct_color(49, 10) == "#B22222"

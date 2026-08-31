@@ -16,6 +16,7 @@ from ui.filters import apply_comparison_filters, collect_active_filters_from_ses
 from ui.tabs.blast_correlation.data import resolve_achievement_tolerances
 from ui.tabs.blast_correlation.renderers import format_achievement_caption
 from ui.tabs.dashboard_achievement import (
+    achievement_pct_color,
     build_achievement_histograms,
     build_achievement_summary,
     build_parameter_breakdown_rows,
@@ -60,7 +61,7 @@ def render_tab_dashboard(config: dict) -> None:
     st.divider()
     _render_plan_view(filtered_results, config)
     st.divider()
-    _render_deviation_histograms(filtered_results, config)
+    _render_deviation_histograms(filtered_results, config, ct_tol)
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +172,11 @@ def _render_achievement_kpi(results, ct_tol: dict) -> None:
         color = "green" if pct >= 70 else "orange" if pct >= 50 else "#B22222"
         _card("Logro Diseño Global (parcial)", pct, 1, color)
     with cols[1]:
-        _card("Cresta CUMPLE estricto", summary["crest_pct"], summary["crest_denom"], "green")
+        _card("Cresta CUMPLE estricto", summary["crest_pct"], summary["crest_denom"], achievement_pct_color(summary["crest_pct"], summary["crest_denom"]))
     with cols[2]:
-        _card("Pata CUMPLE estricto", summary["toe_pct"], summary["toe_denom"], "green")
+        _card("Pata CUMPLE estricto", summary["toe_pct"], summary["toe_denom"], achievement_pct_color(summary["toe_pct"], summary["toe_denom"]))
     with cols[3]:
-        _card("Berma CUMPLE estricto", summary["berm_pct"], summary["berm_denom"], "green")
+        _card("Berma CUMPLE estricto", summary["berm_pct"], summary["berm_denom"], achievement_pct_color(summary["berm_pct"], summary["berm_denom"]))
 
     st.caption(
         format_achievement_caption(summary["ct_tol"])
@@ -345,7 +346,7 @@ def _render_plan_view(results, config: dict) -> None:
 # Section 5: Deviation histograms
 # ---------------------------------------------------------------------------
 
-def _render_deviation_histograms(results, config: dict) -> None:
+def _render_deviation_histograms(results, config: dict, ct_tol: dict) -> None:
     """Histogramas de desviación con líneas de tolerancia."""
     st.subheader("📈 Distribución de Desviaciones")
 
@@ -393,8 +394,7 @@ def _render_deviation_histograms(results, config: dict) -> None:
             st.plotly_chart(fig_b, use_container_width=True)
 
     # Segunda fila: Δ Cresta y Δ Pata (Logro Diseño, tolerancia firmada)
-    ct_tol = resolve_achievement_tolerances(
-        (config or {}).get('tolerances', {}).get('crest_toe_deviation'))
+    # ct_tol se resuelve una única vez en render_tab_dashboard y se propaga.
     hist_specs = build_achievement_histograms(results, ct_tol)
     cols_delta = st.columns(2)
     for col, spec in zip(cols_delta, hist_specs):

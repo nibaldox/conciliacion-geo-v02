@@ -1,5 +1,6 @@
 """Pure DataFrame compute helpers for blast-geotechnical correlation."""
 
+import math
 from typing import Tuple
 
 import numpy as np
@@ -315,6 +316,11 @@ def resolve_achievement_tolerances(ct_tol: dict | None) -> dict:
             raise ValueError(
                 f"achievement_tolerances[{key!r}] must be a number, got {value!r}"
             ) from exc
+        if not math.isfinite(resolved[key]) or resolved[key] < 0:
+            raise ValueError(
+                f"achievement_tolerances[{key!r}] must be a finite, "
+                f"non-negative number, got {value!r}"
+            )
     return resolved
 
 

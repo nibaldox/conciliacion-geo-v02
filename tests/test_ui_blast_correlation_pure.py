@@ -283,6 +283,25 @@ class TestResolveAchievementTolerances:
         with pytest.raises((TypeError, ValueError)):
             data.resolve_achievement_tolerances([1.0, 0.5])
 
+    def test_rejects_bool_nan_inf_negative_and_accepts_zero(self):
+        with pytest.raises(ValueError):
+            data.resolve_achievement_tolerances({"neg": True, "pos": 0.8})
+        with pytest.raises(ValueError):
+            data.resolve_achievement_tolerances({"neg": float("nan"), "pos": 0.8})
+        with pytest.raises(ValueError):
+            data.resolve_achievement_tolerances({"neg": float("inf"), "pos": 0.8})
+        with pytest.raises(ValueError):
+            data.resolve_achievement_tolerances({"neg": 1.0, "pos": -0.5})
+        resolved = data.resolve_achievement_tolerances({"neg": 0, "pos": 0.0})
+        assert resolved == {"neg": 0.0, "pos": 0.0}
+
+    def test_partial_dict_conserves_fallback_on_invalid_other_key(self):
+        # A valid key is resolved even if the caller later validates the rest.
+        original = {"neg": 1.5, "pos": "bad"}
+        with pytest.raises(ValueError):
+            data.resolve_achievement_tolerances(original)
+        assert original == {"neg": 1.5, "pos": "bad"}
+
     def test_compute_malla_correlation_partial_dict_no_keyerror(
         self, blast_df_with_kg
     ):

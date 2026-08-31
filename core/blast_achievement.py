@@ -110,8 +110,8 @@ def _delta_status(delta: Optional[float], tol_neg: float, tol_pos: float) -> Opt
     ``tol_neg`` (allowed debt magnitude); ``delta >= 0``
     (sobre-excavación) against ``tol_pos``. A side CUMPLE when
     ``abs(delta) <= tol_side`` (inclusive), is ``STATUS_FUERA`` when
-    ``abs(delta) <= 1.5 * tol_side``, otherwise ``None`` (NO CUMPLE /
-    unscored). ``None`` / NaN / non-numeric deltas return ``None``.
+    ``abs(delta) <= 1.5 * tol_side``, otherwise ``STATUS_NO_CUMPLE``.
+    ``None`` / NaN / non-numeric deltas return ``None``.
     """
     return classify_achievement_delta(delta, tol_neg, tol_pos)
 
