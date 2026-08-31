@@ -13,6 +13,14 @@ import streamlit as st
 
 from ui.filter_cache import _ensure_filter_values
 from ui.filters import apply_comparison_filters, collect_active_filters_from_session_state
+from ui.tabs.blast_correlation.data import resolve_achievement_tolerances
+from ui.tabs.blast_correlation.renderers import format_achievement_caption
+from ui.tabs.dashboard_achievement import (
+    build_achievement_histograms,
+    build_achievement_summary,
+    build_parameter_breakdown_rows,
+    build_sector_rows,
+)
 
 
 def render_tab_dashboard(config: dict) -> None:
@@ -40,11 +48,15 @@ def render_tab_dashboard(config: dict) -> None:
         st.warning("⚠️ No hay resultados que coincidan con los filtros seleccionados.")
         return
 
+    ct_tol = resolve_achievement_tolerances(
+        (config or {}).get('tolerances', {}).get('crest_toe_deviation'))
+
     _render_global_kpi(filtered_results)
+    _render_achievement_kpi(filtered_results, ct_tol)
     st.divider()
-    _render_parameter_breakdown(filtered_results)
+    _render_parameter_breakdown(filtered_results, ct_tol)
     st.divider()
-    _render_sector_compliance_map(filtered_results)
+    _render_sector_compliance_map(filtered_results, ct_tol)
     st.divider()
     _render_plan_view(filtered_results, config)
     st.divider()
@@ -129,38 +141,58 @@ def _render_global_kpi(results) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Section 1b: Logro Diseño — Cresta, Pata y Berma (métrica separada)
+# ---------------------------------------------------------------------------
+
+def _render_achievement_kpi(results, ct_tol: dict) -> None:
+    """KPIs de Logro Diseño: global (parcial) + % estricto por elemento."""
+    st.subheader("🎯 Logro Diseño — Cresta, Pata y Berma")
+    summary = build_achievement_summary(results, ct_tol)
+    if summary is None:
+        st.info("Sin datos de logro evaluables (se requieren desviaciones de "
+                "cresta/pata o estado de berma).")
+        return
+
+    def _card(label, pct, denom, color):
+        value = "—" if denom == 0 else f"{pct}%"
+        st.markdown(
+            f"<div style='text-align:center; padding:1rem; "
+            f"background:rgba(0,100,0,0.08); border-radius:12px;'>"
+            f"<div style='font-size:2rem; font-weight:700; color:{color};'>"
+            f"{value}</div>"
+            f"<div style='font-size:0.85rem; color:#888;'>{label}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    cols = st.columns(4)
+    with cols[0]:
+        pct = summary["global"]
+        color = "green" if pct >= 70 else "orange" if pct >= 50 else "#B22222"
+        _card("Logro Diseño Global (parcial)", pct, 1, color)
+    with cols[1]:
+        _card("Cresta CUMPLE estricto", summary["crest_pct"], summary["crest_denom"], "green")
+    with cols[2]:
+        _card("Pata CUMPLE estricto", summary["toe_pct"], summary["toe_denom"], "green")
+    with cols[3]:
+        _card("Berma CUMPLE estricto", summary["berm_pct"], summary["berm_denom"], "green")
+
+    st.caption(
+        format_achievement_caption(summary["ct_tol"])
+        + " · El score global da 50% de crédito a FUERA DE TOLERANCIA; "
+        "las tarjetas por elemento cuentan sólo CUMPLE estricto."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Section 2: Parameter breakdown (% cumplimiento + promedio real)
 # ---------------------------------------------------------------------------
 
-def _render_parameter_breakdown(results) -> None:
+def _render_parameter_breakdown(results, ct_tol: dict) -> None:
     """Tabla clara: por cada parámetro, % cumplimiento y promedio real."""
     st.subheader("📋 Detalle por Parámetro")
 
-    param_specs = [
-        ('height_status', 'Altura de Banco', 'height_real', 'm'),
-        ('angle_status', 'Ángulo de Cara', 'angle_real', '°'),
-        ('berm_status', 'Ancho de Berma', 'berm_real', 'm'),
-    ]
-
-    rows = []
-    for key, label, real_field, unit in param_specs:
-        valid = [r for r in results if r.get(key) and r[key] != "-"]
-        total = len(valid)
-        cumple = sum(1 for r in valid if r[key] == "CUMPLE")
-        pct = (cumple / total * 100) if total > 0 else 0
-
-        real_values = [r[real_field] for r in valid if r.get(real_field) is not None]
-        avg_real = (sum(real_values) / len(real_values)) if real_values else 0
-
-        rows.append({
-            'Parámetro': label,
-            'Total Evaluado': total,
-            'Cumple': cumple,
-            'No Cumple': total - cumple,
-            '% Cumplimiento': f"{pct:.0f}%",
-            'Promedio Real': f"{avg_real:.1f} {unit}",
-        })
-
+    rows = build_parameter_breakdown_rows(results, ct_tol)
     df = pd.DataFrame(rows)
     st.dataframe(
         df,
@@ -200,68 +232,47 @@ def _render_parameter_breakdown(results) -> None:
 # Section 3: Sector compliance map (dónde se cumple, dónde no)
 # ---------------------------------------------------------------------------
 
-def _render_sector_compliance_map(results) -> None:
-    """Mapa de calor por sector: dónde se cumple y dónde no."""
+def _render_sector_compliance_map(results, ct_tol: dict) -> None:
+    """Mapa por sector: cumplimiento geotécnico y Logro Diseño separados."""
     st.subheader("🗺️ Cumplimiento por Sector")
 
-    sector_data = {}
-    for r in results:
-        sector = r.get('sector', 'Sin Sector') or 'Sin Sector'
-        if sector not in sector_data:
-            sector_data[sector] = {'cumple': 0, 'no_cumple': 0, 'total': 0}
-        for key in ('height_status', 'angle_status', 'berm_status'):
-            s = r.get(key)
-            if s and s != "-":
-                sector_data[sector]['total'] += 1
-                if s == "CUMPLE":
-                    sector_data[sector]['cumple'] += 1
-                else:
-                    sector_data[sector]['no_cumple'] += 1
-
-    if not sector_data:
+    sector_rows = build_sector_rows(results, ct_tol)
+    if not sector_rows:
         st.info("No hay datos de sector disponibles.")
         return
 
-    rows = []
-    for sector, counts in sorted(sector_data.items()):
-        pct = (counts['cumple'] / counts['total'] * 100) if counts['total'] > 0 else 0
-        rows.append({
-            'Sector': sector,
-            'Cumple': counts['cumple'],
-            'No Cumple': counts['no_cumple'],
-            'Total': counts['total'],
-            '% Cumplimiento': round(pct, 1),
-        })
+    df_sectors = pd.DataFrame(sector_rows)
+    df_disp = df_sectors.copy()
+    df_disp["Logro Diseño (%)"] = df_disp["Logro Diseño (%)"].map(
+        lambda v: "Sin datos" if v is None else v)
+    st.dataframe(df_disp, use_container_width=True, hide_index=True)
 
-    df_sectors = pd.DataFrame(rows)
-
-    # Colorear por compliance
+    # Barras agrupadas: dos métricas separadas, nunca promediadas
     fig = go.Figure()
-    for _, row in df_sectors.iterrows():
-        color = '#2E7D32' if row['% Cumplimiento'] >= 70 else '#F9A825' if row['% Cumplimiento'] >= 50 else '#C62828'
-        fig.add_trace(go.Bar(
-            x=[row['Sector']],
-            y=[row['% Cumplimiento']],
-            marker_color=color,
-            text=f"{row['% Cumplimiento']:.0f}%<br>({row['Cumple']}/{row['Total']})",
-            textposition='inside',
-            showlegend=False,
-            name=row['Sector'],
-        ))
-
+    fig.add_trace(go.Bar(
+        name='Cumplimiento Geotécnico (%)',
+        x=df_sectors['Sector'], y=df_sectors['% Cumplimiento'],
+        marker_color='#2E7D32', textposition='outside',
+        text=[f"{v:.0f}%" for v in df_sectors['% Cumplimiento']],
+    ))
+    logro = df_sectors[df_sectors['Logro Diseño (%)'].notna()]
+    fig.add_trace(go.Bar(
+        name='Logro Diseño (%)',
+        x=logro['Sector'], y=logro['Logro Diseño (%)'],
+        marker_color='#1565C0', textposition='outside',
+        text=[f"{v:.0f}%" for v in logro['Logro Diseño (%)']],
+    ))
     fig.update_layout(
-        title="Cumplimiento % por Sector",
-        yaxis_title="% Cumplimiento",
-        yaxis_range=[0, 100],
-        height=350,
+        barmode='group',
+        title="Cumplimiento Geotécnico vs Logro Diseño por Sector",
+        yaxis_title="%", yaxis_range=[0, 105],
+        height=380,
         margin=dict(l=20, r=20, t=40, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     fig.add_hline(y=70, line_dash="dash", line_color="green",
                   annotation_text="Meta 70%", annotation_position="top left")
     st.plotly_chart(fig, use_container_width=True)
-
-    # Tabla detallada
-    st.dataframe(df_sectors, use_container_width=True, hide_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -380,3 +391,25 @@ def _render_deviation_histograms(results, config: dict) -> None:
                 annotation_text="Mínimo", annotation_position="top right",
             )
             st.plotly_chart(fig_b, use_container_width=True)
+
+    # Segunda fila: Δ Cresta y Δ Pata (Logro Diseño, tolerancia firmada)
+    ct_tol = resolve_achievement_tolerances(
+        (config or {}).get('tolerances', {}).get('crest_toe_deviation'))
+    hist_specs = build_achievement_histograms(results, ct_tol)
+    cols_delta = st.columns(2)
+    for col, spec in zip(cols_delta, hist_specs):
+        with col:
+            if not spec["values"]:
+                st.info(f"Sin datos de {spec['title']}.")
+                continue
+            fig_d = go.Figure(go.Histogram(
+                x=spec["values"], nbinsx=15, marker_color='#1565C0'))
+            fig_d.update_layout(title=spec["title"], height=300,
+                                xaxis_title="Desviación (m)", yaxis_title="Frecuencia",
+                                margin=dict(l=20, r=10, t=40, b=20))
+            fig_d.add_vrect(
+                x0=spec["x0"], x1=spec["x1"],
+                fillcolor="green", opacity=0.1, layer="below",
+                annotation_text="CUMPLE", annotation_position="top left",
+            )
+            st.plotly_chart(fig_d, use_container_width=True)

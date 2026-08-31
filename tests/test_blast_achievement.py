@@ -367,3 +367,76 @@ class TestSignedToleranceClassification:
             compute_design_achievement_score(
                 [self._row(0.0, 0.0)], toe_tolerance_pos_m=False
             )
+
+
+class TestClassifyAchievementDelta:
+    """Public signed-side classifier (shared by core score and dashboard)."""
+
+    def test_in_module_all(self):
+        import core.blast_achievement as m
+
+        assert "classify_achievement_delta" in m.__all__
+
+    def test_negative_within_neg_tolerance_cumple(self):
+        from core.blast_achievement import classify_achievement_delta as c
+
+        assert c(-0.5, 1.0, 0.5) == STATUS_CUMPLE
+
+    def test_exact_limits_inclusive(self):
+        from core.blast_achievement import classify_achievement_delta as c
+
+        assert c(-1.0, 1.0, 0.5) == STATUS_CUMPLE
+        assert c(0.5, 1.0, 0.5) == STATUS_CUMPLE
+
+    def test_beyond_pos_goes_fuera_then_no_cumple(self):
+        from core.blast_achievement import classify_achievement_delta as c
+        from core.compliance_status import STATUS_NO_CUMPLE
+
+        assert c(0.7, 1.0, 0.5) == STATUS_FUERA
+        assert c(0.75, 1.0, 0.5) == STATUS_FUERA
+        assert c(1.0, 1.0, 0.5) == STATUS_NO_CUMPLE
+
+    def test_fuera_limit_inclusive_at_1_5x(self):
+        from core.blast_achievement import classify_achievement_delta as c
+        from core.compliance_status import STATUS_NO_CUMPLE
+
+        assert c(-1.5, 1.0, 0.5) == STATUS_FUERA
+        assert c(-1.51, 1.0, 0.5) == STATUS_NO_CUMPLE
+
+    def test_zero_is_cumple(self):
+        from core.blast_achievement import classify_achievement_delta as c
+
+        assert c(0.0, 1.0, 0.5) == STATUS_CUMPLE
+
+    def test_missing_and_nonfinite_return_none(self):
+        import math
+
+        from core.blast_achievement import classify_achievement_delta as c
+
+        assert c(None, 1.0, 0.5) is None
+        assert c("abc", 1.0, 0.5) is None
+        assert c(float("nan"), 1.0, 0.5) is None
+        assert c(float("inf"), 1.0, 0.5) is None
+        assert c(float("-inf"), 1.0, 0.5) is None
+        assert c(math.nan, 1.0, 0.5) is None
+
+    def test_invalid_tolerances_raise(self):
+        from core.blast_achievement import classify_achievement_delta as c
+
+        with pytest.raises(ValueError):
+            c(0.5, -1.0, 0.5)
+        with pytest.raises(ValueError):
+            c(0.5, 1.0, float("nan"))
+        with pytest.raises(ValueError):
+            c(0.5, "x", 0.5)
+
+    def test_score_uses_same_classification_no_drift(self):
+        from core import blast_achievement as m
+
+        row = {"section": "S1", "delta_crest": 0.7, "delta_toe": 0.3,
+               "berm_status": STATUS_CUMPLE}
+        res = m.compute_design_achievement_score(
+            [row], crest_tolerance_neg_m=1.0, crest_tolerance_pos_m=0.5,
+            toe_tolerance_neg_m=1.0, toe_tolerance_pos_m=0.5)
+        # crest FUERA -> 0.5 credit; toe CUMPLE; berm CUMPLE
+        assert res["global"] == int(round((0.4 * 0.5 + 0.3 + 0.3) * 100))

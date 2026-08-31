@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional
 
-from core.compliance_status import STATUS_CUMPLE, STATUS_FUERA
+from core.compliance_status import STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE
 from core.config import TOLERANCES
 
 
@@ -30,6 +30,7 @@ __all__ = [
     "W_CREST",
     "W_TOE",
     "W_BERM",
+    "classify_achievement_delta",
     "compute_design_achievement_score",
 ]
 
@@ -69,6 +70,39 @@ def _validate_tolerance(value: float, name: str) -> float:
     return v
 
 
+def classify_achievement_delta(
+    delta: Optional[float],
+    tolerance_neg_m: float,
+    tolerance_pos_m: float,
+) -> Optional[str]:
+    """Public signed-side classifier shared by the score and the dashboard.
+
+    ``delta < 0`` (deuda) is compared against ``tolerance_neg_m``;
+    ``delta >= 0`` (sobre-excavación) against ``tolerance_pos_m``. Returns
+    ``CUMPLE`` (inclusive within the side tolerance), ``FUERA DE
+    TOLERANCIA`` (inclusive within 1.5x), ``NO CUMPLE`` (beyond), or
+    ``None`` when the delta is missing / non-numeric / NaN / Inf.
+    Tolerances are validated (finite, >= 0) and raise ``ValueError``.
+    """
+    neg = _validate_tolerance(tolerance_neg_m, "tolerance_neg_m")
+    pos = _validate_tolerance(tolerance_pos_m, "tolerance_pos_m")
+    if delta is None:
+        return None
+    try:
+        v = float(delta)
+    except (TypeError, ValueError):
+        return None
+    if np_isnan(v) or math.isinf(v):
+        return None
+    tol = neg if v < 0 else pos
+    a = abs(v)
+    if a <= tol:
+        return STATUS_CUMPLE
+    if a <= 1.5 * tol:
+        return STATUS_FUERA
+    return STATUS_NO_CUMPLE
+
+
 def _delta_status(delta: Optional[float], tol_neg: float, tol_pos: float) -> Optional[str]:
     """Classify a signed crest/toe deviation into the three-tier model.
 
@@ -79,21 +113,7 @@ def _delta_status(delta: Optional[float], tol_neg: float, tol_pos: float) -> Opt
     ``abs(delta) <= 1.5 * tol_side``, otherwise ``None`` (NO CUMPLE /
     unscored). ``None`` / NaN / non-numeric deltas return ``None``.
     """
-    if delta is None:
-        return None
-    try:
-        v = float(delta)
-    except (TypeError, ValueError):
-        return None
-    if np_isnan(v):
-        return None
-    tol = tol_neg if v < 0 else tol_pos
-    a = abs(v)
-    if a <= tol:
-        return STATUS_CUMPLE
-    if a <= 1.5 * tol:
-        return STATUS_FUERA
-    return None
+    return classify_achievement_delta(delta, tol_neg, tol_pos)
 
 
 def _score_subset(
