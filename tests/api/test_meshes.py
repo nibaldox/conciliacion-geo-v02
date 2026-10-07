@@ -21,6 +21,8 @@ from fastapi.testclient import TestClient
 import api.database as db
 import api.routers.meshes as meshes_router
 
+MESH_SESSION_HEADERS = {"X-Session-ID": "api-mesh-endpoint-tests"}
+
 
 # ===========================================================================
 # POST /meshes/upload
@@ -205,6 +207,7 @@ class TestMeshVertices:
             "/api/v1/meshes/upload",
             files={"file": ("big.stl", larger_stl_bytes, "application/octet-stream")},
             data={"type": "design"},
+            headers=MESH_SESSION_HEADERS,
         )
         assert up.status_code == 200, up.text
         mesh_id = up.json()["mesh_id"]
@@ -212,7 +215,9 @@ class TestMeshVertices:
         assert original_faces > 8000
 
         resp = client.get(
-            f"/api/v1/meshes/{mesh_id}/vertices", params={"step": 2000}
+            f"/api/v1/meshes/{mesh_id}/vertices",
+            params={"step": 2000},
+            headers=MESH_SESSION_HEADERS,
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -374,11 +379,14 @@ class TestMeshContours:
             "/api/v1/meshes/upload",
             files={"file": ("topo.stl", larger_stl_bytes, "application/octet-stream")},
             data={"type": "topo"},
+            headers=MESH_SESSION_HEADERS,
         )
         assert up.status_code == 200
         mesh_id = up.json()["mesh_id"]
 
-        resp = client.get(f"/api/v1/meshes/{mesh_id}/contours")
+        resp = client.get(
+            f"/api/v1/meshes/{mesh_id}/contours", headers=MESH_SESSION_HEADERS
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["interval"] == 15.0
@@ -402,12 +410,14 @@ class TestMeshContours:
             "/api/v1/meshes/upload",
             files={"file": ("topo.stl", larger_stl_bytes, "application/octet-stream")},
             data={"type": "topo"},
+            headers=MESH_SESSION_HEADERS,
         )
         mesh_id = up.json()["mesh_id"]
 
         resp = client.get(
             f"/api/v1/meshes/{mesh_id}/contours",
             params={"interval": 5.0, "grid_size": 500},
+            headers=MESH_SESSION_HEADERS,
         )
         assert resp.status_code == 200
         assert resp.json()["interval"] == 5.0
@@ -432,10 +442,13 @@ class TestMeshBreaklines:
             "/api/v1/meshes/upload",
             files={"file": ("topo.stl", larger_stl_bytes, "application/octet-stream")},
             data={"type": "topo"},
+            headers=MESH_SESSION_HEADERS,
         )
         mesh_id = up.json()["mesh_id"]
 
-        resp = client.get(f"/api/v1/meshes/{mesh_id}/breaklines")
+        resp = client.get(
+            f"/api/v1/meshes/{mesh_id}/breaklines", headers=MESH_SESSION_HEADERS
+        )
         assert resp.status_code == 200, resp.text
         body = resp.json()
         # Schema: bounds, elevation_min/max, interval (=0), lines list.
@@ -462,11 +475,13 @@ class TestMeshBreaklines:
             "/api/v1/meshes/upload",
             files={"file": ("topo.stl", larger_stl_bytes, "application/octet-stream")},
             data={"type": "topo"},
+            headers=MESH_SESSION_HEADERS,
         )
         mesh_id = up.json()["mesh_id"]
         resp = client.get(
             f"/api/v1/meshes/{mesh_id}/breaklines",
             params={"angle_threshold": 35.0},
+            headers=MESH_SESSION_HEADERS,
         )
         assert resp.status_code == 200
 

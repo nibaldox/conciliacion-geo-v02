@@ -174,6 +174,8 @@ _allow_origins = (
     else _DEFAULT_CORS_ORIGINS
 )
 
+install_api_key_auth(app)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allow_origins,
@@ -234,10 +236,6 @@ app.include_router(settings.router, prefix="/api/v1")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(simulations.router, prefix="/api/v1")
-
-# Auth must be installed AFTER routers so it wraps them in the middleware
-# stack (Starlette uses LIFO ordering: last add_middleware runs first).
-install_api_key_auth(app)
 
 
 # ---------------------------------------------------------------------------

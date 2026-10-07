@@ -61,6 +61,19 @@ def get_session_id(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 
+async def _require_owned_mesh(request: Request, mesh_id: str) -> dict:
+    """Return the session-owned mesh row for ``mesh_id`` or raise 404."""
+    session_id = get_session_id(request)
+    session_meshes = await run_db(db.get_all_meshes, session_id)
+    mesh = next(
+        (row for row in session_meshes if row["id"] == mesh_id),
+        None,
+    )
+    if mesh is None:
+        raise HTTPException(404, "Mesh not found")
+    return mesh
+
+
 def _load_mesh_from_blob(mesh_data: bytes, filename: str) -> trimesh.Trimesh:
     """Load a trimesh from database BLOB via a temporary file."""
     suffix = Path(filename).suffix or ".stl"
@@ -897,10 +910,7 @@ async def cancel_dxf(request: Request, upload_id: str):
 @router.get("/{mesh_id}/info")
 async def mesh_info(request: Request, mesh_id: str):
     """Return summary information for a stored mesh."""
-    session_id = get_session_id(request)
-    mesh = await run_db(db.get_mesh_by_id, mesh_id)
-    if mesh is None:
-        raise HTTPException(404, "Mesh not found")
+    mesh = await _require_owned_mesh(request, mesh_id)
     return {
         "id": mesh["id"],
         "type": mesh["type"],
@@ -1061,6 +1071,7 @@ async def mesh_vertices(request: Request, mesh_id: str, step: int = 8000):
 
     ``step`` is the *maximum number of faces/points* to return (default 8000).
     """
+    await _require_owned_mesh(request, mesh_id)
     try:
         return await run_db(_get_decimated_vertices_cached, mesh_id, step)
     except ValueError as exc:
@@ -1190,6 +1201,7 @@ async def mesh_horizontal_deviation(
 @router.delete("/{mesh_id}")
 async def delete_mesh(request: Request, mesh_id: str):
     """Delete a stored mesh."""
+    await _require_owned_mesh(request, mesh_id)
     deleted = await run_db(db.delete_mesh, mesh_id)
     if not deleted:
         raise HTTPException(404, "Mesh not found")
@@ -1212,6 +1224,7 @@ async def mesh_contours(
     Returns contour line segments grouped by elevation level, suitable for
     rendering with Chart.js or any line chart library.
     """
+    await _require_owned_mesh(request, mesh_id)
     try:
         return await run_db(_get_contours_cached, mesh_id, interval, grid_size)
     except ValueError as exc:
@@ -1267,6 +1280,7 @@ async def mesh_breaklines(
     """
     Return analytic structural breaklines (crests, toes) extracted from the mesh dihedral angles.
     """
+    await _require_owned_mesh(request, mesh_id)
     try:
         return await run_db(_get_breaklines_cached, mesh_id, angle_threshold)
     except ValueError as exc:

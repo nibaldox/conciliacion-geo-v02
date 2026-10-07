@@ -49,7 +49,9 @@ def test_confirm_persists_import_and_rebuilds_mesh(client):
     row = db.get_mesh_by_id(result["mesh_id"])
     assert row["import_options"] == {"layers": ["SURFACE"], "units": 6}
     assert row["import_report"]["scale_factor"] == 1.0
-    assert client.get(f"/api/v1/meshes/{result['mesh_id']}/info").json()["import_report"] == row["import_report"]
+    assert client.get(
+        f"/api/v1/meshes/{result['mesh_id']}/info", headers={"X-Session-ID": "dxf-owner"}
+    ).json()["import_report"] == row["import_report"]
 
     db.get_trimesh_by_id.cache_clear()
     rebuilt = db.get_trimesh_by_id(result["mesh_id"])

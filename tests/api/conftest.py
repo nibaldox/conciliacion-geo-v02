@@ -145,7 +145,13 @@ def larger_stl_bytes() -> bytes:
 
 @pytest.fixture()
 def uploaded_mesh_id(client: TestClient, stl_bytes: bytes) -> str:
-    """Upload a tiny mesh once and return its id, for tests that only need a mesh id."""
+    """Upload a tiny mesh as a fixed owner session and return its id.
+
+    The fixture pins ``X-Session-ID`` on the client so every later request
+    in the test acts as the owning session — the same flow as the web
+    client, which attaches the header to all requests.
+    """
+    client.headers["X-Session-ID"] = "api-tests-mesh-owner"
     resp = client.post(
         "/api/v1/meshes/upload",
         files={"file": ("tiny.stl", stl_bytes, "application/octet-stream")},
