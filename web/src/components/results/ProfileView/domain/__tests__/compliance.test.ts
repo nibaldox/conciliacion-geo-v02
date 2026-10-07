@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCompliance, describeCompliance, iterateCounts } from '../compliance';
+import { computeCompliance, computeComplianceStatuses, describeCompliance, iterateCounts } from '../compliance';
 import type { Bench, BenchStatus } from '../types';
 
 function makeBench(status: BenchStatus, n: number): Bench {
@@ -103,6 +103,31 @@ describe('computeCompliance', () => {
     const snapshot = JSON.parse(JSON.stringify(input));
     computeCompliance(input);
     expect(input).toEqual(snapshot);
+  });
+});
+
+describe('computeComplianceStatuses', () => {
+  it('counts inherited property names as unknown instead of reading them as statuses', () => {
+    const stats = computeComplianceStatuses([
+      'CUMPLE',
+      'constructor' as BenchStatus,
+      'hasOwnProperty' as BenchStatus,
+      'toString' as BenchStatus,
+      '__proto__' as BenchStatus,
+    ]);
+    expect(stats.counts).toEqual({ CUMPLE: 1, FUERA: 0, NO_CUMPLE: 0, UNKNOWN: 4 });
+    expect(stats.total).toBe(5);
+    expect(stats.evaluated).toBe(1);
+    expect(stats.unknown).toBe(4);
+    expect(stats.withinTolerance).toBe(1);
+    expect(stats.complianceRatio).toBe(1);
+  });
+
+  it('leaves the counts record untouched by prototype lookups', () => {
+    const stats = computeComplianceStatuses(['toString' as BenchStatus]);
+    expect(Object.keys(stats.counts).sort()).toEqual(['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN']);
+    expect(stats.counts.UNKNOWN).toBe(1);
+    expect(stats.complianceRatio).toBe(0);
   });
 });
 

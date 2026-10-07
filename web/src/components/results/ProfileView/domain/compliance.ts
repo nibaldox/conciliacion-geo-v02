@@ -51,7 +51,7 @@ export function computeComplianceStatuses(statuses: readonly BenchStatus[]): Com
     UNKNOWN: 0,
   };
   for (const status of statuses) {
-    if (Object.hasOwn(counts, status)) counts[status] += 1;
+    if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
     else counts.UNKNOWN += 1;
   }
 
