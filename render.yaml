@@ -48,7 +48,7 @@ services:
       # ── Logging ──────────────────────────────────────────────────
       - key: CONCILIACION_LOG_LEVEL
         value: INFO
-      - key: CONCILIATION_LOG_FORMAT
+      - key: CONCILIACION_LOG_FORMAT
         value: json
 
       # ── Rate limiting (generous defaults, off by feature flag) ──
@@ -72,8 +72,12 @@ services:
       # ── Python runtime tweaks ───────────────────────────────────
       - key: PYTHONUNBUFFERED
         value: "1"
-      - key: CONCILIATION_WORKERS
-        value: "2"
+      # Single worker on purpose: request staging, in-memory caches and
+      # background jobs plus the local SQLite store are per-process.
+      # Raise only after those stores move to shared backends — see
+      # docs/WEB_STABILIZATION.md.
+      - key: CONCILIACION_WORKERS
+        value: "1"
 
       # ── Observability (Phase 8) ────────────────────────────────
       # Sentry: leave SENTRY_DSN blank to disable. To enable, paste

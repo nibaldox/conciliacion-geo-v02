@@ -21,6 +21,25 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_max_upload_mb(name: str, default: int = 500, ceiling: int = 10240) -> int:
+    """Read the request-body limit (MiB) restricted to a sane range.
+
+    Non-numeric, zero/negative and above-ceiling values fall back to
+    ``default`` so a bad env value can neither disable the guard nor
+    raise the in-memory exposure of small instances.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < 1 or value > ceiling:
+        return default
+    return value
+
+
 @dataclass(frozen=True)
 class Tolerances:
     """Default tolerances for compliance evaluation."""
@@ -72,7 +91,8 @@ class PipelineDefaults:
     section_length: float = 200.0     # meters
     section_spacing: float = 20.0     # meters (for auto-generation)
     target_faces_visual: int = 30000  # target faces for mesh decimation
-    max_upload_mb: int = 500          # max file upload size
+    # max file upload size
+    max_upload_mb: int = field(default_factory=lambda: _env_max_upload_mb("CONCILIACION_MAX_UPLOAD_MB", 500))
     match_threshold: float = 5.0      # meters, bench matching by elevation
     # Drill & Blast / geotech correlation
     blast_correlation_radius_m: float = 15.0   # meters — projection radius
