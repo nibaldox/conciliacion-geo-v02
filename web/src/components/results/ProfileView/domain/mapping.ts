@@ -11,7 +11,7 @@
  */
 
 import type { ComparisonResultDto, ProfileDataDto, SectionResponseDto } from './types';
-import type { Bench, ProfileLine, ProfilePoint, ProfileViewModel, SectionMeta } from './types';
+import type { Bench, ComparisonBenchStatus, DesignBenchStatus, ProfileLine, ProfilePoint, ProfileViewModel, ProfileWarnings, SectionMeta } from './types';
 import { worstOfThree, parseBenchStatus } from './status';
 
 // ─── Section meta ───────────────────────────────────────────
@@ -112,10 +112,8 @@ export function toBench(
   raw: RawBench,
   comparison: ComparisonResultDto | null,
 ): SpillBench {
-  // Match is implied by the presence of a comparison row. The
-  // backend also exposes `comparison.type` ('MATCH' | 'MISSING' |
-  // 'EXTRA') but for the profile view we just want a boolean.
-  const matched = comparison != null;
+  const matched = comparison?.type === 'MATCH';
+  const designComparison = matched ? comparison : null;
   const status = comparison
     ? worstOfThree(comparison.height_status, comparison.angle_status, comparison.berm_status)
     : 'UNKNOWN';
@@ -126,23 +124,25 @@ export function toBench(
     crestDistance: raw.crest_distance,
     toeElevation: raw.toe_elevation,
     toeDistance: raw.toe_distance,
+    designBenchNumber: designComparison?.bench_num ?? null,
     height: raw.bench_height,
-    designHeight: comparison?.height_design ?? null,
+    designHeight: designComparison?.height_design ?? null,
     faceAngle: raw.face_angle,
-    designAngle: comparison?.angle_design ?? null,
+    designAngle: designComparison?.angle_design ?? null,
     // Backend may report 0 for "no berm" but that's an actual
     // measurement too. We treat 0 as a real value, and missing/
     // null/undefined as no berm.
     bermWidth: Number.isFinite(raw.berm_width) ? raw.berm_width : null,
-    designBerm: comparison?.berm_design ?? null,
+    designBerm: designComparison?.berm_design ?? null,
     isRamp: raw.is_ramp,
     status,
     heightStatus: comparison ? parseBenchStatus(comparison.height_status) : 'UNKNOWN',
     angleStatus: comparison ? parseBenchStatus(comparison.angle_status) : 'UNKNOWN',
     bermStatus: comparison ? parseBenchStatus(comparison.berm_status) : 'UNKNOWN',
     matched,
-    deltaCrest: comparison?.delta_crest ?? null,
-    deltaToe: comparison?.delta_toe ?? null,
+    matchType: comparison?.type ?? null,
+    deltaCrest: designComparison?.delta_crest ?? null,
+    deltaToe: designComparison?.delta_toe ?? null,
     spillWidth: raw.spill_width != null && Number.isFinite(raw.spill_width) ? raw.spill_width : null,
     spillStartDistance: raw.spill_start_distance != null && Number.isFinite(raw.spill_start_distance) ? raw.spill_start_distance : null,
     spillStartElevation: raw.spill_start_elevation != null && Number.isFinite(raw.spill_start_elevation) ? raw.spill_start_elevation : null,
@@ -151,22 +151,110 @@ export function toBench(
   };
 }
 
-/** Build benches for a section given the raw topo benches and
- *  the full list of comparisons (we pick the one matching the
- *  section name + bench number). */
 export function toBenches(
   rawBenches: readonly RawBench[] | null | undefined,
   sectionName: string,
   comparisons: readonly ComparisonResultDto[] | null | undefined,
 ): readonly SpillBench[] {
   if (!rawBenches || rawBenches.length === 0) return [];
-  const byKey = new Map<string, ComparisonResultDto>();
-  for (const c of comparisons ?? []) {
-    byKey.set(`${c.section}#${c.bench_num}`, c);
+  const sectionComparisons = (comparisons ?? []).filter((c) => c.section === sectionName);
+  const explicitByTopo = new Map<number, ComparisonResultDto[]>();
+  for (const comparison of sectionComparisons) {
+    if (comparison.type === 'MISSING' || !Number.isInteger(comparison.bench_num_topo)) continue;
+    const matches = explicitByTopo.get(comparison.bench_num_topo!) ?? [];
+    matches.push(comparison);
+    explicitByTopo.set(comparison.bench_num_topo!, matches);
   }
-  return rawBenches.map((b) =>
-    toBench(b, byKey.get(`${sectionName}#${b.bench_number}`) ?? null),
+  const legacyComparisons = sectionComparisons.filter(
+    (comparison) => comparison.type !== 'MISSING' && comparison.bench_num_topo == null,
   );
+  const legacyByTopo = inferLegacyComparisons(rawBenches, legacyComparisons);
+
+  return rawBenches.map((bench) => {
+    const explicitMatches = explicitByTopo.get(bench.bench_number) ?? [];
+    const comparison = explicitMatches.length === 1
+      ? explicitMatches[0]!
+      : explicitMatches.length === 0
+        ? legacyByTopo.get(bench.bench_number) ?? null
+        : null;
+    return toBench(bench, comparison);
+  });
+}
+
+/** Preserve design-bank identity and the backend's canonical tier, including unbuilt banks. */
+export function toComparisonBenchStatuses(
+  comparisons: readonly ComparisonResultDto[] | null | undefined,
+  sectionName?: string,
+): readonly ComparisonBenchStatus[] {
+  return (comparisons ?? [])
+    .filter((comparison) => sectionName == null || comparison.section === sectionName)
+    .filter((comparison) => comparison.type === 'MATCH' || comparison.type === 'MISSING' || comparison.type === 'EXTRA')
+    .map((comparison) => {
+      const parsedElevation = comparison.type === 'EXTRA' || comparison.level.trim() === ''
+        ? Number.NaN
+        : Number(comparison.level);
+      return {
+        sectionName: comparison.section,
+        designBenchNumber: comparison.type === 'EXTRA' ? null : comparison.bench_num,
+        designElevation: Number.isFinite(parsedElevation) ? parsedElevation : null,
+        status: worstOfThree(comparison.height_status, comparison.angle_status, comparison.berm_status),
+        hasTopo: comparison.type !== 'MISSING',
+        isAdditional: comparison.type === 'EXTRA',
+      };
+    });
+}
+
+export function toDesignBenchStatuses(
+  comparisons: readonly ComparisonResultDto[] | null | undefined,
+  sectionName?: string,
+): readonly DesignBenchStatus[] {
+  return toComparisonBenchStatuses(comparisons, sectionName)
+    .filter((bench): bench is ComparisonBenchStatus & { designBenchNumber: number } => !bench.isAdditional && bench.designBenchNumber != null)
+    .map(({ sectionName: name, designBenchNumber, designElevation, status, hasTopo }) => ({
+      sectionName: name, designBenchNumber, designElevation, status, hasTopo,
+    }));
+}
+
+function inferLegacyComparisons(
+  rawBenches: readonly RawBench[],
+  comparisons: readonly ComparisonResultDto[],
+): Map<number, ComparisonResultDto> {
+  const comparisonCandidates = rawBenches.map((bench) => {
+    const fingerprint = rawBenchFingerprint(bench);
+    return fingerprint == null
+      ? []
+      : comparisons.filter((comparison) => comparisonFingerprint(comparison) === fingerprint);
+  });
+  const candidateBenchCount = new Map<ComparisonResultDto, number>();
+  for (const candidates of comparisonCandidates) {
+    for (const comparison of candidates) {
+      candidateBenchCount.set(comparison, (candidateBenchCount.get(comparison) ?? 0) + 1);
+    }
+  }
+
+  const inferred = new Map<number, ComparisonResultDto>();
+  comparisonCandidates.forEach((candidates, index) => {
+    if (candidates.length !== 1) return;
+    const comparison = candidates[0]!;
+    if (candidateBenchCount.get(comparison) === 1) {
+      inferred.set(rawBenches[index]!.bench_number, comparison);
+    }
+  });
+  return inferred;
+}
+
+function rawBenchFingerprint(bench: RawBench): string | null {
+  return roundedFingerprint(bench.bench_height, bench.face_angle, bench.berm_width);
+}
+
+function comparisonFingerprint(comparison: ComparisonResultDto): string | null {
+  return roundedFingerprint(comparison.height_real, comparison.angle_real, comparison.berm_real);
+}
+
+function roundedFingerprint(height: number | null, angle: number | null, berm: number | null): string | null {
+  if (height == null || !Number.isFinite(height) || angle == null || !Number.isFinite(angle)
+    || berm == null || !Number.isFinite(berm)) return null;
+  return `${height.toFixed(2)}|${angle.toFixed(1)}|${berm.toFixed(2)}`;
 }
 
 // ─── Top-level view model ───────────────────────────────────
@@ -179,7 +267,13 @@ export function toProfileViewModel(
   return {
     section: toSectionMeta(section),
     lines: toProfileLines(profile),
+    horizontalDeviation: profile.horizontal_deviation ?? null,
     benches: toBenches(profile.benches_topo ?? null, profile.section_name, comparisons),
+    comparisonBenchStatuses: toComparisonBenchStatuses(comparisons, profile.section_name),
+    profileWarnings: {
+      design: profile.profile_warnings?.design ?? [],
+      topo: profile.profile_warnings?.topo ?? [],
+    } satisfies ProfileWarnings,
     floorElevation: profile.floor_elevation ?? null,
     crestElevationMax: profile.crest_elevation_max ?? null,
   };

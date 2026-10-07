@@ -47,7 +47,9 @@
     "switch_to_dark": "Switch to dark mode",
     "switch_to_light": "Switch to light mode",
     "aria_dark": "Dark mode",
-    "aria_light": "Light mode"
+    "aria_light": "Light mode",
+    "light_action": "Light",
+    "dark_action": "Dark"
   },
   "demo": {
     "banner_active": "Demo mode",
@@ -57,7 +59,8 @@
     "exit": "Exit demo",
     "try_title": "Don't have your own data?",
     "try_subtitle": "Try the app with a 4-bench synthetic pit. No upload, no backend wait. Loads instantly from the CDN.",
-    "try_button": "▶ Try with sample data"
+    "try_button": "▶ Try with sample data",
+    "try_compact": "Try sample data"
   },
   "step1": {
     "title": "Load Surfaces",
@@ -68,7 +71,7 @@
     "drop_hint": "Drag or click to select",
     "file_types": "STL / OBJ / PLY / DXF",
     "uploading": "Uploading {{label}}…",
-    "max_size": "Maximum 500 MB per file. .stl and .xlsx files are excluded from the repository.",
+    "max_size": "STL: maximum 250 MiB (approx. 262 MB). General upload limit: 500 MiB.",
     "replace": "Replace",
     "removing": "Removing…",
     "unsupported_format": "Unsupported format. Use: {{formats}}",
@@ -78,7 +81,7 @@
     "plan_view_button_2d": "Load plan view",
     "plan_view_no_data": "Load surfaces to see the plan view",
     "plan_view_loading_verts": "Loading vertices…",
-    "plan_view_loading_plotly": "Loading Plotly (≈3 MB)…",
+    "plan_view_loading_plotly": "Loading charts…",
     "view3d_title": "3D view with CesiumJS",
     "view3d_subtitle": "Deferred download: ~4 MB of JS + ~22 MB of assets (Workers, Widgets). Only loads when you click.",
     "view3d_button": "Load 3D view",
@@ -102,7 +105,74 @@
       "coord": "Local coordinate set to EPSG:4326"
     },
     "launch": "Initialize analysis",
-    "launch_waiting": "Awaiting data packets"
+    "launch_waiting": "Awaiting data packets",
+    "compact_drop_hint": "Select or drop a file",
+    "select_mesh": "Upload {{label}} surface",
+    "mesh_counts": "{{vertices}} vertices · {{faces}} faces",
+    "dxf": {
+      "title": "Review DXF for {{role}}",
+      "layers": "Layers with surfaces",
+      "layer_stats": "{{faces}} faces · {{vertices}} vertices",
+      "unnamed_layer": "Unnamed layer",
+      "no_faces": "No compatible faces",
+      "no_surfaces": "The file contains no compatible DXF faces.",
+      "units": "File units",
+      "choose_units": "Select units",
+      "unit_6": "Meters",
+      "unit_4": "Millimeters",
+      "unit_5": "Centimeters",
+      "unit_2": "Feet",
+      "unit_1": "Inches",
+      "unit_21": "US survey feet",
+      "scale": "Conversion factor to meters: {{factor}}",
+      "extent": "Selected extent for {{faces}} faces",
+      "imported_layers": "Imported layers: {{layers}}",
+      "imported_scale": "Applied scale: {{factor}} m per source unit",
+      "warnings": "Import warnings",
+      "entities": "Entities found",
+      "none": "none",
+      "inspecting": "Inspecting DXF…",
+      "confirm": "Confirm import",
+      "confirming": "Importing…",
+      "warning": {
+        "generic": "The file contains items that need review.",
+        "unsupported_entities": "Some entities do not convert to surface faces.",
+        "unknown_units": "The file does not declare units; select the correct units.",
+        "partial_geometry": "Some geometry could not be imported.",
+        "SURFACES_NO_XY_OVERLAP": "The horizontal extent of this surface does not overlap the other loaded surface. Check the selected layers and units.",
+        "UNITS_UNKNOWN": "The file does not declare units; select the correct units.",
+        "UNITS_UNSUPPORTED": "The file declares units that cannot be converted automatically. Select a supported unit.",
+        "INVALID_FACE": "Invalid DXF faces were skipped.",
+        "NONFINITE_COORDINATES": "Non-finite or invalid coordinates were skipped.",
+        "INVALID_MESH_INDEX": "Faces referencing missing vertices were skipped.",
+        "INVALID_POLYFACE_INDEX": "POLYFACE faces referencing missing vertices were skipped.",
+        "UNSUPPORTED_POLYMESH": "POLYMESH was found and cannot be imported as a supported surface.",
+        "UNSUPPORTED_MESH_SUBDIVISION": "A mesh with unsupported subdivision was skipped.",
+        "UNSUPPORTED_SOLID": "SOLID entities were found and cannot be converted to surfaces.",
+        "UNSUPPORTED_BODY": "BODY entities were found and cannot be converted to surfaces.",
+        "UNSUPPORTED_3DSOLID": "3DSOLID entities were found and cannot be converted to surfaces.",
+        "UNSUPPORTED_SURFACE": "Proprietary surfaces were found; export them as faces or a mesh.",
+        "UNSUPPORTED_REGION": "REGION entities were found and cannot automatically be converted to surfaces.",
+        "UNSUPPORTED_ACAD_PROXY_ENTITY": "An AutoCAD proxy entity was found; export it as faces or a mesh.",
+        "SKIPPED_NON_SURFACE_ENTITIES": "Entities that do not represent surface faces were skipped.",
+        "DISCARDED_FACES": "Invalid faces were discarded during import.",
+        "unsupported_type": "{{entity}} entities were skipped because they cannot automatically become surfaces.",
+        "insert_entity_skipped": "The {{entity}} entity inside a block was skipped.",
+        "DXF_XCLIP_UNSUPPORTED": "The file uses unsupported XCLIP block clipping.",
+        "DXF_BLOCK_CYCLE": "A circular reference between DXF blocks was detected.",
+        "DXF_MISSING_BLOCK": "The file references a block that does not exist.",
+        "DXF_TRANSFORM_UNSUPPORTED": "A block transform is not supported by this importer.",
+        "DXF_ENTITY_LIMIT_EXCEEDED": "The file exceeds the entity expansion limit.",
+        "DXF_FACE_LIMIT_EXCEEDED": "The file exceeds the import face limit.",
+        "DXF_MESH_SUBDIVISION_UNSUPPORTED": "The mesh has subdivision data that cannot be imported.",
+        "DXF_NONPLANAR_POLYGON": "The file contains a non-planar polygon that cannot be safely triangulated.",
+        "DXF_AMBIGUOUS_POLYGON": "A DXF polygon cannot be triangulated unambiguously.",
+        "DXF_NO_SURFACE": "No surfaces with compatible faces were found.",
+        "DXF_NO_VALID_FACES": "No valid faces remain to import.",
+        "DXF_LAYER_EMPTY": "The selected layer contains no importable faces.",
+        "DXF_UNITS_UNSUPPORTED": "The declared DXF units cannot be converted automatically."
+      }
+    }
   },
   "step2": {
     "title": "Define Sections",
@@ -113,7 +183,8 @@
     "next_disabled": "Define at least one section to continue",
     "next": "Next →",
     "prev": "← Previous",
-    "tablist_aria": "Section creation method"
+    "tablist_aria": "Section creation method",
+    "existing_sections": "Existing sections"
   },
   "step3": {
     "title": "Analysis",
@@ -252,7 +323,7 @@
     "hardness_medium": "Medium",
     "hardness_hard": "Hard",
     "hardness_unknown": "Unclassified",
-    "geometry_contract": "Geometry contract (mandatory)",
+    "geometry_contract": "Geometry configuration (required)",
     "incl_source_col": "Inclination source column",
     "az_source_col": "Azimuth source column",
     "incl_convention": "Inclination convention",
@@ -264,7 +335,7 @@
     "bench_height": "Bench height (m)",
     "confirm_geometry": "I have reviewed and confirm the geometry configuration (enables computation).",
     "units_mismatch": "Inclination and azimuth units differ. The current API Form requires them to match; use the common unit.",
-    "contract_required": "Complete and confirm the geometry contract before uploading the CSV.",
+    "contract_required": "Review and confirm the geometry configuration before uploading holes.",
     "blocking_errors": "Blocking errors:",
     "rejected_rows": "Rejected rows:",
     "simulation": {
@@ -369,6 +440,26 @@
         "run_button": "Compute profile",
         "empty": "Empty profile."
       }
+    },
+    "choose_csv": "Choose CSV",
+    "submit_csv": "Upload holes",
+    "csv_required": "Choose a CSV file.",
+    "upload_steps": "1. Choose the CSV. 2. Review and confirm geometry. 3. Upload holes.",
+    "geometry_options": {
+      "FROM_VERTICAL": "From vertical",
+      "DIP_FROM_HORIZONTAL": "Dip from horizontal",
+      "ABSOLUTE_VALUE": "Absolute value",
+      "NEGATIVE_IS_DOWNWARD_DIP": "Negative means downward dip",
+      "SOURCE_DEFINED": "Source-defined rule",
+      "CLOCKWISE_FROM_NORTH": "Clockwise from North",
+      "COUNTERCLOCKWISE_FROM_NORTH": "Counterclockwise from North",
+      "CLOCKWISE_FROM_EAST": "Clockwise from East",
+      "COUNTERCLOCKWISE_FROM_EAST": "Counterclockwise from East",
+      "DEGREES": "Degrees",
+      "RADIANS": "Radians",
+      "negative_is_downward_dip": "Negative means downward dip",
+      "positive_only": "Positive values only",
+      "absolute_value": "Absolute value"
     }
   },
   "section_list": {
@@ -526,7 +617,7 @@
     "cesium_load_error": "Failed to load CesiumJS: {{message}}",
     "cesium_init_error": "Failed to initialize CesiumJS: {{message}}",
     "cesium_loading": "Loading CesiumJS (≈4 MB)…",
-    "plotly_loading": "Loading Plotly (≈3 MB)…",
+    "plotly_loading": "Loading charts…",
     "empty_plan": "Upload surfaces to see the plan view",
     "empty_3d": "Upload surfaces to see the 3D view",
     "loading_vertices": "Loading vertices…",
@@ -536,7 +627,78 @@
     "layers": "Visible Layers",
     "layer_topo": "Real Topography",
     "layer_design": "Design Contours",
-    "layer_sections": "Section Lines"
+    "layer_sections": "Section Lines",
+    "horizontal_map": "Horizontal heat map",
+    "horizontal_map_hint": "Color the surface by measured dH between design and topography.",
+    "horizontal_sector": "Sector",
+    "horizontal_unnamed_sector": "No sector",
+    "horizontal_bench": "Design bench",
+    "horizontal_all_benches": "All",
+    "horizontal_longitudinal_step": "Longitudinal step (m)",
+    "horizontal_vertical_step": "Vertical step (m)",
+    "horizontal_no_meshes": "Upload the design and topography surfaces to calculate the map.",
+    "horizontal_no_sections": "Define sections to select a sector.",
+    "horizontal_demo": "The map requires surfaces uploaded in this session.",
+    "horizontal_loading": "Calculating horizontal deviations…",
+    "horizontal_empty": "No comparable cells for these filters.",
+    "horizontal_retry": "Retry",
+    "horizontal_error": "Could not calculate the horizontal map"
+  },
+  "horizontalDeviation": {
+    "legend": "Horizontal deviation legend",
+    "method_caption": "dH at equal elevation · + overbreak · − underbreak",
+    "direction_caption": "Horizontal dH in the local section; heights are measured from the design toe.",
+    "interpolated_caption": "Surface interpolated between original sections; gray context is topography.",
+    "effective_resolution": "Effective resolution: {{longitudinal}} longitudinal · {{vertical}} vertical",
+    "sample_hint": "h labels show meters above the design toe.",
+    "warning": {
+      "coarsened_resolution": "The requested grid exceeds the size limit. Increase the longitudinal or vertical step.",
+      "rejected_section_pair": "Some sections could not be compared because of their spacing or geometry.",
+      "section_gap": "There is a large gap between sections; part of the surface remains unevaluated.",
+      "direction_change": "Direction changes between sections; part of the surface remains unevaluated.",
+      "zero_spacing": "Some sections overlap; some cells cannot be evaluated.",
+      "no_cells": "A section pair produced no comparable cells.",
+      "no_design_faces": "No design faces were found in the selected sector.",
+      "incomplete_cells": "Some cells lack four evaluable corners and remain unmeasured.",
+      "two_sections": "At least two sections in the sector are needed to build the surface.",
+      "sector_required": "Select a sector with available sections.",
+      "invalid_detection_setting": "Detection settings do not allow this map to be calculated.",
+      "no_compatible_section_pairs": "There are no compatible section pairs in this sector.",
+      "resolution_limit": "The requested resolution exceeds the calculation limit. Increase the longitudinal or vertical step.",
+      "generic": "Some map data could not be evaluated."
+    },
+    "categories": {
+      "within_tolerance": "Within tolerance (≤1 m)",
+      "underbreak_minor": "Minor underbreak (1–1.8 m)",
+      "underbreak_moderate": "Moderate underbreak (1.8–3 m)",
+      "underbreak_severe": "Severe underbreak (>3 m)",
+      "overbreak_minor": "Minor overbreak (1–1.8 m)",
+      "overbreak_moderate": "Moderate overbreak (1.8–3 m)",
+      "overbreak_severe": "Severe overbreak (>3 m)",
+      "unmeasured": "Unmeasured"
+    },
+    "summary": {
+      "measured": "Measured",
+      "within": "Within tolerance",
+      "max_abs": "Max |dH|"
+    },
+    "chart": {
+      "deviation": "Horizontal dH",
+      "design_bench": "Design bench {{number}}",
+      "design_bench_short": "D{{number}}",
+      "no_design_bench": "No design bench associated",
+      "status": "Status",
+      "sample_height": "h above toe {{height}}",
+      "sample_datum": "Design toe: {{elevation}} m",
+      "sample_annotation": "h {{height}} · dH {{deviation}}",
+      "sample_unmeasured": "h {{height}} · {{status}}",
+      "missing": "No unique intersection",
+      "ambiguous": "Ambiguous intersection",
+      "horizontal_segment": "Horizontal segment",
+      "unassessed": "Unassessed",
+      "unmeasured": "Unmeasured",
+      "measured": "Measured"
+    }
   },
   "wizard": {
     "nav_label": "Wizard progress",
@@ -659,17 +821,109 @@
   },
   "profileView": {
     "header": {
-      "eyebrow": "SECTION ANALYSIS",
+      "eyebrow": "Section",
       "last_run": "LAST RUN · {{ago}}",
       "floorElev": "Floor Elev",
-      "crestMax": "Crest Elev"
+      "crestMax": "Crest Elev",
+      "azimuth": "Azimuth",
+      "sector": "Sector",
+      "length": "Length",
+      "benches": "Benches"
     },
     "summary": {
-      "title": "MISSION STATUS",
-      "aria": "Mission status",
-      "headline": "{{within}} of {{total}} within tolerance",
+      "title": "Section compliance",
+      "filtered_title": "Selected bench compliance",
+      "aria": "Section compliance",
+      "headline": "{{within}} of {{total}} evaluated benches within tolerance",
       "no_benches": "No benches",
+      "no_evaluated": "{{count}} benches without evaluable data",
       "bar_aria": "Compliance distribution"
+    },
+    "inspector": {
+      "title": "Selected bench",
+      "bench": "Bench {{number}}",
+      "height": "Actual height",
+      "angle": "Actual angle",
+      "berm": "Actual berm",
+      "design": "Design",
+      "status": "Status",
+      "empty": "Select a bench",
+      "hint": "Click a table row or a profile marker to inspect its parameters."
+    },
+    "status": {
+      "CUMPLE": "Compliant",
+      "FUERA": "Outside tolerance",
+      "NO_CUMPLE": "Noncompliant",
+      "UNKNOWN": "No data"
+    },
+    "table": {
+      "empty": "No benches detected in this section.",
+      "empty_filtered": "The selected design bench is not matched in this section.",
+      "additional_topo": "Additional topo · {{number}}",
+      "missing_design": "Design base elevation {{elevation}} m: no topographic bench is matched.",
+      "missing_design_many": "No topographic bench matched to design base elevations: {{elevations}} m.",
+      "title": "Bench parameters",
+      "comparison": "D: design · R: actual · Height and berm in meters; angle in degrees",
+      "columns": {
+        "benchNumber": "#",
+        "crestElevation": "Elev (m)",
+        "designHeight": "Height (D)",
+        "height": "Height (R)",
+        "designAngle": "Angle (D)",
+        "faceAngle": "Angle (R)",
+        "designBerm": "Berm (D)",
+        "bermWidth": "Berm (R)",
+        "status": "Status",
+        "floor": "Floor (m)",
+        "score": "Score"
+      }
+    },
+    "surfaces": {
+      "design": "design surface",
+      "topo": "topographic surface"
+    },
+    "warnings": {
+      "no_section_intersection": "The {{surface}} section cut does not intersect the surface; no profile was obtained for this section.",
+      "insufficient_section_points": "The {{surface}} section cut produced fewer than two valid points; its profile was omitted for this section.",
+      "disconnected_profile_components": "The {{surface}} section cut crosses disconnected spans; its profile was omitted for this section.",
+      "ambiguous_profile_geometry": "The {{surface}} section cut has ambiguous geometry; its profile was omitted for this section.",
+      "minor_profile_reversal_normalized": "The {{surface}} cut had a small local reversal. It was normalized to a vertical segment up to 0.1 m; elevations were preserved. Review this area if that resolution matters.",
+      "section_cut_error": "The {{surface}} section cut could not be processed; its profile was omitted for this section.",
+      "section_processing_error": "An error occurred while processing the {{surface}} section; its profile is unavailable."
+    },
+    "filter": {
+      "label": "Show",
+      "reconciled": "Reconciled",
+      "reconciled_help": "Detected idealized geometry",
+      "areas": "Areas",
+      "areas_help": "Over-excavation and material deficit",
+      "spill": "Spill",
+      "spill_help": "Spilled material at bench toes",
+      "semaphore": "Status",
+      "semaphore_help": "Green: compliant; amber: warning; red: noncompliant",
+      "horizontal_deviation": "Horizontal deviation",
+      "horizontal_deviation_help": "Color the topography by dH at equal elevation; + overbreak, − underbreak.",
+      "blast": "Holes",
+      "blast_help": "Projected blast holes",
+      "reset": "Reset",
+      "active": "Active",
+      "tolerance": "Tol"
+    },
+    "loading": "Loading profile…",
+    "error": "Could not load the profile",
+    "chart": {
+      "elevation": "Elevation (m)",
+      "distance": "Distance (m)",
+      "hover": {
+        "elevation": "Elevation",
+        "crestDelta": "Crest Δ",
+        "toeDelta": "Toe Δ",
+        "actualAngle": "Actual angle",
+        "plannedAngle": "Planned angle",
+        "actualBerm": "Actual berm",
+        "plannedBerm": "Planned berm",
+        "unmatched": "No design bench associated"
+      }
     }
   },
   "contour": {
@@ -687,11 +941,25 @@
     "title": "General Reconciliation Summary",
     "bench_filter": {
       "all": "All",
-      "label": "Bench:"
+      "label": "Filter by bench",
+      "all_benches": "All benches",
+      "bench": "Bench {{number}}",
+      "design_elevation": "Design bench base elevation {{elevation}} m",
+      "no_design_elevation": "Design ID {{number}} · no base elevation",
+      "design_id": "Design ID {{number}}",
+      "design_elevation_help": "Bench toe elevation in the design; the ID preserves matching across sections.",
+      "selected_one": "{{count}} bench selected",
+      "selected_other": "{{count}} benches selected",
+      "search": "Search benches…",
+      "no_options": "No benches match this number.",
+      "reset": "Reset",
+      "help": "Select one or more benches. An empty selection evaluates all benches.",
+      "no_results": "No results match the selected benches. Reset the filter to see all results."
     },
     "kpi": {
       "global_score": "Global Weighted Score",
       "profiles_ok": "Compliant Profiles",
+      "profiles_outside": "Profiles Outside Tolerance",
       "profiles_no": "Non-Compliant Profiles"
     },
     "section": {
@@ -774,5 +1042,75 @@
     "confidence_hint": "{{kind}} match",
     "missing_required": "Missing required fields: {{names}}.",
     "ready": "Ready to confirm."
+  },
+  "profilesGrid": {
+    "empty": "No processed sections.",
+    "profileError": "This profile could not be loaded.",
+    "profileRefreshError": "This profile could not be refreshed.",
+    "profileEmpty": "This profile has no data to display.",
+    "retryProfile": "Retry profile"
+  },
+  "workspace": {
+    "project": "Project",
+    "analysis": "Analysis",
+    "surfaces": "Surfaces",
+    "sections": "Sections",
+    "profiles": "Profiles",
+    "view3d": "3D view",
+    "summary": "Summary",
+    "blast": "Blasting",
+    "export": "Export",
+    "curves": "From curves",
+    "file": "File",
+    "menu": "Open or close navigation",
+    "skip": "Skip to main content",
+    "parameters": "Parameters",
+    "process": "Processing"
+  },
+  "plan_view": {
+    "title": "Compliance plan by profile",
+    "description": "Actual topography in gray. Sections use the worst tolerance status across their matched benches.",
+    "no_score": "No evaluable score",
+    "unavailable": "No topography is available to draw the plan.",
+    "east": "East (m)",
+    "north": "North (m)",
+    "passing": "Compliant",
+    "outside": "Outside tolerance",
+    "failing": "Non-compliant",
+    "evaluated_area": "Evaluated area",
+    "full_surface": "Full surface"
+  },
+  "project_input": {
+    "curve_help": "How to define the segment",
+    "curve_step1": "Select a breakline in the 3D view.",
+    "curve_step2": "Mark the start point on that line.",
+    "curve_step3": "Mark the end point and generate profiles.",
+    "selected_curve": "Line",
+    "none": "Not selected",
+    "start": "Start",
+    "end": "End",
+    "waiting": "Waiting for click",
+    "optional": "Optional",
+    "length_up": "Upper (m)",
+    "length_down": "Lower (m)",
+    "length_help": "Section length on each side of the origin: upper and lower.",
+    "generating": "Generating…",
+    "generate": "Generate profiles",
+    "choose_file": "Choose file",
+    "tolerance_neg": "Negative tolerance: {{field}}",
+    "tolerance_pos": "Positive tolerance: {{field}}",
+    "negative": "Negative",
+    "positive": "Positive",
+    "global_angles": "Global angles",
+    "resolution": "Step (m)",
+    "face_threshold": "Face (°)",
+    "berm_threshold": "Berm (°)",
+    "process": "Process",
+    "curve_success": "Profiles generated successfully"
+  },
+  "profile_plan": {
+    "title": "Plan location",
+    "active": "Active profile: {{name}}",
+    "neighbours": "Blue: active profile · gray: neighbouring profiles"
   }
 }

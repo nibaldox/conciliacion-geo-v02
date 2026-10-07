@@ -138,7 +138,7 @@ vi.mock('@tanstack/react-query', async () => {
 
 // react-plotly.js renders a placeholder div in jsdom; we assert on the
 // caption and container, not on Plotly's internals.
-vi.mock('react-plotly.js', () => ({
+vi.mock('../../charts/Plot', () => ({
   default: () => <div data-testid="plotly-stub" />,
 }));
 

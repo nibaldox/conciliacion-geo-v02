@@ -9,7 +9,6 @@ import pytest
 import trimesh
 
 from core.mesh_handler import (
-    DEFAULT_MAX_MESH_SIZE_MB,
     MeshValidationError,
     _validate_stl_magic_bytes,
     _validate_stl_path,
@@ -128,5 +127,17 @@ class TestLoadMeshIntegration:
         # `except ValueError` callers.
         assert issubclass(MeshValidationError, ValueError)
 
-    def test_default_cap_is_200mb(self):
-        assert DEFAULT_MAX_MESH_SIZE_MB == 200
+    @pytest.mark.parametrize("size_bytes", [220 * 1024 * 1024, 250 * 1024 * 1024])
+    def test_default_cap_accepts_large_stl(self, tmp_path, monkeypatch, size_bytes):
+        cube = tmp_path / "large.stl"
+        _valid_cube_stl(cube)
+        monkeypatch.setattr(os.path, "getsize", lambda _: size_bytes)
+        mesh = load_mesh(str(cube))
+        assert len(mesh.faces) == 12
+
+    def test_default_cap_rejects_over_250_mib(self, tmp_path, monkeypatch):
+        cube = tmp_path / "oversized.stl"
+        _valid_cube_stl(cube)
+        monkeypatch.setattr(os.path, "getsize", lambda _: 250 * 1024 * 1024 + 1)
+        with pytest.raises(MeshValidationError, match="máximo permitido: 250 MiB"):
+            load_mesh(str(cube))

@@ -5,13 +5,12 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from docx import Document
-from docx.shared import Inches, Pt, RGBColor
+from docx.image.image import Image as DocxImage
+from docx.shared import Emu, Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.section import WD_ORIENT
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from datetime import datetime
 import numpy as np
 
 from core.blast_correlation import (
@@ -24,6 +23,18 @@ from core.compliance_status import (
     STATUS_NO_CUMPLE,
 )
 from core.config import DEFAULTS
+from core.reconciliation_summary import compute_global_compliance, compute_section_scores
+from core.word_report_layout import add_cover, configure_document, style_data_table
+
+PAGE_WIDTH_MM = 297
+PAGE_MARGIN_MM = 15
+USABLE_WIDTH_IN = (PAGE_WIDTH_MM - 2 * PAGE_MARGIN_MM) / 25.4
+PROFILE_GRID_COLUMNS = 2
+PROFILES_PER_PAGE = 4
+PROFILE_IMAGE_MAX_WIDTH = Inches(4.95)
+PROFILE_IMAGE_MAX_HEIGHT = Inches(2.8)
+PLAN_IMAGE_MAX_WIDTH = Inches(USABLE_WIDTH_IN - 0.1)
+PLAN_IMAGE_MAX_HEIGHT = Inches(5.5)
 
 def create_section_plot(params_design, params_topo, distances_d, elevations_d, distances_t, elevations_t,
                         plot_options=None, section=None, df_pozos=None, filtered_bench_nums=None):
@@ -238,19 +249,10 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
     if not sections:
         return None
 
-    # ── Score per section ──
-    section_scores = {}
-    for r in comparisons:
-        sec_name = r.get('section', '')
-        if sec_name not in section_scores:
-            section_scores[sec_name] = []
-        if r.get('type') == 'MATCH':
-            section_scores[sec_name].append(r.get('bench_score', 0))
-
-    section_status = {}
-    for sec_name, scores in section_scores.items():
-        avg = sum(scores) / len(scores) if scores else 0
-        section_status[sec_name] = {'score': round(avg, 1), 'cumple': avg >= 70}
+    section_status = {
+        name: {'score': round(score, 1), 'cumple': round(score, 1) >= 70}
+        for name, score in compute_section_scores(comparisons, prefer_canonical=True).items()
+    }
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -303,9 +305,9 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
     # ── Section lines ──
     for sec in sections:
         name = sec.name
-        status = section_status.get(name, {'score': 0, 'cumple': False})
-        color = '#2E7D32' if status['cumple'] else '#C62828'
-        score = status['score']
+        status = section_status.get(name)
+        color = ('#2E7D32' if status['cumple'] else '#C62828') if status else '#64748B'
+        score = status['score'] if status else None
 
         origin = np.asarray(sec.origin)
         az_rad = np.radians(sec.azimuth)
@@ -316,6 +318,8 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
 
         ax.plot([p1[0], p2[0]], [p1[1], p2[1]],
                 color=color, linewidth=3.5, solid_capstyle='round', zorder=5)
+        label = f'{name} ({score:.1f})' if score is not None else f'{name} (Sin datos)'
+        ax.annotate(label, p2, xytext=(4, 4), textcoords='offset points', fontsize=7, color=color)
 
     ax.set_xlabel('Este (m)', fontsize=9)
     ax.set_ylabel('Norte (m)', fontsize=9)
@@ -332,6 +336,7 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
     legend_elements = [
         Line2D([0], [0], color='#2E7D32', lw=3, label='CUMPLE (≥70)'),
         Line2D([0], [0], color='#C62828', lw=3, label='NO CUMPLE (<70)'),
+        Line2D([0], [0], color='#64748B', lw=3, label='Sin puntaje evaluable'),
     ]
     ax.legend(handles=legend_elements, loc='lower right', fontsize=8,
               framealpha=0.9)
@@ -419,19 +424,30 @@ def create_compliance_pie_charts(comparisons):
     return buf
 
 
-def _setup_landscape_doc() -> Document:
-    """Create a Document with landscape orientation and 0.5in margins."""
+def _setup_landscape_doc(project_info=None) -> Document:
+    """Create a Document configured by the presentation layout helper."""
     doc = Document()
-    for section in doc.sections:
-        section.orientation = WD_ORIENT.LANDSCAPE
-        new_width, new_height = section.page_height, section.page_width
-        section.page_width = new_width
-        section.page_height = new_height
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.5)
-        section.right_margin = Inches(0.5)
+    configure_document(doc, project_info)
     return doc
+
+
+def _add_bounded_picture(paragraph, image_stream, max_width, max_height):
+    """Embed a PNG at its native aspect ratio, bounded on both axes."""
+    blob = image_stream.getvalue()
+    image = DocxImage.from_blob(blob)
+    native_width = image.width
+    native_height = image.height
+    scale = min(
+        float(max_width) / float(native_width),
+        float(max_height) / float(native_height),
+    )
+    run = paragraph.add_run()
+    run.add_picture(
+        io.BytesIO(blob),
+        width=Emu(int(int(native_width) * scale)),
+        height=Emu(int(int(native_height) * scale)),
+    )
+    return run
 
 
 def generate_word_report(comparisons, all_data, output_path, project_info=None,
@@ -440,32 +456,21 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
     if project_info is None:
         project_info = {}
 
-    doc = _setup_landscape_doc()
+    doc = _setup_landscape_doc(project_info)
 
     if plot_options is None:
         plot_options = {}
 
-    title = doc.add_heading(f"Informe de Conciliación Geotécnica", 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    p = doc.add_paragraph()
-    p.add_run(f"Proyecto: {project_info.get('project', 'N/A')}\n").bold = True
-    p.add_run(f"Elaborado por: {project_info.get('author', 'N/A')}\n")
-    p.add_run(f"Fecha: {datetime.now().strftime('%d/%m/%Y')}\n")
+    add_cover(doc, project_info)
 
     doc.add_heading("1. Resumen Ejecutivo", level=1)
 
     if comparisons:
         match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
-        if match_comps:
-            section_score = match_comps[0].get('section_score', 0.0)
-            section_status = match_comps[0].get('section_status', STATUS_NO_CUMPLE)
-        else:
-            section_score = 0.0
-            section_status = STATUS_NO_CUMPLE
+        section_score, section_status = compute_global_compliance(comparisons)
 
         doc.add_paragraph(f"Se evaluaron {len(match_comps)} bancos emparejados.")
-        doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.0f}/100 — {section_status}")
+        doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.1f}/100 — {section_status}")
 
         # Profundidad total: cota cresta global (max crest_elevation across all
         # bench_real) menos cota piso global (min floor_elevation > 0 across all
@@ -509,6 +514,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
                             run.font.size = Pt(9.0)
+            style_data_table(depth_table)
         else:
             doc.add_paragraph(
                 "No hay datos suficientes de bancos para calcular la profundidad total."
@@ -522,19 +528,6 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             pie_stream.close()
         except Exception as e:
             doc.add_paragraph(f"(Error al generar gráficos de torta: {e})")
-
-        # Plano de cumplimiento (vista en planta) después de los pie charts
-        if sections:
-            try:
-                plan_stream = create_plan_view_image(
-                    comparisons, sections, mesh_topo=mesh_topo, grid_ref=grid_ref)
-                if plan_stream is not None:
-                    p_plan = doc.add_paragraph()
-                    p_plan.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p_plan.add_run().add_picture(plan_stream, width=Inches(8.5))
-                    plan_stream.close()
-            except Exception as e:
-                doc.add_paragraph(f"(Error al generar plano de cumplimiento: {e})")
 
         doc.add_paragraph("Resumen por parámetro:")
         # Tabla binaria: CUMPLE + NO CUMPLE = Total. % Logro es
@@ -598,6 +591,25 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
                         run.font.size = Pt(9.0)
+        style_data_table(table)
+
+        # Plano de cumplimiento (vista en planta) después de los pie charts
+        if sections:
+            try:
+                plan_stream = create_plan_view_image(
+                    comparisons, sections, mesh_topo=mesh_topo, grid_ref=grid_ref)
+                if plan_stream is not None:
+                    doc.add_page_break()
+                    p_plan = doc.add_paragraph()
+                    p_plan.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    _add_bounded_picture(
+                        p_plan, plan_stream,
+                        PLAN_IMAGE_MAX_WIDTH, PLAN_IMAGE_MAX_HEIGHT,
+                    )
+                    plan_stream.close()
+                    doc.add_page_break()
+            except Exception as e:
+                doc.add_paragraph(f"(Error al generar plano de cumplimiento: {e})")
     else:
         doc.add_paragraph("No se encontraron resultados para reportar.")
 
@@ -681,6 +693,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
                 for paragraph in cell.paragraphs:
                     for run in paragraph.runs:
                         run.font.size = Pt(8.5)
+        style_data_table(table_summary)
     else:
         doc.add_paragraph("No hay datos de comparación disponibles.")
 
@@ -695,20 +708,22 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         if sec_comps:
             valid_items.append((item, sec_comps))
 
-    chunks = [valid_items[i:i + 6] for i in range(0, len(valid_items), 6)]
+    chunks = [valid_items[i:i + PROFILES_PER_PAGE]
+              for i in range(0, len(valid_items), PROFILES_PER_PAGE)]
 
     for chunk_idx, chunk in enumerate(chunks):
-        n_rows = (len(chunk) + 2) // 3
-        table_plots = doc.add_table(rows=n_rows, cols=3)
+        n_rows = (len(chunk) + PROFILE_GRID_COLUMNS - 1) // PROFILE_GRID_COLUMNS
+        table_plots = doc.add_table(rows=n_rows, cols=PROFILE_GRID_COLUMNS)
         table_plots.alignment = WD_TABLE_ALIGNMENT.CENTER
         table_plots.autofit = False
 
-        for col_idx in range(3):
-            table_plots.columns[col_idx].width = Inches(3.2)
+        column_width = Inches(USABLE_WIDTH_IN / PROFILE_GRID_COLUMNS)
+        for col_idx in range(PROFILE_GRID_COLUMNS):
+            table_plots.columns[col_idx].width = column_width
 
         for idx, (item, sec_comps) in enumerate(chunk):
-            row_idx = idx // 3
-            col_idx = idx % 3
+            row_idx = idx // PROFILE_GRID_COLUMNS
+            col_idx = idx % PROFILE_GRID_COLUMNS
             sec_name = item['section_name']
             pd = item['params_design']
             pt = item['params_topo']
@@ -731,11 +746,15 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             )
 
             cell = table_plots.rows[row_idx].cells[col_idx]
+            cell.width = column_width
             p_cell = cell.paragraphs[0]
             p_cell.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p_cell.paragraph_format.space_before = Pt(0)
             p_cell.paragraph_format.space_after = Pt(0)
-            p_cell.add_run().add_picture(img_stream, width=Inches(3.0))
+            _add_bounded_picture(
+                p_cell, img_stream,
+                PROFILE_IMAGE_MAX_WIDTH, PROFILE_IMAGE_MAX_HEIGHT,
+            )
             img_stream.close()
 
         if chunk_idx < len(chunks) - 1:
@@ -784,6 +803,7 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
                     row_cells[1].text = str(num_wells)
                     row_cells[2].text = f"{total_kg:.0f}"
                     row_cells[3].text = f"{avg_dev:.2f}"
+                style_data_table(table)
 
     doc.save(output_path)
 

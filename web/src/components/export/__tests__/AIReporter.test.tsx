@@ -265,9 +265,7 @@ describe('AIReporter', () => {
     await user.click(screen.getByRole('button', { name: 'Generar informe' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('ai-reporter-content')).toHaveTextContent(
-        '## Informe',
-      );
+      expect(screen.getByRole('heading', { level: 2, name: 'Informe' })).toBeInTheDocument();
     });
     expect(screen.getByTestId('ai-reporter-usage')).toHaveTextContent(
       'Tokens: 100 prompt + 50 completion = 150 total',
@@ -280,6 +278,48 @@ describe('AIReporter', () => {
         stream: false,
       }),
     );
+  });
+
+  it('renders GFM tables, lists and code while ignoring raw HTML', async () => {
+    setupHealthy();
+    mockPost.mockResolvedValueOnce({
+      data: {
+        content: [
+          '## Resumen',
+          '',
+          '| Banco | Estado |',
+          '| --- | --- |',
+          '| 2 | CUMPLE |',
+          '',
+          '- Revisar el banco 3.',
+          '',
+          '```text',
+          'S-01: control geotécnico',
+          '```',
+          '',
+          '<img src=x onerror="alert(1)">',
+        ].join('\n'),
+        finish_reason: 'stop',
+        usage: null,
+        cached: false,
+        chunk_index: 0,
+      },
+    });
+
+    const user = userEvent.setup();
+    renderWith(<AIReporter />, qc);
+    await screen.findByTestId('ai-reporter-form');
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Generar informe' })).toBeEnabled();
+    });
+    await user.click(screen.getByRole('button', { name: 'Generar informe' }));
+
+    expect(await screen.findByRole('heading', { level: 2, name: 'Resumen' })).toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByRole('listitem')).toHaveTextContent('Revisar el banco 3.');
+    expect(screen.getByText('S-01: control geotécnico').closest('code')).toBeInTheDocument();
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(screen.getByTestId('ai-reporter-content').querySelector('img')).toBeNull();
   });
 
   it('renders the advanced section temperature slider when expanded', async () => {

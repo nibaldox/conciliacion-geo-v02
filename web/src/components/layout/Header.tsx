@@ -1,22 +1,17 @@
-/**
- * Header — the top bar.
- *
- * Mission Control aesthetic: dark surface, subtle bottom border,
- * monospace brand text with the orange CG badge, right-aligned
- * utility actions. The brand mark is a square with the letters
- * 'CG' in the accent color (orange) on a dark bg.
- */
-
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { useQueryClient } from '@tanstack/react-query';
 import { LanguageToggle } from './LanguageToggle';
+import { ThemeToggle } from './ThemeToggle';
 import { KeyboardShortcutsHelp } from '../ui/KeyboardShortcutsHelp';
 import { Button } from '../ui/Button';
+import { IconExport } from '../ui/Icons';
 
 export function Header() {
   const reset = useSession((s) => s.reset);
-  const demoMode = useSession((s) => s.demoMode);
+  const collapsed = useSession((s) => s.sidebarCollapsed);
+  const setCollapsed = useSession((s) => s.setSidebarCollapsed);
+  const setView = useSession((s) => s.setActiveWorkspaceView);
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 
@@ -27,81 +22,20 @@ export function Header() {
   };
 
   return (
-    <header
-      data-slot="app-header"
-      className="flex items-center justify-between px-3 md:px-6 py-2.5 border-b shrink-0"
-      style={{
-        backgroundColor: 'var(--color-surface)',
-        borderColor: 'var(--color-border)',
-      }}
-    >
-      {/* Brand block — the orange "CG" badge is the visual anchor. */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleNewSession}
-          className="flex items-center gap-3 rounded-md px-2 py-1 -ml-2 hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          title={t('header.go_home')}
-        >
-          <div
-            className="flex items-center justify-center w-9 h-9 rounded-md font-bold text-sm"
-            style={{
-              backgroundColor: 'var(--color-accent)',
-              color: '#0a0e14',
-              boxShadow: '0 0 12px rgba(249, 115, 22, 0.30)',
-              fontFamily: 'var(--font-mono)',
-            }}
-            aria-label="CG logo"
-          >
-            CG
-          </div>
-          <div className="text-left">
-            <h1
-              className="text-sm font-semibold uppercase tracking-wider"
-              style={{
-                color: 'var(--color-text-primary)',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {t('app.title')}
-            </h1>
-            <p
-              className="text-[10px] uppercase tracking-widest"
-              style={{
-                color: 'var(--color-text-muted)',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              {t('app.tagline')}
-              {demoMode && <span className="ml-1">· DEMO</span>}
-            </p>
-          </div>
-        </button>
-      </div>
-
-      {/* Right side: utility actions. The "Nueva Sesión" button is
-       *  terminal-style to keep with the Mission Control aesthetic. */}
-      <div className="flex items-center gap-1.5 md:gap-2">
-        <div className="hidden md:block">
-          <KeyboardShortcutsHelp />
+    <header data-slot="app-header" className="flex min-h-16 items-center justify-between gap-3 border-b border-border bg-surface-raised px-3 py-3 md:px-6">
+      <div className="flex min-w-0 items-center gap-3">
+        <button type="button" className="rounded-lg p-2 text-text-secondary hover:bg-surface-muted md:hidden" aria-label={t('workspace.menu')} aria-expanded={!collapsed} onClick={() => setCollapsed(!collapsed)}>☰</button>
+        <span className="text-3xl font-bold tracking-tight text-accent-bright" aria-hidden="true">CG</span>
+        <div className="min-w-0">
+          <h1 className="truncate text-sm font-semibold md:text-lg">{t('app.title')}</h1>
+          <p className="hidden text-xs text-text-muted lg:block">{t('app.tagline')}</p>
         </div>
-        <LanguageToggle />
-        <Button
-          variant="terminal"
-          size="sm"
-          onClick={handleNewSession}
-          title={t('header.new_session')}
-        >
-          {t('header.new_session')}
-        </Button>
-        <span
-          className="text-[10px] uppercase tracking-widest hidden md:inline"
-          style={{
-            color: 'var(--color-text-dim)',
-            fontFamily: 'var(--font-mono)',
-          }}
-        >
-          {t('header.version')} 2.0
-        </span>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <div className="hidden items-center gap-1 md:flex"><KeyboardShortcutsHelp /><LanguageToggle /></div>
+        <ThemeToggle />
+        <Button variant="secondary" size="sm" onClick={handleNewSession} aria-label={t('header.new_session')} title={t('header.new_session')}><span className="hidden sm:inline">{t('header.new_session')}</span><span className="sm:hidden" aria-hidden="true">+</span></Button>
+        <span className="hidden sm:inline-flex"><Button variant="secondary" size="sm" leftIcon={<IconExport className="h-4 w-4" />} onClick={() => setView('export-ai')}>{t('workspace.export')}</Button></span>
       </div>
     </header>
   );

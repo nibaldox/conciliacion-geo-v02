@@ -21,6 +21,25 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_max_upload_mb(name: str, default: int = 500, ceiling: int = 10240) -> int:
+    """Read the request-body limit (MiB) restricted to a sane range.
+
+    Non-numeric, zero/negative and above-ceiling values fall back to
+    ``default`` so a bad env value can neither disable the guard nor
+    raise the in-memory exposure of small instances.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < 1 or value > ceiling:
+        return default
+    return value
+
+
 @dataclass(frozen=True)
 class Tolerances:
     """Default tolerances for compliance evaluation."""
@@ -41,6 +60,7 @@ class DetectionDefaults:
     min_bench_height: float = 2.0     # meters, minimum bench height to be detected
     simplify_epsilon: float = 0.05    # meters, RDP simplification tolerance (was 0.1)
     profile_resolution: float = 0.1   # meters, profile resampling resolution (was 0.5)
+    max_profile_reversal_repair: float = 0.1
     # Spill-pile detection (used by _detect_and_project_solid_toe)
     spill_angle_solid: float = 52.0   # degrees, segments above this are solid face
     spill_angle_pile: float = 48.0    # degrees, segments below this are spill pile
@@ -71,7 +91,8 @@ class PipelineDefaults:
     section_length: float = 200.0     # meters
     section_spacing: float = 20.0     # meters (for auto-generation)
     target_faces_visual: int = 30000  # target faces for mesh decimation
-    max_upload_mb: int = 500          # max file upload size
+    # max file upload size
+    max_upload_mb: int = field(default_factory=lambda: _env_max_upload_mb("CONCILIACION_MAX_UPLOAD_MB", 500))
     match_threshold: float = 5.0      # meters, bench matching by elevation
     # Drill & Blast / geotech correlation
     blast_correlation_radius_m: float = 15.0   # meters — projection radius
@@ -303,6 +324,19 @@ class DrillHardnessDefaults:
 
 
 @dataclass(frozen=True)
+class HorizontalDeviationDefaults:
+    within_tolerance_m: float = 1.0
+    moderate_tolerance_m: float = 1.8
+    severe_tolerance_m: float = 3.0
+    reference_height_fractions: tuple[float, ...] = (0.2, 0.5, 0.8)
+    intersection_epsilon_m: float = 1.0e-6
+    heatmap_max_cuts: int = 1600
+    heatmap_max_cells: int = 25000
+    heatmap_max_section_gap_m: float = 500.0
+    heatmap_max_azimuth_delta_deg: float = 45.0
+
+
+@dataclass(frozen=True)
 class BackbreakDefaults:
     """Knobs for :mod:`core.backbreak_prediction.predict_backbreak`.
 
@@ -397,5 +431,6 @@ SECTOR_DEVIATION = SectorDeviationDefaults()
 BLAST = BlastDefaults()
 DRILL_COMPLIANCE = DrillComplianceDefaults()
 DRILL_HARDNESS = DrillHardnessDefaults()
+HORIZONTAL_DEVIATION = HorizontalDeviationDefaults()
 BACKBREAK = BackbreakDefaults()
 SIMULATION = SimulationDefaults()

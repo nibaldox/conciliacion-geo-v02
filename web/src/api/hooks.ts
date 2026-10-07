@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import client, { getSessionId } from './client';
 import { GEOMETRY_CONFIGURATION_VERSION } from './types';
@@ -6,6 +6,8 @@ import { useSession, DEMO_MESH_IDS, type DemoData } from '../stores/session';
 import type {
   MeshInfo,
   UploadResponse,
+  DxfInspectResponse,
+  DxfImportReport,
   SectionResponse,
   SectionAutoParams,
   SectionCreate,
@@ -20,6 +22,7 @@ import type {
   SettingsUpdate,
   VerticesResponse,
   ContourData,
+  HorizontalDeviationMeshResponse,
   ReferenceLineResponse,
   BlastHolesOnProfileResponse,
   BlastCorrelationResponse,
@@ -110,6 +113,34 @@ export function useUploadMesh() {
   });
 }
 
+export function useInspectDxf() {
+  return useMutation({
+    mutationFn: ({ file, type }: { file: File; type: 'design' | 'topo' }): Promise<DxfInspectResponse> => {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('type', type);
+      return client.post('/meshes/dxf/inspect', fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }).then((response) => response.data);
+    },
+  });
+}
+
+export function useConfirmDxf() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ uploadId, layers, units }: { uploadId: string; layers: string[]; units: number }): Promise<UploadResponse & { import_report: DxfImportReport }> =>
+      client.post(`/meshes/dxf/confirm`, { upload_id: uploadId, layers, units }).then((response) => response.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['meshes'] }),
+  });
+}
+
+export function useCancelDxf() {
+  return useMutation({
+    mutationFn: (uploadId: string) => client.delete(`/meshes/dxf/${uploadId}`).then((response) => response.data),
+  });
+}
+
 export function useMeshVertices(meshId: string | null, _step = 150000) {
   const { demoMode, demoData } = useSession();
   return useQuery({
@@ -124,6 +155,60 @@ export function useMeshVertices(meshId: string | null, _step = 150000) {
         .then(r => r.data);
     },
     enabled: !!meshId,
+  });
+}
+
+export function useMeshVerticesRoi(meshId: string | null, bounds: readonly [number, number, number, number] | null, step = 60000) {
+  const { demoMode, demoData } = useSession();
+  const roi: [number, number, number, number] | undefined = bounds ? [
+    Math.round(bounds[0] * 100) / 100,
+    Math.round(bounds[1] * 100) / 100,
+    Math.round(bounds[2] * 100) / 100,
+    Math.round(bounds[3] * 100) / 100,
+  ] : undefined;
+  return useQuery({
+    queryKey: ['mesh-vertices-roi', meshId, demoMode, roi, step],
+    queryFn: async () => {
+      if (demoMode && demoData && isDemoMeshId(meshId)) {
+        return demoData.vertices.topo satisfies VerticesResponse;
+      }
+      const [xmin, ymin, xmax, ymax] = roi!;
+      return client
+        .get<VerticesResponse>(`/meshes/${meshId}/vertices/roi`, { params: { xmin, ymin, xmax, ymax, step } })
+        .then((response) => response.data);
+    },
+    enabled: !!meshId && !!roi && roi.every(Number.isFinite) && roi[0] < roi[2] && roi[1] < roi[3],
+  });
+}
+
+export interface HorizontalDeviationMeshRequest {
+  sector: string | null;
+  bench_num?: number | null;
+  longitudinal_step: number;
+  vertical_step: number;
+}
+
+export function useHorizontalDeviationMesh(
+  topoMeshId: string | null,
+  designMeshId: string | null,
+  request: HorizontalDeviationMeshRequest,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ['horizontal-deviation-mesh', topoMeshId, designMeshId, request],
+    queryFn: () => client
+      .get<HorizontalDeviationMeshResponse>(`/meshes/${topoMeshId}/horizontal-deviation`, {
+        params: {
+          design_mesh_id: designMeshId,
+          sector: request.sector,
+          bench_num: request.bench_num ?? undefined,
+          longitudinal_step: request.longitudinal_step,
+          vertical_step: request.vertical_step,
+        },
+      })
+      .then((response) => response.data),
+    enabled: enabled && !!topoMeshId && !!designMeshId && !isDemoMeshId(topoMeshId) && !isDemoMeshId(designMeshId) && request.sector !== null,
+    staleTime: 60 * 1000,
   });
 }
 
@@ -286,6 +371,7 @@ export function useProcess() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['process-status'] });
       qc.invalidateQueries({ queryKey: ['results'] });
+      qc.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }
@@ -346,10 +432,10 @@ export function setDemoComparisonsCache(
   );
 }
 
-export function useProfile(sectionId: string | null) {
-  const { demoMode, demoData, designMeshId } = useSession();
-  return useQuery({
-    queryKey: ['profile', sectionId, demoMode, designMeshId],
+function profileQueryOptions(sectionId: string | null, state: ReturnType<typeof useSession.getState>) {
+  const { demoMode, demoData, designMeshId, topoMeshId } = state;
+  return {
+    queryKey: ['profile', sectionId, demoMode, designMeshId, topoMeshId],
     queryFn: async () => {
       // Same demo guard as useSections: only use demo data if the active
       // design mesh is a demo mesh, otherwise always hit the backend so
@@ -375,7 +461,16 @@ export function useProfile(sectionId: string | null) {
         .then(r => r.data);
     },
     enabled: sectionId !== null,
-  });
+  };
+}
+
+export function useProfile(sectionId: string | null) {
+  return useQuery(profileQueryOptions(sectionId, useSession()));
+}
+
+export function useSectionProfiles(sectionIds: readonly string[]) {
+  const state = useSession();
+  return useQueries({ queries: sectionIds.map((id) => profileQueryOptions(id, state)) });
 }
 
 export function useUpdateReconciled() {

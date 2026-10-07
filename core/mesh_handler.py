@@ -11,10 +11,7 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 
-# Default cap for mesh uploads: 200 MB. Past this size trimesh.load
-# is very slow and the file is almost certainly malformed or wrong
-# format.
-DEFAULT_MAX_MESH_SIZE_MB = 200
+DEFAULT_MAX_MESH_SIZE_MB = 250
 
 
 class MeshValidationError(ValueError):
@@ -39,8 +36,8 @@ def _validate_stl_path(filepath: str, max_size_mb: int = DEFAULT_MAX_MESH_SIZE_M
     if size_bytes > max_bytes:
         size_mb = size_bytes / (1024 * 1024)
         raise MeshValidationError(
-            f"Archivo demasiado grande: {size_mb:.1f} MB "
-            f"(máximo permitido: {max_size_mb} MB). "
+            f"Archivo demasiado grande: {size_mb:.1f} MiB "
+            f"(máximo permitido: {max_size_mb} MiB). "
             f"Considera exportar con menos decimales o simplificar el modelo."
         )
     if size_bytes == 0:
@@ -91,61 +88,10 @@ def _validate_stl_contents(mesh: trimesh.Trimesh) -> None:
 
 
 def _load_dxf(filepath: str) -> trimesh.Trimesh:
-    """Load 3D faces from a DXF file using ezdxf."""
-    try:
-        import ezdxf
-    except ImportError:
-        raise ImportError("ezdxf is required for loading DXF files. Install it with `pip install ezdxf`.")
+    """Load a DXF surface using the legacy raw-coordinate convention."""
+    from core.dxf_import import import_dxf_surface
 
-    doc = ezdxf.readfile(filepath)
-    msp = doc.modelspace()
-
-    # Extract 3D FACES
-    faces = []
-    vertices = []
-    
-    # Simple approach: iterate over 3DFACE entities
-    # This might be slow for huge files, but robust.
-    # We collet triangles. Quads (4 pts) need to be split.
-    
-    raw_faces = msp.query('3DFACE')
-    
-    # We need to weld vertices to create a proper mesh
-    # trimesh.Trimesh(vertices=..., faces=...) does this if we handle indexing
-    # or we can just dump all triangles and let trimesh.merge_vertices handle it
-    
-    tri_verts = []
-    
-    for e in raw_faces:
-        # 3DFACE has 4 corners (0, 1, 2, 3)
-        # If 3 and 2 are same, it's a triangle.
-        v = list(e.dxf.vtx0), list(e.dxf.vtx1), list(e.dxf.vtx2), list(e.dxf.vtx3)
-        
-        # Triangle 1: 0-1-2
-        tri_verts.append(v[0])
-        tri_verts.append(v[1])
-        tri_verts.append(v[2])
-        
-        # Triangle 2: 2-3-0 (if 3 != 2)
-        if v[3] != v[2]:
-            tri_verts.append(v[2])
-            tri_verts.append(v[3])
-            tri_verts.append(v[0])
-            
-    if not tri_verts:
-         # Try POLYLINE/MESH? most mining software uses 3DFACE
-         raise ValueError("No 3DFACE entities found in DXF.")
-         
-    # Create mesh from raw triangles (disconnected)
-    # faces = [[0,1,2], [3,4,5], ...]
-    n_tris = len(tri_verts) // 3
-    faces_idx = np.arange(len(tri_verts)).reshape((n_tris, 3))
-    
-    mesh = trimesh.Trimesh(vertices=tri_verts, faces=faces_idx)
-    
-    # Merge vertices to create correct topology
-    mesh.merge_vertices()
-    
+    mesh, _ = import_dxf_surface(filepath)
     return mesh
 
 

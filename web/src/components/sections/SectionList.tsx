@@ -7,13 +7,15 @@ import {
   useUpdateSection,
 } from '../../api/hooks';
 import type { SectionResponse, SectionCreate } from '../../api/types';
+import { Button } from '../ui/Button';
+import { ProjectField, PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 
 interface EditState {
   id: string;
   form: SectionCreate;
 }
 
-export function SectionList() {
+export function SectionList({ compact = false }: { compact?: boolean }) {
   const { data: sections, isLoading } = useSections();
   const deleteMutation = useDeleteSection();
   const clearMutation = useClearSections();
@@ -108,7 +110,7 @@ export function SectionList() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-12" style={{ color: 'var(--color-text-muted)' }}>
+      <div className={compact ? "flex items-center justify-center py-2 text-xs" : "flex items-center justify-center py-12"} style={{ color: 'var(--color-text-muted)' }}>
         <span className="animate-spin inline-block w-5 h-5 border-2 rounded-full mr-3" style={{ borderColor: 'var(--color-border)', borderTopColor: 'var(--color-mine-blue)' }} />
         {t('section_list.loading')}
       </div>
@@ -120,12 +122,69 @@ export function SectionList() {
   // Empty state
   if (items.length === 0) {
     return (
-      <div className="text-center py-12 rounded-lg" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
-        <span className="text-4xl block mb-3">&#128203;</span>
+      <div className={compact ? "text-center p-2 rounded-md" : "text-center py-12 rounded-lg"} style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
+        {!compact && <span className="text-4xl block mb-3">&#128203;</span>}
         <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{t('section_list.empty_title')}</p>
         <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
           {t('section_list.empty_subtitle')}
         </p>
+      </div>
+    );
+  }
+
+  if (compact) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2 text-xs text-text-muted">
+          <span>{t('section_list.header')} ({items.length})</span>
+          <Button size="sm" variant={confirmClear ? 'danger' : 'ghost'} disabled={clearMutation.isPending} onClick={handleClearAll}>
+            {t(confirmClear ? 'section_list.clear_confirm' : 'section_list.clear_button')}
+          </Button>
+        </div>
+        {items.map((section) => (
+          <div key={section.id} className="space-y-2 rounded-md border border-border p-2 text-xs">
+            {editState?.id === section.id ? (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <ProjectField id={`edit-${section.id}-name`} label={t('section_list.col_name')}>
+                    <input id={`edit-${section.id}-name`} value={editState.form.name} onChange={(e) => updateEditField('name', e.target.value)} className={PROJECT_INPUT_CLASS} />
+                  </ProjectField>
+                  <ProjectField id={`edit-${section.id}-sector`} label={t('section_list.col_sector')}>
+                    <input id={`edit-${section.id}-sector`} value={editState.form.sector} onChange={(e) => updateEditField('sector', e.target.value)} className={PROJECT_INPUT_CLASS} />
+                  </ProjectField>
+                  {([0, 1] as const).map((axis) => (
+                    <ProjectField key={axis} id={`edit-${section.id}-${axis}`} label={t(axis === 0 ? 'plan_view.east' : 'plan_view.north')}>
+                      <input id={`edit-${section.id}-${axis}`} type="number" step="any" value={editState.form.origin[axis]} onChange={(e) => updateOrigin(axis, e.target.value)} className={PROJECT_INPUT_CLASS} />
+                    </ProjectField>
+                  ))}
+                  {(['length_up', 'length_down'] as const).map((key) => (
+                    <ProjectField key={key} id={`edit-${section.id}-${key}`} label={t('project_input.' + key)}>
+                      <input id={`edit-${section.id}-${key}`} type="number" min={1} step="any" value={editState.form[key]} onChange={(e) => updateEditField(key, parseFloat(e.target.value) || 100)} className={PROJECT_INPUT_CLASS} />
+                    </ProjectField>
+                  ))}
+                  <ProjectField id={`edit-${section.id}-azimuth`} label={t('section_list.col_azimuth')}>
+                    <input id={`edit-${section.id}-azimuth`} type="number" step="any" value={editState.form.azimuth} onChange={(e) => updateEditField('azimuth', parseFloat(e.target.value) || 0)} className={PROJECT_INPUT_CLASS} />
+                  </ProjectField>
+                  <p className="self-end py-2 text-text-muted">{t('section_list.col_length')}: {(editState.form.length_up ?? 0) + (editState.form.length_down ?? 0)} m</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={saveEdit} disabled={updateMutation.isPending}>{t('section_list.save')}</Button>
+                  <Button size="sm" variant="secondary" onClick={cancelEdit}>{t('section_list.cancel')}</Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="truncate font-medium" title={section.name}>{section.name}</p>
+                <p className="break-words text-text-muted">{section.origin.map((value) => value.toFixed(1)).join(', ')} · {section.azimuth.toFixed(1)}° · {section.length.toFixed(1)} m</p>
+                {section.sector && <p className="truncate text-text-muted">{section.sector}</p>}
+                <div className="flex gap-1">
+                  <Button size="sm" variant="secondary" onClick={() => startEdit(section)}>{t('section_list.edit')}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => handleDelete(section.id)} disabled={deleteMutation.isPending}>{t('common.delete')}</Button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
       </div>
     );
   }

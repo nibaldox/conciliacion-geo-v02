@@ -31,8 +31,8 @@ const VALUE_SIZE: Record<MetricSize, string> = {
 };
 
 const LABEL_SIZE: Record<MetricSize, string> = {
-  sm: 'text-[10px]',
-  md: 'text-[11px]',
+  sm: 'text-xs',
+  md: 'text-xs',
   lg: 'text-xs',
 };
 
@@ -56,12 +56,12 @@ export function MetricValue({
     >
       <span
         className={[
-          'uppercase tracking-wider font-medium',
+          'font-medium',
           LABEL_SIZE[size],
         ].join(' ')}
         style={{
           color: 'var(--color-text-muted)',
-          fontFamily: 'var(--font-mono)',
+          fontFamily: 'var(--font-sans)',
         }}
       >
         {label}
@@ -77,7 +77,7 @@ export function MetricValue({
           className={['tabular-nums', LABEL_SIZE[size]].join(' ')}
           style={{
             color: 'var(--color-text-muted)',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-sans)',
           }}
         >
           {unit}

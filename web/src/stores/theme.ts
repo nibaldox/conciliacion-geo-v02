@@ -1,24 +1,26 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { applyTheme } from '../utils/theme';
 
 interface ThemeState {
   isDark: boolean;
   toggle: () => void;
 }
 
-// Default is dark: the app is designed for a dark surface (see
-// `index.html` which sets `class="dark"` on first paint) and the
-// ThemeToggle is the only way to opt into light mode. A default of
-// `false` here would race with `index.html` and leave a flash of
-// unstyled content (white glass cards on dark sidebar).
 export const useTheme = create<ThemeState>()(
   persist(
     (set) => ({
       isDark: true,
-      toggle: () => set((state) => ({ isDark: !state.isDark })),
+      toggle: () => set((state) => {
+        const isDark = !state.isDark;
+        applyTheme(isDark);
+        return { isDark };
+      }),
     }),
     {
       name: 'theme-preference',
     },
   ),
 );
+
+applyTheme(useTheme.getState().isDark);

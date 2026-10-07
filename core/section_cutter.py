@@ -29,6 +29,12 @@ class ProfileResult:
     elevations: np.ndarray
 
 
+@dataclass(frozen=True)
+class ProfileCutDiagnostics:
+    profile: Optional[ProfileResult]
+    warnings: tuple[str, ...] = ()
+
+
 def azimuth_to_direction(azimuth_deg: float) -> np.ndarray:
     """Convert azimuth (degrees from North, clockwise) to 2D direction vector."""
     az_rad = np.radians(azimuth_deg)
@@ -36,6 +42,13 @@ def azimuth_to_direction(azimuth_deg: float) -> np.ndarray:
 
 
 def cut_mesh_with_section(mesh: trimesh.Trimesh, section: SectionLine) -> Optional[ProfileResult]:
+    return cut_mesh_with_section_diagnostics(mesh, section).profile
+
+
+def cut_mesh_with_section_diagnostics(
+    mesh: trimesh.Trimesh,
+    section: SectionLine,
+) -> ProfileCutDiagnostics:
     """
     Cut a mesh with a vertical plane defined by a SectionLine.
     Returns a ProfileResult with distances and elevations, or None.
@@ -51,71 +64,165 @@ def cut_mesh_with_section(mesh: trimesh.Trimesh, section: SectionLine) -> Option
             mesh, plane_normal, plane_origin
         )
     except (ValueError, np.linalg.LinAlgError, AttributeError):
-        # trimesh raises ValueError for malformed planes and numpy for
-        # degenerate geometry. AttributeError covers bad mesh objects.
-        return None
+        return ProfileCutDiagnostics(None, ("section_cut_error",))
 
     if lines is None or len(lines) == 0:
-        return None
+        return ProfileCutDiagnostics(None, ("no_section_intersection",))
 
-    # Collect all intersection points
-    points = []
-    for segment in lines:
-        for point in segment:
-            points.append(point)
-
-    points = np.array(points)
-
-    # Project onto section direction to get distance along section
-    origin_2d = section.origin
-    dists = ((points[:, 0] - origin_2d[0]) * direction[0] +
-             (points[:, 1] - origin_2d[1]) * direction[1])
-    elevs = points[:, 2]
-
-    # Filter by section length
     if getattr(section, 'length_up', None) is not None and getattr(section, 'length_down', None) is not None:
-        mask = (dists >= -section.length_down) & (dists <= section.length_up)
+        lower_distance = -float(section.length_down)
+        upper_distance = float(section.length_up)
     else:
-        half_len = section.length / 2
-        mask = (dists >= -half_len) & (dists <= half_len)
-    dists = dists[mask]
-    elevs = elevs[mask]
+        half_length = float(section.length) / 2.0
+        lower_distance = -half_length
+        upper_distance = half_length
 
-    if len(dists) < 2:
-        return None
+    def section_distance(point: np.ndarray) -> float:
+        return float(np.dot(point[:2] - section.origin[:2], direction))
 
-    # Sort by distance
-    order = np.argsort(dists)
-    dists = dists[order]
-    elevs = elevs[order]
+    clipped_lines = []
+    for segment in np.asarray(lines, dtype=float):
+        first_point = np.asarray(segment[0], dtype=float)
+        second_point = np.asarray(segment[1], dtype=float)
+        first_distance = section_distance(first_point)
+        second_distance = section_distance(second_point)
+        delta_distance = second_distance - first_distance
+        if abs(delta_distance) < 1.0e-12:
+            if lower_distance <= first_distance <= upper_distance:
+                clipped_lines.append((first_point, second_point))
+            continue
+        start_fraction = max(0.0, min(1.0, (lower_distance - first_distance) / delta_distance))
+        end_fraction = max(0.0, min(1.0, (upper_distance - first_distance) / delta_distance))
+        if start_fraction > end_fraction:
+            start_fraction, end_fraction = end_fraction, start_fraction
+        if max(first_distance, second_distance) < lower_distance or min(first_distance, second_distance) > upper_distance:
+            continue
+        clipped_lines.append((
+            first_point + start_fraction * (second_point - first_point),
+            first_point + end_fraction * (second_point - first_point),
+        ))
+    lines = np.asarray(clipped_lines, dtype=float)
+    if len(lines) == 0:
+        return ProfileCutDiagnostics(None, ("no_section_intersection",))
 
-    # Remove near-duplicate distances by rounding and averaging elevations
-    rounded = np.round(dists, 3)
-    unique_dists, inv = np.unique(rounded, return_inverse=True)
-    unique_elevs = np.zeros(len(unique_dists))
-    counts = np.zeros(len(unique_dists))
-    for idx, uid in enumerate(inv):
-        unique_elevs[uid] += elevs[idx]
-        counts[uid] += 1
-    unique_elevs /= counts
+    endpoint_tolerance = 1.0e-3
+    nodes: list[np.ndarray] = []
+    buckets: dict[tuple[int, int, int], list[int]] = {}
 
-    # Densificar el perfil con resampling uniforme. La intersección
-    # plano-mesh produce puntos solo en los bordes de los triángulos,
-    # dejando intervalos largos sin nodos intermedios. Esto reduce la
-    # precisión de los cálculos posteriores (piso local, detección de
-    # bancos, áreas de sobre-excavación). Generamos un perfil denso a
-    # intervalos de profile_resolution para garantizar puntos suficientes.
+    def node_for(point: np.ndarray) -> int:
+        key = tuple(int(round(float(value) / endpoint_tolerance)) for value in point)
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    neighbor = (key[0] + dx, key[1] + dy, key[2] + dz)
+                    for node_id in buckets.get(neighbor, ()):
+                        if float(np.linalg.norm(nodes[node_id] - point)) <= endpoint_tolerance:
+                            return node_id
+        node_id = len(nodes)
+        nodes.append(np.asarray(point, dtype=float))
+        buckets.setdefault(key, []).append(node_id)
+        return node_id
+
+    edges: set[tuple[int, int]] = set()
+    for segment in np.asarray(lines, dtype=float):
+        first = node_for(segment[0])
+        second = node_for(segment[1])
+        if first != second:
+            edges.add((min(first, second), max(first, second)))
+    if not edges:
+        return ProfileCutDiagnostics(None, ("insufficient_section_points",))
+
+    adjacency: dict[int, set[int]] = {}
+    for first, second in edges:
+        adjacency.setdefault(first, set()).add(second)
+        adjacency.setdefault(second, set()).add(first)
+
+    components: list[set[int]] = []
+    unseen = set(adjacency)
+    while unseen:
+        seed = unseen.pop()
+        component = {seed}
+        pending = [seed]
+        while pending:
+            current = pending.pop()
+            for neighbor in adjacency[current] & unseen:
+                unseen.remove(neighbor)
+                component.add(neighbor)
+                pending.append(neighbor)
+        components.append(component)
+    if len(components) != 1:
+        return ProfileCutDiagnostics(None, ("disconnected_profile_components",))
+
+    if any(len(neighbors) > 2 for neighbors in adjacency.values()):
+        return ProfileCutDiagnostics(None, ("ambiguous_profile_geometry",))
+    endpoints = [node_id for node_id, neighbors in adjacency.items() if len(neighbors) == 1]
+    if len(endpoints) != 2:
+        return ProfileCutDiagnostics(None, ("ambiguous_profile_geometry",))
+
+    start = min(endpoints, key=lambda node_id: section_distance(nodes[node_id]))
+    ordered_nodes = [start]
+    previous = None
+    current = start
+    while True:
+        following = [node_id for node_id in adjacency[current] if node_id != previous]
+        if not following:
+            break
+        if len(following) != 1:
+            return ProfileCutDiagnostics(None, ("ambiguous_profile_geometry",))
+        next_node = following[0]
+        if next_node in ordered_nodes:
+            return ProfileCutDiagnostics(None, ("ambiguous_profile_geometry",))
+        ordered_nodes.append(next_node)
+        previous, current = current, next_node
+    if len(ordered_nodes) != len(adjacency):
+        return ProfileCutDiagnostics(None, ("ambiguous_profile_geometry",))
+
+    ordered_points = [nodes[node_id] for node_id in ordered_nodes]
+    profile_distances = np.round(
+        np.asarray([section_distance(point) for point in ordered_points]), 3
+    )
+    profile_elevations = np.asarray([point[2] for point in ordered_points])
+
+    if len(profile_distances) < 2:
+        return ProfileCutDiagnostics(None, ("insufficient_section_points",))
     from core.config import DETECTION
     resolution = float(DETECTION.profile_resolution)
-    if len(unique_dists) >= 2 and resolution > 0:
-        d_min = float(unique_dists[0])
-        d_max = float(unique_dists[-1])
-        n_nodes = max(len(unique_dists), int(np.ceil((d_max - d_min) / resolution)) + 1)
-        dense_d = np.linspace(d_min, d_max, n_nodes)
-        dense_e = np.interp(dense_d, unique_dists, unique_elevs)
-        return ProfileResult(distances=dense_d, elevations=dense_e)
+    if not np.isfinite(resolution) or resolution < 0:
+        resolution = 0.0
+    repair_limit = min(resolution, max(0.0, float(DETECTION.max_profile_reversal_repair)))
+    highest_distance = float(profile_distances[0])
+    reversal_normalized = False
+    for index in range(1, len(profile_distances)):
+        current_distance = float(profile_distances[index])
+        if current_distance < highest_distance:
+            excursion = highest_distance - current_distance
+            if excursion > repair_limit + endpoint_tolerance:
+                return ProfileCutDiagnostics(None, ("ambiguous_profile_geometry",))
+            profile_distances[index] = highest_distance
+            reversal_normalized = reversal_normalized or excursion > endpoint_tolerance + 1.0e-9
+        else:
+            highest_distance = current_distance
 
-    return ProfileResult(distances=unique_dists, elevations=unique_elevs)
+    dense_distances = [float(profile_distances[0])]
+    dense_elevations = [float(profile_elevations[0])]
+    for index in range(len(profile_distances) - 1):
+        d0 = float(profile_distances[index])
+        d1 = float(profile_distances[index + 1])
+        z0 = float(profile_elevations[index])
+        z1 = float(profile_elevations[index + 1])
+        span = d1 - d0
+        steps = max(1, int(np.ceil(span / resolution))) if resolution > 0 else 1
+        for step in range(1, steps + 1):
+            fraction = step / steps
+            dense_distances.append(d0 + fraction * span)
+            dense_elevations.append(z0 + fraction * (z1 - z0))
+
+    profile = ProfileResult(
+        distances=np.asarray(dense_distances, dtype=float),
+        elevations=np.asarray(dense_elevations, dtype=float),
+    )
+    warnings = ("minor_profile_reversal_normalized",) if reversal_normalized else ()
+    return ProfileCutDiagnostics(profile, warnings)
 
 
 def cut_both_surfaces(mesh_design: trimesh.Trimesh, mesh_topo: trimesh.Trimesh,

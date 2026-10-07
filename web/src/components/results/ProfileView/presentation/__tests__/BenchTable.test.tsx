@@ -1,9 +1,12 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeAll, describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BenchTable } from '../BenchTable';
+import i18n from '../../../../../i18n';
 import type { Bench } from '../../domain/types';
 import type { UseCrossLinkStateApi } from '../../application';
+
+beforeAll(async () => i18n.changeLanguage('es'));
 
 function makeBench(overrides: Partial<Bench> = {}): Bench {
   return {
@@ -35,10 +38,10 @@ function makeCrossLink(): UseCrossLinkStateApi {
 }
 
 const benches: readonly Bench[] = [
-  makeBench({ benchNumber: 1, height: 12, faceAngle: 70, status: 'CUMPLE' }),
-  makeBench({ benchNumber: 2, height: 15, faceAngle: 65, status: 'FUERA' }),
-  makeBench({ benchNumber: 3, height: 18, faceAngle: 80, status: 'NO_CUMPLE' }),
-  makeBench({ benchNumber: 4, height: 14, faceAngle: 60, status: 'CUMPLE', bermWidth: null }),
+  makeBench({ benchNumber: 1, designBenchNumber: 8, height: 12, faceAngle: 70, status: 'CUMPLE' }),
+  makeBench({ benchNumber: 2, designBenchNumber: 6, height: 15, faceAngle: 65, status: 'FUERA' }),
+  makeBench({ benchNumber: 3, designBenchNumber: 4, height: 18, faceAngle: 80, status: 'NO_CUMPLE' }),
+  makeBench({ benchNumber: 4, designBenchNumber: 2, height: 14, faceAngle: 60, status: 'CUMPLE', bermWidth: null }),
 ];
 
 describe('BenchTable', () => {
@@ -48,17 +51,63 @@ describe('BenchTable', () => {
     expect(screen.getAllByRole('row')).toHaveLength(5);
   });
 
+  it('labels an EXTRA row as additional topography while keeping its topo identity', () => {
+    const { container } = render(<BenchTable benches={[makeBench({ benchNumber: 3, designBenchNumber: null, matchType: 'EXTRA' })]} crossLink={makeCrossLink()} />);
+    expect(screen.getByText('Adicional topo · 3')).toBeInTheDocument();
+    expect(container.querySelector('[data-bench-number="3"]')).toHaveAttribute('data-match-type', 'EXTRA');
+  });
+
   it('shows an empty state when no benches', () => {
     render(<BenchTable benches={[]} crossLink={makeCrossLink()} />);
     expect(screen.getByText(/no hay bancos/i)).toBeInTheDocument();
   });
 
-  it('renders one header per sort field', () => {
+  it('filters by design bench identity while preserving topo row identity', () => {
+    const { container } = render(<BenchTable benches={benches} crossLink={makeCrossLink()} selectedDesignBenchNumbers={[6]} />);
+    expect(container.querySelectorAll('[data-bench-number]')).toHaveLength(1);
+    expect(container.querySelector('[data-bench-number="2"]')).toBeInTheDocument();
+  });
+
+  it('explains a selected missing design bench using its design elevation', () => {
+    const missing = { sectionName: 'S-1', designBenchNumber: 5, designElevation: 2925, status: 'NO_CUMPLE' as const, hasTopo: false, isAdditional: false };
+    render(<BenchTable benches={benches} crossLink={makeCrossLink()} selectedDesignBenchNumbers={[5]} comparisonBenchStatuses={[missing]} />);
+    expect(screen.getByText('Cota base de diseño 2925 m: sin banco topográfico emparejado.')).toBeInTheDocument();
+  });
+
+  it('still reports a structurally missing design bench when its compliance status is unknown', () => {
+    const missing = { sectionName: 'S-1', designBenchNumber: 5, designElevation: 2925, status: 'UNKNOWN' as const, hasTopo: false, isAdditional: false };
+    render(<BenchTable benches={benches} crossLink={makeCrossLink()} comparisonBenchStatuses={[missing]} />);
+    expect(screen.getByText('Sin banco topográfico emparejado para cotas base de diseño: 2925 m.')).toBeInTheDocument();
+  });
+
+  it('renders sortable headers for visible table fields', () => {
     const { container } = render(<BenchTable benches={benches} crossLink={makeCrossLink()} />);
     const headers = container.querySelectorAll('[data-testid^="sort-header-"]');
-    expect(headers).toHaveLength(9);
+    expect(headers).toHaveLength(8);
     expect(headers[0]?.textContent).toMatch(/#/);
     expect(headers[5]?.textContent).toMatch(/Áng/i);
+    expect(container.querySelector('[data-testid="sort-header-status"]')).not.toBeInTheDocument();
+  });
+
+  it('omits the redundant status column while retaining the dot, parameter colors, and score', () => {
+    const bench = makeBench({
+      status: 'NO_CUMPLE',
+      heightStatus: 'CUMPLE',
+      angleStatus: 'FUERA',
+      bermStatus: 'CUMPLE',
+      benchScore: 90,
+    });
+    const { container } = render(<BenchTable benches={[bench]} crossLink={makeCrossLink()} />);
+    const row = container.querySelector('[data-bench-number="1"]');
+    const cells = row?.querySelectorAll('td');
+
+    expect(row?.querySelector('[data-status="NO_CUMPLE"]')).toBeInTheDocument();
+    expect(cells).toHaveLength(10);
+    expect(cells?.[3]?.querySelector('.badge-ok')).toHaveTextContent('15.0');
+    expect(cells?.[5]?.querySelector('.badge-warn')).toHaveTextContent('65°');
+    expect(cells?.[7]?.querySelector('.badge-ok')).toHaveTextContent('8.0');
+    expect(cells?.[9]).toHaveTextContent('90');
+    expect(row?.querySelector('[data-slot="status-pill"]')).not.toBeInTheDocument();
   });
 
   it('sorts by benchNumber asc by default', () => {

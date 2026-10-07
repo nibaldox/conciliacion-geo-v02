@@ -29,11 +29,13 @@ from api.routers.process import (
 from api.schemas import ExportFilters
 from core import (
     build_reconciled_profile,
+    export_results,
+    generate_word_report,
+    generate_section_images_zip,
 )
 from core.section_cutter import azimuth_to_direction
-from core.excel_writer import export_results
-from core.report_generator import generate_word_report, generate_section_images_zip
 from core.param_extractor import ExtractionResult
+from core.reconciliation_summary import compute_section_scores
 
 # Fase 1.1 cierre §3: reportlab is an optional runtime dependency of the
 # PDF report; the import is LOCALISED so the API still starts without it,
@@ -87,7 +89,9 @@ def _filter_comparisons(
     if not selected:
         return comparisons
     allowed = set(selected)
-    return [c for c in comparisons if c.get("bench_num") in allowed]
+    selected_rows = [{**row, "section_score": None} for row in comparisons if row.get("bench_num") in allowed]
+    scores = compute_section_scores(selected_rows)
+    return [{**row, "section_score": scores.get(row.get("section"))} for row in selected_rows]
 
 
 def _apply_bench_filters(
@@ -345,7 +349,13 @@ def _build_word_payload_sync(
     }
 
     tmp = os.path.join(tempfile.gettempdir(), f"report_{session_id[:8]}.docx")
-    generate_word_report(results, all_data, tmp, project_info)
+    settings = db.get_settings(session_id) or {}
+    generate_word_report(
+        results, all_data, tmp, project_info,
+        sections=[_section_from_dict(section) for section in sections_raw],
+        mesh_topo=mesh_topo,
+        grid_ref=settings.get("grid_ref", 0.0),
+    )
 
     return tmp, export_filters
 
@@ -646,11 +656,15 @@ def _build_pdf_payload_sync(
     author: Optional[str],
     operation: Optional[str],
     phase: Optional[str],
+    filters: Optional[str] = None,
 ) -> str:
     """Build the executive PDF off the event loop."""
+    export_filters = _parse_filters(filters)
     results = db.get_results(session_id)
     if not results:
         raise HTTPException(400, "No results to export — run the pipeline first")
+
+    results = _filter_comparisons(results, export_filters)
 
     # Reconstruct minimal all_data (the PDF doesn't need profiles/plots,
     # just the section names and comparisons).
@@ -665,7 +679,13 @@ def _build_pdf_payload_sync(
     }
 
     tmp = os.path.join(tempfile.gettempdir(), f"Conciliacion_PDF_{session_id[:8]}.pdf")
-    _import_pdf_report()(results, all_data, tmp, project_info=project_info)
+    settings = db.get_settings(session_id) or {}
+    _import_pdf_report()(
+        results, all_data, tmp, project_info=project_info,
+        sections=[_section_from_dict(section) for section in sections_raw],
+        mesh_topo=_load_mesh_from_db(session_id, "topo"),
+        grid_ref=settings.get("grid_ref", 0.0),
+    )
     return tmp
 
 
@@ -676,6 +696,7 @@ async def export_pdf(
     author: Optional[str] = Query(None),
     operation: Optional[str] = Query(None),
     phase: Optional[str] = Query(None),
+    filters: Optional[str] = Query(None),
 ):
     """Export a unified executive PDF report.
 
@@ -691,11 +712,13 @@ async def export_pdf(
             author,
             operation,
             phase,
+            filters,
         )
         return FileResponse(
             tmp,
             media_type="application/pdf",
             filename="Conciliacion_Geotecnica.pdf",
+            headers=_filters_header(_parse_filters(filters)),
         )
     except HTTPException:
         raise

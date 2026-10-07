@@ -287,6 +287,119 @@ class TestCompareDesignVsAsbuilt:
         extra = [c for c in comparisons if c["type"] == "EXTRA"]
         assert len(extra) >= 1
 
+    def test_horizontal_offset_above_old_cost_gate_still_matches(self, sample_tolerances):
+        from core import compare_design_vs_asbuilt
+
+        design = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=100.0,
+            toe_elevation=3885.0, toe_distance=110.0, bench_height=15.0,
+            face_angle=70.0, berm_width=9.0,
+        )
+        topo = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=108.1,
+            toe_elevation=3885.0, toe_distance=118.1, bench_height=15.0,
+            face_angle=70.0, berm_width=9.0, is_ramp=True,
+        )
+
+        comparisons = compare_design_vs_asbuilt(
+            self._make_params([design]), self._make_params([topo]), sample_tolerances,
+        )
+
+        assert [comparison["type"] for comparison in comparisons] == ["MATCH"]
+        assert abs(comparisons[0]["delta_crest"]) == pytest.approx(8.1)
+        assert abs(comparisons[0]["delta_toe"]) == pytest.approx(8.1)
+
+    def test_neighbor_matches_remain_ordered_and_deterministic(self, sample_tolerances):
+        from core import compare_design_vs_asbuilt
+
+        design = [
+            BenchParams(
+                bench_number=1, crest_elevation=4000.0, crest_distance=100.0,
+                toe_elevation=3985.0, toe_distance=110.0, bench_height=15.0,
+                face_angle=70.0, berm_width=9.0,
+            ),
+            BenchParams(
+                bench_number=2, crest_elevation=3985.0, crest_distance=110.0,
+                toe_elevation=3970.0, toe_distance=120.0, bench_height=15.0,
+                face_angle=70.0, berm_width=9.0,
+            ),
+        ]
+        topo = [
+            BenchParams(
+                bench_number=1, crest_elevation=4000.0, crest_distance=109.0,
+                toe_elevation=3985.0, toe_distance=119.0, bench_height=15.0,
+                face_angle=70.0, berm_width=9.0,
+            ),
+            BenchParams(
+                bench_number=2, crest_elevation=3985.0, crest_distance=119.0,
+                toe_elevation=3970.0, toe_distance=129.0, bench_height=15.0,
+                face_angle=70.0, berm_width=9.0,
+            ),
+        ]
+        params_design = self._make_params(design)
+        params_topo = self._make_params(topo)
+
+        first = compare_design_vs_asbuilt(params_design, params_topo, sample_tolerances)
+        second = compare_design_vs_asbuilt(params_design, params_topo, sample_tolerances)
+
+        assert [(row["type"], row["bench_num"], row["bench_num_topo"]) for row in first] == [
+            ("MATCH", 1, 1), ("MATCH", 2, 2),
+        ]
+        assert [(row["type"], row["bench_num"], row["bench_num_topo"]) for row in first] == [
+            (row["type"], row["bench_num"], row["bench_num_topo"]) for row in second
+        ]
+
+    def test_ineligible_pair_penalty_exceeds_eligible_ranking_cost(self):
+        from core.profile_compliance import _resolve_optimal_matches
+
+        matches = _resolve_optimal_matches(
+            np.array([[1.1e9, 0.0]]), np.array([[True, False]]),
+        )
+
+        assert matches == [(0, 0, 1.1e9)]
+
+    def test_vertical_gate_keeps_large_height_deviation_match(self, sample_tolerances):
+        from core import compare_design_vs_asbuilt
+
+        design = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=100.0,
+            toe_elevation=3885.0, toe_distance=110.0, bench_height=15.0,
+            face_angle=70.0, berm_width=9.0,
+        )
+        topo = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=100.0,
+            toe_elevation=3871.8, toe_distance=110.0, bench_height=28.2,
+            face_angle=70.0, berm_width=9.0,
+        )
+
+        comparisons = compare_design_vs_asbuilt(
+            self._make_params([design]), self._make_params([topo]), sample_tolerances,
+        )
+
+        assert [comparison["type"] for comparison in comparisons] == ["MATCH"]
+        assert comparisons[0]["height_dev"] == pytest.approx(13.2)
+        assert comparisons[0]["height_status"] == "NO CUMPLE"
+
+    def test_vertical_gate_still_rejects_different_bench_elevation(self, sample_tolerances):
+        from core import compare_design_vs_asbuilt
+
+        design = BenchParams(
+            bench_number=1, crest_elevation=3900.0, crest_distance=100.0,
+            toe_elevation=3885.0, toe_distance=110.0, bench_height=15.0,
+            face_angle=70.0, berm_width=9.0,
+        )
+        topo = BenchParams(
+            bench_number=1, crest_elevation=3916.0, crest_distance=100.0,
+            toe_elevation=3901.0, toe_distance=110.0, bench_height=15.0,
+            face_angle=70.0, berm_width=9.0,
+        )
+
+        comparisons = compare_design_vs_asbuilt(
+            self._make_params([design]), self._make_params([topo]), sample_tolerances,
+        )
+
+        assert {comparison["type"] for comparison in comparisons} == {"MISSING", "EXTRA"}
+
     def test_compare_both_empty(self, sample_tolerances):
         """Ambos sin bancos → lista vacía."""
         params_d = self._make_params([])

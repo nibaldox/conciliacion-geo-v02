@@ -15,3 +15,32 @@ beforeAll(() => {
 afterAll(() => {
   console.error = originalError;
 });
+
+const webStorageNames = ['localStorage', 'sessionStorage'] as const;
+
+interface JsdomHost {
+  readonly jsdom?: {
+    readonly window?: Partial<Record<(typeof webStorageNames)[number], unknown>>;
+  };
+}
+
+function isStorage(value: unknown): value is Storage {
+  if (typeof value !== 'object' || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return ['getItem', 'setItem', 'removeItem', 'clear'].every(
+    (method) => typeof candidate[method] === 'function',
+  );
+}
+
+function exposeJsdomWebStorage(): void {
+  const storageWindow = (globalThis as typeof globalThis & JsdomHost).jsdom?.window;
+  if (!storageWindow) return;
+  for (const name of webStorageNames) {
+    const candidate = storageWindow[name];
+    if (!isStorage(candidate)) continue;
+    if (globalThis[name] === candidate) continue;
+    Object.defineProperty(globalThis, name, { value: candidate, configurable: true, writable: true });
+  }
+}
+
+exposeJsdomWebStorage();

@@ -14,6 +14,7 @@ vi.mock('../../application', async () => {
     showAreas: false,
     showSpillAreas: true,
     showSemaphore: false,
+    showHorizontalDeviation: true,
     showBlastHoles: true,
     blastTolerance: 10,
     statusFilter: [],
@@ -30,6 +31,7 @@ vi.mock('../../application', async () => {
         showAreas: false,
         showSpillAreas: true,
         showSemaphore: false,
+        showHorizontalDeviation: true,
         showBlastHoles: true,
         blastTolerance: 10,
         statusFilter: [],
@@ -50,6 +52,14 @@ describe('FilterBar', () => {
     expect(screen.getByRole('switch', { name: /áreas/i })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /derrame/i })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /semáforo/i })).toBeInTheDocument();
+  });
+
+  it('shows the horizontal deviation toggle only when data is available', () => {
+    const filter = (useFilterState as any)();
+    const { rerender } = render(<FilterBar filter={filter} />);
+    expect(screen.queryByRole('switch', { name: /desviación horizontal/i })).not.toBeInTheDocument();
+    rerender(<FilterBar filter={filter} horizontalDeviationAvailable />);
+    expect(screen.getByRole('switch', { name: /desviación horizontal/i })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('renders the blast holes toggle when blast data is available', () => {

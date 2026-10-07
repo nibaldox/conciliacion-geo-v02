@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const STORAGE_KEY = 'sidebar_width';
-const DEFAULT_WIDTH = 320;
-const MIN_WIDTH = 240;
-const MAX_WIDTH = 800;
+const DEFAULT_WIDTH = 260;
+const MIN_WIDTH = 220;
+const MAX_WIDTH = 420;
 
 function loadInitialWidth(): number {
   if (typeof window === 'undefined') return DEFAULT_WIDTH;
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
     const parsed = parseInt(saved, 10);
-    if (!isNaN(parsed)) return parsed;
+    if (!isNaN(parsed)) return Math.max(MIN_WIDTH, Math.min(parsed, MAX_WIDTH));
   }
   return DEFAULT_WIDTH;
 }

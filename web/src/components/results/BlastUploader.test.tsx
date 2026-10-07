@@ -124,6 +124,36 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('blast-file-input')).toBeInTheDocument();
   });
 
+  it('selects the CSV before geometry confirmation and opens its configuration', () => {
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    const file = new File(['x,y'], 'antes.csv', { type: 'text/csv' });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
+    expect(screen.getByTestId('geometry-contract-form')).toHaveAttribute('open');
+    expect(screen.getByText(/antes.csv/)).toBeInTheDocument();
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    fireEvent.click(screen.getByTestId('blast-upload-submit'));
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('keeps file selection available and requires reconfirmation when replacing the CSV', () => {
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    const file = new File(['x,y'], 'pozos.csv', { type: 'text/csv' });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
+    fillCompleteContract();
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
+    expect(screen.getByTestId('geometry-confirmed')).not.toBeChecked();
+    expect(screen.getByTestId('blast-file-picker')).not.toBeDisabled();
+  });
+
   it('shows error state when upload fails', () => {
     mockUpload({ isError: true, error: new Error('Network error') });
     mockHoles();
@@ -156,14 +186,15 @@ describe('<BlastUploader />', () => {
 
   // ── INTEGRACIÓN §5.3 — no defaults ──
 
-  it('disables the file input by default (every field empty)', () => {
+  it('permits choosing a file but blocks submission until geometry is confirmed', () => {
     mockUpload();
     mockHoles();
     renderUploader();
-    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
+    expect(screen.getByTestId('blast-file-picker')).not.toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
     // Confirming with empty fields does NOT enable submission.
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
   });
 
   it('all dropdowns start with the placeholder option selected', () => {
@@ -183,25 +214,27 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     // Fields complete but checkbox unticked → still disabled.
-    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-file-input')).not.toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
   });
 
   it('invalidates confirmation when any field is edited after ticking', () => {
     mockUpload();
     mockHoles();
     renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-file-input')).not.toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
     // Edit a field — confirmation must auto-clear.
     fireEvent.change(screen.getByTestId('incl-source-column'), {
       target: { value: 'Inclinacion_real_2' },
     });
-    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
     expect((screen.getByTestId('geometry-confirmed') as HTMLInputElement).checked).toBe(false);
   });
 
@@ -209,6 +242,7 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-sign'), {
       target: { value: 'SOURCE_DEFINED' },
@@ -216,13 +250,13 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('source-rule')).toBeInTheDocument();
     // Without selecting a rule, the contract is still incomplete.
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-file-input')).toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
     // Select a rule → contract complete again.
     fireEvent.change(screen.getByTestId('source-rule'), {
       target: { value: 'negative_is_downward_dip' },
     });
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-file-input')).not.toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
   });
 
   // ── INTEGRACIÓN §5.2 — independent units ──
@@ -231,6 +265,7 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'RADIANS' } });
     // After editing the unit, the confirmation auto-clears but NO
@@ -239,7 +274,7 @@ describe('<BlastUploader />', () => {
     // Re-confirm with the mixed configuration — submission still enabled.
     fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinacion_real' } });
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-file-input')).not.toBeDisabled();
+    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
   });
 
   // ── INTEGRACIÓN §5.4 — structured diagnostics from HTTP 422 ──
@@ -287,6 +322,7 @@ describe('<BlastUploader />', () => {
     } as Partial<ReturnType<typeof useUploadBlastCsv>>);
     mockHoles();
     renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     // Set differing units to prove they are transmitted independently.
     fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'DEGREES' } });
@@ -297,6 +333,8 @@ describe('<BlastUploader />', () => {
 
     const file = new File(['x,y'], 'pozos.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
     await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
     const call = mockMutateAsync.mock.calls[0][0];

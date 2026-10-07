@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCompliance, describeCompliance, iterateCounts } from '../compliance';
+import { computeCompliance, computeComplianceStatuses, describeCompliance, iterateCounts } from '../compliance';
 import type { Bench, BenchStatus } from '../types';
 
 function makeBench(status: BenchStatus, n: number): Bench {
@@ -21,13 +21,22 @@ function makeBench(status: BenchStatus, n: number): Bench {
 }
 
 describe('computeCompliance', () => {
+  it('does not count an unrecognized runtime status as compliant', () => {
+    const stats = computeCompliance([
+      makeBench('CUMPLE', 1),
+      makeBench('INVALID' as BenchStatus, 2),
+    ]);
+    expect(stats.counts).toEqual({ CUMPLE: 1, FUERA: 0, NO_CUMPLE: 0, UNKNOWN: 1 });
+    expect(stats.total).toBe(2);
+    expect(stats.evaluated).toBe(1);
+    expect(stats.withinTolerance).toBe(1);
+    expect(stats.complianceRatio).toBe(1);
+  });
+
   it('returns zero counts for an empty input', () => {
     const stats = computeCompliance([]);
     expect(stats.total).toBe(0);
-    // FUERA no longer appears in the counts shape — the binary
-    // CUMPLE/NO_CUMPLE model means any legacy FUERA bench has
-    // already collapsed into NO_CUMPLE by parseBenchStatus.
-    expect(stats.counts).toEqual({ CUMPLE: 0, NO_CUMPLE: 0, UNKNOWN: 0 });
+    expect(stats.counts).toEqual({ CUMPLE: 0, FUERA: 0, NO_CUMPLE: 0, UNKNOWN: 0 });
     expect(stats.complianceRatio).toBe(0);
     expect(stats.withinTolerance).toBe(0);
   });
@@ -36,26 +45,22 @@ describe('computeCompliance', () => {
     const benches: Bench[] = [
       makeBench('CUMPLE', 1),
       makeBench('CUMPLE', 2),
-      makeBench('NO_CUMPLE', 3),
+      makeBench('FUERA', 3),
       makeBench('NO_CUMPLE', 4),
       makeBench('UNKNOWN', 5),
     ];
     const stats = computeCompliance(benches);
-    expect(stats.counts).toEqual({ CUMPLE: 2, NO_CUMPLE: 2, UNKNOWN: 1 });
+    expect(stats.counts).toEqual({ CUMPLE: 2, FUERA: 1, NO_CUMPLE: 1, UNKNOWN: 1 });
     expect(stats.total).toBe(5);
   });
 
-  it('merges legacy FUERA benches into NO_CUMPLE', () => {
-    // Defensive: a Bench constructed directly with status='FUERA'
-    // (e.g. a fixture or test that bypasses the parsing layer) must
-    // still be counted under NO_CUMPLE so the binary model holds
-    // end-to-end.
+  it('keeps FUERA distinct from both compliant and failed benches', () => {
     const benches: Bench[] = [
       makeBench('CUMPLE', 1),
       makeBench('FUERA', 2),
     ];
     const stats = computeCompliance(benches);
-    expect(stats.counts).toEqual({ CUMPLE: 1, NO_CUMPLE: 1, UNKNOWN: 0 });
+    expect(stats.counts).toEqual({ CUMPLE: 1, FUERA: 1, NO_CUMPLE: 0, UNKNOWN: 0 });
     expect(stats.total).toBe(2);
   });
 
@@ -79,6 +84,17 @@ describe('computeCompliance', () => {
     expect(stats.complianceRatio).toBe(0);
   });
 
+  it('excludes unknown benches from the evaluated compliance ratio', () => {
+    const stats = computeCompliance([
+      makeBench('CUMPLE', 1),
+      makeBench('UNKNOWN', 2),
+      makeBench('FUERA', 3),
+    ]);
+    expect(stats.evaluated).toBe(2);
+    expect(stats.unknown).toBe(1);
+    expect(stats.complianceRatio).toBe(0.5);
+  });
+
   it('does not mutate the input', () => {
     const input: Bench[] = [
       makeBench('CUMPLE', 1),
@@ -87,6 +103,31 @@ describe('computeCompliance', () => {
     const snapshot = JSON.parse(JSON.stringify(input));
     computeCompliance(input);
     expect(input).toEqual(snapshot);
+  });
+});
+
+describe('computeComplianceStatuses', () => {
+  it('counts inherited property names as unknown instead of reading them as statuses', () => {
+    const stats = computeComplianceStatuses([
+      'CUMPLE',
+      'constructor' as BenchStatus,
+      'hasOwnProperty' as BenchStatus,
+      'toString' as BenchStatus,
+      '__proto__' as BenchStatus,
+    ]);
+    expect(stats.counts).toEqual({ CUMPLE: 1, FUERA: 0, NO_CUMPLE: 0, UNKNOWN: 4 });
+    expect(stats.total).toBe(5);
+    expect(stats.evaluated).toBe(1);
+    expect(stats.unknown).toBe(4);
+    expect(stats.withinTolerance).toBe(1);
+    expect(stats.complianceRatio).toBe(1);
+  });
+
+  it('leaves the counts record untouched by prototype lookups', () => {
+    const stats = computeComplianceStatuses(['toString' as BenchStatus]);
+    expect(Object.keys(stats.counts).sort()).toEqual(['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN']);
+    expect(stats.counts.UNKNOWN).toBe(1);
+    expect(stats.complianceRatio).toBe(0);
   });
 });
 
@@ -99,7 +140,7 @@ describe('describeCompliance', () => {
       makeBench('NO_CUMPLE', 4),
     ]);
     expect(describeCompliance(stats, (n) => `${Math.round(n * 100)}%`)).toBe(
-      '3 of 4 within tolerance (75%)',
+      '3 of 4 evaluated within tolerance (75%)',
     );
   });
 });
@@ -111,10 +152,9 @@ describe('iterateCounts', () => {
       makeBench('NO_CUMPLE', 2),
     ]);
     const out = Array.from(iterateCounts(stats));
-    // FUERA has been removed from the presentation order — the
-    // compliance summary now only renders the three binary buckets.
     expect(out).toEqual([
       { status: 'NO_CUMPLE', count: 1 },
+      { status: 'FUERA', count: 0 },
       { status: 'CUMPLE', count: 1 },
       { status: 'UNKNOWN', count: 0 },
     ]);

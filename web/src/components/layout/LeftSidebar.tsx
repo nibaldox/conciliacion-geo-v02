@@ -16,9 +16,12 @@ import {
 import type { ProcessSettings, Tolerances } from '../../api/types';
 import { DEFAULT_SETTINGS } from '../../utils/constants';
 import { Button } from '../ui/Button';
+import { ProjectField, PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 import { IconMesh, IconSections, IconSettings, IconLightning } from '../ui/Icons';
 import { useSidebarResize } from './useSidebarResize';
 import { TolerancesForm } from './TolerancesForm';
+import { ViewsToolbar } from './ViewsToolbar';
+import { LanguageToggle } from './LanguageToggle';
 
 
 type SectionTab = 'curves' | 'file';
@@ -44,23 +47,24 @@ interface AccordionItemProps {
 
 function AccordionItem({ id, title, icon, openSection, toggle, children }: AccordionItemProps) {
   const isOpen = openSection === id;
+  const index = ['mallas', 'secciones', 'tolerancias', 'procesamiento'].indexOf(id);
   return (
-    <div className="border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+    <div className="contents">
       <button
         onClick={() => toggle(id)}
-        className="w-full flex items-center justify-between p-3 text-xs font-mono font-semibold uppercase tracking-wider transition-colors hover:bg-surface-muted"
+        aria-expanded={isOpen}
+        aria-controls={`project-panel-${id}`}
+        className="flex h-9 min-w-0 items-center rounded-md border border-border px-2 text-xs font-medium transition-colors hover:bg-surface-muted"
         style={{
-          backgroundColor: isOpen ? 'var(--color-surface-sunken)' : 'transparent',
+          gridRow: Math.floor(index / 2) + 1,
+          gridColumn: index % 2 + 1,
+          backgroundColor: isOpen ? 'var(--color-accent-bg)' : 'transparent',
           color: isOpen ? 'var(--color-accent-bright)' : 'var(--color-text-secondary)',
         }}
       >
-        <span className="flex items-center gap-2">
-          {icon}
-          {title}
-        </span>
-        <span>{isOpen ? '▼' : '▶'}</span>
+        <span className="flex min-w-0 items-center gap-1.5">{icon}<span className="truncate">{title}</span></span>
       </button>
-      {isOpen && children}
+      {isOpen && <div id={`project-panel-${id}`} className="col-span-2 row-start-3 overflow-hidden rounded-lg border border-border">{children}</div>}
     </div>
   );
 }
@@ -83,6 +87,15 @@ export function LeftSidebar() {
 
   // Section definition tab state
   const [sectionTab, setSectionTab] = useState<SectionTab>('curves');
+
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 767px)').matches) setSidebarCollapsed(true);
+  }, [setSidebarCollapsed]);
+
+  const handleNavigate = () => {
+    setOpenSection('');
+    if (window.matchMedia('(max-width: 767px)').matches) setSidebarCollapsed(true);
+  };
 
   // Sidebar resize (mouse drag + localStorage persistence)
   const { sidebarWidth, startResizing, isResizing } = useSidebarResize();
@@ -149,6 +162,7 @@ export function LeftSidebar() {
     if (!didAutoSwitchTo3D.current && designMeshId && topoMeshId) {
       didAutoSwitchTo3D.current = true;
       setActiveWorkspaceView('3d');
+      setOpenSection((current) => current === 'mallas' ? '' : current);
     }
   }, [designMeshId, topoMeshId, setActiveWorkspaceView]);
 
@@ -171,21 +185,11 @@ export function LeftSidebar() {
     });
   };
 
-  // Input styles
-  const inputStyle = {
-    backgroundColor: 'var(--color-surface-sunken)',
-    borderColor: 'var(--color-border)',
-    color: 'var(--color-text-primary)',
-  };
-
-  const inputCls =
-    "w-full px-3 py-1.5 border rounded-md text-xs outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono";
-
   if (sidebarCollapsed) {
     return (
       <aside
         data-slot="left-sidebar-collapsed"
-        className="w-12 h-full flex flex-col items-center py-4 border-r shrink-0 select-none"
+        className="w-14 h-full flex flex-col items-center overflow-y-auto py-3 border-r shrink-0 select-none"
         style={{
           backgroundColor: 'var(--color-surface-raised)',
           borderColor: 'var(--color-border)',
@@ -202,10 +206,14 @@ export function LeftSidebar() {
         </button>
 
         <div className="flex flex-col gap-6 items-center opacity-50 mt-4">
-          <button type="button" aria-label={t('sidebar.mallas', { defaultValue: 'Mallas' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.mallas', { defaultValue: 'Mallas' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('mallas'); }}><IconMesh className="w-5 h-5" /></button>
-          <button type="button" aria-label={t('sidebar.secciones', { defaultValue: 'Secciones' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.secciones', { defaultValue: 'Secciones' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('secciones'); }}><IconSections className="w-5 h-5" /></button>
+          <button type="button" aria-label={t('sidebar.mallas', { defaultValue: 'Mallas' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.mallas', { defaultValue: 'Mallas' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('mallas'); }}><IconMesh className="w-4 h-4" /></button>
+          <button type="button" aria-label={t('sidebar.secciones', { defaultValue: 'Secciones' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.secciones', { defaultValue: 'Secciones' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('secciones'); }}><IconSections className="w-4 h-4" /></button>
           <button type="button" aria-label={t('sidebar.tolerancias', { defaultValue: 'Parámetros' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.tolerancias', { defaultValue: 'Parámetros' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('tolerancias'); }}><IconSettings className="w-5 h-5" /></button>
           <button type="button" aria-label={t('sidebar.procesamiento', { defaultValue: 'Procesar' })} className="cursor-pointer transition-colors hover:text-accent" title={t('sidebar.procesamiento', { defaultValue: 'Procesar' })} onClick={() => { setSidebarCollapsed(false); setOpenSection('procesamiento'); }}><IconLightning className="w-5 h-5" /></button>
+        </div>
+        <div className="mt-6 w-full px-1"><ViewsToolbar compact onNavigate={handleNavigate} /></div>
+        <div className="mt-auto flex flex-col items-center gap-2 py-4 md:hidden">
+          <LanguageToggle />
         </div>
       </aside>
     );
@@ -214,7 +222,7 @@ export function LeftSidebar() {
   return (
     <aside
       data-slot="left-sidebar"
-      className="relative h-full flex flex-col border-r shrink-0 select-none overflow-hidden"
+      className="project-sidebar relative h-full flex flex-col border-r shrink-0 select-none overflow-hidden"
       style={{
         width: sidebarWidth,
         backgroundColor: 'var(--color-surface-raised)',
@@ -223,14 +231,15 @@ export function LeftSidebar() {
     >
       {/* Sidebar header */}
       <div
+        data-slot="project-heading"
         className="flex items-center justify-between p-4 border-b shrink-0"
         style={{ borderColor: 'var(--color-border)' }}
       >
         <h3
-          className="text-xs uppercase tracking-widest font-mono font-bold"
+          className="text-sm font-semibold"
           style={{ color: 'var(--color-text-secondary)' }}
         >
-          CONTROL PANEL
+          {t('workspace.project')}
         </h3>
         <button
           onClick={() => setSidebarCollapsed(true)}
@@ -244,25 +253,26 @@ export function LeftSidebar() {
       </div>
 
       {/* Accordions container */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        <AccordionItem id="mallas" title={t('step1.title')} icon={<IconMesh className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
-          <div className="p-3 space-y-3 bg-surface-sunken border-t border-border">
-            <div className="space-y-3">
-              <DropZone type="design" meshId={designMeshId} onSetMeshId={setDesignMeshId} />
-              <DropZone type="topo" meshId={topoMeshId} onSetMeshId={setTopoMeshId} />
+      <div className="grid min-h-0 grid-cols-2 auto-rows-min content-start gap-2 overflow-y-auto p-2" data-slot="project-controls">
+        <AccordionItem id="mallas" title={t('workspace.surfaces')} icon={<IconMesh className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-2 space-y-2 bg-surface-sunken">
+            <div className="space-y-2">
+              <DropZone compact type="design" meshId={designMeshId} onSetMeshId={setDesignMeshId} />
+              <DropZone compact type="topo" meshId={topoMeshId} onSetMeshId={setTopoMeshId} />
             </div>
+            <p className="px-1 text-xs text-text-muted">{t('step1.file_types')}</p>
             {!bothUploaded && (
-              <div className="pt-2 text-center">
-                <TryDemoButton />
+              <div>
+                <TryDemoButton compact />
               </div>
             )}
           </div>
         </AccordionItem>
 
-        <AccordionItem id="secciones" title={t('step2.title', { defaultValue: 'Líneas de Sección' })} icon={<IconSections className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
-          <div className="p-3 space-y-4 bg-surface-sunken border-t border-border">
+        <AccordionItem id="secciones" title={t('workspace.sections')} icon={<IconSections className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-2 space-y-1.5 bg-surface-sunken">
             {!bothUploaded ? (
-              <div className="p-4 rounded border border-dashed text-center" style={{ borderColor: 'var(--status-nok-border)', backgroundColor: 'var(--status-nok-bg)' }}>
+              <div className="p-2 rounded-md border border-dashed text-center" style={{ borderColor: 'var(--status-nok-border)', backgroundColor: 'var(--status-nok-bg)' }}>
                 <p className="text-xs font-medium" style={{ color: 'var(--status-nok-text)' }}>
                   {t('plan_view_no_data', { defaultValue: 'Cargue superficies primero para definir secciones' })}
                 </p>
@@ -270,73 +280,59 @@ export function LeftSidebar() {
             ) : (
               <>
                 {/* Step 2 Form tabs */}
-                <div className="grid grid-cols-2 gap-1 p-1 rounded-lg shrink-0" style={{ backgroundColor: 'var(--color-surface)' }}>
+                <div className="grid grid-cols-2 gap-1 rounded-md shrink-0" style={{ backgroundColor: 'var(--color-surface)' }}>
                   {(['curves', 'file'] as SectionTab[]).map((tab) => (
                     <button
                       key={tab}
                       onClick={() => setSectionTab(tab)}
-                      className="py-1 text-[9px] uppercase tracking-wider font-semibold rounded transition-all"
+                      className="h-8 text-xs font-medium rounded-md transition-colors"
+                      aria-pressed={sectionTab === tab}
                       style={{
                         backgroundColor: sectionTab === tab ? 'var(--color-accent-bg)' : 'transparent',
                         color: sectionTab === tab ? 'var(--color-accent-bright)' : 'var(--color-text-muted)',
-                        fontFamily: 'var(--font-mono)',
                       }}
                     >
-                      {tab === 'curves' ? 'Por Curvas' : 'Archivo'}
+                      {t(tab === 'curves' ? 'workspace.curves' : 'workspace.file')}
                     </button>
                   ))}
                 </div>
 
                 {/* Selected form */}
-                <div className="p-2 border rounded" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-raised)' }}>
+                <div className="min-w-0">
                   {sectionTab === 'curves' && (
                     <SectionCurveForm onRegisterClickHandler={setMapClickHandler} />
                   )}
                   {sectionTab === 'file' && <SectionFileUpload />}
                 </div>
 
-                {/* List of sections */}
-                <div>
-                  <h4 className="text-[10px] uppercase tracking-widest font-mono font-bold mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                    {t('step2.existing_sections', { defaultValue: 'Secciones Existentes' })}
-                  </h4>
-                  <div className="max-h-48 overflow-y-auto border rounded" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
-                    <SectionList />
-                  </div>
-                </div>
+                <details className="rounded-md border border-border bg-surface-raised px-2 py-1">
+                  <summary className="cursor-pointer text-xs font-medium text-text-secondary">{t('step2.existing_sections')}</summary>
+                  <div className="mt-2 max-h-48 overflow-auto"><SectionList compact /></div>
+                </details>
               </>
             )}
           </div>
         </AccordionItem>
 
-        <AccordionItem id="tolerancias" title={t('step3.settings_title', { defaultValue: 'Tolerancias y Parámetros' })} icon={<IconSettings className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
-          <div className="p-3 space-y-4 bg-surface-sunken border-t border-border">
+        <AccordionItem id="tolerancias" title={t('workspace.parameters')} icon={<IconSettings className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-2 space-y-2 bg-surface-sunken">
               {/* Process parameters */}
-              <section className="space-y-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                <h4 className="text-[10px] uppercase tracking-widest font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+              <section className="space-y-2 border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                <h4 className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('sidebar.process_title')}
                 </h4>
-                <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-3 gap-2">
                   {PROCESS_FIELDS.map((f) => (
-                    <div key={f.key}>
-                      <label className="block text-[10px] uppercase font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-                        {t(f.labelKey)}
-                      </label>
-                      <input
-                        type="number"
-                        step={f.step}
-                        min={f.min}
-                        max={f.max}
+                    <ProjectField key={f.key} id={`process-${f.key}`} label={t('project_input.' + f.key)} title={t(f.labelKey)}>
+                      <input id={`process-${f.key}`} type="number" step={f.step} min={f.min} max={f.max}
                         value={processSettings[f.key]}
                         onChange={(e) => handleProcessChange(f.key, parseFloat(e.target.value) || f.fallback)}
-                        className={inputCls}
-                        style={inputStyle}
-                        disabled={isProcessing}
-                      />
-                    </div>
+                        className={PROJECT_INPUT_CLASS} disabled={isProcessing} />
+                    </ProjectField>
                   ))}
                   <Button
-                    variant="terminal"
+                    variant="secondary"
+                    className="col-span-3 min-h-8"
                     onClick={handleSaveSettings}
                     disabled={isProcessing || updateSettings.isPending}
                     loading={updateSettings.isPending}
@@ -358,13 +354,14 @@ export function LeftSidebar() {
             </div>
         </AccordionItem>
 
-        <AccordionItem id="procesamiento" title={t('step3.title')} icon={<IconLightning className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
-          <div className="p-3 bg-surface-sunken border-t border-border flex flex-col items-center gap-3">
+        <AccordionItem id="procesamiento" title={t('project_input.process')} icon={<IconLightning className="w-4 h-4" />} openSection={openSection} toggle={toggleAccordion}>
+          <div className="p-2 bg-surface-sunken flex flex-col gap-2">
             <ProcessButton />
             <ProcessProgress />
           </div>
         </AccordionItem>
       </div>
+      <div className="shrink-0 border-t border-border p-2"><ViewsToolbar onNavigate={handleNavigate} /></div>
 
       {/* Resize Handle */}
       <div

@@ -27,12 +27,14 @@ from core.compliance_status import (
     STATUS_NO_CUMPLE,
     STATUS_FUERA,
 )
-from core.config import SECTOR_DEVIATION
+from core.config import DETECTION, SECTOR_DEVIATION
 from core.profile_extract import (
     ReconciledPoint,
     ReconciledProfile,
     _build_reconciled_points,
 )
+
+_BLOCKED_MATCH_COST = 1e9
 
 
 def _evaluate_status(deviation, tol_neg, tol_pos):
@@ -188,8 +190,10 @@ def build_reconciled_profile_v2(
     :class:`ReconciledProfile` includes ``face`` segments sampled
     from the profile between each crest and toe.
 
-    If ``floor_elevation`` is provided, the polyline extends
-    vertically from the last detected toe down to the real pit floor.
+    If ``floor_elevation`` and a source profile are provided, the
+    polyline closes at the matching source-profile coordinate when it
+    continues the last face direction. Without a source profile, the
+    existing face-angle projection is used.
     """
     return build_reconciled_profile(
         benches, source=source, return_v2=True, profile=profile,
@@ -198,14 +202,19 @@ def build_reconciled_profile_v2(
 
 
 def _build_cost_matrix(
-    benches_design: list, benches_topo: list, match_threshold: float = 8.0,
-) -> np.ndarray:
-    """Pairwise cost matrix (design x topo). Pairs above threshold are
-    blocked with a huge cost so the Hungarian solver won't pair them.
-    Cost = sqrt(1.5 * dz**2 + 1.0 * dx**2) (z-weighted)."""
+    benches_design: list, benches_topo: list,
+    elevation_threshold: float = DETECTION.gap_match_threshold,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ranking costs and eligibility from the vertical identity gate.
+
+    A pair is eligible only when the absolute difference between mean bench
+    elevations is below the configured threshold. The weighted center-distance
+    cost ranks eligible pairs; horizontal displacement does not reject them.
+    """
     n_d = len(benches_design)
     n_t = len(benches_topo)
     cost = np.zeros((n_d, n_t))
+    eligible = np.zeros((n_d, n_t), dtype=bool)
     for i, bd in enumerate(benches_design):
         bd_z = (bd.crest_elevation + bd.toe_elevation) / 2
         bd_x = (bd.crest_distance + bd.toe_distance) / 2
@@ -213,11 +222,9 @@ def _build_cost_matrix(
             bt_z = (bt.crest_elevation + bt.toe_elevation) / 2
             bt_x = (bt.crest_distance + bt.toe_distance) / 2
             diff_z = abs(bd_z - bt_z)
-            if diff_z >= match_threshold:
-                cost[i, j] = 1e9
-            else:
-                cost[i, j] = np.sqrt(1.5 * (bd_z - bt_z) ** 2 + 1.0 * (bd_x - bt_x) ** 2)
-    return cost
+            eligible[i, j] = diff_z < elevation_threshold
+            cost[i, j] = np.sqrt(1.5 * (bd_z - bt_z) ** 2 + 1.0 * (bd_x - bt_x) ** 2)
+    return cost, eligible
 
 
 def _build_match_row(
@@ -250,6 +257,7 @@ def _build_match_row(
         'sector': params_design.sector,
         'section': params_design.section_name,
         'bench_num': bd.bench_number,
+        'bench_num_topo': bt.bench_number,
         'type': 'MATCH',
         'level': f"{bd.toe_elevation:.0f}",
         'height_design': round(bd.bench_height, 2),
@@ -287,6 +295,7 @@ def _build_missing_row(bd, params_design) -> dict:
         'sector': params_design.sector,
         'section': params_design.section_name,
         'bench_num': bd.bench_number,
+        'bench_num_topo': None,
         'type': 'MISSING',
         'level': f"{bd.toe_elevation:.0f}",
         'height_design': round(bd.bench_height, 2),
@@ -317,6 +326,7 @@ def _build_extra_row(bt, params_design) -> dict:
         'sector': params_design.sector,
         'section': params_design.section_name,
         'bench_num': 999,
+        'bench_num_topo': bt.bench_number,
         'type': 'EXTRA',
         'level': f"{bt.toe_elevation:.0f}",
         'height_design': None,
@@ -342,14 +352,21 @@ def _build_extra_row(bt, params_design) -> dict:
 
 
 def _resolve_optimal_matches(
-    cost_matrix: np.ndarray, match_threshold: float = 8.0,
+    cost_matrix: np.ndarray, eligible_matrix: np.ndarray,
 ) -> list[tuple[int, int, float]]:
-    """Run Hungarian assignment and filter to pairs below match_threshold."""
+    """Run Hungarian assignment and keep pairs that pass the elevation gate."""
     from scipy.optimize import linear_sum_assignment
-    row_ind, col_ind = linear_sum_assignment(cost_matrix)
+    eligible_costs = cost_matrix[eligible_matrix]
+    max_valid_cost = float(np.max(eligible_costs)) if eligible_costs.size else 0.0
+    blocked_cost = max(
+        _BLOCKED_MATCH_COST,
+        (max_valid_cost + 1.0) * (min(cost_matrix.shape) + 1),
+    )
+    assignment_cost = np.where(eligible_matrix, cost_matrix, blocked_cost)
+    row_ind, col_ind = linear_sum_assignment(assignment_cost)
     candidates: list[tuple[int, int, float]] = []
     for r, c in zip(row_ind, col_ind):
-        if cost_matrix[r, c] < match_threshold:
+        if eligible_matrix[r, c]:
             candidates.append((r, c, cost_matrix[r, c]))
     candidates.sort(key=lambda x: x[0])
     return candidates
@@ -390,9 +407,8 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     if n_d == 0 and n_t == 0:
         return []
 
-    match_threshold = 8.0
-    cost_matrix = _build_cost_matrix(benches_design, benches_topo, match_threshold)
-    candidates = _resolve_optimal_matches(cost_matrix, match_threshold)
+    cost_matrix, eligible_matrix = _build_cost_matrix(benches_design, benches_topo)
+    candidates = _resolve_optimal_matches(cost_matrix, eligible_matrix)
     valid_matches = _greedy_match_filter(candidates)
 
     matched_design_indices = {r for r, c, _ in valid_matches}

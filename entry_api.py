@@ -8,6 +8,7 @@ Environment variables set BEFORE importing api.database:
 - DATABASE_URL: sqlite:///<data_dir>/conciliacion.db
 """
 
+import argparse
 import logging
 import os
 import sys
@@ -15,6 +16,16 @@ from pathlib import Path
 
 
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+DEFAULT_PORT = 57890
+
+
+def parse_port(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
+    args = parser.parse_args(argv)
+    if not 1 <= args.port <= 65535:
+        parser.error("--port must be between 1 and 65535")
+    return args.port
 
 
 def resolve_data_dir() -> Path:
@@ -63,14 +74,15 @@ def configure_logging(log_file: Path) -> None:
     )
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    port = parse_port(argv)
     data_dir = configure_data_dir()
     configure_logging(data_dir / "logs" / "conciliacion.log")
 
     import uvicorn
     from api.main import app
 
-    uvicorn.run(app, host="127.0.0.1", port=57890, log_config=None)
+    uvicorn.run(app, host="127.0.0.1", port=port, log_config=None)
 
 
 if __name__ == "__main__":

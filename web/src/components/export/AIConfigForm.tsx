@@ -82,98 +82,101 @@ export function AIConfigForm({
 
   return (
     <div
-      className="rounded-xl shadow-sm p-5 space-y-3"
+      className="rounded-xl shadow-sm p-4 sm:p-5 space-y-4"
       style={{
         backgroundColor: 'var(--color-surface)',
         border: '1px solid var(--color-border)',
       }}
       data-testid="ai-reporter-form"
     >
-      <div>
-        <label
-          htmlFor="ai-provider"
-          className="block text-xs font-medium mb-1"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          {t('ai_reporter.form.provider_label')}
-        </label>
-        <select
-          id="ai-provider"
-          value={state.provider}
-          onChange={(e) =>
-            dispatch({ type: 'SET_PROVIDER', value: e.target.value })
-          }
-          disabled={!providers?.length}
-          className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-          style={{
-            border: '1px solid var(--color-border)',
-            color: 'var(--color-text-primary)',
-            backgroundColor: 'var(--color-surface)',
-          }}
-        >
-          {!providers?.length && (
-            <option value="">{t('ai_reporter.health.pending')}</option>
-          )}
-          {(providers ?? []).map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div>
+          <label
+            htmlFor="ai-provider"
+            className="block text-xs font-medium mb-1"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            {t('ai_reporter.form.provider_label')}
+          </label>
+          <select
+            id="ai-provider"
+            value={state.provider}
+            onChange={(e) =>
+              dispatch({ type: 'SET_PROVIDER', value: e.target.value })
+            }
+            disabled={!providers?.length}
+            className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+            style={{
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-primary)',
+              backgroundColor: 'var(--color-surface)',
+            }}
+          >
+            {!providers?.length && (
+              <option value="">{t('ai_reporter.health.pending')}</option>
+            )}
+            {(providers ?? []).map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label
+            htmlFor="ai-model"
+            className="block text-xs font-medium mb-1"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            {t('ai_reporter.form.model_label')}
+          </label>
+          <input
+            id="ai-model"
+            type="text"
+            value={state.model}
+            onChange={(e) => dispatch({ type: 'SET_MODEL', value: e.target.value })}
+            placeholder="model-name"
+            className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+            style={{
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-primary)',
+              backgroundColor: 'var(--color-surface)',
+            }}
+          />
+        </div>
+
+        <div className="md:col-span-2 xl:col-span-2">
+          <label
+            htmlFor="ai-notes"
+            className="block text-xs font-medium mb-1"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            {t('ai_reporter.form.notes_label')}
+          </label>
+          <textarea
+            id="ai-notes"
+            value={state.notes}
+            onChange={(e) => dispatch({ type: 'SET_NOTES', value: e.target.value })}
+            placeholder={t('ai_reporter.form.notes_placeholder')}
+            rows={2}
+            className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-y"
+            style={{
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-text-primary)',
+              backgroundColor: 'var(--color-surface)',
+            }}
+          />
+        </div>
       </div>
 
-      <div>
-        <label
-          htmlFor="ai-model"
-          className="block text-xs font-medium mb-1"
-          style={{ color: 'var(--color-text-secondary)' }}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <CollapsibleFieldset
+          summary={t('ai_reporter.advanced.toggle')}
+          open={state.showAdvanced}
+          onToggle={() => dispatch({ type: 'TOGGLE_ADVANCED' })}
+          testId="ai-advanced"
         >
-          {t('ai_reporter.form.model_label')}
-        </label>
-        <input
-          id="ai-model"
-          type="text"
-          value={state.model}
-          onChange={(e) => dispatch({ type: 'SET_MODEL', value: e.target.value })}
-          placeholder="model-name"
-          className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-          style={{
-            border: '1px solid var(--color-border)',
-            color: 'var(--color-text-primary)',
-            backgroundColor: 'var(--color-surface)',
-          }}
-        />
-      </div>
-
-      <div>
-        <label
-          htmlFor="ai-notes"
-          className="block text-xs font-medium mb-1"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          {t('ai_reporter.form.notes_label')}
-        </label>
-        <textarea
-          id="ai-notes"
-          value={state.notes}
-          onChange={(e) => dispatch({ type: 'SET_NOTES', value: e.target.value })}
-          placeholder={t('ai_reporter.form.notes_placeholder')}
-          rows={2}
-          className="w-full px-3 py-2 rounded-lg text-sm outline-none resize-y"
-          style={{
-            border: '1px solid var(--color-border)',
-            color: 'var(--color-text-primary)',
-            backgroundColor: 'var(--color-surface)',
-          }}
-        />
-      </div>
-
-      <CollapsibleFieldset
-        summary={t('ai_reporter.advanced.toggle')}
-        open={state.showAdvanced}
-        onToggle={() => dispatch({ type: 'TOGGLE_ADVANCED' })}
-        testId="ai-advanced"
-      >
         <div>
           <label
             htmlFor="ai-temperature"
@@ -275,7 +278,7 @@ export function AIConfigForm({
           />
           {t('ai_reporter.advanced.cache_label')}
         </label>
-      </CollapsibleFieldset>
+        </CollapsibleFieldset>
 
       {hasResults && (
         <CollapsibleFieldset
@@ -412,10 +415,13 @@ export function AIConfigForm({
         </label>
       </fieldset>
 
+      </div>
+
+      <div className="flex justify-end">
       <Button
         type="button"
         variant="primary"
-        fullWidth
+        className="w-full sm:w-auto sm:min-w-56"
         loading={generating}
         disabled={formDisabled}
         onClick={onGenerate}
@@ -424,6 +430,7 @@ export function AIConfigForm({
           ? t('ai_reporter.form.generating')
           : t('ai_reporter.form.generate_button')}
       </Button>
+      </div>
     </div>
   );
 }

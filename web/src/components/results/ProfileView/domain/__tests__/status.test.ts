@@ -16,9 +16,7 @@ import type { BenchStatus } from '../types';
 describe('parseBenchStatus', () => {
   it('parses known compliance strings to their canonical bucket', () => {
     expect(parseBenchStatus('CUMPLE')).toBe('CUMPLE');
-    // Legacy "FUERA DE TOLERANCIA" / "FUERA" collapse to NO_CUMPLE so
-    // the presentation layer treats compliance as binary.
-    expect(parseBenchStatus('FUERA DE TOLERANCIA')).toBe('NO_CUMPLE');
+    expect(parseBenchStatus('FUERA DE TOLERANCIA')).toBe('FUERA');
     expect(parseBenchStatus('NO CUMPLE')).toBe('NO_CUMPLE');
     expect(parseBenchStatus('NO CONSTRUIDO')).toBe('NO_CUMPLE');
     expect(parseBenchStatus('FALTA BANCO')).toBe('NO_CUMPLE');
@@ -26,14 +24,13 @@ describe('parseBenchStatus', () => {
     expect(parseBenchStatus('BANCO ADICIONAL')).toBe('NO_CUMPLE');
   });
 
-  it('accepts the shortened "FUERA" form and collapses it to NO_CUMPLE', () => {
-    expect(parseBenchStatus('FUERA')).toBe('NO_CUMPLE');
+  it('accepts the shortened "FUERA" form', () => {
+    expect(parseBenchStatus('FUERA')).toBe('FUERA');
   });
 
   it('normalises whitespace and case', () => {
     expect(parseBenchStatus('  cumple  ')).toBe('CUMPLE');
-    // Lower-case legacy string also collapses.
-    expect(parseBenchStatus('fuera de tolerancia')).toBe('NO_CUMPLE');
+    expect(parseBenchStatus('fuera de tolerancia')).toBe('FUERA');
   });
 
   it('returns UNKNOWN for null, undefined, and empty string', () => {
@@ -59,9 +56,9 @@ describe('worstOfThree', () => {
 
   it('returns the most severe when they differ', () => {
     expect(worstOfThree('CUMPLE', 'CUMPLE', 'NO CUMPLE')).toBe('NO_CUMPLE');
-    // Legacy FUERA input collapses to NO_CUMPLE.
-    expect(worstOfThree('CUMPLE', 'FUERA DE TOLERANCIA', 'CUMPLE')).toBe('NO_CUMPLE');
+    expect(worstOfThree('CUMPLE', 'FUERA DE TOLERANCIA', 'CUMPLE')).toBe('FUERA');
     expect(worstOfThree('NO CUMPLE', 'FUERA DE TOLERANCIA', 'CUMPLE')).toBe('NO_CUMPLE');
+    expect(worstOfThree(null, 'NO CUMPLE', null)).toBe('NO_CUMPLE');
   });
 
   it('treats null/undefined as UNKNOWN (least severe)', () => {
@@ -76,8 +73,6 @@ describe('worstOfThree', () => {
 
 describe('compareStatus', () => {
   it('returns negative when a is less severe than b', () => {
-    // FUERA retains a rank in STATUS_SEVERITY (for defensive sorting of
-    // legacy values) but is no longer produced by parseBenchStatus.
     expect(compareStatus('CUMPLE', 'NO_CUMPLE')).toBeLessThan(0);
     expect(compareStatus('CUMPLE', 'FUERA')).toBeLessThan(0);
   });
@@ -107,12 +102,9 @@ describe('isBackendStatusString', () => {
     }
   });
 
-  it('returns false for "FUERA DE TOLERANCIA" (no longer whitelisted)', () => {
-    // FUERA DE TOLERANCIA is collapsed to NO_CUMPLE by parseBenchStatus
-    // before reaching the type, so it is intentionally not part of
-    // BACKEND_STATUS_STRINGS. isBackendStatusString is a type-narrowing
-    // predicate on raw strings, not a parser.
-    expect(isBackendStatusString('FUERA DE TOLERANCIA')).toBe(false);
+  it('recognizes the out-of-tolerance forms', () => {
+    expect(isBackendStatusString('FUERA DE TOLERANCIA')).toBe(true);
+    expect(isBackendStatusString('FUERA')).toBe(true);
   });
 
   it('returns false for unknown strings', () => {
@@ -122,17 +114,13 @@ describe('isBackendStatusString', () => {
 });
 
 describe('STATUS_SEVERITY', () => {
-  it('ranks CUMPLE < NO_CUMPLE in the binary model', () => {
+  it('ranks CUMPLE < FUERA < NO_CUMPLE', () => {
     expect(STATUS_SEVERITY.UNKNOWN).toBeLessThan(STATUS_SEVERITY.CUMPLE);
     expect(STATUS_SEVERITY.CUMPLE).toBeLessThan(STATUS_SEVERITY.NO_CUMPLE);
+    expect(STATUS_SEVERITY.FUERA).toBeLessThan(STATUS_SEVERITY.NO_CUMPLE);
   });
 
-  it('exposes the four-variant BenchStatus keys (FUERA retained defensively)', () => {
-    // FUERA stays in STATUS_SEVERITY as a defensive sentinel rank
-    // even though parseBenchStatus never produces it any more. It
-    // ranks between CUMPLE and NO_CUMPLE so any stray legacy value
-    // (e.g. a fixture that bypasses parsing) still compares
-    // consistently.
+  it('exposes the four-variant BenchStatus keys', () => {
     expect(Object.keys(STATUS_SEVERITY).sort()).toEqual(
       ['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN'].sort(),
     );
@@ -150,9 +138,9 @@ describe('STATUS_PRESENTATION_ORDER', () => {
     expect(cumpleIdx).toBeLessThan(unknownIdx);
   });
 
-  it('exhausts the three visible statuses (FUERA is collapsed)', () => {
-    expect(new Set(STATUS_PRESENTATION_ORDER).size).toBe(3);
-    expect(STATUS_PRESENTATION_ORDER).not.toContain('FUERA');
+  it('exhausts the three tolerance tiers and UNKNOWN', () => {
+    expect(new Set(STATUS_PRESENTATION_ORDER).size).toBe(4);
+    expect(STATUS_PRESENTATION_ORDER).toContain('FUERA');
   });
 });
 

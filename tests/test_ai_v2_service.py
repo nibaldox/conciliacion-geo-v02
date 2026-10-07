@@ -75,7 +75,14 @@ async def test_stream_report_respects_config_max_tokens():
 
 
 @pytest.mark.asyncio
-async def test_stream_report_emits_final_usage_chunk():
+@pytest.mark.parametrize("elapsed_ns", [0, 250_000, 1_250_000_000])
+async def test_stream_report_emits_final_usage_chunk(
+    monkeypatch: pytest.MonkeyPatch, elapsed_ns: int
+) -> None:
+    readings = iter([1_000_000_000, 1_000_000_000 + elapsed_ns])
+    monkeypatch.setattr(
+        "core.ai_v2.service.time.perf_counter_ns", lambda: next(readings)
+    )
     provider = FakeProvider(["a", "b", "c"])
     req = AIRequest(provider="ollama", model="m", results={})
     config = AIConfig(_env_file=None)
@@ -86,7 +93,7 @@ async def test_stream_report_emits_final_usage_chunk():
     assert last.finish_reason == "stop"
     assert last.usage is not None
     assert last.usage.completion_tokens > 0
-    assert last.usage.duration_ms > 0
+    assert last.usage.duration_ms == pytest.approx(elapsed_ns / 1_000_000)
 
 
 @pytest.mark.asyncio

@@ -27,37 +27,37 @@ export function SectionHeader({ section, benchCount, floorElevation, crestElevat
   return (
     <header
       data-slot="section-header"
-      className="px-3 md:px-6 py-2.5 border-b flex flex-wrap items-center gap-x-4 gap-y-1.5"
+      className="px-4 py-3 rounded-xl border flex flex-wrap items-center gap-x-4 gap-y-2"
       style={{
-        backgroundColor: 'var(--color-surface)',
+        backgroundColor: 'var(--color-surface-raised)',
         borderColor: 'var(--color-border)',
       }}
     >
       {/* Eyebrow + section name as the title group */}
       <div className="flex items-baseline gap-2 mr-1 min-w-0">
         <span
-          className="text-[10px] uppercase tracking-widest font-semibold"
+          className="text-xs font-semibold"
           style={{
             color: 'var(--color-accent-bright)',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-sans)',
           }}
         >
-          {t('profileView.header.eyebrow', { defaultValue: 'SECTION ANALYSIS' })}
+          {t('profileView.header.eyebrow', { defaultValue: 'Sección' })}
         </span>
         <span
-          className="text-[10px] uppercase tracking-widest"
+          className="text-xs"
           style={{
             color: 'var(--color-text-dim)',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-sans)',
           }}
         >
           /
         </span>
         <h2
-          className="text-sm font-semibold uppercase tracking-wider"
+          className="text-base font-semibold"
           style={{
             color: 'var(--color-text-primary)',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-sans)',
           }}
           title={section.id}
         >
@@ -109,10 +109,10 @@ export function SectionHeader({ section, benchCount, floorElevation, crestElevat
 
       {lastRunAt && (
         <span
-          className="text-[10px] uppercase tracking-widest hidden lg:inline tabular-nums"
+          className="text-xs hidden lg:inline tabular-nums"
           style={{
             color: 'var(--color-text-muted)',
-            fontFamily: 'var(--font-mono)',
+            fontFamily: 'var(--font-sans)',
           }}
           title={lastRunAt}
         >

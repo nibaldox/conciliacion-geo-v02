@@ -145,7 +145,13 @@ def larger_stl_bytes() -> bytes:
 
 @pytest.fixture()
 def uploaded_mesh_id(client: TestClient, stl_bytes: bytes) -> str:
-    """Upload a tiny mesh once and return its id, for tests that only need a mesh id."""
+    """Upload a tiny mesh as a fixed owner session and return its id.
+
+    The fixture pins ``X-Session-ID`` on the client so every later request
+    in the test acts as the owning session — the same flow as the web
+    client, which attaches the header to all requests.
+    """
+    client.headers["X-Session-ID"] = "api-tests-mesh-owner"
     resp = client.post(
         "/api/v1/meshes/upload",
         files={"file": ("tiny.stl", stl_bytes, "application/octet-stream")},
@@ -160,12 +166,14 @@ def _clear_lru_caches() -> Iterator[None]:
     """Reset the lru_cache-decorated helpers between tests so cached
     meshes/sections from previous tests do not bleed into new ones."""
     meshes_router._get_decimated_vertices_cached.cache_clear()
+    meshes_router._get_roi_vertices_cached.cache_clear()
     meshes_router._get_contours_cached.cache_clear()
     meshes_router._get_breaklines_cached.cache_clear()
     # The DB layer also caches the trimesh by id.
     db.get_trimesh_by_id.cache_clear()
     yield
     meshes_router._get_decimated_vertices_cached.cache_clear()
+    meshes_router._get_roi_vertices_cached.cache_clear()
     meshes_router._get_contours_cached.cache_clear()
     meshes_router._get_breaklines_cached.cache_clear()
     db.get_trimesh_by_id.cache_clear()

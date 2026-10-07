@@ -47,7 +47,9 @@
     "switch_to_dark": "Cambiar a modo oscuro",
     "switch_to_light": "Cambiar a modo claro",
     "aria_dark": "Modo oscuro",
-    "aria_light": "Modo claro"
+    "aria_light": "Modo claro",
+    "light_action": "Claro",
+    "dark_action": "Oscuro"
   },
   "demo": {
     "banner_active": "Modo demo",
@@ -57,7 +59,8 @@
     "exit": "Salir del demo",
     "try_title": "¿Sin datos propios?",
     "try_subtitle": "Probá la app con un pit sintético de 4 bancos. Sin subir nada, sin esperar al backend. Se carga al instante desde el CDN.",
-    "try_button": "▶ Probar con datos de ejemplo"
+    "try_button": "▶ Probar con datos de ejemplo",
+    "try_compact": "Probar con datos de ejemplo"
   },
   "step1": {
     "title": "Cargar Superficies",
@@ -68,7 +71,7 @@
     "drop_hint": "Arrastre o haga clic para seleccionar",
     "file_types": "STL / OBJ / PLY / DXF",
     "uploading": "Subiendo {{label}}…",
-    "max_size": "Máximo 500 MB por archivo. Los archivos .stl y .xlsx están excluidos del repositorio.",
+    "max_size": "STL: máximo 250 MiB (aprox. 262 MB). Límite de carga general: 500 MiB.",
     "replace": "Reemplazar",
     "removing": "Eliminando…",
     "unsupported_format": "Formato no soportado. Use: {{formats}}",
@@ -78,7 +81,7 @@
     "plan_view_button_2d": "Cargar vista en planta",
     "plan_view_no_data": "Cargue superficies para ver la vista en planta",
     "plan_view_loading_verts": "Cargando vértices…",
-    "plan_view_loading_plotly": "Cargando Plotly (≈3 MB)…",
+    "plan_view_loading_plotly": "Cargando gráficos…",
     "view3d_title": "Vista 3D con CesiumJS",
     "view3d_subtitle": "Descarga diferida: ~4 MB de JS + ~22 MB de assets (Workers, Widgets). Solo se carga cuando hacés clic.",
     "view3d_button": "Cargar vista 3D",
@@ -102,7 +105,74 @@
       "coord": "Local coordinate set to EPSG:4326"
     },
     "launch": "Inicializar análisis",
-    "launch_waiting": "Awaiting data packets"
+    "launch_waiting": "Awaiting data packets",
+    "compact_drop_hint": "Seleccionar o arrastrar archivo",
+    "select_mesh": "Cargar superficie de {{label}}",
+    "mesh_counts": "{{vertices}} vértices · {{faces}} caras",
+    "dxf": {
+      "title": "Revisar DXF para {{role}}",
+      "layers": "Capas con superficies",
+      "layer_stats": "{{faces}} caras · {{vertices}} vértices",
+      "unnamed_layer": "Capa sin nombre",
+      "no_faces": "Sin caras compatibles",
+      "no_surfaces": "El archivo no contiene caras DXF compatibles.",
+      "units": "Unidades del archivo",
+      "choose_units": "Seleccione las unidades",
+      "unit_6": "Metros",
+      "unit_4": "Milímetros",
+      "unit_5": "Centímetros",
+      "unit_2": "Pies",
+      "unit_1": "Pulgadas",
+      "unit_21": "Pies topográficos US",
+      "scale": "Factor de conversión a metros: {{factor}}",
+      "extent": "Extensión seleccionada de {{faces}} caras",
+      "imported_layers": "Capas importadas: {{layers}}",
+      "imported_scale": "Factor aplicado: {{factor}} m por unidad",
+      "warnings": "Advertencias de importación",
+      "entities": "Entidades encontradas",
+      "none": "ninguna",
+      "inspecting": "Inspeccionando DXF…",
+      "confirm": "Confirmar importación",
+      "confirming": "Importando…",
+      "warning": {
+        "generic": "El archivo contiene elementos que requieren revisión.",
+        "unsupported_entities": "Hay entidades que no se convierten en caras de superficie.",
+        "unknown_units": "El archivo no declara unidades; seleccione las unidades correctas.",
+        "partial_geometry": "Parte de la geometría no pudo importarse.",
+        "SURFACES_NO_XY_OVERLAP": "La extensión horizontal de esta superficie no se cruza con la otra superficie cargada. Revise las capas y unidades seleccionadas.",
+        "UNITS_UNKNOWN": "El archivo no declara unidades; seleccione las unidades correctas.",
+        "UNITS_UNSUPPORTED": "El archivo declara unidades que no se pueden convertir automáticamente. Seleccione una unidad compatible.",
+        "INVALID_FACE": "Se omitieron caras DXF con geometría inválida.",
+        "NONFINITE_COORDINATES": "Se omitieron coordenadas no válidas o infinitas.",
+        "INVALID_MESH_INDEX": "Se omitieron caras que apuntan a vértices inexistentes.",
+        "INVALID_POLYFACE_INDEX": "Se omitieron caras POLYFACE que apuntan a vértices inexistentes.",
+        "UNSUPPORTED_POLYMESH": "Se encontró POLYMESH, que no se importa como superficie compatible.",
+        "UNSUPPORTED_MESH_SUBDIVISION": "Se omitió una malla con subdivisión no compatible.",
+        "UNSUPPORTED_SOLID": "Se encontraron entidades SOLID que no se convierten en superficies.",
+        "UNSUPPORTED_BODY": "Se encontraron entidades BODY que no se convierten en superficies.",
+        "UNSUPPORTED_3DSOLID": "Se encontraron entidades 3DSOLID que no se convierten en superficies.",
+        "UNSUPPORTED_SURFACE": "Se encontraron superficies propietarias que deben exportarse como caras o malla.",
+        "UNSUPPORTED_REGION": "Se encontraron regiones que no se convierten automáticamente en superficies.",
+        "UNSUPPORTED_ACAD_PROXY_ENTITY": "Se encontró una entidad proxy de AutoCAD; expórtela como caras o malla.",
+        "SKIPPED_NON_SURFACE_ENTITIES": "Se omitieron entidades que no representan caras de superficie.",
+        "DISCARDED_FACES": "Se descartaron caras inválidas durante la importación.",
+        "unsupported_type": "Se omitieron entidades {{entity}} que no se convierten automáticamente en superficies.",
+        "insert_entity_skipped": "Se omitió la entidad {{entity}} dentro de un bloque.",
+        "DXF_XCLIP_UNSUPPORTED": "El archivo usa recortes de bloque XCLIP que no son compatibles.",
+        "DXF_BLOCK_CYCLE": "Se detectó una referencia circular entre bloques DXF.",
+        "DXF_MISSING_BLOCK": "El archivo hace referencia a un bloque que no existe.",
+        "DXF_TRANSFORM_UNSUPPORTED": "Una transformación de bloque no es compatible con la importación.",
+        "DXF_ENTITY_LIMIT_EXCEEDED": "El archivo supera el límite de entidades que se pueden expandir.",
+        "DXF_FACE_LIMIT_EXCEEDED": "El archivo supera el límite de caras que se pueden importar.",
+        "DXF_MESH_SUBDIVISION_UNSUPPORTED": "La malla tiene una subdivisión que no se puede importar.",
+        "DXF_NONPLANAR_POLYGON": "El archivo contiene un polígono no plano que no se puede triangular con seguridad.",
+        "DXF_AMBIGUOUS_POLYGON": "La triangulación de un polígono DXF no es clara.",
+        "DXF_NO_SURFACE": "No se encontraron superficies con caras compatibles.",
+        "DXF_NO_VALID_FACES": "No quedan caras válidas para importar.",
+        "DXF_LAYER_EMPTY": "La capa seleccionada no contiene caras importables.",
+        "DXF_UNITS_UNSUPPORTED": "Las unidades DXF declaradas no se pueden convertir automáticamente."
+      }
+    }
   },
   "step2": {
     "title": "Definir Secciones",
@@ -113,7 +183,8 @@
     "next_disabled": "Defina al menos una sección para continuar",
     "next": "Siguiente →",
     "prev": "← Anterior",
-    "tablist_aria": "Método de creación de secciones"
+    "tablist_aria": "Método de creación de secciones",
+    "existing_sections": "Secciones existentes"
   },
   "step3": {
     "title": "Análisis",
@@ -252,7 +323,7 @@
     "hardness_medium": "Medio",
     "hardness_hard": "Duro",
     "hardness_unknown": "Sin clasificar",
-    "geometry_contract": "Contrato geométrico (obligatorio)",
+    "geometry_contract": "Configuración geométrica (obligatoria)",
     "incl_source_col": "Columna fuente de inclinación",
     "az_source_col": "Columna fuente de azimut",
     "incl_convention": "Convención de inclinación",
@@ -264,7 +335,7 @@
     "bench_height": "Altura de banco (m)",
     "confirm_geometry": "He revisado y confirmo la configuración geométrica (habilita el cálculo).",
     "units_mismatch": "Las unidades de inclinación y azimut difieren. La API Form actual requiere que coincidan; use la unidad común.",
-    "contract_required": "Complete y confirme el contrato geométrico antes de cargar el CSV.",
+    "contract_required": "Revisa y confirma la configuración geométrica antes de cargar los pozos.",
     "blocking_errors": "Errores bloqueantes:",
     "rejected_rows": "Filas rechazadas:",
     "simulation": {
@@ -369,6 +440,26 @@
         "run_button": "Calcular perfil",
         "empty": "Perfil vacío."
       }
+    },
+    "choose_csv": "Seleccionar CSV",
+    "submit_csv": "Cargar pozos",
+    "csv_required": "Selecciona un archivo CSV.",
+    "upload_steps": "1. Selecciona el CSV. 2. Revisa y confirma la geometría. 3. Carga los pozos.",
+    "geometry_options": {
+      "FROM_VERTICAL": "Desde la vertical",
+      "DIP_FROM_HORIZONTAL": "Buzamiento desde la horizontal",
+      "ABSOLUTE_VALUE": "Valor absoluto",
+      "NEGATIVE_IS_DOWNWARD_DIP": "Negativo indica buzamiento descendente",
+      "SOURCE_DEFINED": "Según regla de la fuente",
+      "CLOCKWISE_FROM_NORTH": "Desde el Norte, sentido horario",
+      "COUNTERCLOCKWISE_FROM_NORTH": "Desde el Norte, sentido antihorario",
+      "CLOCKWISE_FROM_EAST": "Desde el Este, sentido horario",
+      "COUNTERCLOCKWISE_FROM_EAST": "Desde el Este, sentido antihorario",
+      "DEGREES": "Grados",
+      "RADIANS": "Radianes",
+      "negative_is_downward_dip": "Negativo indica buzamiento descendente",
+      "positive_only": "Solo valores positivos",
+      "absolute_value": "Valor absoluto"
     }
   },
   "section_list": {
@@ -526,7 +617,7 @@
     "cesium_load_error": "Error al cargar CesiumJS: {{message}}",
     "cesium_init_error": "Error al inicializar CesiumJS: {{message}}",
     "cesium_loading": "Cargando CesiumJS (≈4 MB)…",
-    "plotly_loading": "Cargando Plotly (≈3 MB)…",
+    "plotly_loading": "Cargando gráficos…",
     "empty_plan": "Cargue superficies para ver la vista en planta",
     "empty_3d": "Cargue superficies para ver la vista 3D",
     "loading_vertices": "Cargando vértices…",
@@ -536,7 +627,78 @@
     "layers": "Capas Visibles",
     "layer_topo": "Topografía Real",
     "layer_design": "Curvas de Diseño",
-    "layer_sections": "Líneas de Sección"
+    "layer_sections": "Líneas de Sección",
+    "horizontal_map": "Mapa de calor horizontal",
+    "horizontal_map_hint": "Colorea la superficie por dH medida entre diseño y topografía.",
+    "horizontal_sector": "Sector",
+    "horizontal_unnamed_sector": "Sin sector",
+    "horizontal_bench": "Banco de diseño",
+    "horizontal_all_benches": "Todos",
+    "horizontal_longitudinal_step": "Paso longitudinal (m)",
+    "horizontal_vertical_step": "Paso vertical (m)",
+    "horizontal_no_meshes": "Cargue las superficies de diseño y topografía para calcular el mapa.",
+    "horizontal_no_sections": "Defina secciones para seleccionar un sector.",
+    "horizontal_demo": "El mapa requiere superficies cargadas en esta sesión.",
+    "horizontal_loading": "Calculando diferencias horizontales…",
+    "horizontal_empty": "Sin celdas comparables para estos filtros.",
+    "horizontal_retry": "Reintentar",
+    "horizontal_error": "No se pudo calcular el mapa horizontal"
+  },
+  "horizontalDeviation": {
+    "legend": "Leyenda de desviación horizontal",
+    "method_caption": "dH a igual cota · + sobreexcavación · − faltante",
+    "direction_caption": "dH horizontal en la sección local; las alturas se miden desde la pata de diseño.",
+    "interpolated_caption": "Superficie interpolada entre secciones originales; el contexto gris es la topografía.",
+    "effective_resolution": "Resolución efectiva: {{longitudinal}} longitudinal · {{vertical}} vertical",
+    "sample_hint": "Las etiquetas h indican metros desde la pata de diseño.",
+    "warning": {
+      "coarsened_resolution": "La malla solicitada supera el límite de tamaño. Aumente el paso longitudinal o vertical.",
+      "rejected_section_pair": "Algunas secciones no pudieron compararse por su separación o geometría.",
+      "section_gap": "Hay un espacio grande entre secciones; parte de la superficie queda sin evaluar.",
+      "direction_change": "La dirección cambia entre secciones; parte de la superficie queda sin evaluar.",
+      "zero_spacing": "Hay secciones coincidentes; algunas celdas no se pueden evaluar.",
+      "no_cells": "Un par de secciones no produjo celdas comparables.",
+      "no_design_faces": "No se encontraron caras de diseño en el sector elegido.",
+      "incomplete_cells": "Algunas celdas no tienen las cuatro esquinas evaluables y quedan sin medición.",
+      "two_sections": "Se necesitan al menos dos secciones del sector para construir la superficie.",
+      "sector_required": "Seleccione un sector con secciones disponibles.",
+      "invalid_detection_setting": "La configuración de detección no permite calcular el mapa.",
+      "no_compatible_section_pairs": "No hay pares de secciones compatibles para este sector.",
+      "resolution_limit": "La resolución solicitada supera el límite de cálculo. Aumente el paso longitudinal o vertical.",
+      "generic": "Hay datos que no pudieron evaluarse en el mapa."
+    },
+    "categories": {
+      "within_tolerance": "Dentro de tolerancia (≤1 m)",
+      "underbreak_minor": "Faltante leve (1–1,8 m)",
+      "underbreak_moderate": "Faltante moderado (1,8–3 m)",
+      "underbreak_severe": "Faltante severo (>3 m)",
+      "overbreak_minor": "Sobreexcavación leve (1–1,8 m)",
+      "overbreak_moderate": "Sobreexcavación moderada (1,8–3 m)",
+      "overbreak_severe": "Sobreexcavación severa (>3 m)",
+      "unmeasured": "Sin medición"
+    },
+    "summary": {
+      "measured": "Medidas",
+      "within": "Dentro de tolerancia",
+      "max_abs": "Máx. |dH|"
+    },
+    "chart": {
+      "deviation": "dH horizontal",
+      "design_bench": "Banco de diseño {{number}}",
+      "design_bench_short": "D{{number}}",
+      "no_design_bench": "Sin banco de diseño asociado",
+      "status": "Estado",
+      "sample_height": "h desde pata {{height}}",
+      "sample_datum": "Pata de diseño: {{elevation}} m",
+      "sample_annotation": "h {{height}} · dH {{deviation}}",
+      "sample_unmeasured": "h {{height}} · {{status}}",
+      "missing": "Sin cruce único",
+      "ambiguous": "Cruce ambiguo",
+      "horizontal_segment": "Tramo horizontal",
+      "unassessed": "Sin evaluación",
+      "unmeasured": "Sin medición",
+      "measured": "Medido"
+    }
   },
   "wizard": {
     "nav_label": "Progreso del asistente",
@@ -659,17 +821,109 @@
   },
   "profileView": {
     "header": {
-      "eyebrow": "ANÁLISIS DE SECCIÓN",
+      "eyebrow": "Sección",
       "last_run": "ÚLTIMO ANÁLISIS · {{ago}}",
       "floorElev": "Cota Piso",
-      "crestMax": "Cota Cresta"
+      "crestMax": "Cota Cresta",
+      "azimuth": "Azimut",
+      "sector": "Sector",
+      "length": "Longitud",
+      "benches": "Bancos"
     },
     "summary": {
-      "title": "ESTADO DE MISIÓN",
-      "aria": "Estado de la misión",
-      "headline": "{{within}} de {{total}} dentro de tolerancia",
+      "title": "Cumplimiento de sección",
+      "filtered_title": "Cumplimiento de bancos seleccionados",
+      "aria": "Cumplimiento de sección",
+      "headline": "{{within}} de {{total}} bancos evaluados dentro de tolerancia",
       "no_benches": "Sin bancos",
+      "no_evaluated": "{{count}} bancos sin datos evaluables",
       "bar_aria": "Distribución de cumplimiento"
+    },
+    "inspector": {
+      "title": "Banco seleccionado",
+      "bench": "Banco {{number}}",
+      "height": "Altura real",
+      "angle": "Ángulo real",
+      "berm": "Berma real",
+      "design": "Diseño",
+      "status": "Estado",
+      "empty": "Selecciona un banco",
+      "hint": "Haz clic en una fila de la tabla o en un marcador del perfil para consultar sus parámetros."
+    },
+    "status": {
+      "CUMPLE": "Cumple",
+      "FUERA": "Fuera de tolerancia",
+      "NO_CUMPLE": "No cumple",
+      "UNKNOWN": "Sin datos"
+    },
+    "table": {
+      "empty": "No hay bancos detectados en esta sección.",
+      "empty_filtered": "El banco de diseño seleccionado no está emparejado en esta sección.",
+      "additional_topo": "Adicional topo · {{number}}",
+      "missing_design": "Cota base de diseño {{elevation}} m: sin banco topográfico emparejado.",
+      "missing_design_many": "Sin banco topográfico emparejado para cotas base de diseño: {{elevations}} m.",
+      "title": "Parámetros por banco",
+      "comparison": "D: diseño · R: real · Altura y berma en metros; ángulo en grados",
+      "columns": {
+        "benchNumber": "#",
+        "crestElevation": "Cota (m)",
+        "designHeight": "Alt (D)",
+        "height": "Alt (R)",
+        "designAngle": "Áng (D)",
+        "faceAngle": "Áng (R)",
+        "designBerm": "Berma (D)",
+        "bermWidth": "Berma (R)",
+        "status": "Estado",
+        "floor": "Piso (m)",
+        "score": "Puntaje"
+      }
+    },
+    "surfaces": {
+      "design": "diseño",
+      "topo": "topografía"
+    },
+    "warnings": {
+      "no_section_intersection": "El corte de {{surface}} no intersecta la superficie; no se obtuvo un perfil para esta sección.",
+      "insufficient_section_points": "El corte de {{surface}} produjo menos de dos puntos válidos; se omitió el perfil de esta sección.",
+      "disconnected_profile_components": "El corte de {{surface}} cruza tramos desconectados; se omitió el perfil de esta sección.",
+      "ambiguous_profile_geometry": "La geometría del corte de {{surface}} es ambigua; se omitió el perfil de esta sección.",
+      "minor_profile_reversal_normalized": "El corte de {{surface}} tenía un retroceso local pequeño. Se normalizó a un tramo vertical de hasta 0,1 m y se conservaron las cotas; revise esta zona si esa resolución es relevante.",
+      "section_cut_error": "No se pudo procesar el corte de {{surface}}; se omitió el perfil de esta sección.",
+      "section_processing_error": "Ocurrió un error al procesar la sección de {{surface}}; el perfil no está disponible."
+    },
+    "filter": {
+      "label": "Mostrar",
+      "reconciled": "Reconciliado",
+      "reconciled_help": "Geometría idealizada detectada",
+      "areas": "Áreas",
+      "areas_help": "Sobre-excavación y deuda de material",
+      "spill": "Derrame",
+      "spill_help": "Material derramado en la base de los bancos",
+      "semaphore": "Semáforo",
+      "semaphore_help": "Verde: cumple; amarillo: alerta; rojo: no cumple",
+      "horizontal_deviation": "Desviación horizontal",
+      "horizontal_deviation_help": "Colorea la topografía por dH a igual cota; + sobreexcavación, − faltante.",
+      "blast": "Pozos",
+      "blast_help": "Proyección de pozos de tronadura",
+      "reset": "Restablecer",
+      "active": "Activos",
+      "tolerance": "Tol"
+    },
+    "loading": "Cargando perfil…",
+    "error": "No se pudo cargar el perfil",
+    "chart": {
+      "elevation": "Elevación (m)",
+      "distance": "Distancia (m)",
+      "hover": {
+        "elevation": "Cota",
+        "crestDelta": "ΔCr",
+        "toeDelta": "ΔPa",
+        "actualAngle": "Ángulo real",
+        "plannedAngle": "Ángulo planificado",
+        "actualBerm": "Berma real",
+        "plannedBerm": "Berma planificada",
+        "unmatched": "Sin banco de diseño asociado"
+      }
     }
   },
   "contour": {
@@ -687,11 +941,25 @@
     "title": "Resumen General de Conciliación",
     "bench_filter": {
       "all": "Todos",
-      "label": "Banco:"
+      "label": "Filtrar por banco",
+      "all_benches": "Todos los bancos",
+      "bench": "Banco {{number}}",
+      "design_elevation": "Cota base de diseño {{elevation}} m",
+      "no_design_elevation": "ID de diseño {{number}} · sin cota base",
+      "design_id": "ID de diseño {{number}}",
+      "design_elevation_help": "Cota del pie del banco en el diseño; el ID conserva la correspondencia entre secciones.",
+      "selected_one": "{{count}} banco seleccionado",
+      "selected_other": "{{count}} bancos seleccionados",
+      "search": "Buscar banco…",
+      "no_options": "No hay bancos con ese número.",
+      "reset": "Restablecer",
+      "help": "Selecciona uno o varios bancos. Sin selección se evalúan todos.",
+      "no_results": "No hay resultados para los bancos seleccionados. Restablece el filtro para ver todos."
     },
     "kpi": {
       "global_score": "Score Ponderado Global",
       "profiles_ok": "Perfiles CUMPLE",
+      "profiles_outside": "Perfiles FUERA DE TOLERANCIA",
       "profiles_no": "Perfiles NO CUMPLE"
     },
     "section": {
@@ -774,5 +1042,75 @@
     "confidence_hint": "Coincidencia {{kind}}",
     "missing_required": "Faltan campos requeridos: {{names}}.",
     "ready": "Listo para confirmar."
+  },
+  "profilesGrid": {
+    "empty": "No hay secciones procesadas.",
+    "profileError": "No se pudo cargar este perfil.",
+    "profileRefreshError": "No se pudo actualizar este perfil.",
+    "profileEmpty": "Este perfil no tiene datos para mostrar.",
+    "retryProfile": "Reintentar perfil"
+  },
+  "workspace": {
+    "project": "Proyecto",
+    "analysis": "Análisis",
+    "surfaces": "Superficies",
+    "sections": "Secciones",
+    "profiles": "Perfiles",
+    "view3d": "Vista 3D",
+    "summary": "Resumen",
+    "blast": "Tronadura",
+    "export": "Exportar",
+    "curves": "Por curvas",
+    "file": "Archivo",
+    "menu": "Abrir o cerrar navegación",
+    "skip": "Ir al contenido principal",
+    "parameters": "Parámetros",
+    "process": "Procesamiento"
+  },
+  "plan_view": {
+    "title": "Plano de cumplimiento por perfil",
+    "description": "Topografía real en gris. Los cortes usan el peor estado de tolerancia de sus bancos emparejados.",
+    "no_score": "Sin puntaje evaluable",
+    "unavailable": "No hay topografía disponible para dibujar el plano.",
+    "east": "Este (m)",
+    "north": "Norte (m)",
+    "passing": "Cumple",
+    "outside": "Fuera de tolerancia",
+    "failing": "No cumple",
+    "evaluated_area": "Zona evaluada",
+    "full_surface": "Superficie completa"
+  },
+  "project_input": {
+    "curve_help": "Cómo definir el tramo",
+    "curve_step1": "Selecciona una línea de quiebre en la vista 3D.",
+    "curve_step2": "Marca el punto inicial de esa línea.",
+    "curve_step3": "Marca el punto final y genera los perfiles.",
+    "selected_curve": "Línea",
+    "none": "Sin seleccionar",
+    "start": "Inicio",
+    "end": "Fin",
+    "waiting": "Esperando clic",
+    "optional": "Opcional",
+    "length_up": "Superior (m)",
+    "length_down": "Inferior (m)",
+    "length_help": "Longitud de la sección a cada lado del origen: superior e inferior.",
+    "generating": "Generando…",
+    "generate": "Generar perfiles",
+    "choose_file": "Seleccionar archivo",
+    "tolerance_neg": "Tolerancia negativa: {{field}}",
+    "tolerance_pos": "Tolerancia positiva: {{field}}",
+    "negative": "Negativa",
+    "positive": "Positiva",
+    "global_angles": "Ángulos globales",
+    "resolution": "Paso (m)",
+    "face_threshold": "Cara (°)",
+    "berm_threshold": "Berma (°)",
+    "process": "Procesar",
+    "curve_success": "Perfiles generados correctamente"
+  },
+  "profile_plan": {
+    "title": "Ubicación en planta",
+    "active": "Perfil activo: {{name}}",
+    "neighbours": "Azul: perfil activo · gris: perfiles vecinos"
   }
 }

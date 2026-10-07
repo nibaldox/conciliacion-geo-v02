@@ -10,6 +10,7 @@ export interface MeshInfo {
   bounds: Record<string, number>;
   filename: string;
   uploaded_at: string;
+  import_report?: DxfImportReport | null;
 }
 
 export interface UploadResponse {
@@ -17,6 +18,38 @@ export interface UploadResponse {
   n_vertices: number;
   n_faces: number;
   bounds: Record<string, number>;
+  import_report?: DxfImportReport | null;
+}
+
+export interface DxfLayerSummary {
+  name: string;
+  n_faces: number;
+  n_vertices: number;
+  bounds: { xmin: number; xmax: number; ymin: number; ymax: number; zmin: number; zmax: number } | null;
+  entity_counts: Record<string, number>;
+}
+
+export interface DxfInspectResponse {
+  upload_id: string;
+  filename: string;
+  type: MeshType;
+  expires_at: number;
+  declared_units: number;
+  layers: DxfLayerSummary[];
+  entity_counts: Record<string, number>;
+  warnings: string[];
+  importer_version: string;
+}
+
+export interface DxfImportReport {
+  selected_layers: string[];
+  declared_units: number;
+  confirmed_units: number | null;
+  scale_factor: number;
+  importer_version: string;
+  entity_counts: Record<string, number>;
+  warnings: string[];
+  discarded_faces: number;
 }
 
 // Section schemas
@@ -147,9 +180,124 @@ export interface ProfileData {
   reconciled_topo?: { distances: number[]; elevations: number[] } | null;
   reconciled_design_legacy?: { distances: number[]; elevations: number[] } | null;
   reconciled_topo_legacy?: { distances: number[]; elevations: number[] } | null;
+  horizontal_deviation?: HorizontalDeviationProfile | null;
   benches_topo?: BenchParams[] | null;
   floor_elevation?: number | null;
   crest_elevation_max?: number | null;
+  profile_warnings?: { design?: string[]; topo?: string[] } | null;
+}
+
+export type HorizontalDeviationCategory =
+  | 'within_tolerance'
+  | 'overbreak_minor'
+  | 'overbreak_moderate'
+  | 'overbreak_severe'
+  | 'underbreak_minor'
+  | 'underbreak_moderate'
+  | 'underbreak_severe'
+  | 'unmeasured'
+  | 'unassessed';
+
+export type HorizontalDeviationStatus =
+  | 'measured'
+  | 'missing'
+  | 'ambiguous'
+  | 'horizontal_segment'
+  | 'unassessed'
+  | 'unmeasured'
+  | string;
+
+export interface HorizontalDeviationThresholds {
+  within: number;
+  moderate: number;
+  severe: number;
+}
+
+export interface HorizontalDeviationProfilePoint {
+  distance: number | null;
+  elevation: number | null;
+  deviation: number | null;
+  value?: number | null;
+  unit?: string;
+  category: HorizontalDeviationCategory | string;
+  design_bench_num: number | null;
+  status: HorizontalDeviationStatus;
+  source?: string;
+  assumptions?: string[];
+  warnings?: string[];
+}
+
+export interface HorizontalDeviationSample {
+  design_bench_num: number;
+  height_above_toe: number | null;
+  toe_elevation?: number | null;
+  elevation: number | null;
+  reference_elevation: number | null;
+  design_distance: number | null;
+  topo_distance: number | null;
+  deviation: number | null;
+  value?: number | null;
+  unit?: string;
+  category: HorizontalDeviationCategory | string;
+  status: HorizontalDeviationStatus;
+  source?: string;
+  assumptions?: string[];
+  warnings?: string[];
+}
+
+export interface HorizontalDeviationSummary {
+  measured: number;
+  total: number;
+  within_percent: number | null;
+  max_abs_deviation: number | null;
+}
+
+export interface HorizontalDeviationProfile {
+  unit: 'm' | string;
+  method: 'horizontal_at_equal_elevation' | string;
+  direction: 'positive_overbreak_negative_underbreak' | string;
+  thresholds: HorizontalDeviationThresholds;
+  points: HorizontalDeviationProfilePoint[];
+  samples: HorizontalDeviationSample[];
+  summary: HorizontalDeviationSummary;
+  warnings: string[];
+}
+
+export interface HorizontalDeviationMeshCell {
+  deviation_m: number | null;
+  value?: number | null;
+  unit?: string;
+  category: HorizontalDeviationCategory | string;
+  status: HorizontalDeviationStatus;
+  station_m: number;
+  elevation_m: number;
+  bench_num?: number;
+  source?: string;
+  assumptions?: string[];
+  warnings?: string[];
+}
+
+export interface HorizontalDeviationMeshResponse {
+  vertices: { x: number[]; y: number[]; z: number[] };
+  faces: number[][];
+  cell_index_by_face: number[];
+  cells: HorizontalDeviationMeshCell[];
+  unit: 'm' | string;
+  method: 'horizontal_at_equal_elevation' | string;
+  direction: 'positive_overbreak_negative_underbreak' | string;
+  thresholds: HorizontalDeviationThresholds;
+  resolution: { longitudinal_step: number; vertical_step: number };
+  effective_resolution?: {
+    longitudinal_step_min: number | null;
+    longitudinal_step_max: number | null;
+    vertical_step_min: number | null;
+    vertical_step_max: number | null;
+  };
+  summary: HorizontalDeviationSummary;
+  warnings: string[];
+  assumptions?: string[];
+  sector: string;
+  bench_num: number | null;
 }
 
 export type MatchType = 'MATCH' | 'MISSING' | 'EXTRA';
@@ -158,6 +306,7 @@ export interface ComparisonResult {
   sector: string;
   section: string;
   bench_num: number;
+  bench_num_topo?: number | null;
   type: MatchType;
   level: string;
   height_design: number | null;

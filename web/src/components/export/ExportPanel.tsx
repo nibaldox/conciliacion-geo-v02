@@ -97,70 +97,9 @@ export function ExportPanel() {
     exportImages.isPending;
 
   return (
-    <div className="space-y-5">
-      {/* Project info form */}
-      <div className="rounded-xl shadow-sm p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-        <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
-          {t('export.title')}
-        </h4>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('export.project')}
-            </label>
-            <input
-              type="text"
-              value={form.project}
-              onChange={(e) => handleFieldChange('project', e.target.value)}
-              placeholder={t('export.project_placeholder')}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('export.author')}
-            </label>
-            <input
-              type="text"
-              value={form.author}
-              onChange={(e) => handleFieldChange('author', e.target.value)}
-              placeholder={t('export.author_placeholder')}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('export.operation')}
-            </label>
-            <input
-              type="text"
-              value={form.operation}
-              onChange={(e) => handleFieldChange('operation', e.target.value)}
-              placeholder={t('export.operation_placeholder')}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('export.phase')}
-            </label>
-            <input
-              type="text"
-              value={form.phase}
-              onChange={(e) => handleFieldChange('phase', e.target.value)}
-              placeholder={t('export.phase_placeholder')}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            />
-          </div>
-        </div>
-      </div>
-
+    <div data-slot="export-panel" className="space-y-4">
       {/* Export buttons */}
-      <div className="grid grid-cols-5 gap-3">
+      <div data-testid="export-actions" className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-5 sm:gap-3">
         <ExportButton
           label={t('export.excel')}
           icon={<IconDashboard className="w-6 h-6" />}
@@ -266,6 +205,66 @@ export function ExportPanel() {
           {t('export.error_images')}
         </div>
       )}
+
+      <div className="rounded-xl shadow-sm p-4 sm:p-5" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+        <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--color-text-primary)' }}>
+          {t('export.title')}
+        </h4>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('export.project')}
+            </label>
+            <input
+              type="text"
+              value={form.project}
+              onChange={(e) => handleFieldChange('project', e.target.value)}
+              placeholder={t('export.project_placeholder')}
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('export.author')}
+            </label>
+            <input
+              type="text"
+              value={form.author}
+              onChange={(e) => handleFieldChange('author', e.target.value)}
+              placeholder={t('export.author_placeholder')}
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('export.operation')}
+            </label>
+            <input
+              type="text"
+              value={form.operation}
+              onChange={(e) => handleFieldChange('operation', e.target.value)}
+              placeholder={t('export.operation_placeholder')}
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('export.phase')}
+            </label>
+            <input
+              type="text"
+              value={form.phase}
+              onChange={(e) => handleFieldChange('phase', e.target.value)}
+              placeholder={t('export.phase_placeholder')}
+              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+              style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -292,7 +291,7 @@ function ExportButton({
       disabled={disabled}
       loading={loading}
       fullWidth
-      className="!flex-col !gap-2 !px-4 !py-4"
+      className="!flex-col !gap-2 !px-3 !py-3 sm:!px-4 sm:!py-4"
     >
       {!loading && <span className="mb-1 text-accent">{icon}</span>}
       <span className="text-xs font-medium">{label}</span>

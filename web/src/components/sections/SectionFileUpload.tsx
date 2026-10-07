@@ -2,6 +2,8 @@ import { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFileSections } from '../../api/hooks';
 import { Button } from '../ui/Button';
+import { IconSections } from '../ui/Icons';
+import { ProjectField, PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 
 type AzMode = 'perpendicular' | 'local_slope';
 
@@ -65,162 +67,47 @@ export function SectionFileUpload() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      {/* Drop zone */}
-      <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onClick={() => inputRef.current?.click()}
-        className="relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all"
-        style={isDragging
-          ? { borderColor: 'var(--color-mine-blue)', backgroundColor: 'var(--color-surface-muted)' }
-          : file
-            ? { borderColor: 'var(--color-mine-green)', backgroundColor: 'var(--status-ok-bg)' }
-            : { borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }
-        }
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".csv,.txt,.dxf"
-          onChange={handleInputChange}
-          className="hidden"
-        />
-
-        {file ? (
-          <div className="flex items-center justify-center gap-3">
-            <span className="text-2xl">&#128196;</span>
-            <div className="text-left">
-              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{file.name}</p>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                {(file.size / 1024).toFixed(1)} KB
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                clearFile();
-              }}
-              className="ml-4 text-xs font-medium"
-              style={{ color: 'var(--color-mine-red)' }}
-            >
-              {t('section_form_file.remove')}
-            </button>
-          </div>
-        ) : (
-          <div>
-            <span className="text-3xl mb-3 block">&#128228;</span>
-            <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('section_form_file.drop_hint')}
-            </p>
-            <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              {t('section_form_file.drop_formats')}
-            </p>
-          </div>
-        )}
+    <form onSubmit={handleSubmit} className="space-y-2" data-slot="section-file-form">
+      <div onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}
+        className="flex min-h-[54px] items-center gap-1 rounded-lg border border-dashed p-2 transition-colors"
+        style={{ borderColor: isDragging ? 'var(--color-accent)' : file ? 'var(--status-ok-border)' : 'var(--color-border)', backgroundColor: file ? 'var(--status-ok-bg)' : 'var(--color-surface-raised)' }}>
+        <input ref={inputRef} type="file" accept=".csv,.txt,.dxf" onChange={handleInputChange} className="hidden" />
+        <button type="button" onClick={() => inputRef.current?.click()} className="flex min-w-0 flex-1 items-center gap-2 rounded text-left outline-none focus-visible:ring-2 focus-visible:ring-accent" aria-label={t('project_input.choose_file')}>
+          <IconSections className="h-5 w-5 shrink-0 text-accent-bright" />
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-medium text-text-secondary" title={file?.name}>{file?.name ?? t('project_input.choose_file')}</span>
+            <span className="block text-xs text-text-muted">{file ? `${(file.size / 1024).toFixed(1)} KB` : t('section_form_file.drop_formats')}</span>
+          </span>
+        </button>
+        {file && <button type="button" onClick={clearFile} className="h-8 w-8 shrink-0 rounded-md text-mine-red hover:bg-surface-muted" aria-label={t('section_form_file.remove')} title={t('section_form_file.remove')}>×</button>}
       </div>
-
-      {/* Settings */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-1.5">
+        <ProjectField id="file-sector" label={t('section_form_file.sector')}>
+          <input id="file-sector" value={sector} onChange={(e) => setSector(e.target.value)} className={PROJECT_INPUT_CLASS} placeholder={t('project_input.optional')} />
+        </ProjectField>
+        <ProjectField id="file-spacing" label={t('section_form_file.spacing')}>
+          <input id="file-spacing" type="number" min={1} step="any" value={spacing} onChange={(e) => setSpacing(parseFloat(e.target.value) || 20)} className={PROJECT_INPUT_CLASS} />
+        </ProjectField>
+        <ProjectField id="file-up" label={t('project_input.length_up')} title={t('project_input.length_help')}>
+          <input id="file-up" type="number" min={1} step="any" value={lengthUp} onChange={(e) => setLengthUp(parseFloat(e.target.value) || 100)} className={PROJECT_INPUT_CLASS} />
+        </ProjectField>
+        <ProjectField id="file-down" label={t('project_input.length_down')} title={t('project_input.length_help')}>
+          <input id="file-down" type="number" min={1} step="any" value={lengthDown} onChange={(e) => setLengthDown(parseFloat(e.target.value) || 100)} className={PROJECT_INPUT_CLASS} />
+        </ProjectField>
         <div className="col-span-2">
-          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            {t('section_form_file.spacing')}
-          </label>
-          <input
-            type="number"
-            min={1}
-            step="any"
-            value={spacing}
-            onChange={(e) => setSpacing(parseFloat(e.target.value) || 20)}
-            className="w-full rounded-md px-3 py-2 text-sm outline-none"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Longitud Superior (m)
-          </label>
-          <input
-            type="number"
-            min={1}
-            step="any"
-            value={lengthUp}
-            onChange={(e) => setLengthUp(parseFloat(e.target.value) || 100)}
-            className="w-full rounded-md px-3 py-2 text-sm outline-none"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            Longitud Inferior (m)
-          </label>
-          <input
-            type="number"
-            min={1}
-            step="any"
-            value={lengthDown}
-            onChange={(e) => setLengthDown(parseFloat(e.target.value) || 100)}
-            className="w-full rounded-md px-3 py-2 text-sm outline-none"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            {t('section_form_file.sector')}
-          </label>
-          <input
-            type="text"
-            value={sector}
-            onChange={(e) => setSector(e.target.value)}
-            className="w-full rounded-md px-3 py-2 text-sm outline-none"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-            placeholder={t('section_form_file.sector_placeholder')}
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-            {t('section_form_file.az_method')}
-          </label>
-          <select
-            value={azMode}
-            onChange={(e) => setAzMode(e.target.value as AzMode)}
-            className="w-full rounded-md px-3 py-2 text-sm outline-none"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
-          >
-            <option value="perpendicular">{t('section_form_file.az_perpendicular')}</option>
-            <option value="local_slope">{t('section_form_file.az_local_slope')}</option>
-          </select>
+          <ProjectField id="file-azimuth" label={t('section_form_file.az_method')}>
+            <select id="file-azimuth" value={azMode} onChange={(e) => setAzMode(e.target.value as AzMode)} className={PROJECT_INPUT_CLASS}>
+              <option value="perpendicular">{t('section_form_file.az_perpendicular')}</option>
+              <option value="local_slope">{t('section_form_file.az_local_slope')}</option>
+            </select>
+          </ProjectField>
         </div>
       </div>
-
-      {/* Submit */}
-      <div className="flex items-center gap-4">
-        <Button
-          type="submit"
-          disabled={!file || mutation.isPending}
-          loading={mutation.isPending}
-        >
-          {mutation.isPending ? t('section_form_file.submitting') : t('section_form_file.submit')}
-        </Button>
-
-        {mutation.isError && (
-          <p className="text-sm" style={{ color: 'var(--color-mine-red)' }}>
-            {t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_file.error_generic')}
-          </p>
-        )}
-
-        {mutation.isSuccess && (
-          <p className="text-sm font-medium" style={{ color: 'var(--color-mine-green)' }}>
-            {t('section_form_file.success')}
-          </p>
-        )}
-      </div>
+      <Button type="submit" size="sm" fullWidth className="min-h-8" disabled={!file || mutation.isPending} loading={mutation.isPending}>
+        {t(mutation.isPending ? 'section_form_file.submitting' : 'section_form_file.submit')}
+      </Button>
+      {mutation.isError && <p role="alert" className="text-xs text-mine-red">{t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_file.error_generic')}</p>}
+      {mutation.isSuccess && <p role="status" className="text-xs text-mine-green">{t('section_form_file.success')}</p>}
     </form>
   );
 }

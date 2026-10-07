@@ -15,10 +15,16 @@ web/node_modules/
 node_modules/
 web/dist/
 web/coverage/
+.pnpm-store/
+.vite/
+web/test-results/
+web/playwright-report/
 
 # Python
 *.egg-info/
 conciliacion_geotecnica.egg-info/
+.pytest_cache/
+.ai_v2_cache/
 
 # Data (SQLite, temp files)
 data/

@@ -751,8 +751,14 @@ def _correct_toe_with_spill(
     distances, elevations, weighted_angle: float,
 ) -> tuple[float, float, float, np.ndarray]:
     """Detect a corrected toe and spill point; return (toe_x, angle, spill_w, spill_pt)."""
+    crest_index = int(np.argmin(np.linalg.norm(face_pts - crest, axis=1)))
+    toe_index = int(np.argmin(np.linalg.norm(face_pts - toe, axis=1)))
+    if crest_index <= toe_index:
+        oriented_face_pts = face_pts[crest_index:toe_index + 1]
+    else:
+        oriented_face_pts = face_pts[toe_index:crest_index + 1][::-1]
     corrected_toe_x, corrected_angle, spill_pt = _detect_and_project_solid_toe(
-        face_pts, DETECTION.face_threshold
+        oriented_face_pts, DETECTION.face_threshold
     )
     if abs(corrected_toe_x - toe[0]) > 1e-3:
         return corrected_toe_x, corrected_angle, abs(toe[0] - corrected_toe_x), spill_pt
@@ -961,11 +967,9 @@ def _build_reconciled_points(
       bench's toe and this bench's crest are still emitted so the
       polyline is continuous.
     * The last bench never emits a ``berm_top`` (no following bench).
-    * Benches are emitted in the order they appear in the list, which
-      is the topological order produced by :func:`extract_parameters`.
-      For inverted sections (distances decreasing) the caller is
-      expected to have already reversed the bench list — this
-      function does not silently flip it.
+    * Benches are emitted in topological order. With a monotonic source
+      profile, that order is reversed only when it conflicts with the
+      crest-to-toe direction of every bench.
 
     If ``profile`` is provided as a ``(distances, elevations)`` pair of
     arrays, the function additionally emits ``face`` segments between
@@ -981,10 +985,45 @@ def _build_reconciled_points(
     profile_d = None
     profile_e = None
     if profile is not None:
-        profile_d = np.asarray(profile[0])
-        profile_e = np.asarray(profile[1])
+        profile_d = np.asarray(profile[0], dtype=float).reshape(-1)
+        profile_e = np.asarray(profile[1], dtype=float).reshape(-1)
+        if profile_d.size != profile_e.size:
+            profile_d = None
+            profile_e = None
+    ordered_benches = list(benches)
+    finite_profile_d = (
+        profile_d[np.isfinite(profile_d)]
+        if profile_d is not None else np.array([], dtype=float)
+    )
+    profile_steps = np.diff(finite_profile_d)
+    profile_is_monotonic = (
+        profile_steps.size == 0
+        or np.all(profile_steps >= -1e-9)
+        or np.all(profile_steps <= 1e-9)
+    )
+    if (
+        profile_d is not None
+        and profile_d.size
+        and len(benches) > 1
+        and profile_is_monotonic
+    ):
+        face_directions = np.sign([
+            float(b.toe_distance) - float(b.crest_distance)
+            for b in benches
+        ])
+        centers = np.array([
+            0.5 * (float(b.crest_distance) + float(b.toe_distance))
+            for b in benches
+        ])
+        center_steps = np.diff(centers)
+        if (
+            np.all(face_directions != 0)
+            and np.all(face_directions == face_directions[0])
+            and np.all(center_steps * face_directions[0] < -1e-9)
+        ):
+            ordered_benches.reverse()
     pts: List[ReconciledPoint] = []
-    for idx, b in enumerate(benches):
+    for idx, b in enumerate(ordered_benches):
         if b.is_ramp:
             pts.append(ReconciledPoint(
                 distance=float(b.crest_distance),
@@ -1018,10 +1057,13 @@ def _build_reconciled_points(
                     source=source,
                 ))
             else:
-                for fd, fe in zip(face_d, face_e):
+                face_order = np.argsort(face_d, kind="stable")
+                if float(b.toe_distance) < float(b.crest_distance):
+                    face_order = face_order[::-1]
+                for face_idx in face_order:
                     pts.append(ReconciledPoint(
-                        distance=float(fd),
-                        elevation=float(fe),
+                        distance=float(face_d[face_idx]),
+                        elevation=float(face_e[face_idx]),
                         bench_number=int(b.bench_number),
                         segment_type="face",
                         source=source,
@@ -1040,8 +1082,12 @@ def _build_reconciled_points(
         # next crest and hide the real pata del banco. Skipping it lets
         # the renderer draw a straight oblique toe -> next-crest line,
         # which matches the expected geometry.
-        if not b.is_ramp and idx + 1 < len(benches):
-            next_b = benches[idx + 1]
+        if (
+            not b.is_ramp
+            and idx + 1 < len(ordered_benches)
+            and not ordered_benches[idx + 1].is_ramp
+        ):
+            next_b = ordered_benches[idx + 1]
             if next_b.crest_elevation >= b.toe_elevation:
                 # Cada banco prolonga su cara con su mismo ángulo hasta la
                 # cota del siguiente crest. La cota de piso local del banco
@@ -1070,26 +1116,71 @@ def _build_reconciled_points(
                         source=source,
                     ))
 
-    # Extender el perfil del último banco hasta el piso real (cota del
-    # fondo del rajo). En lugar de una línea vertical, prolongamos la cara
-    # del banco con su mismo ángulo hasta alcanzar la cota del piso.
-    if floor_elevation is not None and pts and benches:
-        last_bench = benches[-1]
-        delta_z = float(last_bench.toe_elevation) - float(floor_elevation)
-        if delta_z > 0:
-            angle_rad = math.radians(float(last_bench.face_angle))
-            if angle_rad > 0.01:
+    if floor_elevation is not None and pts and ordered_benches:
+        last_bench = ordered_benches[-1]
+        if profile_d is not None and profile_e is not None and profile_d.size:
+            endpoint = _profile_floor_endpoint(
+                profile_d,
+                profile_e,
+                float(floor_elevation),
+                float(last_bench.toe_distance),
+            )
+            if endpoint is not None:
+                _, floor_d, floor_z = endpoint
                 face_dir = 1.0 if last_bench.toe_distance >= last_bench.crest_distance else -1.0
-                delta_d = (delta_z / math.tan(angle_rad)) * face_dir
-                floor_d = float(last_bench.toe_distance) + delta_d
-            else:
-                floor_d = float(last_bench.toe_distance)
-            pts.append(ReconciledPoint(
-                distance=floor_d,
-                elevation=float(floor_elevation),
-                bench_number=int(last_bench.bench_number),
-                segment_type="floor",
-                source=source,
-            ))
+                extends_from_toe = (floor_d - float(last_bench.toe_distance)) * face_dir >= -1e-9
+                at_existing_endpoint = (
+                    np.isclose(floor_d, pts[-1].distance, atol=1e-9)
+                    and np.isclose(floor_z, pts[-1].elevation, atol=1e-9)
+                )
+                if extends_from_toe and not at_existing_endpoint:
+                    pts.append(ReconciledPoint(
+                        distance=floor_d,
+                        elevation=floor_z,
+                        bench_number=int(last_bench.bench_number),
+                        segment_type="floor",
+                        source=source,
+                    ))
+        else:
+            delta_z = float(last_bench.toe_elevation) - float(floor_elevation)
+            if delta_z > 0:
+                angle_rad = math.radians(float(last_bench.face_angle))
+                if angle_rad > 0.01:
+                    face_dir = 1.0 if last_bench.toe_distance >= last_bench.crest_distance else -1.0
+                    delta_d = (delta_z / math.tan(angle_rad)) * face_dir
+                    floor_d = float(last_bench.toe_distance) + delta_d
+                else:
+                    floor_d = float(last_bench.toe_distance)
+                pts.append(ReconciledPoint(
+                    distance=floor_d,
+                    elevation=float(floor_elevation),
+                    bench_number=int(last_bench.bench_number),
+                    segment_type="floor",
+                    source=source,
+                ))
 
     return pts
+
+
+def _profile_floor_endpoint(
+    profile_d: np.ndarray,
+    profile_e: np.ndarray,
+    floor_elevation: float,
+    reference_distance: float,
+) -> tuple[int, float, float] | None:
+    valid = np.isfinite(profile_d) & np.isfinite(profile_e)
+    if not np.any(valid):
+        return None
+    indices = np.flatnonzero(valid)
+    errors = np.abs(profile_e[indices] - float(floor_elevation))
+    min_error = float(np.min(errors))
+    if min_error > 1e-6:
+        return None
+    candidates = indices[errors <= min_error + 1e-9]
+    boundary_candidates = candidates[
+        (candidates == 0) | (candidates == len(profile_d) - 1)
+    ]
+    if boundary_candidates.size:
+        candidates = boundary_candidates
+    idx = int(candidates[np.argmin(np.abs(profile_d[candidates] - reference_distance))])
+    return idx, float(profile_d[idx]), float(profile_e[idx])

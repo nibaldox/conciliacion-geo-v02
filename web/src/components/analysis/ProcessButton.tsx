@@ -26,15 +26,16 @@ export function ProcessButton() {
   };
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex w-full flex-col gap-2">
       {/* Main process button */}
       {!isComplete && !isError && (
         <Button
           onClick={handleProcess}
           loading={isProcessing || isPending}
           disabled={isProcessing || isPending}
-          size="lg"
-          className="!px-8 !py-4 !text-lg shadow-lg"
+          size="sm"
+          fullWidth
+          className="min-h-8"
         >
           {isProcessing || isPending ? t('step3.running') : t('step3.start_processing')}
         </Button>
@@ -42,13 +43,13 @@ export function ProcessButton() {
 
       {/* Complete state */}
       {isComplete && (
-        <div className="flex flex-col items-center gap-3 w-full">
-          <div className="flex flex-col items-center gap-2 px-8 py-4 rounded-xl w-full" style={{ backgroundColor: 'var(--status-ok-bg)', border: '1px solid var(--status-ok-border)' }}>
-            <div className="flex items-center gap-2 font-semibold text-lg" style={{ color: 'var(--status-ok-text)' }}>
-              <span className="text-2xl">✓</span>
+        <div className="flex flex-col items-center gap-2 w-full">
+          <div className="flex flex-col items-center gap-1 p-2 rounded-md w-full" style={{ backgroundColor: 'var(--status-ok-bg)', border: '1px solid var(--status-ok-border)' }}>
+            <div className="flex items-center gap-2 font-semibold text-xs" style={{ color: 'var(--status-ok-text)' }}>
+              <span className="text-xs">✓</span>
               {t('step3.complete_title')}
             </div>
-            <p className="text-sm" style={{ color: 'var(--status-ok-text)', opacity: 0.8 }}>
+            <p className="text-xs" style={{ color: 'var(--status-ok-text)', opacity: 0.8 }}>
               {t('step3.n_results', { count: status?.n_results ?? 0 })}
             </p>
           </div>
@@ -58,7 +59,8 @@ export function ProcessButton() {
             onClick={handleProcess}
             loading={isPending}
             disabled={isPending}
-            className="w-full mt-2"
+            size="sm"
+            className="w-full min-h-8"
           >
             {t('step3.recalculate', { defaultValue: 'Recalcular Perfiles' })}
           </Button>
@@ -67,14 +69,14 @@ export function ProcessButton() {
 
       {/* Error state */}
       {isError && (
-        <div className="flex flex-col items-center gap-3 px-8 py-4 rounded-xl" style={{ backgroundColor: 'var(--status-nok-bg)', border: '1px solid var(--status-nok-border)' }}>
-          <div className="font-semibold text-lg" style={{ color: 'var(--status-nok-text)' }}>
+        <div className="flex flex-col items-center gap-2 p-2 rounded-md w-full" style={{ backgroundColor: 'var(--status-nok-bg)', border: '1px solid var(--status-nok-border)' }}>
+          <div className="font-semibold text-xs" style={{ color: 'var(--status-nok-text)' }}>
             {t('step3.error_title')}
           </div>
-          <p className="text-sm" style={{ color: 'var(--status-nok-text)', opacity: 0.8 }}>
+          <p className="text-xs" style={{ color: 'var(--status-nok-text)', opacity: 0.8 }}>
             {t('step3.error_detail')}
           </p>
-          <Button variant="danger" onClick={handleProcess}>
+          <Button variant="danger" size="sm" fullWidth onClick={handleProcess}>
             {t('step3.retry')}
           </Button>
         </div>

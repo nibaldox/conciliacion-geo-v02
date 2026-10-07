@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from core.profile_extract import _correct_toe_with_spill
 from core.profile_simplify import _detect_and_project_solid_toe, ramer_douglas_peucker
 
 
@@ -70,3 +71,34 @@ def test_solid_toe_projection_removes_shallow_spill_tail():
     assert toe_x < face[-1, 0]
     assert angle > 60.0
     np.testing.assert_allclose(spill_point, [3.0, 6.0])
+
+
+def test_toe_projection_is_independent_of_profile_coordinate_direction():
+    crest_to_toe = np.array(
+        [
+            [0.0, 15.0],
+            [1.0, 12.0],
+            [2.0, 9.0],
+            [3.0, 6.0],
+            [6.0, 4.5],
+            [9.0, 3.0],
+            [12.0, 1.5],
+            [15.0, 0.0],
+        ]
+    )
+    results = []
+    for face_points in (crest_to_toe, crest_to_toe[::-1]):
+        crest = face_points[np.argmax(face_points[:, 1])]
+        toe = face_points[np.argmin(face_points[:, 1])]
+        results.append(_correct_toe_with_spill(
+            face_points,
+            crest,
+            toe,
+            face_points[:, 0],
+            face_points[:, 1],
+            60.0,
+        ))
+
+    assert results[0][0] == pytest.approx(results[1][0])
+    assert results[0][1] == pytest.approx(results[1][1])
+    np.testing.assert_allclose(results[0][3], results[1][3])

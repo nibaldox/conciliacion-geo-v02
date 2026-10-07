@@ -208,11 +208,12 @@ class TestApiExposesBothShapes:
                 self.distances = np.array([0.0, 10.0, 15.0, 25.0, 30.0])
                 self.elevations = np.array([3900.0, 3900.0, 3885.0, 3880.0, 3865.0])
 
-        import core
+        import api.routers.process as process_router
+        from core import ProfileCutDiagnostics
         monkeypatch.setattr(
-            core,
-            "cut_both_surfaces",
-            lambda m_d, m_t, sec: (MockProfile(), MockProfile()),
+            process_router,
+            "cut_mesh_with_section_diagnostics",
+            lambda mesh, sec: ProfileCutDiagnostics(MockProfile()),
         )
 
         resp = client.get("/api/v1/process/profiles/0", headers=headers)
@@ -296,11 +297,12 @@ class TestEmptyBenches:
                 self.distances = np.array([0.0, 1.0])
                 self.elevations = np.array([100.0, 100.0])
 
-        import core
+        import api.routers.process as process_router
+        from core import ProfileCutDiagnostics
         monkeypatch.setattr(
-            core,
-            "cut_both_surfaces",
-            lambda m_d, m_t, sec: (MockProfile(), MockProfile()),
+            process_router,
+            "cut_mesh_with_section_diagnostics",
+            lambda mesh, sec: ProfileCutDiagnostics(MockProfile()),
         )
 
         resp = client.get("/api/v1/process/profiles/0", headers=headers)

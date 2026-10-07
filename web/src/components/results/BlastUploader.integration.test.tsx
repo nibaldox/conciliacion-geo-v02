@@ -72,10 +72,11 @@ describe('BlastUploader with production hook', () => {
       },
     });
     renderUploader();
-    completeContract();
     fireEvent.change(screen.getByTestId('blast-file-input'), {
       target: { files: [new File(['bad'], 'bad.csv', { type: 'text/csv' })] },
     });
+    completeContract();
+    fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByTestId('rejected-rows')).toHaveTextContent('INVALID_X'));
@@ -101,10 +102,11 @@ describe('BlastUploader with production hook', () => {
       },
     });
     renderUploader();
-    completeContract();
     fireEvent.change(screen.getByTestId('blast-file-input'), {
       target: { files: [new File(['bad'], 'bad.csv', { type: 'text/csv' })] },
     });
+    completeContract();
+    fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByTestId('blocking-errors')).toHaveTextContent('GEOMETRY_INCOMPLETE'));

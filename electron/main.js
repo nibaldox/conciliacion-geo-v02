@@ -2,7 +2,7 @@ const { app, BrowserWindow, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
-const { spawn } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const { isPortInUse } = require('./lib/port');
 const { waitForHealth } = require('./lib/health');
 const { isDevMode, getDevUrl } = require('./lib/dev-mode');
@@ -64,9 +64,9 @@ function killPythonProcess() {
       // A standard pythonProcess.kill() only terminates the parent bootloader process,
       // leaving the actual child Python process alive and holding the port.
       // We use taskkill with /T (tree kill) and /F (force) to clean up the entire tree.
-      spawn('taskkill', ['/pid', pythonProcess.pid.toString(), '/f', '/t'], {
+      spawnSync('taskkill', ['/pid', pythonProcess.pid.toString(), '/f', '/t'], {
         stdio: 'ignore',
-        detached: true
+        windowsHide: true
       });
     } else {
       pythonProcess.kill();
@@ -105,7 +105,7 @@ app.whenReady().then(async () => {
       }
 
       try {
-        await waitForHealth(API_PORT, 15000, 200);
+        await waitForHealth(API_PORT, 60000, 200);
       } catch (err) {
         fatalError(`El backend no respondió a tiempo. Revisá el log en ${logFile}`);
         return;

@@ -18,6 +18,7 @@ class MeshInfo(BaseModel):
     bounds: Dict[str, float]
     filename: str
     uploaded_at: str
+    import_report: Optional[Dict[str, Any]] = None
 
 
 class SectionCreate(BaseModel):
@@ -125,12 +126,15 @@ class ProfileData(BaseModel):
     reconciled_design_legacy: Optional[Dict[str, List[float]]] = None
     reconciled_topo_legacy: Optional[Dict[str, List[float]]] = None
     benches_topo: Optional[List[BenchParamsSchema]] = None
+    horizontal_deviation: Optional[Dict[str, Any]] = None
+    profile_warnings: Optional[Dict[str, List[str]]] = None
 
 
 class ComparisonResult(BaseModel):
     sector: str
     section: str
     bench_num: int
+    bench_num_topo: Optional[int] = None
     type: str  # "MATCH" | "MISSING" | "EXTRA"
     level: str
     height_design: Optional[float] = None
@@ -203,6 +207,13 @@ class UploadResponse(BaseModel):
     n_vertices: int
     n_faces: int
     bounds: Dict[str, float]
+    import_report: Optional[Dict[str, Any]] = None
+
+
+class DxfImportConfirmation(BaseModel):
+    upload_id: str
+    layers: List[str] = Field(min_length=1)
+    units: int = Field(ge=1, le=24)
 
 
 class ContourLine(BaseModel):

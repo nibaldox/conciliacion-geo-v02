@@ -28,7 +28,7 @@ export default defineConfig({
       ? [VitePWA({
       // Register the service worker that Workbox generates. We do NOT
       // include the Cesium static assets (~22 MB) or the heavy lazy
-      // chunks (Cesium 5.5 MB, Plotly 4.7 MB) in the precache —
+      // chunks in the precache —
       // they're only useful when the user opts into the 3D viewer /
       // Plotly plan view, and precaching them on first install would
       // balloon the install event by ~30 MB. They're served via
@@ -39,7 +39,7 @@ export default defineConfig({
       workbox: {
         // and the browser's normal HTTP cache (Cache-Control +
         // ETag, both set by GitHub Pages) handles those. Heavy
-        // chunks (Plotly 4.7 MB) are intentionally excluded from
+      // chunks (Plotly) are intentionally excluded from
         // precache because they'd balloon the install event;
         // they're served on demand via the runtime caching rules
         // below instead.
@@ -99,11 +99,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  optimizeDeps: {
-    include: [
-      'mersenne-twister',
-    ],
-  },
   server: {
     port: 5173,
     proxy: {
@@ -134,7 +129,7 @@ export default defineConfig({
           'vendor-react': ['react', 'react-dom'],
           'vendor-chartjs': ['chart.js', 'react-chartjs-2'],
           'vendor-tanstack': ['@tanstack/react-query', '@tanstack/react-table'],
-          'vendor-plotly': ['plotly.js', 'react-plotly.js'],
+          'vendor-plotly': ['plotly.js/dist/plotly-cartesian.min.js', 'react-plotly.js/factory'],
         },
       },
     },

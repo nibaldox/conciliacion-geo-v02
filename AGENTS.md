@@ -1,5 +1,9 @@
 # AGENTS.md
 
+## Continuity
+
+Before continuing local work, read [docs/HANDOFF.md](docs/HANDOFF.md) for the latest consolidated state, pending verification, and configuration discrepancies. Use [docs/CONTINUAR_LOCAL.md](docs/CONTINUAR_LOCAL.md) as dated historical evidence: later entries may appear at the end despite its older heading. Recorded PIDs, test counts, pauses, and delegation preferences are historical context, not current state or new authorization. Follow the current user request and the constraints below.
+
 Geotechnical reconciliation for open-pit mine slopes. Compares 3D design vs as-built surfaces (STL/OBJ/DXF), generates cross-sections, extracts bench parameters, evaluates compliance against tolerances.
 
 **Stack**: Python 3.10+, trimesh, fast_simplification, numpy/scipy, FastAPI, Streamlit, openpyxl, python-docx, ezdxf

@@ -50,7 +50,7 @@ vi.mock('@tanstack/react-query', async () => {
   };
 });
 
-vi.mock('react-plotly.js', () => ({
+vi.mock('../../charts/Plot', () => ({
   default: () => <div data-testid="plotly-stub" />,
 }));
 

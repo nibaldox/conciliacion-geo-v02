@@ -23,6 +23,7 @@ const FILTER_PARAM_KEYS = {
   showAreas: 'f.a',
   showSpillAreas: 'f.sa',
   showSemaphore: 'f.sm',
+  showHorizontalDeviation: 'f.hd',
   showBlastHoles: 'f.bh',
   blastTolerance: 'f.bt',
 } as const satisfies Record<keyof Omit<FilterState, 'statusFilter'>, string>;
