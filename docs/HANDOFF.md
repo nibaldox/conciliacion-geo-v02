@@ -2,6 +2,13 @@
 
 Actualizado el **7 de octubre de 2026**, zona **America/Santiago**. Este documento sintetiza el código y la bitácora local; no certifica una release ni una suite ejecutada hoy.
 
+## Última hora — estabilización web publicada (7 de octubre de 2026)
+
+- La rama **`wip/web-stabilization-2026-10-07`** (remota, en `https://github.com/nibaldox/conciliacion-geo-v02`, pública) traslada el árbol de la fase de estabilización web para continuar en otro equipo; `main` local permanece en `cc8b95c`. La publicación fue autorizada puntualmente por el usuario; no es un permiso permanente de push ni de despliegue.
+- **Handoff portátil (leer primero): `docs/CONTINUAR_WEB.md`** — estado verificado con límites, trabajo de navegador pendiente, puesta en marcha en un PC nuevo y comandos de reanudación.
+- Resumen de esa fase (histórico, no re-ejecutado hoy): backend 2447 passed / 8 skipped sobre el árbol certificado por hash; frontend Node 22 480/480 con cobertura obligatoria al 100%; revisión estática del árbol PASS. La validación de navegador quedó **parcial** (12/15 E2E seleccionados; 3 specs con expectativas desactualizadas; 1 timeout por triajar; `project-entry` sin correr; PWA A/B y offline sin ejecutar) y el CI remoto no se ejecutó: **no es una release**.
+- Alcance vigente: solo web (sin Streamlit/Electron/CLI). El material histórico de más abajo se conserva tal cual.
+
 ## Leer al retomar
 
 1. Leer `AGENTS.md` y el pedido actual del usuario; estos determinan el alcance autorizado.
