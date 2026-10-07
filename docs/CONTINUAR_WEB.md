@@ -9,7 +9,7 @@ Documento autónomo para continuar la estabilización web en otro equipo. Fecha:
 - Repositorio: `https://github.com/nibaldox/conciliacion-geo-v02` (público).
 - Rama de continuación: **`wip/web-stabilization-2026-10-07`** — creada desde `main` local en `cc8b95c` con el árbol de la fase de estabilización, commit por unidad de trabajo. Incluye los commits locales previos (`aed2988`, `22496f3`, `cc8b95c`) tal cual; no se reescribió historial.
 - `main` no se publicó. La publicación de esta rama fue autorizada puntualmente por el usuario para continuar en otro PC; **no es un permiso permanente de push ni de despliegue**, y no reactiva el «no push» histórica de fases anteriores.
-- **Alcance vigente: solo web.** Trabajo nuevo en `web/` y `api/`; `core/` solo como soporte de la web (p. ej. `core/config.py` de despliegue). **No** modificar `app.py`, `ui/` (salvo la excepción documentada `ui/modulo_tronadura/`), Electron/portable ni `cli.py`.
+- **Alcance vigente: solo web.** Trabajo nuevo en `web/` y `api/`; `core/` solo como soporte de la web (p. ej. `core/config.py` de despliegue). **No** modificar `app.py`, `ui/` (incluida `ui/modulo_tronadura/`: la excepción histórica H-10 **no está vigente en este alcance** — requiere autorización nueva y explícita), Electron/portable ni `cli.py`.
 - El asistente principal **orquesta** (divide, delega, evalúa evidencias); los ejecutores implementan. Commits locales por unidad, con rutas explícitas y los tests de cada unidad en su propio commit.
 
 ## 2. Puesta en marcha en un PC nuevo
@@ -33,12 +33,12 @@ cd conciliacion-geo-v02
 python -m venv .venv
 source .venv/bin/activate              # Linux/macOS
 
-# 3) Dependencias (comandos de README + CI)
+# 3) Dependencias Python (ruta pip de este handoff; ver nota pip/uv abajo)
 python -m pip install -r requirements-api.txt
 python -m pip install -e ".[test]"     # extra test = pytest, pytest-asyncio, httpx
 
-# 4) uv para el harness del frontend
-uv sync --locked --extra test --python 3.12
+# 4) uv — solo para EJECUTAR el harness del frontend sobre este entorno:
+#    export UV_NO_SYNC=1   # y nunca `uv sync` aquí (ver nota pip/uv abajo)
 
 # 5) Frontend
 cd web
@@ -48,6 +48,8 @@ npm ci
 Notas de entorno:
 
 - El typecheck real del proyecto es `npx tsc -b` (no `tsc --noEmit`: ese no analizaba ningún archivo). Para paridad con CI, exportar `UV_NO_SYNC=1` antes de `npm run test:coverage`.
+- **pip/uv — no mezclar en el mismo `.venv`**: `uv sync` (y `uv run`) tratan el entorno como gestionado y lo reconcilian con `pyproject.toml` + `uv.lock`, eliminando por defecto paquetes ajenos a esa resolución. Tras los `pip install` del paso 3, **no ejecutar `uv sync`**: puede eliminar dependencias API instaladas vía `requirements-api.txt` que no estén declaradas en `pyproject.toml`. Opción local: quedarse con este entorno pip y correr el harness con `UV_NO_SYNC=1`, sin `uv sync`.
+- **El aprovisionamiento uv-locked es de CI, no de esta guía**: el job de frontend de CI lo hace con `uv sync --locked --extra test --python 3.12` sobre checkout limpio (y congela con `UV_NO_SYNC=1` al correr la suite); no replicarlo tras los `pip install` locales.
 - **Aislar datos antes de importar la API**: exportar `CONCILIACION_DATA_DIR` a un directorio nuevo (p. ej. `data/qa-localfecha/`) en la misma shell que lance `uvicorn`; el SQLite se crea ahí. No apuntar a `data/` compartido ni a directorios de logs históricos.
 - **No reutilizar** IDs de sesión, puertos ni PIDs que aparezcan en bitácoras o logs históricos: crear sesión, puerto y procesos nuevos y verificar que el puerto esté libre. Los PID registrados en cualquier bitácora son históricos y no acreditan propiedad.
 - **No repetir búsquedas amplias** por el home o el disco completo (fueron lentas y consumieron presupuesto en la fase previa); en otro PC las rutas difieren. Trabajar siempre dentro del clon.
@@ -95,7 +97,7 @@ Resultados del PC del mantenedor el 7 de octubre de 2026, sobre el árbol exacto
 ```bash
 # Backend, desde la raíz (como CI)
 python -m pytest tests/ -v --tb=short --ignore=tests/test_openblast.py
-python test_pipeline.py
+python test_pipeline.py              # solo Linux/CI: rutas /tmp hardcodeadas (ver aviso abajo)
 
 # Frontend, desde web/
 npx tsc -b
@@ -106,6 +108,8 @@ npm run build
 # E2E (no corre en CI; requiere API+web — ver §3)
 npx playwright test
 ```
+
+**Aviso — `python test_pipeline.py` no es portable a Windows tal cual**: hardcodea rutas POSIX (`/tmp`); en Windows se necesita un harness que redirija esas rutas a un scratch del equipo (sin editar el script del pipeline en esta fase). No hay corrida literal aprobada de este comando: no declararla como aprobada. En CI es el paso «Run pipeline test» del job backend (Ubuntu); el CI remoto no se ejecutó en esta fase (§4).
 
 ## 6. Qué no hacer
 
