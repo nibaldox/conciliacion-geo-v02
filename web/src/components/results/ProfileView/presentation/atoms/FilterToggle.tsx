@@ -38,7 +38,7 @@ export interface FilterToggleProps {
 const ACCENT_VAR: Record<NonNullable<FilterToggleProps['accent']>, string> = {
   blue: 'var(--color-mine-blue)',
   green: 'var(--color-mine-green)',
-  amber: 'var(--color-warn, #f59e0b)',
+  amber: 'var(--status-warn-text)',
   red: 'var(--color-mine-red)',
 };
 
@@ -67,7 +67,7 @@ export function FilterToggle({
         onClick={handleClick}
         title={title}
         className={[
-          'inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[11px] font-semibold',
+          'inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-xs font-semibold',
           'border transition-all duration-150 select-none',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
           disabled
@@ -76,11 +76,9 @@ export function FilterToggle({
         ].join(' ')}
         style={{
           backgroundColor: checked ? ACCENT_VAR[accent] : 'var(--color-surface)',
-          color: checked ? '#0a0e14' : 'var(--color-text-muted)',
+          color: checked ? 'var(--color-accent-fg)' : 'var(--color-text-muted)',
           borderColor: checked ? ACCENT_VAR[accent] : 'var(--color-border)',
-          fontFamily: 'var(--font-mono)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.04em',
+          fontFamily: 'var(--font-sans)',
         }}
       >
         {checked ? <span aria-hidden="true">●</span> : <span aria-hidden="true">○</span>}
@@ -96,9 +94,7 @@ export function FilterToggle({
   //   3. The label changes color + weight + gets a leading marker
   const labelStyle: CSSProperties = {
     color: checked ? ACCENT_VAR[accent] : 'var(--color-text-muted)',
-    fontFamily: 'var(--font-mono)',
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
+    fontFamily: 'var(--font-sans)',
   };
 
   return (
@@ -117,7 +113,7 @@ export function FilterToggle({
         // the same baseline in the FilterBar. `box-border` (the
         // Tailwind default) means the 1px border is INSIDE the
         // OFF (border: surface) and ON (border: accent).
-        'group inline-flex items-center justify-center gap-2.5 h-7 px-2.5 rounded-md text-[11px] font-semibold',
+        'group inline-flex items-center justify-center gap-2.5 h-8 px-2.5 rounded-md text-xs font-semibold',
         'transition-colors duration-150 select-none whitespace-nowrap',
         'border',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
@@ -138,18 +134,6 @@ export function FilterToggle({
           : 'var(--color-border-strong)',
       }}
     >
-      {/* Leading marker — the strongest ON/OFF cue. */}
-      <span
-        aria-hidden="true"
-        className="inline-block w-2 h-2 rounded-full shrink-0 transition-colors"
-        style={{
-          backgroundColor: checked ? ACCENT_VAR[accent] : 'var(--color-border-strong)',
-          boxShadow: checked
-            ? `0 0 6px ${ACCENT_VAR[accent]}`
-            : 'none',
-        }}
-      />
-
       {/* The track — secondary cue.
        * overflow-hidden clips the thumb to the pill shape; without
        * it the thumb bleeds onto the first letter of the label.
@@ -166,7 +150,7 @@ export function FilterToggle({
           className="absolute top-0.5 h-2.5 w-2.5 rounded-full transition-transform"
           style={{
             transform: `translateX(${checked ? '13px' : '2px'})`,
-            backgroundColor: '#0a0e14',
+            backgroundColor: 'var(--color-accent-fg)',
             boxShadow: checked
               ? `0 0 0 1.5px ${ACCENT_VAR[accent]}`
               : '0 0 0 1.5px var(--color-text-muted)',
@@ -180,7 +164,7 @@ export function FilterToggle({
       {badge != null && (
         <span
           className="opacity-70 tabular-nums"
-          style={{ color: 'var(--color-text-dim)', fontFamily: 'var(--font-mono)' }}
+          style={{ color: 'var(--color-text-dim)', fontFamily: 'var(--font-sans)' }}
         >
           {badge}
         </span>

@@ -9,21 +9,18 @@
 
 import { assertNever, type BenchStatus } from './types';
 
-export type ComplianceStatus = 'CUMPLE' | 'NO_CUMPLE' | 'UNKNOWN';
+export type ComplianceStatus = 'CUMPLE' | 'FUERA' | 'NO_CUMPLE' | 'UNKNOWN';
 
 // ─── Backend status strings ──────────────────────────────────
 
-/** The seven strings the backend may return in `*_status` fields.
+/** The status strings the backend may return in `*_status` fields.
  *
- *  Note: 'FUERA DE TOLERANCIA' is intentionally absent. The presentation
- *  layer treats compliance as binary, so parseBenchStatus collapses
- *  every out-of-tolerance backend string (including the legacy
- *  "FUERA DE TOLERANCIA" / "FUERA" forms) into NO_CUMPLE before it
- *  reaches this type. Anything that still receives a raw FUERA literal
- *  is operating outside the canonical pipeline and should be migrated
- *  rather than whitelisted here. */
+ *  Out-of-tolerance is a distinct status because the backend evaluates
+ *  signed deviations against asymmetric tolerances in three tiers. */
 export const BACKEND_STATUS_STRINGS = [
   'CUMPLE',
+  'FUERA DE TOLERANCIA',
+  'FUERA',
   'NO CUMPLE',
   'NO CONSTRUIDO',
   'FALTA BANCO',
@@ -42,22 +39,12 @@ export function isBackendStatusString(s: string): s is BackendStatusString {
 
 // ─── Parsing ────────────────────────────────────────────────
 
-/** Normalise any backend status string to one of our 4 buckets.
- *
- * The compliance system is now binary at the presentation layer
- * (CUMPLE / NO_CUMPLE). The legacy "FUERA DE TOLERANCIA" / "FUERA"
- * strings coming from the backend are collapsed into NO_CUMPLE so
- * downstream code never sees a FUERA value. The 'FUERA' literal
- * remains in the BenchStatus union purely as a defensive fallback
- * for any path that hasn't yet been migrated; it is never produced
- * by parseBenchStatus or by the API adapter. */
+/** Normalise backend strings to the three compliance tiers and UNKNOWN. */
 export function parseBenchStatus(raw: string | null | undefined): BenchStatus {
   if (raw == null) return 'UNKNOWN';
   const s = raw.trim().toUpperCase();
   if (s === 'CUMPLE') return 'CUMPLE';
-  // "FUERA DE TOLERANCIA" and the shortened "FUERA" both collapse to
-  // NO_CUMPLE — the presentation layer treats compliance as binary.
-  if (s === 'FUERA DE TOLERANCIA' || s === 'FUERA') return 'NO_CUMPLE';
+  if (s === 'FUERA DE TOLERANCIA' || s === 'FUERA') return 'FUERA';
   if (
     s === 'NO CUMPLE' ||
     s === 'NO_CONSTRUIDO' ||
@@ -141,11 +128,10 @@ export const STATUS_ICON: Record<BenchStatus, string> = {
  *  and compliance summary cards. Worst first so the eye lands on
  *  the problem.
  *
- *  FUERA is intentionally absent: parseBenchStatus collapses all
- *  out-of-tolerance backend strings into NO_CUMPLE, so the
- *  presentation layer never needs to render a FUERA bucket. */
+ *  Includes all three evaluated tiers plus unknown data. */
 export const STATUS_PRESENTATION_ORDER: readonly ComplianceStatus[] = [
   'NO_CUMPLE',
+  'FUERA',
   'CUMPLE',
   'UNKNOWN',
 ] as const;

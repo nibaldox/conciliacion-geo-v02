@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import type { Tolerances } from '../../api/types';
+import { PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 
 export interface TolerancesFormProps {
   tolerances: Tolerances;
@@ -29,83 +30,46 @@ const TOLERANCE_FIELDS: readonly ToleranceFieldDef[] = [
   { key: 'overall_angle',    labelKey: 'sidebar.tol_overall',      step: 0.5, mode: 'paired' },
 ];
 
-const INPUT_CLS =
-  'w-full px-3 py-1.5 border rounded-md text-xs outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono';
-
-const inputStyle = {
-  backgroundColor: 'var(--color-surface-sunken)',
-  borderColor: 'var(--color-border)',
-  color: 'var(--color-text-primary)',
-} as const;
-
-const labelStyle = { color: 'var(--color-text-muted)' } as const;
-
 export function TolerancesForm({ tolerances, onChange }: TolerancesFormProps) {
   const { t } = useTranslation();
-
-  return (
-    <section className="space-y-3">
-      <h4
-        className="text-[10px] uppercase tracking-widest font-mono font-bold"
-        style={{ color: 'var(--color-text-secondary)' }}
-      >
-        {t('sidebar.tolerances_title')}
-      </h4>
-      <div className="space-y-2.5">
-        {TOLERANCE_FIELDS.map((field) => {
-          const value = tolerances[field.key] as unknown as Record<string, number>;
-          const LabelTag = field.asLabel ? 'label' : 'p';
-          const labelClass = `text-[10px] uppercase font-medium mb-1 ${field.asLabel ? 'block' : ''}`;
-          return (
-            <div key={field.key}>
-              <LabelTag className={labelClass} style={labelStyle}>
-                {t(field.labelKey)}
-              </LabelTag>
-              {field.mode === 'paired' ? (
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    step={field.step}
-                    placeholder="−"
-                    value={value.neg}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      if (!isNaN(v)) onChange(field.key, { neg: v, pos: value.pos } as Partial<Tolerances[typeof field.key]>);
-                    }}
-                    className={INPUT_CLS}
-                    style={inputStyle}
-                  />
-                  <input
-                    type="number"
-                    step={field.step}
-                    placeholder="+"
-                    value={value.pos}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      if (!isNaN(v)) onChange(field.key, { neg: value.neg, pos: v } as Partial<Tolerances[typeof field.key]>);
-                    }}
-                    className={INPUT_CLS}
-                    style={inputStyle}
-                  />
-                </div>
-              ) : (
-                <input
-                  type="number"
-                  step={field.step}
-                  min={field.min}
-                  value={value.min}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v)) onChange(field.key, { min: v } as Partial<Tolerances[typeof field.key]>);
-                  }}
-                  className={INPUT_CLS}
-                  style={inputStyle}
-                />
-              )}
-            </div>
-          );
-        })}
+  const renderField = (field: ToleranceFieldDef) => {
+    const value = tolerances[field.key] as unknown as Record<string, number>;
+    return (
+      <div key={field.key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2">
+        <p className="text-xs text-text-muted">{t(field.labelKey)}</p>
+        {field.mode === 'paired' ? (
+          <div className="grid grid-cols-2 gap-1">
+            {(['neg', 'pos'] as const).map((side) => (
+              <input key={side} type="number" step={field.step} value={value[side]}
+                aria-label={t('project_input.tolerance_' + side, { field: t(field.labelKey) })}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  if (!isNaN(v)) onChange(field.key, { neg: value.neg, pos: value.pos, [side]: v } as Partial<Tolerances[typeof field.key]>);
+                }} className={PROJECT_INPUT_CLASS} />
+            ))}
+          </div>
+        ) : (
+          <input type="number" step={field.step} min={field.min} value={value.min} aria-label={t(field.labelKey)}
+            onChange={(e) => {
+              const v = parseFloat(e.target.value);
+              if (!isNaN(v)) onChange(field.key, { min: v } as Partial<Tolerances[typeof field.key]>);
+            }} className={PROJECT_INPUT_CLASS} />
+        )}
       </div>
+    );
+  };
+  return (
+    <section className="space-y-2">
+      <h4 className="text-xs font-semibold text-text-secondary">{t('sidebar.tolerances_title')}</h4>
+      <div className="grid grid-cols-2 gap-2 text-xs text-text-muted">
+        <span />
+        <div className="grid grid-cols-2 gap-1 text-center"><span>{t('project_input.negative')}</span><span>{t('project_input.positive')}</span></div>
+      </div>
+      {TOLERANCE_FIELDS.slice(0, 3).map(renderField)}
+      <details className="rounded-md border border-border p-2">
+        <summary className="cursor-pointer text-xs font-medium text-text-secondary">{t('project_input.global_angles')}</summary>
+        <div className="mt-2 space-y-2">{TOLERANCE_FIELDS.slice(3).map(renderField)}</div>
+      </details>
     </section>
   );
 }

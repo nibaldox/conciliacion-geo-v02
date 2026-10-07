@@ -44,7 +44,7 @@ def get_session_id(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _load_mesh_from_blob(mesh_data: bytes, filename: str):
+def _load_mesh_from_blob(mesh_data: bytes, filename: str, import_options: dict | None = None):
     """Load a trimesh from database BLOB via a temporary file."""
     import trimesh as _trimesh
 
@@ -53,6 +53,14 @@ def _load_mesh_from_blob(mesh_data: bytes, filename: str):
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(mesh_data)
+        if import_options and Path(filename).suffix.lower() == ".dxf":
+            from core import import_dxf_surface
+            mesh, _ = import_dxf_surface(
+                tmp,
+                layers=import_options.get("layers"),
+                units=import_options.get("units"),
+            )
+            return mesh
         return load_mesh(tmp)
     finally:
         os.unlink(tmp)
@@ -98,6 +106,39 @@ def _dict_to_section(d: dict) -> SectionLine:
         length_down=d.get("length_down"),
         sector=d.get("sector", ""),
     )
+
+
+def _read_polyline_xy_csv(content: bytes) -> np.ndarray:
+    preview = pd.read_csv(io.BytesIO(content), header=None, nrows=1)
+    first_row_is_data = (
+        preview.shape[1] >= 2
+        and not preview.empty
+        and pd.to_numeric(preview.iloc[0, :2], errors="coerce").notna().all()
+    )
+    df = pd.read_csv(
+        io.BytesIO(content),
+        header=None if first_row_is_data else 0,
+        nrows=10000,
+    )
+    x_col = next(
+        (c for c in df.columns if str(c).strip().upper() in ("X", "ESTE", "EAST", "E")),
+        None,
+    )
+    y_col = next(
+        (
+            c
+            for c in df.columns
+            if str(c).strip().upper() in ("Y", "NORTE", "NORTH", "N")
+        ),
+        None,
+    )
+    if x_col is None or y_col is None:
+        num_cols = df.select_dtypes(include=[np.number]).columns
+        if len(num_cols) >= 2:
+            x_col, y_col = num_cols[0], num_cols[1]
+        else:
+            raise ValueError("Could not find X/Y columns")
+    return df[[x_col, y_col]].dropna().values.astype(float)
 
 
 async def _get_design_mesh(session_id: str):
@@ -345,26 +386,10 @@ async def sections_from_file(
             raise HTTPException(400, "No polylines found in DXF")
     else:
         # CSV / TXT
-        df = pd.read_csv(io.BytesIO(content), nrows=10000)
-        x_col = next(
-            (c for c in df.columns if c.strip().upper() in ("X", "ESTE", "EAST", "E")),
-            None,
-        )
-        y_col = next(
-            (
-                c
-                for c in df.columns
-                if c.strip().upper() in ("Y", "NORTE", "NORTH", "N")
-            ),
-            None,
-        )
-        if x_col is None or y_col is None:
-            num_cols = df.select_dtypes(include=[np.number]).columns
-            if len(num_cols) >= 2:
-                x_col, y_col = num_cols[0], num_cols[1]
-            else:
-                raise HTTPException(400, "Could not find X/Y columns")
-        polyline = df[[x_col, y_col]].dropna().values.astype(float)
+        try:
+            polyline = _read_polyline_xy_csv(content)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     if len(polyline) < 2:
         raise HTTPException(400, "Polyline must have at least 2 points")

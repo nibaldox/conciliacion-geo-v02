@@ -239,6 +239,96 @@ class TestMeshVertices:
         assert resp.status_code == 404
 
 
+class TestMeshVerticesRoi:
+    def test_roi_keeps_faces_crossing_bounds_and_preserves_large_coordinates(
+        self,
+        client: TestClient,
+        stl_bytes: bytes,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        import numpy as np
+        import trimesh
+
+        origin = 1_000_000_000_000.0
+        source = trimesh.Trimesh(
+            vertices=np.array([
+                [origin + 0.4, 2000.0, 10.25],
+                [origin + 1.6, 2000.0, 10.75],
+                [origin + 1.0, 2001.0, 11.5],
+                [origin + 3.0, 2000.0, 12.0],
+                [origin + 3.5, 2000.0, 12.0],
+                [origin + 3.0, 2001.0, 12.0],
+            ], dtype=np.float64),
+            faces=np.array([[0, 1, 2], [3, 4, 5]], dtype=np.int64),
+            process=False,
+        )
+        headers = {"X-Session-ID": "roi-large-coordinates-session"}
+        upload = client.post(
+            "/api/v1/meshes/upload",
+            files={"file": ("roi.stl", stl_bytes, "application/octet-stream")},
+            data={"type": "topo"},
+            headers=headers,
+        )
+        assert upload.status_code == 200, upload.text
+        mesh_id = upload.json()["mesh_id"]
+        get_mesh = lambda _: source
+        get_mesh.cache_clear = meshes_router.db.get_trimesh_by_id.cache_clear
+        monkeypatch.setattr(meshes_router.db, "get_trimesh_by_id", get_mesh)
+        meshes_router._get_roi_vertices_cached.cache_clear()
+
+        response = client.get(
+            f"/api/v1/meshes/{mesh_id}/vertices/roi",
+            params={
+                "xmin": origin + 0.5,
+                "ymin": 1999.5,
+                "xmax": origin + 1.5,
+                "ymax": 2001.5,
+                "step": 1000,
+            },
+            headers=headers,
+        )
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert set(payload) == {"x", "y", "z", "faces"}
+        assert len(payload["faces"]) == 1
+        assert len(payload["x"]) == len(payload["y"]) == len(payload["z"]) == 3
+        assert min(payload["x"]) >= origin
+        assert max(payload["x"]) > origin + 1.5
+        assert payload["z"] == [10.25, 10.75, 11.5]
+
+    def test_roi_rejects_invalid_bounds_and_face_budget(
+        self, client: TestClient, uploaded_mesh_id: str
+    ):
+        base = f"/api/v1/meshes/{uploaded_mesh_id}/vertices/roi"
+        invalid_bounds = client.get(
+            base, params={"xmin": 2, "ymin": 0, "xmax": 1, "ymax": 1}
+        )
+        invalid_step = client.get(
+            base,
+            params={"xmin": 0, "ymin": 0, "xmax": 1, "ymax": 1, "step": 75001},
+        )
+        assert invalid_bounds.status_code == 422
+        assert invalid_step.status_code == 422
+
+    def test_roi_is_scoped_to_uploading_session(
+        self, client: TestClient, stl_bytes: bytes
+    ):
+        upload = client.post(
+            "/api/v1/meshes/upload",
+            files={"file": ("roi.stl", stl_bytes, "application/octet-stream")},
+            data={"type": "topo"},
+            headers={"X-Session-ID": "roi-owner-session"},
+        )
+        assert upload.status_code == 200, upload.text
+        response = client.get(
+            f"/api/v1/meshes/{upload.json()['mesh_id']}/vertices/roi",
+            params={"xmin": 0, "ymin": 0, "xmax": 1, "ymax": 1},
+            headers={"X-Session-ID": "different-session"},
+        )
+        assert response.status_code == 404
+
+
 # ===========================================================================
 # DELETE /meshes/{id}
 # ===========================================================================

@@ -21,12 +21,6 @@ datas = [
     ("web/dist", "web/dist"),
 ]
 
-# Optional: a seed SQLite DB. The sidecar creates this at runtime if it does
-# not exist, but shipping an existing DB lets users keep sessions across
-# portable installs.
-if os.path.exists("data/conciliacion.db"):
-    datas.append(("data/conciliacion.db", "data"))
-
 # Fixtures used by some frozen test runs / diagnostics.
 if os.path.exists("tests/conftest.py"):
     datas.append(("tests/conftest.py", "tests"))
@@ -44,6 +38,7 @@ hiddenimports = [
     "api.routers.sections",
     "api.routers.settings",
     "api.database",
+    "api.dxf_uploads",
     "api.schemas",
     # Core domain
     "core",
@@ -83,6 +78,7 @@ hiddenimports = [
     "core.geology",
     "core.geom_utils",
     "core.mesh_handler",
+    "core.dxf_import",
     "core.param_extractor",
     "core.profile_compliance",
     "core.profile_extract",
@@ -100,6 +96,7 @@ hiddenimports = [
     "pandas",
     "openpyxl",
     "ezdxf",
+    "ezdxf.xclip",
 ]
 
 excludes = [

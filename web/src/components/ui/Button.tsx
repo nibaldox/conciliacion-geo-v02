@@ -23,7 +23,7 @@ interface VariantStyle {
 
 const VARIANT_STYLES: Record<Variant, VariantStyle> = {
   primary: {
-    base: { backgroundColor: 'var(--color-mine-blue)', color: '#fff' },
+    base: { backgroundColor: 'var(--color-mine-blue)', color: 'var(--color-accent-fg)' },
     hover: { filter: 'brightness(1.1)' },
     focus: 'focus-visible:ring-mine-blue',
   },
@@ -41,7 +41,7 @@ const VARIANT_STYLES: Record<Variant, VariantStyle> = {
     focus: 'focus-visible:ring-mine-blue',
   },
   danger: {
-    base: { backgroundColor: 'var(--color-mine-red)', color: '#fff' },
+    base: { backgroundColor: 'var(--color-mine-red)', color: 'var(--color-accent-fg)' },
     hover: { filter: 'brightness(1.1)' },
     focus: 'focus-visible:ring-mine-red',
   },
@@ -50,15 +50,15 @@ const VARIANT_STYLES: Record<Variant, VariantStyle> = {
   launch: {
     base: {
       backgroundColor: 'var(--color-accent)',
-      color: '#0a0e14',
+      color: 'var(--color-accent-fg)',
       boxShadow: '0 0 0 1px var(--color-accent-bright) inset, var(--shadow-glow-accent)',
     },
     hover: {
       backgroundColor: 'var(--color-accent-bright)',
-      boxShadow: '0 0 24px rgba(249, 115, 22, 0.35)',
+      boxShadow: 'none',
     },
     focus: 'focus-visible:ring-accent',
-    textClass: 'uppercase tracking-wider font-semibold',
+    textClass: 'font-semibold',
   },
   // Terminal / "console" button — monospace, subtle border, like
   // a command in a terminal. Used for secondary actions that
@@ -68,7 +68,7 @@ const VARIANT_STYLES: Record<Variant, VariantStyle> = {
       backgroundColor: 'var(--color-surface-sunken)',
       color: 'var(--color-accent-bright)',
       border: '1px solid var(--color-border)',
-      fontFamily: 'var(--font-mono)',
+      fontFamily: 'var(--font-sans)',
     },
     hover: {
       borderColor: 'var(--color-accent)',

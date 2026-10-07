@@ -11,7 +11,16 @@
       content="Compara superficies 3D de diseño vs topografía real en minería a cielo abierto. Genera secciones transversales, evalúa cumplimiento contra tolerancias y exporta reportes Excel/Word/DXF."
     />
     <meta name="theme-color" content="#0a0e14" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
+    <script>
+      try {
+        const savedTheme = JSON.parse(localStorage.getItem('theme-preference') || 'null');
+        const isDark = savedTheme?.state?.isDark !== false;
+        document.documentElement.classList.toggle('dark', isDark);
+        document.documentElement.classList.toggle('light', !isDark);
+        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+      } catch {}
+    </script>
     <meta name="generator" content="Conciliación Geotécnica v2" />
 
     <!-- ── Icons & manifest ─────────────────────────────────── -->
@@ -84,7 +93,7 @@
       })();
     </script>
   </head>
-  <body style="background-color: #0a0e14; color: #f5f5f5;">
+  <body>
     <noscript>
       <div style="padding: 2rem; font-family: system-ui; text-align: center;">
         <h1>JavaScript required</h1>

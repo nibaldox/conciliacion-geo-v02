@@ -23,6 +23,7 @@ export interface FilterState {
   /** Color the bench markers by compliance (overrides the default
    *  design-blue / topo-green split). */
   readonly showSemaphore: boolean;
+  readonly showHorizontalDeviation: boolean;
   /** Overlay blast-hole projections. */
   readonly showBlastHoles: boolean;
   /** Maximum distance (m) from the section line for a blast hole
@@ -40,6 +41,7 @@ export const DEFAULT_FILTER_STATE: FilterState = Object.freeze({
   showAreas: false,
   showSpillAreas: true,
   showSemaphore: false,
+  showHorizontalDeviation: true,
   showBlastHoles: true,
   blastTolerance: 10,
   statusFilter: [],
@@ -57,6 +59,7 @@ export function isFilterActive(state: FilterState): boolean {
     state.showAreas !== d.showAreas ||
     state.showSpillAreas !== d.showSpillAreas ||
     state.showSemaphore !== d.showSemaphore ||
+    state.showHorizontalDeviation !== d.showHorizontalDeviation ||
     state.showBlastHoles !== d.showBlastHoles ||
     state.blastTolerance !== d.blastTolerance ||
     state.statusFilter.length > 0

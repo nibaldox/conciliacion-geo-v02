@@ -1,3 +1,4 @@
+import { readThemeColor } from '../../../../utils/theme';
 /**
  * ProfilesGrid — renders all processed sections as a 3-column grid
  * of compact ProfileChart thumbnails. Clicking a card selects the
@@ -5,7 +6,7 @@
  */
 
 import { useTranslation } from 'react-i18next';
-import Plot from 'react-plotly.js';
+import Plot from '../../../charts/Plot';
 import type { Data, Layout } from 'plotly.js';
 import { useSession } from '../../../../stores/session';
 import { useSections, useProfile } from '../../../../api/hooks';
@@ -22,12 +23,13 @@ interface MiniCardProps {
 }
 
 function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
+  const { t } = useTranslation();
   const { isDark } = useTheme();
-  const { data: profile } = useProfile(section.id);
+  const { data: profile, isPending, isError, refetch } = useProfile(section.id);
 
   const gridColor = isDark ? '#1e293b' : '#e2e8f0';
-  const designColor = '#7693b7';
-  const topoColor = '#4ade80';
+  const designColor = readThemeColor('--color-mine-blue', '#7693b7');
+  const topoColor = readThemeColor('--color-mine-green', '#4ade80');
 
   const plotData: Data[] = [];
   if (profile) {
@@ -80,10 +82,8 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
   };
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className="rounded-xl overflow-hidden text-left transition-all hover:scale-[1.01] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    <div
+      className="rounded-xl overflow-hidden transition-all hover:scale-[1.01]"
       style={{
         border: isSelected
           ? '2px solid var(--color-accent-bright)'
@@ -92,50 +92,78 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
         boxShadow: isSelected ? 'var(--shadow-glow-accent)' : 'none',
       }}
     >
-      {/* Header */}
-      <div
-        className="px-3 py-1.5 flex items-center justify-between gap-2 border-b"
-        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
+      <button
+        type="button"
+        onClick={onSelect}
+        className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
-        <span
-          className="text-xs font-mono font-semibold truncate"
-          style={{ color: isSelected ? 'var(--color-accent-bright)' : 'var(--color-text-primary)' }}
+        <div
+          className="px-3 py-1.5 flex items-center justify-between gap-2 border-b"
+          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
         >
-          {section.name}
-        </span>
-        {section.sector && (
           <span
-            className="text-[10px] font-mono px-1.5 py-0.5 rounded"
-            style={{
-              color: 'var(--color-text-muted)',
-              backgroundColor: 'var(--color-surface-muted)',
-            }}
+            className="text-xs font-mono font-semibold truncate"
+            style={{ color: isSelected ? 'var(--color-accent-bright)' : 'var(--color-text-primary)' }}
           >
-            {section.sector}
+            {section.name}
           </span>
-        )}
-      </div>
+          {section.sector && (
+            <span
+              className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+              style={{
+                color: 'var(--color-text-muted)',
+                backgroundColor: 'var(--color-surface-muted)',
+              }}
+            >
+              {section.sector}
+            </span>
+          )}
+        </div>
 
-      {/* Chart */}
-      <div style={{ height: 160, position: 'relative' }}>
-        {!profile ? (
-          <div
-            className="flex items-center justify-center h-full"
-            style={{ color: 'var(--color-text-dim)' }}
+        <div style={{ height: 160, position: 'relative' }}>
+          {isPending && !profile ? (
+            <div
+              className="flex items-center justify-center h-full"
+              style={{ color: 'var(--color-text-dim)' }}
+            >
+              <Spinner size="sm" />
+            </div>
+          ) : !profile && isError ? (
+            <div className="flex h-full items-center justify-center px-3 text-center text-xs text-status-nok-text">
+              {t('profilesGrid.profileError', { defaultValue: 'No se pudo cargar este perfil.' })}
+            </div>
+          ) : plotData.length > 0 ? (
+            <Plot
+              data={plotData}
+              layout={layout}
+              config={{ displayModeBar: false, responsive: true }}
+              style={{ width: '100%', height: '100%' }}
+              useResizeHandler
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center px-3 text-center text-xs text-text-muted">
+              {t('profilesGrid.profileEmpty', { defaultValue: 'Este perfil no tiene datos para mostrar.' })}
+            </div>
+          )}
+        </div>
+      </button>
+      {isError && (
+        <div className="flex justify-center border-t border-border px-3 py-2">
+          {profile && (
+            <span className="mr-2 text-xs text-status-nok-text">
+              {t('profilesGrid.profileRefreshError', { defaultValue: 'No se pudo actualizar este perfil.' })}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => { void refetch(); }}
+            className="text-xs text-accent-bright underline underline-offset-2"
           >
-            <Spinner size="sm" />
-          </div>
-        ) : (
-          <Plot
-            data={plotData}
-            layout={layout}
-            config={{ displayModeBar: false, responsive: true }}
-            style={{ width: '100%', height: '100%' }}
-            useResizeHandler
-          />
-        )}
-      </div>
-    </button>
+            {t('profilesGrid.retryProfile', { defaultValue: 'Reintentar perfil' })}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

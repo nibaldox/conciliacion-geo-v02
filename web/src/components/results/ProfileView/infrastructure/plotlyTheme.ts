@@ -7,10 +7,12 @@
  * and respects whatever the design system decides to change.
  */
 
-import type { Layout, Config, ScatterLine, ScatterMarker } from 'plotly.js';
+import type { Layout, Config, ScatterData } from 'plotly.js';
 import type { BenchStatus } from '../domain/types';
 import { STATUS_FG_VAR, STATUS_BORDER_VAR } from '../domain/status';
 
+type ScatterLine = NonNullable<ScatterData['line']>;
+type ScatterMarker = NonNullable<ScatterData['marker']>;
 
 /** Resolved theme tokens. We read CSS variables at runtime via
  *  getComputedStyle so the chart re-themes if the user toggles

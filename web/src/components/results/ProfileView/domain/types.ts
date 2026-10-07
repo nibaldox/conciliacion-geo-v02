@@ -11,7 +11,7 @@
  * `assertNever` helper, and explicit nullability.
  */
 
-import type { BenchParams, ComparisonResult, ProfileData, SectionResponse } from '../../../../api/types';
+import type { BenchParams, ComparisonResult, HorizontalDeviationProfile, ProfileData, SectionResponse } from '../../../../api/types';
 
 // ─── Status ──────────────────────────────────────────────────
 
@@ -21,8 +21,7 @@ import type { BenchParams, ComparisonResult, ProfileData, SectionResponse } from
  * 'FUERA DE TOLERANCIA', 'NO CUMPLE', 'NO CONSTRUIDO', 'FALTA BANCO',
  * 'EXTRA', 'BANCO ADICIONAL').
  *
- * The seven API strings collapse into four semantically distinct
- * buckets we care about for the UI:
+ * The API strings normalize into four semantically distinct buckets:
  *   - CUMPLE     → within tolerance
  *   - FUERA      → outside tolerance but not catastrophic
  *   - NO_CUMPLE  → catastrophic (no build, missing, etc.)
@@ -56,6 +55,7 @@ export interface Bench {
   readonly crestDistance: number;
   readonly toeElevation: number;
   readonly toeDistance: number;
+  readonly designBenchNumber?: number | null;
   readonly height: number;
   readonly designHeight: number | null;
   readonly faceAngle: number;
@@ -71,10 +71,33 @@ export interface Bench {
   readonly bermStatus: BenchStatus;
   /** `true` if this bench exists in both design and topo. */
   readonly matched: boolean;
+  readonly matchType?: 'MATCH' | 'MISSING' | 'EXTRA' | null;
   readonly deltaCrest: number | null;
   readonly deltaToe: number | null;
   readonly floorElevation?: number | null;
   readonly benchScore?: number | null;
+}
+
+export interface DesignBenchStatus {
+  readonly sectionName: string;
+  readonly designBenchNumber: number;
+  readonly designElevation: number | null;
+  readonly status: BenchStatus;
+  readonly hasTopo: boolean;
+}
+
+export interface ComparisonBenchStatus {
+  readonly sectionName: string;
+  readonly designBenchNumber: number | null;
+  readonly designElevation: number | null;
+  readonly status: BenchStatus;
+  readonly hasTopo: boolean;
+  readonly isAdditional: boolean;
+}
+
+export interface ProfileWarnings {
+  readonly design: readonly string[];
+  readonly topo: readonly string[];
 }
 
 // ─── Section metadata ───────────────────────────────────────
@@ -95,7 +118,10 @@ export interface SectionMeta {
 export interface ProfileViewModel {
   readonly section: SectionMeta;
   readonly lines: readonly ProfileLine[];
+  readonly horizontalDeviation?: HorizontalDeviationProfile | null;
   readonly benches: readonly Bench[];
+  readonly comparisonBenchStatuses?: readonly ComparisonBenchStatus[];
+  readonly profileWarnings?: ProfileWarnings;
   readonly floorElevation?: number | null;
   readonly crestElevationMax?: number | null;
 }

@@ -41,6 +41,7 @@ class DetectionDefaults:
     min_bench_height: float = 2.0     # meters, minimum bench height to be detected
     simplify_epsilon: float = 0.05    # meters, RDP simplification tolerance (was 0.1)
     profile_resolution: float = 0.1   # meters, profile resampling resolution (was 0.5)
+    max_profile_reversal_repair: float = 0.1
     # Spill-pile detection (used by _detect_and_project_solid_toe)
     spill_angle_solid: float = 52.0   # degrees, segments above this are solid face
     spill_angle_pile: float = 48.0    # degrees, segments below this are spill pile
@@ -303,6 +304,19 @@ class DrillHardnessDefaults:
 
 
 @dataclass(frozen=True)
+class HorizontalDeviationDefaults:
+    within_tolerance_m: float = 1.0
+    moderate_tolerance_m: float = 1.8
+    severe_tolerance_m: float = 3.0
+    reference_height_fractions: tuple[float, ...] = (0.2, 0.5, 0.8)
+    intersection_epsilon_m: float = 1.0e-6
+    heatmap_max_cuts: int = 1600
+    heatmap_max_cells: int = 25000
+    heatmap_max_section_gap_m: float = 500.0
+    heatmap_max_azimuth_delta_deg: float = 45.0
+
+
+@dataclass(frozen=True)
 class BackbreakDefaults:
     """Knobs for :mod:`core.backbreak_prediction.predict_backbreak`.
 
@@ -397,5 +411,6 @@ SECTOR_DEVIATION = SectorDeviationDefaults()
 BLAST = BlastDefaults()
 DRILL_COMPLIANCE = DrillComplianceDefaults()
 DRILL_HARDNESS = DrillHardnessDefaults()
+HORIZONTAL_DEVIATION = HorizontalDeviationDefaults()
 BACKBREAK = BackbreakDefaults()
 SIMULATION = SimulationDefaults()

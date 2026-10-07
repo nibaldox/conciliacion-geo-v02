@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "prebuild": "node -e \"const fs=require('fs'); const missing=['public/Cesium','src/locales/es.json','src/locales/en.json'].filter(p=>!fs.existsSync(p)); if(missing.length){console.error('prebuild: faltan activos requeridos:', missing.join(', ')); process.exit(1)} console.log('prebuild: activos requeridos OK');\"",
@@ -24,29 +27,31 @@
     "chart.js": "^4.5.1",
     "i18next": "^26.3.1",
     "i18next-browser-languagedetector": "^8.2.1",
-    "plotly.js": "^2.35.0",
+    "plotly.js": "^4.1.1",
     "react": "^19.1.0",
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.1.0",
     "react-i18next": "^17.0.8",
     "react-markdown": "^10.1.0",
     "react-plotly.js": "^2.6.0",
+    "remark-gfm": "^4.0.1",
     "three": "^0.184.0",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.0.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/vite": "^4.1.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.20.4",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/react-plotly.js": "^2.6.0",
     "@types/three": "^0.184.1",
-    "@eslint/js": "^9.0.0",
     "@vitejs/plugin-react": "^4.4.0",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9.0.0",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.1.0",
@@ -54,7 +59,7 @@
     "typescript-eslint": "^8.0.0",
     "vite": "^6.3.0",
     "vite-plugin-pwa": "^0.21.2",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.11"
   },
   "optionalDependencies": {
     "@rollup/rollup-darwin-arm64": "^4.34.0",

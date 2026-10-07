@@ -71,7 +71,7 @@ async def stream_report(
                 )
             return
 
-    start = time.monotonic()
+    start = time.perf_counter_ns()
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -94,7 +94,7 @@ async def stream_report(
             yield AIResponseChunk(content=chunk.content, chunk_index=chunk_index)
             chunk_index += 1
 
-    duration_ms = (time.monotonic() - start) * 1000
+    duration_ms = (time.perf_counter_ns() - start) / 1_000_000
 
     if request.use_cache and enable_cache:
         await cache.put(cache_key, accumulated)

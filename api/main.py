@@ -3,6 +3,7 @@ FastAPI application for Geotechnical Reconciliation (modular).
 Routes are split across api/routers/ — this file wires them together.
 """
 
+import asyncio
 import logging
 import os
 import uuid
@@ -12,6 +13,8 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.database import init_db, cleanup_old_sessions
+from api import dxf_uploads
+from api._async_db import run_db
 from api.middleware import install_health_endpoints, install_middleware
 from api.middleware_auth import install_api_key_auth
 from api.middleware_ratelimit import install_rate_limiter
@@ -75,8 +78,24 @@ else:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
-    cleanup_old_sessions()
+    stop_cleanup = asyncio.Event()
+
+    async def cleanup_pending_imports():
+        while not stop_cleanup.is_set():
+            await run_db(dxf_uploads.cleanup_expired)
+            try:
+                await asyncio.wait_for(stop_cleanup.wait(), timeout=60)
+            except TimeoutError:
+                pass
+
+    cleanup_task = asyncio.create_task(cleanup_pending_imports())
+    try:
+        yield
+    finally:
+        stop_cleanup.set()
+        await cleanup_task
+        await run_db(dxf_uploads.cleanup_all)
+        await run_db(cleanup_old_sessions)
 
 
 app = FastAPI(

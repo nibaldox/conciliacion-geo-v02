@@ -1,8 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ComplianceSummary } from '../ComplianceSummary';
+import i18n from '../../../../../i18n';
 import type { Bench } from '../../domain/types';
+
+beforeAll(async () => i18n.changeLanguage('es'));
 
 function makeBench(status: Bench['status'], n: number): Bench {
   return {
@@ -34,7 +37,7 @@ describe('ComplianceSummary', () => {
     // The i18n key is missing from the locales so i18next renders
     // the defaultValue without interpolation. We just verify the
     // headline element exists with the i18n key pattern.
-    expect(container.textContent).toMatch(/MISSION STATUS/);
+    expect(container.textContent).toMatch(/Cumplimiento de sección/);
     expect(container.querySelector('header')).toBeInTheDocument();
   });
 
@@ -46,11 +49,10 @@ describe('ComplianceSummary', () => {
     ];
     const { container } = render(<ComplianceSummary benches={benches} />);
     const segments = container.querySelectorAll('[data-status]');
-    // Binary: FUERA collapses to NO_CUMPLE, so only 2 segments (CUMPLE + NO_CUMPLE)
     const barSegments = Array.from(segments).filter(
       (el) => el.parentElement?.getAttribute('role') === 'img',
     );
-    expect(barSegments).toHaveLength(2);
+    expect(barSegments).toHaveLength(3);
   });
 
   it('shows a per-status legend with icon + count + percentage', () => {
@@ -61,8 +63,8 @@ describe('ComplianceSummary', () => {
       makeBench('NO_CUMPLE', 4),
     ];
     render(<ComplianceSummary benches={benches} />);
-    // Binary: 2 CUMPLE = 50%, 2 NO_CUMPLE (1 FUERA + 1 NO_CUMPLE) = 50%
-    expect(screen.getAllByText('50%')).toHaveLength(2);
+    expect(screen.getByText('Fuera de tolerancia')).toBeInTheDocument();
+    expect(screen.getAllByText('50%')).toHaveLength(1);
   });
 
   it('handles empty bench list gracefully', () => {

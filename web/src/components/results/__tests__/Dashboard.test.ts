@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterByBench, uniqueBenchNumbers } from '../Dashboard';
+import { designBenchOptions, filterByBench } from '../Dashboard';
 import type { ComparisonResult } from '../../../api/types';
 
 function makeRow(overrides: Partial<ComparisonResult> = {}): ComparisonResult {
@@ -68,12 +68,16 @@ describe('filterByBench (G10)', () => {
   });
 });
 
-describe('uniqueBenchNumbers', () => {
-  it('returns sorted unique bench numbers', () => {
-    expect(uniqueBenchNumbers(rows)).toEqual([1, 2, 3]);
+describe('designBenchOptions', () => {
+  it('returns sorted unique design benches with base elevations', () => {
+    expect(designBenchOptions(rows)).toEqual([
+      { number: 1, minElevation: 3150, maxElevation: 3150 },
+      { number: 2, minElevation: 3150, maxElevation: 3150 },
+      { number: 3, minElevation: 3150, maxElevation: 3150 },
+    ]);
   });
 
   it('returns an empty list for no data', () => {
-    expect(uniqueBenchNumbers([])).toEqual([]);
+    expect(designBenchOptions([])).toEqual([]);
   });
 });

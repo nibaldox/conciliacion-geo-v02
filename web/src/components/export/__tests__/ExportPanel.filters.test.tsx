@@ -120,4 +120,13 @@ describe('ExportPanel — filter propagation (G09)', () => {
     expect(screen.getByTestId('export-filter-summary')).toBeInTheDocument();
     expect(screen.getByTestId('export-filter-bench-count')).toHaveTextContent('3');
   });
+
+  it('places export actions before the project metadata fields', () => {
+    renderWith(<ExportPanel />, qc);
+
+    const actions = screen.getByTestId('export-actions');
+    const projectInfo = screen.getByText('export.title').closest('div');
+    expect(projectInfo).not.toBeNull();
+    expect(actions.compareDocumentPosition(projectInfo!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

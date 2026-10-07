@@ -160,12 +160,14 @@ def _clear_lru_caches() -> Iterator[None]:
     """Reset the lru_cache-decorated helpers between tests so cached
     meshes/sections from previous tests do not bleed into new ones."""
     meshes_router._get_decimated_vertices_cached.cache_clear()
+    meshes_router._get_roi_vertices_cached.cache_clear()
     meshes_router._get_contours_cached.cache_clear()
     meshes_router._get_breaklines_cached.cache_clear()
     # The DB layer also caches the trimesh by id.
     db.get_trimesh_by_id.cache_clear()
     yield
     meshes_router._get_decimated_vertices_cached.cache_clear()
+    meshes_router._get_roi_vertices_cached.cache_clear()
     meshes_router._get_contours_cached.cache_clear()
     meshes_router._get_breaklines_cached.cache_clear()
     db.get_trimesh_by_id.cache_clear()

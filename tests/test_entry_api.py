@@ -43,3 +43,27 @@ def test_resolve_data_dir_unsupported_platform(monkeypatch):
     import entry_api
     with pytest.raises(RuntimeError, match="Plataforma no soportada"):
         entry_api.resolve_data_dir()
+
+
+def test_parse_port_defaults_to_electron_port():
+    if "entry_api" in sys.modules:
+        del sys.modules["entry_api"]
+    import entry_api
+    assert entry_api.parse_port([]) == 57890
+
+
+def test_parse_port_accepts_explicit_override():
+    if "entry_api" in sys.modules:
+        del sys.modules["entry_api"]
+    import entry_api
+    assert entry_api.parse_port(["--port", "57901"]) == 57901
+
+
+@pytest.mark.parametrize("port", ["0", "65536", "-1"])
+def test_parse_port_rejects_out_of_range_values(port):
+    if "entry_api" in sys.modules:
+        del sys.modules["entry_api"]
+    import entry_api
+    with pytest.raises(SystemExit) as exc_info:
+        entry_api.parse_port(["--port", port])
+    assert exc_info.value.code == 2

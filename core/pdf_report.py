@@ -182,37 +182,9 @@ def _build_styles() -> Dict[str, ParagraphStyle]:
 
 
 def _compute_global_score(comparisons: List[Dict[str, Any]]) -> tuple[float, str]:
-    """Return ``(score_0_100, status_label)`` for the executive summary.
+    from core.reconciliation_summary import compute_global_compliance
 
-    Uses ``section_score`` from the first MATCH comparison when available
-    (this is the same field the Word report reads). Falls back to a manual
-    computation across MATCH comparisons when the field is missing.
-    """
-    match_comps = [c for c in comparisons if c.get("type") == "MATCH"]
-    if not match_comps:
-        return 0.0, "SIN DATOS"
-
-    first = match_comps[0]
-    if "section_score" in first and first["section_score"] is not None:
-        score = float(first["section_score"])
-        status = first.get("section_status", STATUS_NO_CUMPLE)
-        return score, status
-
-    # Fallback: ratio of CUMPLE statuses across all three parameters.
-    keys = ("height_status", "angle_status", "berm_status")
-    total = 0
-    ok = 0
-    for c in match_comps:
-        for k in keys:
-            if c.get(k) == STATUS_CUMPLE:
-                ok += 1
-            total += 1
-    score = (ok / total * 100) if total else 0.0
-    if score >= 90:
-        status = STATUS_CUMPLE
-    else:
-        status = STATUS_NO_CUMPLE
-    return score, status
+    return compute_global_compliance(comparisons)
 
 
 def _compute_depth_metrics(comparisons: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
@@ -737,7 +709,7 @@ def _build_executive_summary(
 
     # Score headline
     headline = (
-        f"<b>Cumplimiento General (Ponderado):</b> {score:.0f} / 100 — "
+        f"<b>Cumplimiento General (Ponderado):</b> {score:.1f} / 100 — "
         f'<font color="{STATUS_COLOR_MAP.get(status, colors.black).hexval()}">'
         f"<b>{status}</b></font>"
     )
@@ -879,7 +851,7 @@ def _build_pie_section(
         display_h = float(ih) * ratio
         story.append(
             Image(
-                reader,
+                io.BytesIO(pie_buf.getvalue()),
                 width=max_w,
                 height=display_h,
                 hAlign="CENTER",
@@ -918,7 +890,7 @@ def _build_plan_section(
     story.append(
         Paragraph(
             "<b>Plano de Cumplimiento por Perfil</b>",
-            styles["section"],
+            styles["h1"],
         )
     )
     story.append(Spacer(1, 0.3 * cm))
@@ -939,7 +911,7 @@ def _build_plan_section(
         display_h = float(ih) * ratio
         story.append(
             Image(
-                reader,
+                io.BytesIO(plan_buf.getvalue()),
                 width=max_w,
                 height=display_h,
                 hAlign="CENTER",
@@ -963,7 +935,7 @@ def generate_pdf_report(
     output_path: str,
     project_info: Optional[Dict[str, Any]] = None,
     df_pozos: Optional[Any] = None,  # pandas.DataFrame — unused in this stub
-    sections: Optional[List[Any]] = None,  # unused in this stub
+    sections: Optional[List[Any]] = None,
     mesh_topo: Optional[Any] = None,
     grid_ref: float = 0.0,
 ) -> str:
@@ -991,8 +963,7 @@ def generate_pdf_report(
         Optional blast-hole DataFrame. Reserved for future use; the
         executive report doesn't currently include a drilling section.
     sections:
-        Optional list of ``SectionLine`` objects. Reserved for future
-        use.
+        Optional list of ``SectionLine`` objects for the compliance plan.
 
     Returns
     -------

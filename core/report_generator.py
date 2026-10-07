@@ -24,6 +24,7 @@ from core.compliance_status import (
     STATUS_NO_CUMPLE,
 )
 from core.config import DEFAULTS
+from core.reconciliation_summary import compute_global_compliance, compute_section_scores
 
 def create_section_plot(params_design, params_topo, distances_d, elevations_d, distances_t, elevations_t,
                         plot_options=None, section=None, df_pozos=None, filtered_bench_nums=None):
@@ -238,19 +239,10 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
     if not sections:
         return None
 
-    # ── Score per section ──
-    section_scores = {}
-    for r in comparisons:
-        sec_name = r.get('section', '')
-        if sec_name not in section_scores:
-            section_scores[sec_name] = []
-        if r.get('type') == 'MATCH':
-            section_scores[sec_name].append(r.get('bench_score', 0))
-
-    section_status = {}
-    for sec_name, scores in section_scores.items():
-        avg = sum(scores) / len(scores) if scores else 0
-        section_status[sec_name] = {'score': round(avg, 1), 'cumple': avg >= 70}
+    section_status = {
+        name: {'score': round(score, 1), 'cumple': round(score, 1) >= 70}
+        for name, score in compute_section_scores(comparisons, prefer_canonical=True).items()
+    }
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -303,9 +295,9 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
     # ── Section lines ──
     for sec in sections:
         name = sec.name
-        status = section_status.get(name, {'score': 0, 'cumple': False})
-        color = '#2E7D32' if status['cumple'] else '#C62828'
-        score = status['score']
+        status = section_status.get(name)
+        color = ('#2E7D32' if status['cumple'] else '#C62828') if status else '#64748B'
+        score = status['score'] if status else None
 
         origin = np.asarray(sec.origin)
         az_rad = np.radians(sec.azimuth)
@@ -316,6 +308,8 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
 
         ax.plot([p1[0], p2[0]], [p1[1], p2[1]],
                 color=color, linewidth=3.5, solid_capstyle='round', zorder=5)
+        label = f'{name} ({score:.1f})' if score is not None else f'{name} (Sin datos)'
+        ax.annotate(label, p2, xytext=(4, 4), textcoords='offset points', fontsize=7, color=color)
 
     ax.set_xlabel('Este (m)', fontsize=9)
     ax.set_ylabel('Norte (m)', fontsize=9)
@@ -332,6 +326,7 @@ def create_plan_view_image(comparisons, sections, mesh_topo=None, grid_ref=0.0):
     legend_elements = [
         Line2D([0], [0], color='#2E7D32', lw=3, label='CUMPLE (≥70)'),
         Line2D([0], [0], color='#C62828', lw=3, label='NO CUMPLE (<70)'),
+        Line2D([0], [0], color='#64748B', lw=3, label='Sin puntaje evaluable'),
     ]
     ax.legend(handles=legend_elements, loc='lower right', fontsize=8,
               framealpha=0.9)
@@ -457,15 +452,10 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 
     if comparisons:
         match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
-        if match_comps:
-            section_score = match_comps[0].get('section_score', 0.0)
-            section_status = match_comps[0].get('section_status', STATUS_NO_CUMPLE)
-        else:
-            section_score = 0.0
-            section_status = STATUS_NO_CUMPLE
+        section_score, section_status = compute_global_compliance(comparisons)
 
         doc.add_paragraph(f"Se evaluaron {len(match_comps)} bancos emparejados.")
-        doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.0f}/100 — {section_status}")
+        doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.1f}/100 — {section_status}")
 
         # Profundidad total: cota cresta global (max crest_elevation across all
         # bench_real) menos cota piso global (min floor_elevation > 0 across all

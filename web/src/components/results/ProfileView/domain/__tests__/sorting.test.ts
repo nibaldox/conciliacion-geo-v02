@@ -30,6 +30,22 @@ const benches: readonly Bench[] = [
 ];
 
 describe('comparator', () => {
+  it.each(['designHeight', 'designAngle', 'designBerm'] as const)(
+    'sorts %s numerically in both directions with absent values treated as zero',
+    (field) => {
+      const missing = makeBench({ benchNumber: 1, [field]: null });
+      const low = makeBench({ benchNumber: 2, [field]: 4 });
+      const high = makeBench({ benchNumber: 3, [field]: 20 });
+      const input = [high, missing, low];
+      expect(applySort(input, field, 'asc').map((b) => b.benchNumber)).toEqual([1, 2, 3]);
+      expect(applySort(input, field, 'desc').map((b) => b.benchNumber)).toEqual([3, 2, 1]);
+      const compare = comparator(field, 'asc');
+      expect(compare(missing, low)).toBeLessThan(0);
+      expect(compare(low, missing)).toBeGreaterThan(0);
+      expect(compare(missing, missing)).toBe(0);
+    },
+  );
+
   it('sorts by benchNumber asc', () => {
     const sorted = [...benches].sort(comparator('benchNumber', 'asc'));
     expect(sorted.map((b) => b.benchNumber)).toEqual([1, 2, 3, 4, 5]);
@@ -55,13 +71,11 @@ describe('comparator', () => {
     expect(sorted[0]!.crestElevation).toBeLessThanOrEqual(sorted[sorted.length - 1]!.crestElevation);
   });
 
-  it('sorts by status: NO_CUMPLE first, then CUMPLE (binary, no FUERA bucket)', () => {
+  it('sorts by status from NO_CUMPLE through FUERA and CUMPLE', () => {
     const sorted = [...benches].sort(comparator('status', 'asc'));
-    // First by status rank (presentation order), stable within rank.
-    // FUERA is no longer a presentation bucket — its benches share
-    // the NO_CUMPLE rank.
     expect(sorted[0]!.status).toBe('NO_CUMPLE');
-    // Among CUMPLE, the original order is preserved (stable sort).
+    expect(sorted.slice(1, 3).every((bench) => bench.status === 'FUERA')).toBe(true);
+    expect(sorted.slice(3).every((bench) => bench.status === 'CUMPLE')).toBe(true);
   });
 
   it('pushes null bermWidth to the end regardless of direction', () => {

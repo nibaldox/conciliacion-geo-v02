@@ -442,12 +442,118 @@ class TestProcessRun:
         resp = client.post("/api/v1/process")
         assert resp.status_code == 400
 
+    def test_run_reports_profile_warnings_per_section(self, client, headers, stl_path, monkeypatch):
+        import numpy as np
+        from core import ProfileCutDiagnostics
+
+        _upload_mesh(client, headers, stl_path, "design")
+        _upload_mesh(client, headers, stl_path, "topo")
+        sections = [
+            {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 20.0, "sector": "A"},
+            {"name": "S-02", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 20.0, "sector": "A"},
+        ]
+        sections_response = client.post(
+            "/api/v1/sections/manual", json=sections, headers=headers,
+        )
+        assert sections_response.status_code == 200
+
+        class MockProfile:
+            def __init__(self):
+                self.distances = np.array([0.0, 1.0])
+                self.elevations = np.array([100.0, 100.0])
+
+        import api.routers.process as process_router
+        monkeypatch.setattr(
+            process_router,
+            "cut_mesh_with_section_diagnostics",
+            lambda mesh, section: (
+                ProfileCutDiagnostics(None, ("no_section_intersection",))
+                if section.name == "S-01"
+                else ProfileCutDiagnostics(
+                    MockProfile(), ("minor_profile_reversal_normalized",)
+                )
+            ),
+        )
+
+        resp = client.post("/api/v1/process", headers=headers)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "complete"
+        assert data["total_sections"] == 2
+        assert data["profile_warnings"] == {
+            "S-01": {
+                "design": ["no_section_intersection"],
+                "topo": ["no_section_intersection"],
+            },
+            "S-02": {
+                "design": ["minor_profile_reversal_normalized"],
+                "topo": ["minor_profile_reversal_normalized"],
+            },
+        }
+
 
 class TestProcessProfiles:
     def test_profiles_out_of_range_404(self, client):
         """Profiles for nonexistent section index returns 404."""
         resp = client.get("/api/v1/process/profiles/0")
         assert resp.status_code == 404
+
+    def test_xyz_origin_profiles_match_xy_and_all_sections_return_200(
+        self, client, headers, tmp_path
+    ):
+        import trimesh
+
+        mesh = trimesh.Trimesh(
+            vertices=[
+                [0.0, 0.0, 0.0],
+                [10.0, 0.0, 0.0],
+                [10.0, 10.0, 10.0],
+                [0.0, 10.0, 10.0],
+            ],
+            faces=[[0, 1, 2], [0, 2, 3]],
+            process=False,
+        )
+        stl_path = str(tmp_path / "profile_surface.stl")
+        mesh.export(stl_path)
+        xyz_session = headers["x-session-id"]
+        xy_headers = {"x-session-id": db.create_session()}
+        for session_headers in (headers, xy_headers):
+            _upload_mesh(client, session_headers, stl_path, "design")
+            _upload_mesh(client, session_headers, stl_path, "topo")
+
+        def section(name, origin):
+            return {
+                "name": name,
+                "origin": origin,
+                "azimuth": 90.0,
+                "length": 20.0,
+                "sector": "A",
+            }
+
+        db.save_sections(xyz_session, [
+            section("S-00", [5.0, 5.0, 3500.0]),
+            section("S-01", [5.0, 5.0, 3600.0]),
+        ])
+        db.save_sections(
+            xy_headers["x-session-id"],
+            [section("S-00", [5.0, 5.0])],
+        )
+
+        xyz_responses = [
+            client.get(f"/api/v1/process/profiles/{index}", headers=headers)
+            for index in range(2)
+        ]
+        xy_response = client.get("/api/v1/process/profiles/0", headers=xy_headers)
+
+        assert [response.status_code for response in xyz_responses] == [200, 200]
+        assert xy_response.status_code == 200
+        xyz_profile = xyz_responses[0].json()
+        xy_profile = xy_response.json()
+        assert xyz_profile["design"] == xy_profile["design"]
+        assert xyz_profile["topo"] == xy_profile["topo"]
+        assert xyz_profile["horizontal_deviation"] == xy_profile["horizontal_deviation"]
+        assert xyz_profile["profile_warnings"] == xy_profile["profile_warnings"]
 
     def test_profiles_success(self, client, headers, stl_path, monkeypatch):
         import numpy as np
@@ -487,8 +593,13 @@ class TestProcessProfiles:
                 self.distances = np.array([0.0, 5.0, 10.0, 15.0])
                 self.elevations = np.array([3900.0, 3900.0, 3885.0, 3885.0])
 
-        import core
-        monkeypatch.setattr(core, "cut_both_surfaces", lambda m_d, m_t, sec: (MockProfile(), MockProfile()))
+        import api.routers.process as process_router
+        from core import ProfileCutDiagnostics
+        monkeypatch.setattr(
+            process_router,
+            "cut_mesh_with_section_diagnostics",
+            lambda mesh, sec: ProfileCutDiagnostics(MockProfile()),
+        )
 
         resp = client.get("/api/v1/process/profiles/0", headers=headers)
         assert resp.status_code == 200, f"Profiles failed: {resp.text}"
@@ -498,6 +609,50 @@ class TestProcessProfiles:
         assert "topo" in data
         assert "reconciled_design" in data
         assert "reconciled_topo" in data
+        assert data["horizontal_deviation"]["method"] == "horizontal_at_equal_elevation"
+        assert data["horizontal_deviation"]["unit"] == "m"
+        assert data["profile_warnings"] == {"design": [], "topo": []}
+
+        diagnostics = iter((
+            ProfileCutDiagnostics(None, ("no_section_intersection",)),
+            ProfileCutDiagnostics(MockProfile()),
+        ))
+        monkeypatch.setattr(
+            process_router,
+            "cut_mesh_with_section_diagnostics",
+            lambda mesh, sec: next(diagnostics),
+        )
+
+        resp = client.get("/api/v1/process/profiles/0", headers=headers)
+        assert resp.status_code == 200
+        missing_design = resp.json()
+        assert "design" not in missing_design
+        assert "topo" in missing_design
+        assert "reconciled_design" not in missing_design
+        assert missing_design["profile_warnings"] == {
+            "design": ["no_section_intersection"],
+            "topo": [],
+        }
+
+        diagnostics = iter((
+            ProfileCutDiagnostics(MockProfile()),
+            ProfileCutDiagnostics(MockProfile(), ("minor_profile_reversal_normalized",)),
+        ))
+        monkeypatch.setattr(
+            process_router,
+            "cut_mesh_with_section_diagnostics",
+            lambda mesh, sec: next(diagnostics),
+        )
+        recovered_response = client.get("/api/v1/process/profiles/0", headers=headers)
+
+        assert recovered_response.status_code == 200
+        recovered = recovered_response.json()
+        assert "topo" in recovered
+        assert recovered["topo"]["distances"] == [0.0, 5.0, 10.0, 15.0]
+        assert recovered["profile_warnings"] == {
+            "design": [],
+            "topo": ["minor_profile_reversal_normalized"],
+        }
 
 
 # ===================================================================

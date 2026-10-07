@@ -11,11 +11,6 @@ export const LazyMesh3DViewer = lazy(() =>
 );
 
 
-// ProfileView + ProfilesGrid pull in react-plotly.js (~3.5 MB parsed).
-// Both are re-exported from the same barrel, so a single dynamic import
-// puts the whole feature — and Plotly — into one on-demand chunk that is
-// only fetched when the user opens the Profiles workspace. Plotly itself
-// still lands in the `vendor-plotly` manualChunk (see vite.config.ts).
 export const LazyProfileView = lazy(() =>
   import('./results/ProfileView').then(m => ({ default: m.ProfileView }))
 );

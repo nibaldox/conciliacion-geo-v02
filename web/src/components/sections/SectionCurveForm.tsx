@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { useMeshBreaklines, useCurveSection } from '../../api/hooks';
 import { Button } from '../ui/Button';
+import { ProjectField, PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 
 export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHandler?: (handler: ((x: number, y: number, curveId?: string, pointIndex?: number) => void) | null) => void }) {
   const { t } = useTranslation();
@@ -104,120 +105,50 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
   const p2 = selectedCurvePoints[1];
 
   return (
-    <div className="space-y-5">
-      {/* Instructions */}
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] p-4 rounded-lg">
-        <h4 className="text-sm font-semibold mb-2" style={{ color: 'var(--color-text-primary)' }}>¿Cómo generar?</h4>
-        <ol className="list-decimal pl-4 text-xs space-y-1" style={{ color: 'var(--color-text-secondary)' }}>
-          <li>Haz clic en una <strong style={{ color: 'var(--color-text-primary)' }}>línea de quiebre</strong> en el mapa para seleccionarla.</li>
-          <li>Haz clic en el <strong style={{ color: 'var(--color-text-primary)' }}>punto inicial</strong> de la curva.</li>
-          <li>Haz clic en el <strong style={{ color: 'var(--color-text-primary)' }}>punto final</strong> de la curva.</li>
+    <div className="space-y-2" data-slot="section-curve-form">
+      <details className="rounded-md border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-secondary">
+        <summary className="cursor-pointer font-medium">{t('project_input.curve_help')}</summary>
+        <ol className="mt-2 list-decimal space-y-1 pl-4">
+          <li>{t('project_input.curve_step1')}</li>
+          <li>{t('project_input.curve_step2')}</li>
+          <li>{t('project_input.curve_step3')}</li>
         </ol>
-      </div>
-
-      {/* Selection Status */}
-      <div className="bg-[var(--color-surface)] border border-[var(--color-border)] p-4 rounded-lg space-y-2">
-        <div className="flex justify-between text-xs">
-          <span style={{ color: 'var(--color-text-muted)' }}>Línea seleccionada:</span>
-          <span className="font-mono" style={{ color: selectedCurveId ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>
-            {selectedCurveId || 'Ninguna'}
-          </span>
+      </details>
+      <div className="space-y-2 rounded-md border border-border bg-surface-raised px-2 py-1.5 text-xs">
+        <div className="flex min-w-0 justify-between gap-2">
+          <span className="text-text-muted">{t('project_input.selected_curve')}</span>
+          <span className="truncate font-medium" title={selectedCurveId ?? undefined}>{selectedCurveId || t('project_input.none')}</span>
         </div>
-        <div className="flex justify-between text-xs">
-          <span style={{ color: 'var(--color-text-muted)' }}>Punto Inicial:</span>
-          <span className="font-mono" style={{ color: p1 ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
-            {p1 ? `P${p1.pointIndex} (${p1.x.toFixed(1)}, ${p1.y.toFixed(1)})` : 'Esperando clic...'}
-          </span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span style={{ color: 'var(--color-text-muted)' }}>Punto Final:</span>
-          <span className="font-mono" style={{ color: p2 ? 'var(--color-accent)' : 'var(--color-text-muted)' }}>
-            {p2 ? `P${p2.pointIndex} (${p2.x.toFixed(1)}, ${p2.y.toFixed(1)})` : 'Esperando clic...'}
-          </span>
+        <div className="grid grid-cols-2 gap-2">
+          {[p1, p2].map((point, index) => (
+            <div key={index} className="min-w-0">
+              <p className="text-text-muted">{t(index === 0 ? 'project_input.start' : 'project_input.end')}{point ? ` · P${point.pointIndex}` : ''}</p>
+              <p className={point ? 'truncate text-[10px] leading-4 tabular-nums text-accent-bright' : 'text-text-muted'} title={point ? `${point.x.toFixed(1)}, ${point.y.toFixed(1)}` : undefined}>
+                {point ? `${point.x.toFixed(1)}, ${point.y.toFixed(1)}` : t('project_input.waiting')}
+              </p>
+            </div>
+          ))}
         </div>
       </div>
-
-      {/* Form Fields */}
-      <div className="space-y-4">
-        <div>
-          <label className="block text-xs font-mono font-bold mb-1 uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
-            Sector
-          </label>
-          <input
-            type="text"
-            value={sector}
-            onChange={(e) => setSector(e.target.value)}
-            placeholder="Opcional"
-            className="w-full px-3 py-2 border rounded font-mono text-sm focus:outline-none focus:border-[var(--color-accent)]"
-            style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
-          />
-        </div>
-        
-        <div>
-          <label className="block text-xs font-mono font-bold mb-1 uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
-            {t('section_form_file.spacing')}
-          </label>
-          <input
-            type="number"
-            value={spacing}
-            onChange={(e) => setSpacing(Number(e.target.value))}
-            className="w-full px-3 py-2 border rounded font-mono text-sm focus:outline-none focus:border-[var(--color-accent)]"
-            style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
-            min={1}
-            max={100}
-            step={1}
-          />
-        </div>
-
-        <div className="flex gap-2">
-          <div className="flex-1">
-            <label className="block text-xs font-mono font-bold mb-1 uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
-              Longitud Superior (m)
-            </label>
-            <input
-              type="number"
-              value={lengthUp}
-              onChange={(e) => setLengthUp(Number(e.target.value))}
-              className="w-full px-3 py-2 border rounded font-mono text-sm focus:outline-none focus:border-[var(--color-accent)]"
-              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
-              min={1}
-              max={1000}
-              step={10}
-            />
-          </div>
-          <div className="flex-1">
-            <label className="block text-xs font-mono font-bold mb-1 uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
-              Longitud Inferior (m)
-            </label>
-            <input
-              type="number"
-              value={lengthDown}
-              onChange={(e) => setLengthDown(Number(e.target.value))}
-              className="w-full px-3 py-2 border rounded font-mono text-sm focus:outline-none focus:border-[var(--color-accent)]"
-              style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}
-              min={1}
-              max={1000}
-              step={10}
-            />
-          </div>
-        </div>
-
-        <Button className="w-full" variant="primary" disabled={!isReady || mutation.isPending} onClick={handleGenerate}>
-          {mutation.isPending ? 'Generando...' : 'Generar Perfiles'}
-        </Button>
-
-        {mutation.isError && (
-          <p className="text-xs font-medium mt-2 text-center" style={{ color: 'var(--color-mine-red)' }}>
-            Error: {mutation.error instanceof Error ? mutation.error.message : 'No se pudo generar los perfiles'}
-          </p>
-        )}
-
-        {mutation.isSuccess && (
-          <p className="text-xs font-medium mt-2 text-center" style={{ color: 'var(--color-mine-green)' }}>
-            ¡Perfiles generados con éxito!
-          </p>
-        )}
+      <div className="grid grid-cols-2 gap-2">
+        <ProjectField id="curve-sector" label={t('section_form_file.sector')}>
+          <input id="curve-sector" value={sector} onChange={(e) => setSector(e.target.value)} placeholder={t('project_input.optional')} className={PROJECT_INPUT_CLASS} />
+        </ProjectField>
+        <ProjectField id="curve-spacing" label={t('section_form_file.spacing')}>
+          <input id="curve-spacing" type="number" value={spacing} onChange={(e) => setSpacing(Number(e.target.value))} min={1} max={100} step={1} className={PROJECT_INPUT_CLASS} />
+        </ProjectField>
+        <ProjectField id="curve-up" label={t('project_input.length_up')} title={t('project_input.length_help')}>
+          <input id="curve-up" type="number" value={lengthUp} onChange={(e) => setLengthUp(Number(e.target.value))} min={1} max={1000} step={10} className={PROJECT_INPUT_CLASS} />
+        </ProjectField>
+        <ProjectField id="curve-down" label={t('project_input.length_down')} title={t('project_input.length_help')}>
+          <input id="curve-down" type="number" value={lengthDown} onChange={(e) => setLengthDown(Number(e.target.value))} min={1} max={1000} step={10} className={PROJECT_INPUT_CLASS} />
+        </ProjectField>
       </div>
+      <Button size="sm" fullWidth className="min-h-8" disabled={!isReady || mutation.isPending} loading={mutation.isPending} onClick={handleGenerate}>
+        {t(mutation.isPending ? 'project_input.generating' : 'project_input.generate')}
+      </Button>
+      {mutation.isError && <p role="alert" className="text-xs text-mine-red">{t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_file.error_generic')}</p>}
+      {mutation.isSuccess && <p role="status" className="text-xs text-mine-green">{t('project_input.curve_success')}</p>}
     </div>
   );
 }

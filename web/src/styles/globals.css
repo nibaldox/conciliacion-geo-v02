@@ -1,5 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
+@source not "../../test-results";
+@source not "../../playwright-report";
 /* Fonts loaded via <link rel="stylesheet"> in index.html for better
    preconnect hints and to avoid blocking CSS parsing. */
 
@@ -115,33 +117,46 @@
  * ──────────────────────────────────────────────────────────── */
 @theme {
   /* Brand data colors — brighter for dark backgrounds */
-  --color-mine-blue: #7693b7;
-  --color-mine-green: #39ab60;
+  --color-mine-blue: #4da5f5;
+  --color-mine-green: #22c5aa;
   --color-mine-yellow: #e68f19;
   --color-mine-red: #e83149;
   --color-mine-gray: #9fa6b2;
+  --color-hdev-within: #22c55e;
+  --color-hdev-underbreak-minor: #facc15;
+  --color-hdev-underbreak-moderate: #f97316;
+  --color-hdev-underbreak-severe: #ef4444;
+  --color-hdev-overbreak-minor: #22d3ee;
+  --color-hdev-overbreak-moderate: #3b82f6;
+  --color-hdev-overbreak-severe: #818cf8;
+  --color-hdev-unmeasured: #94a3b8;
 
   /* Surfaces — deep blue-black, matching GeotRadarSim style */
-  --color-surface: #0b0f19;
-  --color-surface-raised: #0d111b;
-  --color-surface-muted: #1d2433;
-  --color-surface-sunken: #05070c;
+  --color-surface: #111820;
+  --color-surface-raised: #19232d;
+  --color-surface-muted: #23313f;
+  --color-surface-sunken: #121c26;
 
   /* Borders — subtle, using low-opacity white for that HUD look */
-  --color-border: rgba(255, 255, 255, 0.05);
+  --color-border: #2d3b49;
   --color-border-strong: rgba(255, 255, 255, 0.12);
   --color-border-dashed: rgba(255, 255, 255, 0.20);
 
   /* Text — off-white, matching Outfit family aesthetics */
   --color-text-primary: #ebedf0;
-  --color-text-secondary: #9fa6b2;
-  --color-text-muted: #6b778c;
-  --color-text-dim: #434d5d;
+  --color-text-secondary: #bfccd9;
+  --color-text-muted: #9baaba;
+  --color-text-dim: #8494a6;
 
   /* Accent — technical steel blue/cyan from GeotRadarSim */
-  --color-accent: #7693b7;
-  --color-accent-bright: #92a9c7;
-  --color-accent-bg: rgba(118, 147, 183, 0.15);
+  --color-accent: #2878bd;
+  --color-accent-fg: #ffffff;
+  --color-accent-bright: #6cb8fa;
+  --color-accent-bg: rgba(77, 165, 245, 0.16);
+  --color-viewer-bg: #111111;
+  --color-viewer-topo: #cccccc;
+  --color-viewer-grid: #334155;
+  --color-viewer-grid-minor: #1e293b;
 
   /* Status colors (semi-transparent bg + bright fg) */
   --status-ok-bg: rgba(57, 171, 96, 0.10);
@@ -162,7 +177,7 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   /* Shadows — matching GeotRadarSim HUD glow effects */
-  --shadow-glow-accent: 0 0 16px rgba(118, 147, 183, 0.25);
+  --shadow-glow-accent: 0 2px 6px rgba(0, 0, 0, 0.15);
   --shadow-glow-ok: 0 0 16px rgba(57, 171, 96, 0.20);
   --shadow-glow-warn: 0 0 16px rgba(230, 143, 25, 0.20);
   --shadow-glow-nok: 0 0 16px rgba(232, 49, 73, 0.20);
@@ -170,25 +185,37 @@
 
 /* ── Light mode (legacy — opt-in via .light class) ───────────── */
 .light {
-  --color-surface: #ffffff;
-  --color-surface-raised: #f9fafb;
-  --color-surface-muted: #f3f4f6;
-  --color-surface-sunken: #fafafa;
-  --color-border: #e5e7eb;
+  --color-surface: #f1f5f9;
+  --color-surface-raised: #ffffff;
+  --color-surface-muted: #e8eef5;
+  --color-surface-sunken: #f7f9fc;
+  --color-border: #d8e1ec;
   --color-border-strong: #d1d5db;
   --color-border-dashed: #9ca3af;
   --color-text-primary: #111827;
   --color-text-secondary: #4b5563;
-  --color-text-muted: #9ca3af;
-  --color-text-dim: #d1d5db;
-  --color-accent: #ea580c;
-  --color-accent-bright: #f97316;
-  --color-accent-bg: rgba(234, 88, 12, 0.08);
+  --color-text-muted: #64748b;
+  --color-text-dim: #64748b;
+  --color-accent: #2563a6;
+  --color-accent-bright: #1d5b99;
+  --color-accent-bg: rgba(37, 99, 166, 0.08);
+  --color-viewer-bg: #edf2f7;
+  --color-viewer-topo: #75869a;
+  --color-viewer-grid: #cbd5e1;
+  --color-viewer-grid-minor: #dde5ee;
 
   --color-mine-blue: #2F5496;
-  --color-mine-green: #2E7D32;
-  --color-mine-yellow: #F9A825;
+  --color-mine-green: #0f766e;
+  --color-mine-yellow: #b45309;
   --color-mine-red: #C62828;
+  --color-hdev-within: #15803d;
+  --color-hdev-underbreak-minor: #a16207;
+  --color-hdev-underbreak-moderate: #c2410c;
+  --color-hdev-underbreak-severe: #b91c1c;
+  --color-hdev-overbreak-minor: #0e7490;
+  --color-hdev-overbreak-moderate: #1d4ed8;
+  --color-hdev-overbreak-severe: #1e3a8a;
+  --color-hdev-unmeasured: #64748b;
 
   --status-ok-bg: #ecfdf5;
   --status-ok-text: #065f46;
@@ -310,3 +337,52 @@ body {
 .step-active { background-color: var(--color-mine-blue); color: #fff; }
 .step-complete { background-color: var(--color-mine-green); color: #fff; }
 .step-pending { background-color: var(--color-surface-muted); color: var(--color-text-muted); }
+
+@media (max-width: 767px) {
+  .project-sidebar {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    max-width: calc(100vw - 56px);
+    box-shadow: var(--shadow-glow-accent);
+  }
+}
+
+@media (max-height: 850px) {
+  .project-sidebar [data-slot="project-heading"] {
+    padding-block: 10px;
+  }
+  .project-sidebar [aria-controls^="project-panel-"] {
+    padding-block: 8px;
+  }
+  .project-sidebar [data-slot="views-toolbar"] {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .project-sidebar [data-slot="views-toolbar"] h3 {
+    grid-column: 1 / -1;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .project-sidebar [data-slot="views-toolbar"] button {
+    padding: 6px 8px;
+    gap: 8px;
+    font-size: 13px;
+  }
+}
+
+@media (max-height: 700px) {
+  .project-sidebar [data-slot="views-toolbar"] {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .project-sidebar [data-slot="views-toolbar"] h3,
+  .project-sidebar [data-slot="views-toolbar"] button span {
+    display: none;
+  }
+  .project-sidebar [data-slot="views-toolbar"] button {
+    height: 36px;
+    justify-content: center;
+    padding: 6px;
+  }
+}

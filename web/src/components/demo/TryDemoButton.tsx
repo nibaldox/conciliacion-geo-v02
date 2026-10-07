@@ -9,7 +9,7 @@ import { Button } from '../ui/Button';
  * loads the precomputed payload and jumps the user straight to the
  * results tab so they can see what the app looks like with data.
  */
-export function TryDemoButton() {
+export function TryDemoButton({ compact = false }: { compact?: boolean }) {
   const demoMode = useSession((s) => s.demoMode);
   const demoLoading = useSession((s) => s.demoLoading);
   const loadDemo = useSession((s) => s.loadDemo);
@@ -26,6 +26,16 @@ export function TryDemoButton() {
     setDemoSectionsCache(qc, demoData);
     setDemoComparisonsCache(qc, demoData);
   };
+
+  if (compact) {
+    return (
+      <div data-slot="try-demo" data-compact="true">
+        <Button variant="secondary" size="sm" fullWidth onClick={handleClick} loading={demoLoading}>
+          {demoLoading ? t('common.loading') : t('demo.try_compact')}
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div

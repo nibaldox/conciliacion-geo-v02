@@ -28,16 +28,17 @@ import api.schemas as schemas
 from core import (
     load_mesh,
     SectionLine,
-    cut_both_surfaces,
+    cut_mesh_with_section_diagnostics,
     extract_parameters,
     compare_design_vs_asbuilt,
     build_reconciled_profile,
+    build_reconciled_profile_v2,
+    compute_horizontal_deviation,
 )
 from core.param_extractor import (
     BenchParams,
     ExtractionResult,
     ReconciledPoint,
-    build_reconciled_profile_v2,
 )
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.blast_correlation import compute_blast_geotech_correlation
@@ -190,21 +191,36 @@ def _reconciled_profile_to_dict(prof) -> dict:
     }
 
 
-def _legacy_reconciled_to_dict(benches, floor_elevation: float | None = None) -> dict:
+def _legacy_reconciled_to_dict(
+    benches,
+    floor_elevation: float | None = None,
+    floor_point: tuple[float, float] | None = None,
+    floor_resolved_from_profile: bool = False,
+) -> dict:
     """Streamlit-equivalent reconciled polyline as flat ``(distances, elevations)``
     arrays.
 
-    Calls the legacy ``build_reconciled_profile`` path (the exact builder
-    used by ``ui/step3_analysis.py``) so the Web UI can render the same
-    crest/toe polyline that Streamlit draws. The ``DeprecationWarning`` is
-    expected here by design and silenced, since the legacy shape is being
-    produced deliberately for cross-UI parity (see docs/UI_PARITY_AUDIT.md,
-    Causa 2).
+    Calls the legacy ``build_reconciled_profile`` path for the sorted
+    crest/toe polyline. When the rich profile resolved a floor point from
+    source geometry, that same point is inserted before sorting.
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         distances, elevations = build_reconciled_profile(
-            benches, floor_elevation=floor_elevation)
+            benches,
+            floor_elevation=None if floor_resolved_from_profile else floor_elevation,
+        )
+    if floor_point is not None and len(distances) > 0:
+        floor_d, floor_z = map(float, floor_point)
+        existing = np.isclose(distances, floor_d, atol=1e-9) & np.isclose(
+            elevations, floor_z, atol=1e-9,
+        )
+        if not np.any(existing):
+            distances = np.append(distances, floor_d)
+            elevations = np.append(elevations, floor_z)
+            order = np.argsort(distances, kind="stable")
+            distances = distances[order]
+            elevations = elevations[order]
     return {
         "distances": distances.tolist(),
         "elevations": elevations.tolist(),
@@ -275,8 +291,11 @@ def _run_pipeline_sync(
         """Worker: cut → extract → compare for a single section."""
         idx, sec = args
         try:
-            pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-            if pd_prof is not None and pt_prof is not None:
+            design_cut = cut_mesh_with_section_diagnostics(mesh_design, sec)
+            topo_cut = cut_mesh_with_section_diagnostics(mesh_topo, sec)
+            pd_prof = design_cut.profile
+            pt_prof = topo_cut.profile
+            if pd_prof is not None:
                 p_d = extract_parameters(
                     pd_prof.distances,
                     pd_prof.elevations,
@@ -286,6 +305,9 @@ def _run_pipeline_sync(
                     face_threshold,
                     berm_threshold,
                 )
+            else:
+                p_d = ExtractionResult(section_name=sec.name, sector=sec.sector)
+            if pt_prof is not None:
                 p_t = extract_parameters(
                     pt_prof.distances,
                     pt_prof.elevations,
@@ -295,28 +317,38 @@ def _run_pipeline_sync(
                     face_threshold,
                     berm_threshold,
                 )
-                comps = compare_design_vs_asbuilt(p_d, p_t, tolerances)
-                return idx, sec, p_d, p_t, comps
             else:
-                p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-                return idx, sec, p_d_empty, p_t_empty, []
+                p_t = ExtractionResult(section_name=sec.name, sector=sec.sector)
+            if pd_prof is not None and pt_prof is not None:
+                comps = compare_design_vs_asbuilt(p_d, p_t, tolerances)
+            else:
+                comps = []
+            profile_warnings = {
+                "design": list(design_cut.warnings),
+                "topo": list(topo_cut.warnings),
+            }
+            return idx, sec, p_d, p_t, comps, profile_warnings
         except Exception as exc:
             logger.exception("Section %s processing failed: %s", sec.name, exc)
             p_d_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
             p_t_empty = ExtractionResult(section_name=sec.name, sector=sec.sector)
-            return idx, sec, p_d_empty, p_t_empty, []
+            return idx, sec, p_d_empty, p_t_empty, [], {
+                "design": ["section_processing_error"],
+                "topo": ["section_processing_error"],
+            }
 
     # Execute in parallel (inside the executor thread, so this pool only
     # uses background threads; no event-loop blocking).
     completed = 0
+    section_profile_warnings: Dict[str, Dict[str, List[str]]] = {}
     with ThreadPoolExecutor() as executor:
-        for idx, sec, p_d, p_t, comps in executor.map(
+        for idx, sec, p_d, p_t, comps, profile_warnings in executor.map(
             _process_section, enumerate(sections)
         ):
             params_design_list[idx] = p_d
             params_topo_list[idx] = p_t
             comparison_results.extend(comps)
+            section_profile_warnings[sec.name] = profile_warnings
             completed += 1
             db.update_process_status(session_id, "processing", completed, len(sections))
 
@@ -351,6 +383,7 @@ def _run_pipeline_sync(
         "status": "complete",
         "total_sections": len(sections),
         "total_results": len(comparison_results),
+        "profile_warnings": section_profile_warnings,
     }
 
 
@@ -478,13 +511,20 @@ def _build_profile_payload_sync(
     except Exception as exc:
         raise HTTPException(400, f"Error loading meshes: {exc}")
 
-    pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+    design_cut = cut_mesh_with_section_diagnostics(mesh_design, sec)
+    topo_cut = cut_mesh_with_section_diagnostics(mesh_topo, sec)
+    pd_prof = design_cut.profile
+    pt_prof = topo_cut.profile
 
     result: Dict[str, Any] = {
         "section_name": sec.name,
         "sector": sec.sector,
         "origin": sec.origin.tolist(),
         "azimuth": sec.azimuth,
+        "profile_warnings": {
+            "design": list(design_cut.warnings),
+            "topo": list(topo_cut.warnings),
+        },
     }
 
     if pd_prof is not None:
@@ -524,7 +564,8 @@ def _build_profile_payload_sync(
         topo_crest_max = float(np.max(pt_prof.elevations))
 
     design_extraction = db.get_extraction(session_id, sec.name, "design")
-    if design_extraction:
+    benches_d = []
+    if design_extraction and pd_prof is not None:
         benches_d = [_dict_to_bench(b) for b in design_extraction.get("benches", [])]
         if benches_d:
             design_floor = float(np.min(pd_prof.elevations)) if pd_prof is not None else None
@@ -533,11 +574,18 @@ def _build_profile_payload_sync(
                 floor_elevation=design_floor,
             )
             result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
+            floor_points = [p for p in prof_d.points if p.segment_type == "floor"]
+            floor_point = floor_points[-1] if floor_points else None
             result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(
-                benches_d, floor_elevation=design_floor)
+                benches_d,
+                floor_elevation=design_floor,
+                floor_point=(floor_point.distance, floor_point.elevation)
+                if floor_point is not None else None,
+                floor_resolved_from_profile=profile_d_arg is not None,
+            )
 
     topo_extraction = db.get_extraction(session_id, sec.name, "topo")
-    if topo_extraction:
+    if topo_extraction and pt_prof is not None:
         benches_t = [_dict_to_bench(b) for b in topo_extraction.get("benches", [])]
         if benches_t:
             prof_t = build_reconciled_profile_v2(
@@ -545,9 +593,24 @@ def _build_profile_payload_sync(
                 floor_elevation=topo_floor,
             )
             result["reconciled_topo"] = _reconciled_profile_to_dict(prof_t)
+            floor_points = [p for p in prof_t.points if p.segment_type == "floor"]
+            floor_point = floor_points[-1] if floor_points else None
             result["reconciled_topo_legacy"] = _legacy_reconciled_to_dict(
-                benches_t, floor_elevation=topo_floor)
+                benches_t,
+                floor_elevation=topo_floor,
+                floor_point=(floor_point.distance, floor_point.elevation)
+                if floor_point is not None else None,
+                floor_resolved_from_profile=profile_t_arg is not None,
+            )
             result["benches_topo"] = [_bench_to_dict(b) for b in benches_t]
+
+    if pd_prof is not None and pt_prof is not None:
+        horizontal_result = compute_horizontal_deviation(
+            (pd_prof.distances, pd_prof.elevations),
+            (pt_prof.distances, pt_prof.elevations),
+            benches_d,
+        )
+        result["horizontal_deviation"] = horizontal_result.to_dict()
 
     if topo_floor is not None:
         result["floor_elevation"] = topo_floor

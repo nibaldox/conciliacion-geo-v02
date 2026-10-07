@@ -1,3 +1,4 @@
+import { applyTheme } from './utils/theme';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Suspense, useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -47,7 +48,6 @@ function WarningState({ icon, title, description }: { icon: string; title: strin
 
 function ProfilesWorkspace() {
   const { t } = useTranslation();
-  const selectedSection = useSession((s) => s.selectedSection);
   const setSelectedSection = useSession((s) => s.setSelectedSection);
   const [mode, setMode] = useState<'grid' | 'detail'>('grid');
 
@@ -59,13 +59,15 @@ function ProfilesWorkspace() {
 
 
   return (
-    <div className="flex flex-col h-full gap-3 min-h-0">
+    <div className="flex flex-col gap-4 min-h-0">
       {/* Mode toggle */}
-      <div className="shrink-0 flex items-center gap-2">
+      <div className="shrink-0 flex flex-wrap items-center justify-end gap-2">
+        <div className="mr-auto w-full min-w-0 md:w-auto md:min-w-80 md:flex-1 md:max-w-2xl">{mode === 'detail' && <SectionSelector />}</div>
         <button
           type="button"
           onClick={() => setMode('grid')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-colors"
+          aria-pressed={mode === 'grid'}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           style={
             mode === 'grid'
               ? {
@@ -85,7 +87,8 @@ function ProfilesWorkspace() {
         <button
           type="button"
           onClick={() => setMode('detail')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-colors"
+          aria-pressed={mode === 'detail'}
+          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           style={
             mode === 'detail'
               ? {
@@ -102,11 +105,6 @@ function ProfilesWorkspace() {
         >
           <IconList className="w-3.5 h-3.5" /> {t('profiles.mode_detail', { defaultValue: 'Detalle' })}
         </button>
-        {mode === 'detail' && selectedSection && (
-          <span className="text-xs font-mono ml-2" style={{ color: 'var(--color-text-muted)' }}>
-            — {selectedSection}
-          </span>
-        )}
       </div>
 
       {/* Content */}
@@ -118,9 +116,6 @@ function ProfilesWorkspace() {
         </div>
       ) : (
         <div className="space-y-3 flex-1 flex flex-col min-h-0">
-          <div className="shrink-0">
-            <SectionSelector />
-          </div>
           <div className="flex-1 min-h-0">
             <Suspense fallback={<LoadingSpinner />}>
               <LazyProfileView />
@@ -212,13 +207,9 @@ function WorkspaceRouter() {
       );
     case 'export-ai':
       return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full overflow-y-auto pb-4">
-          <div className="h-fit">
-            <ExportPanel />
-          </div>
-          <div className="h-fit">
-            <LazyAIReporter />
-          </div>
+        <div data-slot="export-workspace" className="h-full flex flex-col gap-5 overflow-y-auto pb-4">
+          <ExportPanel />
+          <LazyAIReporter />
         </div>
       );
     default:
@@ -265,11 +256,7 @@ function App() {
 
   // Apply dark class to root element
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    applyTheme(isDark);
   }, [isDark]);
 
   // Sync <html lang> with i18n language

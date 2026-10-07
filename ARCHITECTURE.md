@@ -27,7 +27,7 @@ narrative overview see [README.md](README.md).
 │  blast_correlation → shared helper (correlation summary)   │
 │  geom_utils      → area, deviation, find_df_column          │
 │  config          → frozen dataclasses (Tolerances, ...)     │
-│  ai_reporter / ai_service → OpenAI-compatible LLM client   │
+│  ai_v2/ → report prompts, providers, streaming and cache   │
 └──────────────────────┬──────────────────────────────────────┘
                        │ FastAPI + SQLite session
                        ▼
@@ -38,6 +38,9 @@ narrative overview see [README.md](README.md).
 │    meshes    → upload, info, vertices, contours, delete     │
 │    sections  → CRUD for section lines                       │
 │    process   → run pipeline, status, profiles, edits        │
+│    blast     → drill-hole upload and processing            │
+│    simulations → deterministic 3D energy maps              │
+│    mapping   → column mapping                              │
 │    export    → excel, word, dxf, images                     │
 │    settings  → tolerances, detection thresholds             │
 │    ai        → list models, health, generate report         │
@@ -71,22 +74,25 @@ For a single section run, the pipeline is:
      `compare_design_vs_asbuilt`.
    - Extraction results cached per section (for the drag-and-drop editor
      in the UI), and a flat list of comparison rows is persisted.
-4. **Browse / edit** — `GET /api/v1/profiles/{section_id}` returns raw
-   profiles plus the cached extraction. `PUT /api/v1/results/{section_id}/
+4. **Browse / edit** — `GET /api/v1/process/profiles/{section_id}` returns raw
+   profiles plus the cached extraction. `PUT /api/v1/process/results/{section_id}/
    reconciled` accepts user-edited bench positions, recomputes height/angle/
    berm, and re-runs comparison.
 5. **Export** — `GET /api/v1/export/{excel|word|dxf|images}` reads the
    cached results and produces the artefact.
 
-For Drill & Blast, the flow is independent and lives mostly in the
-Streamlit module:
+For Drill & Blast, the web/API and Streamlit adapters share the processing
+contracts and domain functions in `core/`:
 
-1. User uploads the ENAEX-format CSV/XLSX from the sidebar of the
-   *Análisis de Tronadura* tab.
+1. User uploads the ENAEX-format CSV/XLSX and confirms the source-column
+   mapping, elevation semantics, angular conventions and units.
 2. `core.calculo_tronadura.procesar_pozos` normalises coordinates
-   (`X=Latitud_Geo`, `Y=Longitud_Geo`, `Z_collar = Nombre_Banco + 15m`),
-   drops the ENAEX `COLS_DROP` columns, and computes toe coordinates via
-   `Inclination`/`Azimuth` trigonometry.
+   (`X=Latitud_Geo`, `Y=Longitud_Geo`). When the source represents a bench
+   elevation, `Z_collar` uses the valid, user-confirmed event height
+   `bench_height_m`; there is no automatic 15 m addition. Missing confirmation
+   blocks the dependent geometry. A confirmed collar elevation is retained
+   without that transformation. Toe coordinates use the confirmed inclination
+   and azimuth conventions.
 3. The cleaned DataFrame is overlaid onto any previously computed
    reconciliation sections via
    `proyectar_pozos_en_seccion` (radius `DEFAULTS.blast_correlation_
@@ -97,8 +103,9 @@ Streamlit module:
 
 ## Module boundaries
 
-- **Always import from `core`**, never from `core.submodule`. The
-  `core/__init__.py` re-exports the public API.
+- **Import the stable public API from `core`**. Check `core/__init__.py`
+  `__all__` before choosing an import. Modules that are not re-exported, such
+  as `core.geom_utils` and `core.ai_v2`, are imported from their submodules.
 - **Domain defaults live in `core/config.py`** as frozen dataclasses:
   `Tolerances`, `DetectionDefaults`, `PipelineDefaults`, `VisualizationDefaults`,
   `RampDetection`. UI sliders and CLI args override these at the edge.
@@ -128,9 +135,9 @@ backend and a shared object store for the mesh BLOBs.
   for `process_section`. Mesh objects and the executor must remain in
   the main thread — copy meshes before submitting.
 - The FastAPI `/process` endpoint also uses a `ThreadPoolExecutor` for
-  the same reason. SQLite writes from multiple threads are serialised
-  by Python's GIL; concurrent writes from different processes are not
-  safe.
+  the same reason. Connections enable SQLite WAL mode; SQLite controls write
+  locking. This store is intended for a single machine, not distributed workers
+  sharing a network database file.
 
 ## Configuration sources (in order of precedence)
 

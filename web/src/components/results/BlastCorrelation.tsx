@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
-import Plot from 'react-plotly.js';
+import Plot from '../charts/Plot';
 import type { Data, Layout, Config } from 'plotly.js';
 import { useBlastCorrelation, useSections } from '../../api/hooks';
 import { getSessionId } from '../../api/client';

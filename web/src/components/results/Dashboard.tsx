@@ -1,10 +1,15 @@
 import { useMemo } from 'react';
+import { BenchFilter } from './BenchFilter';
+import { CompliancePlanView } from './CompliancePlanView';
 import { useTranslation } from 'react-i18next';
-import Plot from 'react-plotly.js';
+import Plot from '../charts/Plot';
 import type { Data, Layout, Config, Shape } from 'plotly.js';
-import { useResults, useSections } from '../../api/hooks';
+import { useResults } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import type { ComparisonResult } from '../../api/types';
+import { compareStatus } from './ProfileView/domain/status';
+import type { BenchStatus } from './ProfileView/domain/types';
+import { toComparisonBenchStatuses } from './ProfileView/domain/mapping';
 
 // ─── Module-level icons (M3: hoisted to avoid per-render allocation) ──
 
@@ -49,51 +54,54 @@ export function filterByBench(
 }
 
 /** Unique bench numbers present in the data, ascending. */
-export function uniqueBenchNumbers(
+export interface DesignBenchOption {
+  readonly number: number;
+  readonly minElevation: number | null;
+  readonly maxElevation: number | null;
+}
+
+export function designBenchOptions(
   rows: readonly ComparisonResult[],
-): number[] {
-  const set = new Set<number>();
-  for (const r of rows) set.add(r.bench_num);
-  return [...set].sort((a, b) => a - b);
+): DesignBenchOption[] {
+  const elevations = new Map<number, Set<number>>();
+  for (const row of rows) {
+    if (row.type === 'EXTRA') continue;
+    if (!Number.isInteger(row.bench_num)) continue;
+    const values = elevations.get(row.bench_num) ?? new Set<number>();
+    const elevation = Number(row.level);
+    if (Number.isFinite(elevation)) values.add(elevation);
+    elevations.set(row.bench_num, values);
+  }
+  return [...elevations.entries()].sort(([a], [b]) => a - b).map(([number, values]) => {
+    const ordered = [...values].sort((a, b) => a - b);
+    return {
+      number,
+      minElevation: ordered.length ? ordered[0]! : null,
+      maxElevation: ordered.length ? ordered[ordered.length - 1]! : null,
+    };
+  });
 }
 
 // ─── Binary compliance scoring (Track 1-WEB) ─────────────────
 //
-// The Streamlit dashboard was redesigned around binary compliance:
-// every bench is either CUMPLE or NO CUMPLE (any "FUERA DE TOLERANCIA"
-// is merged into NO CUMPLE). A per-bench score weights the three
-// parameters (berma=60, ángulo=20, altura=20, max 100). A profile
-// (i.e. a section) CUMPLEs when its average bench score ≥ 70. The
-// global score is the mean of per-profile scores.
-
-/** Maximum bench score when all three parameters CUMPLE. */
 export const BENCH_SCORE_MAX = 100;
 
 /** Per-parameter weights (sum = 100). */
 export const SCORE_WEIGHTS = {
   berm: 60,
-  angle: 20,
-  height: 20,
+  angle: 10,
+  height: 30,
 } as const;
 
 /** Threshold above which a profile is considered CUMPLE. */
-export const PROFILE_CUMPLE_THRESHOLD = 70;
-
-/**
- * Score for a single bench row. Each parameter contributes its
- * weight if it CUMPLES, 0 otherwise.
- */
+/** Score for a single bench row. Kept for the explicitly numeric KPI. */
 export function benchScore(row: ComparisonResult): number {
+  if (typeof row.bench_score === 'number' && Number.isFinite(row.bench_score)) return row.bench_score;
   let score = 0;
   if (row.berm_status === 'CUMPLE') score += SCORE_WEIGHTS.berm;
   if (row.angle_status === 'CUMPLE') score += SCORE_WEIGHTS.angle;
   if (row.height_status === 'CUMPLE') score += SCORE_WEIGHTS.height;
   return score;
-}
-
-/** True if a profile (section) meets the CUMPLE threshold. */
-export function profileCumple(score: number): boolean {
-  return score >= PROFILE_CUMPLE_THRESHOLD;
 }
 
 /**
@@ -119,6 +127,7 @@ export function computeProfileScores(
 ): Map<string, number> {
   const map = new Map<string, number[]>();
   for (const r of rows) {
+    if (r.type !== 'MATCH') continue;
     const list = map.get(r.section) ?? [];
     list.push(benchScore(r));
     map.set(r.section, list);
@@ -129,6 +138,16 @@ export function computeProfileScores(
     out.set(section, scores.length === 0 ? 0 : sum / scores.length);
   }
   return out;
+}
+
+/** Worst evaluated tier across the matched design benches in each section. */
+export function computeProfileStatuses(rows: readonly ComparisonResult[]): Map<string, BenchStatus> {
+  const statuses = new Map<string, BenchStatus>();
+  for (const bench of toComparisonBenchStatuses(rows)) {
+    const previous = statuses.get(bench.sectionName);
+    statuses.set(bench.sectionName, previous == null || compareStatus(bench.status, previous) > 0 ? bench.status : previous);
+  }
+  return statuses;
 }
 
 /**
@@ -145,26 +164,24 @@ export function computeGlobalScore(
   return total / profiles.size;
 }
 
-/**
- * Counts of CUMPLE vs NO CUMPLE profiles (binary — FUERA is folded
- * into NO CUMPLE). Used by the global KPI cards.
- */
+/** Counts each profile by its worst evaluated backend tolerance tier. */
 export interface ProfileComplianceCounts {
   cumple: number;
+  fuera: number;
   noCumple: number;
 }
 
 export function computeProfileComplianceCounts(
   rows: readonly ComparisonResult[],
 ): ProfileComplianceCounts {
-  const profiles = computeProfileScores(rows);
-  let cumple = 0;
-  let noCumple = 0;
-  for (const score of profiles.values()) {
-    if (profileCumple(score)) cumple += 1;
-    else noCumple += 1;
+  const profiles = computeProfileStatuses(rows);
+  const counts: ProfileComplianceCounts = { cumple: 0, fuera: 0, noCumple: 0 };
+  for (const status of profiles.values()) {
+    if (status === 'CUMPLE') counts.cumple += 1;
+    else if (status === 'FUERA') counts.fuera += 1;
+    else if (status === 'NO_CUMPLE') counts.noCumple += 1;
   }
-  return { cumple, noCumple };
+  return counts;
 }
 
 // ─── Per-parameter breakdown (binary) ────────────────────────
@@ -209,6 +226,7 @@ export function computeParameterBreakdown(
         : parameter === 'angle'
           ? r.angle_status
           : r.berm_status;
+      if (!status || status === '-') continue;
       const isCumple = status === 'CUMPLE';
       if (isCumple) cumple += 1;
       else noCumple += 1;
@@ -227,7 +245,6 @@ export function computeParameterBreakdown(
 
 export interface SectorCompliance {
   sector: string;
-  /** Percentage of benches CUMPLE on the sector (0-100). */
   pct: number;
   total: number;
 }
@@ -238,11 +255,10 @@ export function computeSectorCompliance(
   const map = new Map<string, { cumple: number; total: number }>();
   for (const r of rows) {
     const entry = map.get(r.sector) ?? { cumple: 0, total: 0 };
-    entry.total += 1;
-    if (r.height_status === 'CUMPLE' &&
-        r.angle_status === 'CUMPLE' &&
-        r.berm_status === 'CUMPLE') {
-      entry.cumple += 1;
+    for (const status of [r.height_status, r.angle_status, r.berm_status]) {
+      if (!status || status === '-') continue;
+      entry.total += 1;
+      if (status === 'CUMPLE') entry.cumple += 1;
     }
     map.set(r.sector, entry);
   }
@@ -438,7 +454,6 @@ function getValueColor(pct: number): string {
 export function Dashboard() {
   const { t } = useTranslation();
   const { data: results } = useResults();
-  const { data: sections } = useSections();
   const filters = useSession((s) => s.filters);
   const setFilters = useSession((s) => s.setFilters);
 
@@ -449,7 +464,7 @@ export function Dashboard() {
   );
 
   const benchNumbers = useMemo(
-    () => uniqueBenchNumbers(results ?? []),
+    () => designBenchOptions(results ?? []),
     [results],
   );
 
@@ -489,8 +504,7 @@ export function Dashboard() {
   );
 
   const totalBenches = filteredResults.length;
-  const nSections = sections?.length ?? 0;
-  const filterActive = filters.bench.length > 0;
+  const nSections = new Set(filteredResults.map((row) => row.section)).size;
 
   const plotConfig = useMemo<Partial<Config>>(
     () => ({ displayModeBar: false, responsive: true }),
@@ -660,48 +674,11 @@ export function Dashboard() {
         </span>
       </div>
 
-      {/* G10: bench filter */}
-      <div className="glass-panel rounded-xl p-4 flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wider mr-1" style={{ color: 'var(--color-text-muted)' }}>
-          {t('dashboard.bench_filter.label')}
-        </span>
-        <button
-          type="button"
-          onClick={() => setFilters({ bench: [] })}
-          className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
-            !filterActive ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]'
-          }`}
-          aria-pressed={!filterActive}
-          aria-label={`${t('dashboard.bench_filter.all')}, ${!filterActive ? 'activado' : 'desactivado'}`}
-        >
-          {t('dashboard.bench_filter.all')}
-        </button>
-        {benchNumbers.map((n) => {
-          const selected = filters.bench.includes(n);
-          return (
-            <button
-              key={n}
-              type="button"
-              onClick={() => {
-                const next = selected
-                  ? filters.bench.filter((b) => b !== n)
-                  : [...filters.bench, n];
-                setFilters({ bench: next });
-              }}
-              className={`text-xs px-2.5 py-1 rounded-full font-medium tabular-nums transition-colors ${
-                selected ? 'bg-[var(--color-accent)] text-white' : 'bg-[var(--color-surface-muted)] text-[var(--color-text-secondary)]'
-              }`}
-              aria-pressed={selected}
-              aria-label={`Banco ${n}, ${selected ? 'activado' : 'desactivado'}`}
-            >
-              B{n}
-            </button>
-          );
-        })}
-      </div>
+      <BenchFilter available={benchNumbers} selected={filters.bench} onChange={(bench) => setFilters({ bench })} />
 
+      {!filteredResults.length ? <p role="status" className="rounded-lg border border-border bg-surface-raised p-4 text-sm text-text-muted">{t('dashboard.bench_filter.no_results')}</p> : <>
       {/* Section 1: Global KPI */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KPICard
           title={t('dashboard.kpi.global_score')}
           value={globalScore.toFixed(1)}
@@ -713,18 +690,27 @@ export function Dashboard() {
           title={t('dashboard.kpi.profiles_ok')}
           value={String(profileCounts.cumple)}
           valueColor="#10b981"
-          pct={profileCounts.cumple + profileCounts.noCumple === 0
+          pct={profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple === 0
             ? 0
-            : profileCounts.cumple / (profileCounts.cumple + profileCounts.noCumple)}
+            : profileCounts.cumple / (profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple)}
           icon={ProfilesOkIcon}
+        />
+        <KPICard
+          title={t('dashboard.kpi.profiles_outside')}
+          value={String(profileCounts.fuera)}
+          valueColor="#f59e0b"
+          pct={profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple === 0
+            ? 0
+            : profileCounts.fuera / (profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple)}
+          icon={GlobalIcon}
         />
         <KPICard
           title={t('dashboard.kpi.profiles_no')}
           value={String(profileCounts.noCumple)}
           valueColor="#ef4444"
-          pct={profileCounts.cumple + profileCounts.noCumple === 0
+          pct={profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple === 0
             ? 0
-            : profileCounts.noCumple / (profileCounts.cumple + profileCounts.noCumple)}
+            : profileCounts.noCumple / (profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple)}
           icon={ProfilesNoIcon}
         />
       </div>
@@ -800,6 +786,8 @@ export function Dashboard() {
         </div>
       )}
 
+      <CompliancePlanView results={filteredResults} statuses={computeProfileStatuses(filteredResults)} />
+
       {/* Section 4: Deviation histograms with tolerance bands */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <HistogramPanel
@@ -821,6 +809,7 @@ export function Dashboard() {
           emptyText={t('dashboard.histogram.no_data')}
         />
       </div>
+      </>}
     </div>
   );
 }

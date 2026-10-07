@@ -631,7 +631,7 @@ class Test20ReactMaps:
     def test_panel_renders_with_2d_arrays(self):
         # Verifica que el panel incluye el SliceHeatmap (data-testid)
         panel = _REPO_ROOT / "web/src/components/results/BlastSimulationPanel.tsx"
-        text = panel.read_text()
+        text = panel.read_text(encoding="utf-8")
         assert "SliceHeatmap" in text or "CanvasHeatmap" in text
         assert "source_holes_projection" in text
 
@@ -641,7 +641,7 @@ class Test20ReactMaps:
 class Test21StreamlitMaps:
     def test_streamlit_renders_with_2d_arrays(self):
         sl = _REPO_ROOT / "ui/modulo_tronadura/energy_simulation.py"
-        text = sl.read_text()
+        text = sl.read_text(encoding="utf-8")
         assert "go.Heatmap" in text or "plan_slice" in text
         assert "source_holes_projection" in text
 
@@ -650,8 +650,12 @@ class Test21StreamlitMaps:
 
 class Test22Parity:
     def test_both_consume_same_contract(self):
-        react = (_REPO_ROOT / "web/src/components/results/BlastSimulationPanel.tsx").read_text()
-        streamlit = (_REPO_ROOT / "ui/modulo_tronadura/energy_simulation.py").read_text()
+        react = (
+            _REPO_ROOT / "web/src/components/results/BlastSimulationPanel.tsx"
+        ).read_text(encoding="utf-8")
+        streamlit = (
+            _REPO_ROOT / "ui/modulo_tronadura/energy_simulation.py"
+        ).read_text(encoding="utf-8")
         # Ambos importan SimulationConfiguration
         assert "SimulationConfiguration" in react or "SimulationCreateRequest" in react
         assert "SimulationConfiguration" in streamlit or "_build_config" in streamlit

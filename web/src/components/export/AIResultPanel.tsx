@@ -1,4 +1,6 @@
 import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/Button';
 import { type AIErrorState } from './useAIConfig';
 import type { AIResponseChunk, AIUsageMetrics } from '../../api/types';
@@ -117,7 +119,7 @@ function ResultCard({
         >
           {t('ai_reporter.report.title')}
         </h5>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {report.cached && (
             <span
               className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full"
@@ -152,17 +154,34 @@ function ResultCard({
       </div>
 
       <div
-        className="text-xs leading-relaxed"
-        style={{
-          color: 'var(--color-text-primary)',
-          maxHeight: '600px',
-          overflowY: 'auto',
-          whiteSpace: 'pre-wrap',
-          fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-        }}
+        className="min-w-0 max-w-full overflow-x-auto text-sm leading-7"
+        style={{ color: 'var(--color-text-primary)' }}
         data-testid="ai-reporter-content"
       >
-        {report.content}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            h1: ({ children }) => <h1 className="mb-4 mt-2 text-2xl font-semibold leading-tight" style={{ color: 'var(--color-text-primary)' }}>{children}</h1>,
+            h2: ({ children }) => <h2 className="mb-3 mt-6 border-b pb-2 text-xl font-semibold leading-tight" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-primary)' }}>{children}</h2>,
+            h3: ({ children }) => <h3 className="mb-2 mt-5 text-lg font-semibold leading-tight" style={{ color: 'var(--color-text-primary)' }}>{children}</h3>,
+            h4: ({ children }) => <h4 className="mb-2 mt-4 text-base font-semibold" style={{ color: 'var(--color-text-primary)' }}>{children}</h4>,
+            p: ({ children }) => <p className="my-3 whitespace-pre-wrap">{children}</p>,
+            ul: ({ children }) => <ul className="my-3 list-disc space-y-1 pl-6">{children}</ul>,
+            ol: ({ children }) => <ol className="my-3 list-decimal space-y-1 pl-6">{children}</ol>,
+            li: ({ children }) => <li className="pl-1">{children}</li>,
+            blockquote: ({ children }) => <blockquote className="my-4 border-l-2 pl-4" style={{ borderColor: 'var(--color-accent)', color: 'var(--color-text-secondary)' }}>{children}</blockquote>,
+            a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2" style={{ color: 'var(--color-accent-bright)' }}>{children}</a>,
+            hr: () => <hr className="my-5" style={{ borderColor: 'var(--color-border)' }} />,
+            pre: ({ children }) => <pre className="my-4 overflow-x-auto rounded-lg border p-4 text-xs leading-5" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-sunken)', color: 'var(--color-text-primary)' }}>{children}</pre>,
+            code: ({ children, className }) => <code className={className ? 'font-mono' : 'rounded px-1.5 py-0.5 font-mono text-[0.9em]'} style={{ backgroundColor: className ? undefined : 'var(--color-surface-sunken)', color: 'var(--color-text-primary)' }}>{children}</code>,
+            table: ({ children }) => <div className="my-4 max-w-full overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--color-border)' }}><table className="w-full min-w-[32rem] border-collapse text-left text-sm">{children}</table></div>,
+            thead: ({ children }) => <thead style={{ backgroundColor: 'var(--color-surface-raised)' }}>{children}</thead>,
+            th: ({ children, style }) => <th className="border-b px-3 py-2 font-semibold" style={{ borderColor: 'var(--color-border)', textAlign: style?.textAlign }}>{children}</th>,
+            td: ({ children, style }) => <td className="border-b px-3 py-2 align-top" style={{ borderColor: 'var(--color-border)', textAlign: style?.textAlign }}>{children}</td>,
+          }}
+        >
+          {report.content}
+        </ReactMarkdown>
       </div>
 
       {copied && (

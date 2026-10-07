@@ -6,6 +6,7 @@ import trimesh
 
 from core import SectionLine, cut_mesh_with_section
 from core.section_cutter import (
+    cut_mesh_with_section_diagnostics,
     ProfileResult,
     azimuth_to_direction,
     compute_local_azimuth,
@@ -13,6 +14,7 @@ from core.section_cutter import (
     generate_perpendicular_sections,
     generate_sections_along_crest,
 )
+from core.horizontal_deviation import profile_intersections_at_elevation
 
 
 class TestCutMesh:
@@ -66,6 +68,265 @@ class TestCutMesh:
         )
         result = cut_mesh_with_section(pit_mesh_design, section)
         assert result is None
+
+    def test_disconnected_intersection_components_are_rejected_with_diagnostic(self):
+        first = trimesh.Trimesh(
+            vertices=[[0, -1, 0], [0, 1, 0], [1, 0, 1]],
+            faces=[[0, 1, 2]],
+            process=False,
+        )
+        second = trimesh.Trimesh(
+            vertices=[[5, -1, 10], [5, 1, 10], [6, 0, 11]],
+            faces=[[0, 1, 2]],
+            process=False,
+        )
+        mesh = trimesh.util.concatenate([first, second])
+        section = SectionLine("S-GAP", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.profile is None
+        assert diagnostic.warnings == ("disconnected_profile_components",)
+        assert cut_mesh_with_section(mesh, section) is None
+
+    def test_disconnected_component_outside_section_is_ignored(self):
+        first = trimesh.Trimesh(
+            vertices=[[0, -1, 0], [0, 1, 0], [1, 0, 1]],
+            faces=[[0, 1, 2]],
+            process=False,
+        )
+        second = trimesh.Trimesh(
+            vertices=[[20, -1, 10], [20, 1, 10], [21, 0, 11]],
+            faces=[[0, 1, 2]],
+            process=False,
+        )
+        section = SectionLine("S-OUTSIDE", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(
+            trimesh.util.concatenate([first, second]), section
+        )
+
+        assert diagnostic.warnings == ()
+        assert diagnostic.profile is not None
+        assert diagnostic.profile.distances.min() == pytest.approx(0.0)
+        assert diagnostic.profile.distances.max() == pytest.approx(1.0)
+
+    def test_intersection_entirely_outside_section_reports_no_intersection(self):
+        mesh = trimesh.Trimesh(
+            vertices=[[20, -1, 0], [20, 1, 0], [21, 0, 1]],
+            faces=[[0, 1, 2]],
+            process=False,
+        )
+        section = SectionLine("S-NO-INTERSECTION", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.profile is None
+        assert diagnostic.warnings == ("no_section_intersection",)
+
+    def test_projected_overlapping_components_are_rejected_instead_of_averaged(self):
+        first = trimesh.Trimesh(
+            vertices=[[0, -1, 0], [0, 1, 0], [1, 0, 1]],
+            faces=[[0, 1, 2]],
+            process=False,
+        )
+        second = trimesh.Trimesh(
+            vertices=[[0, -1, 10], [0, 1, 10], [1, 0, 11]],
+            faces=[[0, 1, 2]],
+            process=False,
+        )
+        mesh = trimesh.util.concatenate([first, second])
+        section = SectionLine("S-OVERLAP", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.profile is None
+        assert diagnostic.warnings == ("disconnected_profile_components",)
+
+    def test_connected_profile_with_horizontal_reversal_is_rejected_as_ambiguous(self):
+        profile_points = [(0, 0), (10, 1), (4, 2)]
+        vertices = [
+            [distance, y, elevation]
+            for distance, elevation in profile_points
+            for y in (-1, 1)
+        ]
+        mesh = trimesh.Trimesh(
+            vertices=vertices,
+            faces=[[0, 2, 3], [0, 3, 1], [2, 4, 5], [2, 5, 3]],
+            process=False,
+        )
+        section = SectionLine("S-OVERHANG", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.profile is None
+        assert diagnostic.warnings == ("ambiguous_profile_geometry",)
+
+    def test_millimeter_scale_reversal_is_clamped_to_monotonic_distance(self):
+        profile_points = [(0, 0), (1, 1), (0.9989, 2)]
+        vertices = [
+            [distance, y, elevation]
+            for distance, elevation in profile_points
+            for y in (-1, 1)
+        ]
+        mesh = trimesh.Trimesh(
+            vertices=vertices,
+            faces=[[0, 2, 3], [0, 3, 1], [2, 4, 5], [2, 5, 3]],
+            process=False,
+        )
+        section = SectionLine("S-MILLIMETER", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.warnings == ()
+        assert diagnostic.profile is not None
+        assert np.all(np.diff(diagnostic.profile.distances) >= 0.0)
+        assert diagnostic.profile.distances[-1] == pytest.approx(1.0)
+        assert diagnostic.profile.elevations[-1] == pytest.approx(2.0)
+
+    def test_cumulative_reversal_beyond_profile_resolution_is_rejected(self):
+        profile_points = [(0, 0), (1, 1), (0.94, 2), (0.88, 3)]
+        vertices = [
+            [distance, y, elevation]
+            for distance, elevation in profile_points
+            for y in (-1, 1)
+        ]
+        faces = []
+        for index in range(len(profile_points) - 1):
+            first = 2 * index
+            following = first + 2
+            faces.extend([[first, following, following + 1], [first, following + 1, first + 1]])
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        section = SectionLine("S-CUMULATIVE-REVERSAL", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.profile is None
+        assert diagnostic.warnings == ("ambiguous_profile_geometry",)
+
+    def test_sub_resolution_reversal_is_preserved_as_vertical_with_warning(self):
+        profile_points = [(0, 0), (1, 1), (0.95, 2), (2, 3)]
+        vertices = [
+            [distance, y, elevation]
+            for distance, elevation in profile_points
+            for y in (-1, 1)
+        ]
+        faces = []
+        for index in range(len(profile_points) - 1):
+            first = 2 * index
+            following = first + 2
+            faces.extend([[first, following, following + 1], [first, following + 1, first + 1]])
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        section = SectionLine("S-SMALL-REVERSAL", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.profile is not None
+        assert diagnostic.warnings == ("minor_profile_reversal_normalized",)
+        distances = diagnostic.profile.distances
+        elevations = diagnostic.profile.elevations
+        assert np.all(np.diff(distances) >= 0.0)
+        assert elevations[np.flatnonzero(np.isclose(distances, 1.0))].tolist() == pytest.approx([1.0, 1.5, 2.0])
+        assert distances[-1] == pytest.approx(2.0)
+        crossing = profile_intersections_at_elevation(distances, elevations, 1.5)
+        assert crossing.status == "measured"
+        assert crossing.distance_m == pytest.approx(1.0)
+
+    def test_repair_has_physical_cap_even_if_profile_resolution_is_larger(self, monkeypatch):
+        from dataclasses import replace
+        import core.config
+
+        profile_points = [(0, 0), (1, 1), (0.8, 2)]
+        vertices = [
+            [distance, y, elevation]
+            for distance, elevation in profile_points
+            for y in (-1, 1)
+        ]
+        mesh = trimesh.Trimesh(
+            vertices=vertices,
+            faces=[[0, 2, 3], [0, 3, 1], [2, 4, 5], [2, 5, 3]],
+            process=False,
+        )
+        monkeypatch.setattr(
+            core.config,
+            "DETECTION",
+            replace(core.config.DETECTION, profile_resolution=1.0),
+        )
+        section = SectionLine("S-REPAIR-CAP", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.profile is None
+        assert diagnostic.warnings == ("ambiguous_profile_geometry",)
+
+    def test_reversal_outside_requested_section_does_not_reject_profile(self):
+        profile_points = [(-20, 0), (-15, 5), (-16, 6), (-10, 10), (0, 11), (10, 10), (20, 0)]
+        vertices = [
+            [distance, y, elevation]
+            for distance, elevation in profile_points
+            for y in (-1, 1)
+        ]
+        faces = []
+        for index in range(len(profile_points) - 1):
+            first = 2 * index
+            following = first + 2
+            faces.extend([[first, following, following + 1], [first, following + 1, first + 1]])
+        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+        section = SectionLine("S-CLIPPED", np.array([0.0, 0.0]), 90.0, 18.0)
+
+        diagnostic = cut_mesh_with_section_diagnostics(mesh, section)
+
+        assert diagnostic.warnings == ()
+        assert diagnostic.profile is not None
+        assert diagnostic.profile.distances.min() == pytest.approx(-9.0)
+        assert diagnostic.profile.distances.max() == pytest.approx(9.0)
+        assert diagnostic.profile.elevations[0] == pytest.approx(10.1)
+        assert diagnostic.profile.elevations[-1] == pytest.approx(10.1)
+        assert np.all(np.diff(diagnostic.profile.distances) >= -1e-3)
+
+    def test_connected_vertical_intersection_is_preserved(self):
+        mesh = trimesh.Trimesh(
+            vertices=[
+                [0, -1, 0], [0, 1, 0], [0, 1, 10], [0, -1, 10],
+            ],
+            faces=[[0, 1, 2], [0, 2, 3]],
+            process=False,
+        )
+        section = SectionLine("S-VERTICAL", np.array([0.0, 0.0]), 90.0, 20.0)
+
+        profile = cut_mesh_with_section(mesh, section)
+
+        assert profile is not None
+        assert len(profile.distances) >= 2
+        assert profile.distances == pytest.approx(np.zeros(len(profile.distances)))
+        assert profile.elevations[0] == pytest.approx(0.0)
+        assert profile.elevations[-1] == pytest.approx(10.0)
+
+    def test_three_component_section_origin_matches_xy_origin_profile(self):
+        mesh = trimesh.Trimesh(
+            vertices=[
+                [0, -1, 0], [0, 1, 0], [0, 1, 10], [0, -1, 10],
+            ],
+            faces=[[0, 1, 2], [0, 2, 3]],
+            process=False,
+        )
+        section_xy = SectionLine("S-XY", np.array([0.0, 0.0]), 90.0, 20.0)
+        section_xyz = SectionLine("S-XYZ", np.array([0.0, 0.0, 999.0]), 90.0, 20.0)
+
+        diagnostic_xy = cut_mesh_with_section_diagnostics(mesh, section_xy)
+        diagnostic_xyz = cut_mesh_with_section_diagnostics(mesh, section_xyz)
+
+        assert diagnostic_xyz.warnings == diagnostic_xy.warnings == ()
+        assert diagnostic_xyz.profile is not None
+        assert diagnostic_xy.profile is not None
+        assert diagnostic_xyz.profile.distances == pytest.approx(
+            diagnostic_xy.profile.distances
+        )
+        assert diagnostic_xyz.profile.elevations == pytest.approx(
+            diagnostic_xy.profile.elevations
+        )
+        assert diagnostic_xyz.profile.elevations[0] == pytest.approx(0.0)
+        assert diagnostic_xyz.profile.elevations[-1] == pytest.approx(10.0)
 
 
 class TestGenerateSections:

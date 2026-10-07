@@ -9,6 +9,8 @@ import {
 import { getSessionId } from '../../api/client';
 import type { BlastUploadResponse, BlockingError, RejectedRow } from '../../api/types';
 import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
+import { Button } from '../ui/Button';
+import { PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 
 export interface BlastUploaderProps {
   onUploaded?: (response: BlastUploadResponse) => void;
@@ -107,7 +109,10 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
   const upload = useUploadBlastCsv();
   const holes = useBlastHolesBySession(sessionId ?? null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [filename, setFilename] = useState<string | null>(null);
+  const contractRef = useRef<HTMLDetailsElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const filename = selectedFile?.name ?? null;
   const [state, setState] = useState<GeometryState>(DEFAULT_STATE);
 
   // INTEGRACIÓN §5.3/§5.4: editing any option after confirming invalidates
@@ -123,7 +128,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
   };
 
   const geometry: BlastGeometryForm | null = useMemo(() => buildGeometry(state), [state]);
-  const canSubmit = Boolean(sessionId) && geometry !== null && !upload.isPending;
+  const canSubmit = Boolean(sessionId) && selectedFile !== null && geometry !== null && !upload.isPending;
 
   // INTEGRACIÓN §5.4 — extract structured diagnostics from HTTP 400/422
   // error responses (AxiosError.response.data) so the operator sees the
@@ -146,23 +151,34 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
   const rejectedRows: RejectedRow[] = upload.isError ? errorRejectedRows : successRejectedRows;
   const diagnostics = upload.isError ? errorDiagnostics : upload.data;
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !sessionId || !geometry) return;
-    setFilename(file.name);
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setFileError(t('blast.csv_required'));
+      return;
+    }
+    setFileError(null);
+    setSelectedFile(file);
+    upload.reset?.();
+    update('confirmed', false);
+    if (contractRef.current) contractRef.current.open = true;
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile || !sessionId || !geometry || upload.isPending) return;
     try {
-      const result = await upload.mutateAsync({ sessionId, file, geometry });
-      // On HTTP 422 the backend returns a structured body but Axios
-      // treats non-2xx as an error — the result only arrives on 200.
+      const result = await upload.mutateAsync({ sessionId, file: selectedFile, geometry });
       onUploaded?.(result);
     } catch {
-      // Diagnostics surfaced via errorDiagnostics below.
+      return;
     }
   };
 
   return (
     <section
-      className="flex flex-col gap-3 rounded-lg border p-4"
+      className="flex flex-col gap-3 rounded-lg border p-4 text-left"
       style={{
         borderColor: 'var(--color-border)',
         backgroundColor: 'var(--color-surface-muted)',
@@ -176,7 +192,15 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
         {t('blast.upload_title')}
       </h3>
 
-      <details className="text-xs" data-testid="geometry-contract-form">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={upload.isPending} data-testid="blast-file-picker">{t('blast.choose_csv')}</Button>
+        {filename && <span className="min-w-0 break-all text-xs text-text-secondary">{t('blast.file_selected', { filename })}</span>}
+      </div>
+      <input ref={fileInputRef} type="file" accept=".csv,text/csv" data-testid="blast-file-input" onChange={handleFileChange} disabled={upload.isPending} className="hidden" />
+      {fileError && <p role="alert" className="text-xs text-mine-red">{fileError}</p>}
+      <p className="text-xs text-text-muted">{t('blast.upload_steps')}</p>
+
+      <details ref={contractRef} className="text-xs" data-testid="geometry-contract-form">
         <summary className="cursor-pointer font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
           {t('blast.geometry_contract', { defaultValue: 'Contrato geométrico (obligatorio)' })}
         </summary>
@@ -189,7 +213,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               onChange={(e) => update('inclinationSourceColumn', e.target.value)}
               placeholder="Inclinacion_real"
               data-testid="incl-source-column"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -200,7 +224,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               onChange={(e) => update('azimuthSourceColumn', e.target.value)}
               placeholder="Azimuth_real"
               data-testid="az-source-column"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -209,11 +233,11 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               value={state.inclinationConvention}
               onChange={(e) => update('inclinationConvention', e.target.value as GeometryState['inclinationConvention'])}
               data-testid="incl-convention"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             >
               <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {INCL_CONVENTIONS.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>{t('blast.geometry_options.' + v)}</option>
               ))}
             </select>
           </label>
@@ -223,11 +247,11 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               value={state.inclinationSignConvention}
               onChange={(e) => update('inclinationSignConvention', e.target.value as GeometryState['inclinationSignConvention'])}
               data-testid="incl-sign"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             >
               <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {SIGN_CONVENTIONS.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>{t('blast.geometry_options.' + v)}</option>
               ))}
             </select>
           </label>
@@ -238,11 +262,11 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
                 value={state.inclinationSourceRule}
                 onChange={(e) => update('inclinationSourceRule', e.target.value as GeometryState['inclinationSourceRule'])}
                 data-testid="source-rule"
-                className="rounded border px-2 py-1"
+                className={PROJECT_INPUT_CLASS}
               >
                 <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
                 {SOURCE_RULES.map((v) => (
-                  <option key={v} value={v}>{v}</option>
+                  <option key={v} value={v}>{t('blast.geometry_options.' + v)}</option>
                 ))}
               </select>
             </label>
@@ -253,11 +277,11 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               value={state.inclinationUnit}
               onChange={(e) => update('inclinationUnit', e.target.value as GeometryState['inclinationUnit'])}
               data-testid="incl-unit"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             >
               <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {UNITS.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>{t('blast.geometry_options.' + v)}</option>
               ))}
             </select>
           </label>
@@ -267,11 +291,11 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               value={state.azimuthUnit}
               onChange={(e) => update('azimuthUnit', e.target.value as GeometryState['azimuthUnit'])}
               data-testid="az-unit"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             >
               <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {UNITS.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>{t('blast.geometry_options.' + v)}</option>
               ))}
             </select>
           </label>
@@ -281,11 +305,11 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               value={state.azimuthConvention}
               onChange={(e) => update('azimuthConvention', e.target.value as GeometryState['azimuthConvention'])}
               data-testid="az-convention"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             >
               <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
               {AZ_CONVENTIONS.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v}>{t('blast.geometry_options.' + v)}</option>
               ))}
             </select>
           </label>
@@ -298,7 +322,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               value={state.benchHeightM}
               onChange={(e) => update('benchHeightM', e.target.value)}
               data-testid="bench-height"
-              className="rounded border px-2 py-1"
+              className={PROJECT_INPUT_CLASS}
             />
           </label>
           <label className="col-span-2 flex items-center gap-2 mt-1" data-testid="confirm-row">
@@ -318,16 +342,9 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
         </div>
       </details>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".csv"
-        data-testid="blast-file-input"
-        onChange={handleFileChange}
-        disabled={!canSubmit}
-        className="text-xs file:mr-3 file:rounded-md file:border-0 file:bg-[var(--color-accent)] file:px-3 file:py-1.5 file:text-white file:transition-colors disabled:opacity-50"
-        style={{ color: 'var(--color-text-primary)' }}
-      />
+      <Button type="button" size="sm" onClick={handleUpload} disabled={!canSubmit} loading={upload.isPending} data-testid="blast-upload-submit">
+        {t('blast.submit_csv')}
+      </Button>
       {!sessionId && (
         <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {t('blast.upload_no_session', { defaultValue: 'Inicie una sesión para cargar pozos.' })}
@@ -339,11 +356,6 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             defaultValue:
               'Complete y confirme el contrato geométrico antes de cargar el CSV.',
           })}
-        </p>
-      )}
-      {filename && (
-        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('blast.file_selected', { filename })}
         </p>
       )}
       {upload.isPending && (

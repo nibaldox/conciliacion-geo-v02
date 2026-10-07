@@ -55,7 +55,9 @@ def init_db():
             n_vertices INTEGER,
             n_faces INTEGER,
             bounds TEXT,
-            uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP
+            uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            import_options TEXT,
+            import_report TEXT
         );
 
         CREATE TABLE IF NOT EXISTS results (
@@ -92,6 +94,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_blast_simulations_session
             ON blast_simulations(session_id);
     """)
+    mesh_columns = {row["name"] for row in conn.execute("PRAGMA table_info(meshes)")}
+    if "import_options" not in mesh_columns:
+        conn.execute("ALTER TABLE meshes ADD COLUMN import_options TEXT")
+    if "import_report" not in mesh_columns:
+        conn.execute("ALTER TABLE meshes ADD COLUMN import_report TEXT")
     conn.commit()
     conn.close()
 
@@ -157,6 +164,8 @@ def save_mesh(
     n_vertices: int,
     n_faces: int,
     bounds: Dict[str, float],
+    import_options: Optional[Dict[str, Any]] = None,
+    import_report: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Save a mesh file to the database. Returns mesh ID."""
     mesh_id = str(uuid.uuid4())
@@ -166,7 +175,7 @@ def save_mesh(
         "DELETE FROM meshes WHERE session_id = ? AND type = ?", (session_id, mesh_type)
     )
     conn.execute(
-        "INSERT INTO meshes (id, session_id, type, filename, data, n_vertices, n_faces, bounds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO meshes (id, session_id, type, filename, data, n_vertices, n_faces, bounds, import_options, import_report) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             mesh_id,
             session_id,
@@ -176,6 +185,8 @@ def save_mesh(
             n_vertices,
             n_faces,
             json.dumps(bounds),
+            json.dumps(import_options) if import_options is not None else None,
+            json.dumps(import_report) if import_report is not None else None,
         ),
     )
     conn.execute(
@@ -190,7 +201,7 @@ def get_mesh(session_id: str, mesh_type: str) -> Optional[Dict[str, Any]]:
     """Get mesh info and data by session and type."""
     conn = get_connection()
     row = conn.execute(
-        "SELECT id, type, filename, data, n_vertices, n_faces, bounds, uploaded_at FROM meshes WHERE session_id = ? AND type = ?",
+        "SELECT id, type, filename, data, n_vertices, n_faces, bounds, uploaded_at, import_options, import_report FROM meshes WHERE session_id = ? AND type = ?",
         (session_id, mesh_type),
     ).fetchone()
     conn.close()
@@ -205,6 +216,8 @@ def get_mesh(session_id: str, mesh_type: str) -> Optional[Dict[str, Any]]:
         "n_faces": row["n_faces"],
         "bounds": json.loads(row["bounds"]),
         "uploaded_at": row["uploaded_at"],
+        "import_options": json.loads(row["import_options"]) if row["import_options"] else None,
+        "import_report": json.loads(row["import_report"]) if row["import_report"] else None,
     }
 
 
@@ -212,7 +225,7 @@ def get_mesh_by_id(mesh_id: str) -> Optional[Dict[str, Any]]:
     """Get mesh by its ID."""
     conn = get_connection()
     row = conn.execute(
-        "SELECT id, session_id, type, filename, data, n_vertices, n_faces, bounds, uploaded_at FROM meshes WHERE id = ?",
+        "SELECT id, session_id, type, filename, data, n_vertices, n_faces, bounds, uploaded_at, import_options, import_report FROM meshes WHERE id = ?",
         (mesh_id,),
     ).fetchone()
     conn.close()
@@ -228,6 +241,8 @@ def get_mesh_by_id(mesh_id: str) -> Optional[Dict[str, Any]]:
         "n_faces": row["n_faces"],
         "bounds": json.loads(row["bounds"]),
         "uploaded_at": row["uploaded_at"],
+        "import_options": json.loads(row["import_options"]) if row["import_options"] else None,
+        "import_report": json.loads(row["import_report"]) if row["import_report"] else None,
     }
 
 
@@ -236,7 +251,7 @@ def get_trimesh_by_id(mesh_id: str) -> trimesh.Trimesh:
     """Get trimesh by its ID, cached in memory."""
     conn = get_connection()
     row = conn.execute(
-        "SELECT filename, data FROM meshes WHERE id = ?", (mesh_id,)
+        "SELECT filename, data, import_options FROM meshes WHERE id = ?", (mesh_id,)
     ).fetchone()
     conn.close()
     if not row:
@@ -250,7 +265,12 @@ def get_trimesh_by_id(mesh_id: str) -> trimesh.Trimesh:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        mesh = load_mesh(tmp)
+        options = json.loads(row["import_options"]) if row["import_options"] else None
+        if options and Path(filename).suffix.lower() == ".dxf":
+            from core import import_dxf_surface
+            mesh, _ = import_dxf_surface(tmp, layers=options.get("layers"), units=options.get("units"))
+        else:
+            mesh = load_mesh(tmp)
         # Force evaluation to cache in-memory
         _ = mesh.vertices
         _ = mesh.faces
@@ -274,7 +294,7 @@ def get_all_meshes(session_id: str) -> List[Dict[str, Any]]:
     """Get all meshes for a session (without BLOB data)."""
     conn = get_connection()
     rows = conn.execute(
-        "SELECT id, type, filename, n_vertices, n_faces, bounds, uploaded_at FROM meshes WHERE session_id = ?",
+        "SELECT id, type, filename, n_vertices, n_faces, bounds, uploaded_at, import_report FROM meshes WHERE session_id = ?",
         (session_id,),
     ).fetchall()
     conn.close()
@@ -287,6 +307,7 @@ def get_all_meshes(session_id: str) -> List[Dict[str, Any]]:
             "n_faces": r["n_faces"],
             "bounds": json.loads(r["bounds"]),
             "uploaded_at": r["uploaded_at"],
+            "import_report": json.loads(r["import_report"]) if r["import_report"] else None,
         }
         for r in rows
     ]

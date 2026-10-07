@@ -5,11 +5,8 @@
  * the chosen field+direction. Centralised so every sort UI (column
  * header, default order, URL-saved order) goes through one place.
  *
- * Status ordering is now binary at the presentation layer
- * (NO_CUMPLE worst → CUMPLE best → UNKNOWN last). FUERA has been
- * removed from the status index because parseBenchStatus collapses
- * the legacy "FUERA DE TOLERANCIA" / "FUERA" backend strings into
- * NO_CUMPLE before benches reach the sort layer.
+ * Status ordering follows the three backend tolerance tiers, with
+ * UNKNOWN after evaluated statuses.
  */
 
 import type { Bench, BenchStatus } from './types';
@@ -42,15 +39,12 @@ export const DEFAULT_SORT: { field: SortField; direction: SortDirection } = {
 // ─── Comparators ────────────────────────────────────────────
 
 const STATUS_INDEX: Record<BenchStatus, number> = (() => {
-  // Seed every variant of BenchStatus with a high "unknown" rank so
-  // any legacy FUERA value (which should never reach the sorter
-  // because parseBenchStatus collapses it) still sorts to the end
-  // rather than crashing.
+  // Seed all variants so the index remains total if presentation order changes.
   const map = {
     CUMPLE: 0,
+    FUERA: 0,
     NO_CUMPLE: 0,
     UNKNOWN: 0,
-    FUERA: Number.MAX_SAFE_INTEGER,
   } as Record<BenchStatus, number>;
   STATUS_PRESENTATION_ORDER.forEach((s, i) => {
     map[s] = i;
@@ -58,11 +52,7 @@ const STATUS_INDEX: Record<BenchStatus, number> = (() => {
   return map;
 })();
 
-/** Status index in the *presentation* order: NO_CUMPLE=0, CUMPLE=1,
- *  UNKNOWN=2. FUERA is not in the presentation order — it has been
- *  collapsed into NO_CUMPLE by parseBenchStatus — but it remains in
- *  STATUS_INDEX with a sentinel rank so any stray value sorts last
- *  instead of producing NaN. */
+/** Status index follows the presentation order: worst first, unknown last. */
 function statusRank(s: BenchStatus): number {
   return STATUS_INDEX[s];
 }

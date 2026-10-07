@@ -5,7 +5,7 @@ Este documento describe cómo generar la versión portable de escritorio (Electr
 ## Requisitos previos
 
 - Python 3.10+ (recomendado 3.12)
-- Node.js 20+
+- Node.js 22+
 - npm
 - Entorno virtual con las dependencias del backend instaladas (`.venv/`)
 - `pyinstaller`:
@@ -31,10 +31,17 @@ uv pip install pyinstaller
 ```bash
 cd web
 npm install
-npm run build
+VITE_PWA=false VITE_BASE=/ VITE_API_URL=/api/v1 npm run build
 ```
 
-Esto genera `web/dist/` con `index.html` y los assets estáticos.
+Esto genera `web/dist/` con `index.html` y los assets estáticos. Para Electron debe desactivarse la PWA y usarse la API local. En PowerShell, configurar las variables antes del comando:
+
+```powershell
+$env:VITE_PWA = 'false'
+$env:VITE_BASE = '/'
+$env:VITE_API_URL = '/api/v1'
+npm run build
+```
 
 ### 2. Compilar el sidecar Python
 
@@ -76,6 +83,15 @@ npm run build:windows
 ```
 
 Resultado: `dist-portable/conciliacion-portable-windows/`
+
+Para generar un solo EXE portable de Windows:
+
+```powershell
+cd electron
+npx electron-builder --win portable dir --x64 --config builder.config.js --config.win.signAndEditExecutable=false '--config.win.artifactName=conciliacion-portable-windows.${ext}'
+```
+
+La opción anterior genera un ejecutable sin firma. El sidecar debe reconstruirse después de cualquier cambio en `core/`, `api/` o `web/dist/`, incluidos los módulos de importación DXF.
 
 ## Workflow de desarrollo
 
@@ -218,7 +234,7 @@ The repo has two GitHub Actions workflows:
 
 ### Build (`.github/workflows/build.yml`)
 Runs on every push to main and every PR:
-1. Set up Python 3.14 + Node 20
+1. Set up Python 3.14 + Node 22
 2. Install pyinstaller + project deps
 3. `web/npm ci && npm run build`
 4. `pytest tests/ -q` (backend tests)

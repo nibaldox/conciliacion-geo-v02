@@ -26,10 +26,11 @@ import { isFilterActive } from '../domain/filters';
 export interface FilterBarProps {
   readonly filter: UseFilterStateApi;
   readonly blastDataAvailable?: boolean;
+  readonly horizontalDeviationAvailable?: boolean;
   readonly activeCount?: number;
 }
 
-export function FilterBar({ filter, blastDataAvailable = false, activeCount }: FilterBarProps) {
+export function FilterBar({ filter, blastDataAvailable = false, horizontalDeviationAvailable = false, activeCount }: FilterBarProps) {
   const { t } = useTranslation();
   const { state, setField, reset } = filter;
 
@@ -46,14 +47,14 @@ export function FilterBar({ filter, blastDataAvailable = false, activeCount }: F
   return (
     <div
       data-slot="filter-bar"
-      className="flex flex-wrap items-center gap-2 px-3 md:px-6 py-2 border-b"
+      className="flex flex-wrap items-center gap-2 px-4 py-3 border-b"
       style={{
-        backgroundColor: 'var(--color-surface)',
+        backgroundColor: 'var(--color-surface-raised)',
         borderColor: 'var(--color-border)',
       }}
     >
       <span
-        className="text-[10px] uppercase tracking-wider font-semibold mr-1"
+        className="text-xs font-medium mr-1"
         style={{ color: 'var(--color-text-muted)' }}
       >
         {t('profileView.filter.label', { defaultValue: 'Mostrar' })}
@@ -91,6 +92,16 @@ export function FilterBar({ filter, blastDataAvailable = false, activeCount }: F
           defaultValue: 'Verde=Cumple, Amarillo=Alerta, Rojo=No cumple',
         })}
       />
+      {horizontalDeviationAvailable && (
+        <FilterToggle
+          checked={state.showHorizontalDeviation}
+          onChange={(v) => setField('showHorizontalDeviation', v)}
+          label={t('profileView.filter.horizontal_deviation', { defaultValue: 'Desviación horizontal' })}
+          title={t('profileView.filter.horizontal_deviation_help', {
+            defaultValue: 'Colorea la topografía por dH a igual cota; + sobreexcavación, − faltante.',
+          })}
+        />
+      )}
 
       {blastDataAvailable && (
         <>

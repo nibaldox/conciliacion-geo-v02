@@ -3,24 +3,24 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Button } from '../Button';
 
-describe('Button (Mission Control variants)', () => {
-  it('renders the launch variant with uppercase + tracking', () => {
-    render(<Button variant="launch">Launch Engine</Button>);
-    const btn = screen.getByRole('button');
+describe('Button variants', () => {
+  it('starts the primary action when activated with the keyboard', async () => {
+    const onClick = vi.fn();
+    render(<Button variant="launch" onClick={onClick}>Iniciar análisis</Button>);
+    const btn = screen.getByRole('button', { name: 'Iniciar análisis' });
     expect(btn).toHaveAttribute('data-variant', 'launch');
-    expect(btn).toHaveClass('uppercase');
-    expect(btn).toHaveClass('tracking-wider');
-    expect(btn.textContent).toBe('Launch Engine');
+    btn.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(onClick).toHaveBeenCalledOnce();
   });
 
-  it('renders the terminal variant with monospace font (via CSS var)', () => {
-    render(<Button variant="terminal">$ run --scan</Button>);
-    const btn = screen.getByRole('button');
+  it('keeps secondary actions available in the terminal variant', async () => {
+    const onClick = vi.fn();
+    render(<Button variant="terminal" onClick={onClick}>Guardar</Button>);
+    const btn = screen.getByRole('button', { name: 'Guardar' });
     expect(btn).toHaveAttribute('data-variant', 'terminal');
-    // The terminal style sets fontFamily to the --font-mono CSS
-    // variable; the browser resolves it at runtime. We just check
-    // that the CSS var is wired up.
-    expect(btn.style.fontFamily).toBe('var(--font-mono)');
+    await userEvent.click(btn);
+    expect(onClick).toHaveBeenCalledOnce();
   });
 
   it('falls back to a button when no onClick', () => {

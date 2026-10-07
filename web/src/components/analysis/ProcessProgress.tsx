@@ -18,28 +18,28 @@ export function ProcessProgress() {
   const displayTotal = isComplete ? (status.n_results || total) : total;
 
   return (
-    <div className="w-full max-w-xl space-y-3">
+    <div className="w-full max-w-xl space-y-2">
       {/* Progress text */}
       {isProcessing && (
-        <p className="text-sm text-center" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="text-xs text-center" style={{ color: 'var(--color-text-secondary)' }}>
           {t('step3.processing_section', { current: current ?? '...', total })}
         </p>
       )}
 
       {isComplete && (
-        <p className="text-sm text-center font-medium" style={{ color: 'var(--status-ok-text)' }}>
+        <p className="text-xs text-center font-medium" style={{ color: 'var(--status-ok-text)' }}>
           {t('step3.complete', { count: status.n_results })}
         </p>
       )}
 
       {status.status === 'error' && (
-        <p className="text-sm text-center font-medium" style={{ color: 'var(--status-nok-text)' }}>
+        <p className="text-xs text-center font-medium" style={{ color: 'var(--status-nok-text)' }}>
           {t('step3.error')}
         </p>
       )}
 
       {/* Progress bar */}
-      <div className="w-full rounded-full h-3 overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
+      <div className="w-full rounded-full h-2 overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
         <div
           className="h-full rounded-full transition-all duration-500 ease-out"
           style={{

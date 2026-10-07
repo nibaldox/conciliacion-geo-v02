@@ -1,4 +1,4 @@
-import Plot from 'react-plotly.js';
+import Plot from '../charts/Plot';
 import type { Data, Layout, Config } from 'plotly.js';
 import { useTranslation } from 'react-i18next';
 import { useBlastDamageModel } from '../../api/hooks';
