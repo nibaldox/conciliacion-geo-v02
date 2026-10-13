@@ -1,5 +1,7 @@
 # Continuación web — handoff portátil (rama `wip/web-stabilization-2026-10-07`)
 
+**Actualización del 13 de octubre de 2026:** por solicitud del usuario, todos los commits de esta fase se integraron en `main` mediante fast-forward. Para continuar en otro PC, usar `git clone -b main https://github.com/nibaldox/conciliacion-geo-v02.git`. Las referencias a la rama WIP y las restricciones de publicación de abajo describen la fase histórica del 7 de octubre; esta sesión autoriza publicar la integración en `main`. Las verificaciones y los pendientes de navegador siguen siendo los registrados aquí.
+
 Documento autónomo para continuar la estabilización web en otro equipo. Fecha: **7 de octubre de 2026** (America/Santiago, UTC-03:00). Resume lo ejecutado en la fase `web-stabilization` con sus límites y no certifica una release: **la validación de navegador quedó parcial** (§3) y el CI remoto no se ejecutó en esa fase.
 
 ---

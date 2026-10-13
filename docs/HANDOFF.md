@@ -1,6 +1,10 @@
 # Continuidad para agentes de codificación
 
-Actualizado el **7 de octubre de 2026**, zona **America/Santiago**. Este documento sintetiza el código y la bitácora local; no certifica una release ni una suite ejecutada hoy.
+Actualizado el **13 de octubre de 2026**, zona **America/Santiago**. Este documento sintetiza el código y la bitácora local; no certifica una release ni una suite ejecutada hoy.
+
+## Continuación desde main — 13 de octubre de 2026
+
+Por solicitud explícita del usuario, la rama de estabilización web se integró en `main` mediante fast-forward, conservando todos los commits hasta `a29925a`. La rama de continuación para el otro PC pasa a ser **`main`**. La autorización de esta sesión incluye publicar estos cambios en GitHub; no certifica una release ni completa la validación de navegador pendiente. No se ejecutaron nuevas suites funcionales durante esta integración.
 
 ## Última hora — estabilización web publicada (7 de octubre de 2026)
 
