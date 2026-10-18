@@ -78,8 +78,8 @@ else:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    open_sentinel()
     stop_cleanup = asyncio.Event()
+    cleanup_task = None
 
     async def cleanup_pending_imports():
         while not stop_cleanup.is_set():
@@ -89,13 +89,15 @@ async def lifespan(app: FastAPI):
             except TimeoutError:
                 pass
 
-    cleanup_task = asyncio.create_task(cleanup_pending_imports())
     try:
+        open_sentinel()
+        cleanup_task = asyncio.create_task(cleanup_pending_imports())
         yield
     finally:
         try:
             stop_cleanup.set()
-            await cleanup_task
+            if cleanup_task is not None:
+                await cleanup_task
             await run_db(dxf_uploads.cleanup_all)
             await run_db(cleanup_old_sessions)
         finally:

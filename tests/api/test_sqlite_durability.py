@@ -101,3 +101,73 @@ def test_open_close_sentinel_idempotent_and_rebinds(tmp_path, monkeypatch, api_i
     writer.close()
     assert Path(f"{new_db}-wal").exists()
     assert rebound.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 1
+
+
+class _FailingReadConn:
+    """Envoltorio de conexión cuyo primer ``SELECT 1`` falla."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.closed = False
+
+    def execute(self, sql, *args, **kwargs):
+        if sql.strip().upper().startswith("SELECT 1"):
+            raise sqlite3.OperationalError("fallo de lectura inicial")
+        return self._inner.execute(sql, *args, **kwargs)
+
+    def close(self):
+        self.closed = True
+        self._inner.close()
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_open_sentinel_closes_conn_when_initial_read_fails(
+    api_isolated_db, monkeypatch
+):
+    """Si el ``SELECT 1`` inicial falla, la conexión nueva se cierra y no se
+    deja estado de módulo: ni ``_sentinel`` ni ``_sentinel_path``."""
+    import api.database as db
+
+    db.close_sentinel()
+    real = db.get_connection()
+    wrapper = _FailingReadConn(real)
+    monkeypatch.setattr(db, "get_connection", lambda: wrapper)
+
+    with pytest.raises(sqlite3.OperationalError):
+        db.open_sentinel()
+
+    assert wrapper.closed is True
+    assert db._sentinel is None
+    assert db._sentinel_path is None
+    with pytest.raises(sqlite3.ProgrammingError):
+        real.execute("SELECT 1")
+
+
+def test_lifespan_closes_sentinel_when_startup_fails_after_open(
+    api_isolated_db, monkeypatch
+):
+    """Si el arranque falla después de open_sentinel (aquí al crear la tarea
+    de limpieza), el lifespan debe cerrar el centinela igualmente."""
+    import asyncio as _asyncio
+
+    import api.database as db
+    import api.main as main
+
+    db.close_sentinel()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("fallo de arranque")
+
+    monkeypatch.setattr(main.asyncio, "create_task", _boom)
+
+    async def _run_lifespan():
+        async with main.app.router.lifespan_context(main.app):
+            raise AssertionError("el cuerpo del lifespan no debe alcanzarse")
+
+    with pytest.raises(RuntimeError):
+        _asyncio.run(_run_lifespan())
+
+    assert db._sentinel is None
+    assert db._sentinel_path is None

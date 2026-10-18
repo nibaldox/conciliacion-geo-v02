@@ -60,7 +60,16 @@ def open_sentinel() -> sqlite3.Connection:
             _sentinel = None
             _sentinel_path = None
         conn = get_connection()
-        conn.execute("SELECT 1").fetchone()
+        try:
+            conn.execute("SELECT 1").fetchone()
+        except BaseException:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+            _sentinel = None
+            _sentinel_path = None
+            raise
         _sentinel = conn
         _sentinel_path = current
         return conn
