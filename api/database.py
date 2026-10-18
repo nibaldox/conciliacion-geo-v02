@@ -4,6 +4,7 @@ import uuid
 import functools
 import tempfile
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -26,8 +27,58 @@ def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+_SENTINEL_LOCK = threading.Lock()
+_sentinel: Optional[sqlite3.Connection] = None
+_sentinel_path: Optional[Path] = None
+
+
+def open_sentinel() -> sqlite3.Connection:
+    """Open (and keep) a process-wide connection bound to the current DB_PATH.
+
+    Holding one connection open for the whole API lifespan prevents the
+    last per-request connection from triggering ``sqlite3WalClose`` ->
+    checkpoint (fsync) on every request, which on btrfs held the write
+    lock past the busy timeout. Idempotent: repeated calls return the
+    already-open sentinel; if the sentinel is bound to a stale DB_PATH it
+    is closed first and reopened against the current path.
+    """
+    global _sentinel, _sentinel_path
+    with _SENTINEL_LOCK:
+        current = Path(DB_PATH)
+        if _sentinel is not None and _sentinel_path == current:
+            return _sentinel
+        if _sentinel is not None:
+            try:
+                _sentinel.close()
+            except sqlite3.Error:
+                pass
+            _sentinel = None
+            _sentinel_path = None
+        conn = get_connection()
+        conn.execute("SELECT 1").fetchone()
+        _sentinel = conn
+        _sentinel_path = current
+        return conn
+
+
+def close_sentinel() -> None:
+    """Close the sentinel connection if open. Idempotent, never raises."""
+    global _sentinel, _sentinel_path
+    with _SENTINEL_LOCK:
+        conn = _sentinel
+        _sentinel = None
+        _sentinel_path = None
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except sqlite3.Error:
+        pass
 
 
 def init_db():
@@ -125,20 +176,22 @@ def get_or_create_session(session_id: Optional[str] = None) -> str:
     """
     if session_id:
         conn = get_connection()
-        row = conn.execute(
-            "SELECT id FROM sessions WHERE id = ?", (session_id,)
-        ).fetchone()
-        if row:
-            conn.close()
+        try:
+            row = conn.execute(
+                "SELECT id FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if row:
+                return session_id
+            # session_id not found — create it explicitly
+            conn.execute(
+                "INSERT INTO sessions (id, settings, sections) VALUES (?, '{}', '[]') "
+                "ON CONFLICT(id) DO NOTHING",
+                (session_id,),
+            )
+            conn.commit()
             return session_id
-        # session_id not found — create it explicitly
-        conn.execute(
-            "INSERT INTO sessions (id, settings, sections) VALUES (?, '{}', '[]')",
-            (session_id,),
-        )
-        conn.commit()
-        conn.close()
-        return session_id
+        finally:
+            conn.close()
     return create_session()
 
 

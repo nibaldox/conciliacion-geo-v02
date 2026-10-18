@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.database import init_db, cleanup_old_sessions
+from api.database import init_db, cleanup_old_sessions, open_sentinel, close_sentinel
 from api import dxf_uploads
 from api._async_db import run_db
 from api.middleware import install_health_endpoints, install_middleware
@@ -78,6 +78,7 @@ else:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    open_sentinel()
     stop_cleanup = asyncio.Event()
 
     async def cleanup_pending_imports():
@@ -92,10 +93,13 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        stop_cleanup.set()
-        await cleanup_task
-        await run_db(dxf_uploads.cleanup_all)
-        await run_db(cleanup_old_sessions)
+        try:
+            stop_cleanup.set()
+            await cleanup_task
+            await run_db(dxf_uploads.cleanup_all)
+            await run_db(cleanup_old_sessions)
+        finally:
+            close_sentinel()
 
 
 app = FastAPI(
