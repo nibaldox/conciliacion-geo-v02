@@ -255,9 +255,9 @@ python -X utf8 test_pipeline.py
 Desde `web/`:
 
 ```bash
-npm run test
+UV_NO_SYNC=1 npm run test:coverage
 npm run test:domain -- --coverage
-npx tsc --noEmit
+npx tsc -b
 npm run lint
 npm run build
 npx playwright test
@@ -265,7 +265,28 @@ npx playwright test
 
 La cobertura del dominio `src/components/results/ProfileView/domain/**` se exige al **100%** en sentencias, ramas, funciones y líneas. Playwright tiene configuración de servidores en `web/playwright.config.ts` y puede reutilizar servidores existentes; para QA usar datos y sesiones aislados. La configuración Edge `playwright.horizontal.config.ts` presupone un frontend en 5174 y no lo inicia.
 
-### Evidencia histórica, no ejecución nueva
+### Verificación local — 16–17 de octubre de 2026
+
+| Validación | Resultado ejecutado | Alcance |
+|---|---|---|
+| Backend | 2.487 aprobadas, 8 omitidas, 11 advertencias | Sin OpenBlast, con `--skip-electron --benchmark-skip-slow`; datos de QA aislados |
+| Frontend, bloque 1 | 585 aprobadas en 66 archivos | Suite completa con cobertura; Node 22 |
+| Frontend, tras T01 de selección continua | 589 aprobadas en 67 archivos | Incluye 4 pruebas contractuales nuevas; typecheck real, lint y build aprobados; todavía no cambia la interacción del visor |
+| Frontend, tras T02 de selección continua | 605 aprobadas en 68 archivos | Anclas y proyección sobre segmentos originales, dos revisiones PASS; typecheck real, lint y build con PWA aprobados; todavía sin consumidores en el visor |
+| Frontend, tras T03–T05 | 644 aprobadas en 71 archivos | Recorte, picking CSS y estado puro verificados; 59 pruebas combinadas de selección, typecheck, lint y build aprobados; aún sin migrar consumidores del visor |
+| Frontend, tras T06 | 663 aprobadas en 74 archivos | Integración de anclas y payload XY; éxito tardío protegido y no-ops verificados; typecheck, lint, build y revisiones aprobados; clics reales pendientes |
+| Frontend, tras T07 | 677 aprobadas en 75 archivos | Resolver de escena y captura adaptativa conectados; 3/3 probes de oclusión/overflow, typecheck, lint, build y revisión aprobados; clics reales pendientes |
+| Frontend, tras T08 | 682 aprobadas en 75 archivos | Preview con buffer fijo e invalidación por pose/proyección/viewport, sin alterar anclas; typecheck, lint, build y revisión del delta aprobados; QA de pantalla pendiente |
+| Frontend, tras T09 | 690 aprobadas en 76 archivos | Recorrido recortado y extremos etiquetados; identidad parcial y offsets CSS verificados; dominio obligatorio 100%, typecheck/lint/build y revisión del delta aprobados; picking real pendiente |
+| Frontend, tras T10 | 704 aprobadas en 77 archivos | Resumen continuo, restablecer/Escape y borradores numéricos; dominio obligatorio 100%, typecheck/lint/build y dos revisiones aprobados; picking real pendiente |
+| Dominio de perfiles | 100% en sentencias, ramas, funciones y líneas | Umbral obligatorio aprobado |
+| TypeScript / ESLint / build | Aprobados | `tsc -b --force`, ESLint completo y build web con PWA |
+| Pipeline sintético | Aprobado; Excel y Word generados | Arnés en memoria que redirige sus cuatro rutas literales `/tmp` a scratch, sin modificar el script |
+| Smoke de navegador | 21/21 comprobaciones y 6/6 adicionales del coordinador aprobadas | Chromium escritorio/móvil, API real y datos sintéticos; filtros, histogramas, tabla y guardado de tolerancias |
+
+El smoke inicializa la navegación al dashboard programáticamente y no sustituye el E2E completo de carga manual ni la validación con archivos reales del usuario. Estas pruebas locales no acreditan un despliegue, una release ni la suite completa de Playwright. Evidencias y límites en [HANDOFF.md](docs/HANDOFF.md).
+
+### Evidencia histórica anterior
 
 | Validación | Último resultado documentado | Alcance |
 |---|---|---|
@@ -276,7 +297,7 @@ La cobertura del dominio `src/components/results/ProfileView/domain/**` se exige
 | Mapa con orígenes XYZ, 4 oct. | Heatmap 10/10; consulta real HTTP 200 | Payload comprobado; inspección visual final pendiente |
 | Pipeline sintético, 3 oct. | Aprobado | Ejecutado con Python `-X utf8` |
 
-Los conteos cambian al agregar pruebas. Esta actualización solo verificó documentación, referencias y coherencia con fuentes locales; no volvió a ejecutar las suites. El registro completo está en [CONTINUAR_LOCAL.md](docs/CONTINUAR_LOCAL.md).
+Los conteos cambian al agregar pruebas. La tabla histórica conserva los límites de esas corridas; no reemplaza la verificación local del bloque indicada arriba. El registro histórico completo está en [CONTINUAR_LOCAL.md](docs/CONTINUAR_LOCAL.md).
 
 ## Despliegue y portable
 
