@@ -260,7 +260,56 @@
     "col_berm_design": "Berma D. (m)",
     "col_berm_real": "Berma R. (m)",
     "col_berm_min": "Mín. (m)",
-    "col_berm_status": "Estado"
+    "col_berm_status": "Estado",
+    "col_level": "Nivel",
+    "col_delta_crest": "Δ Cresta",
+    "col_delta_toe": "Δ Pata",
+    "col_spill": "B. Derrame (m)",
+    "col_berm_effective": "B. Efectiva (m)",
+    "order_label": "Orden",
+    "order_by_section": "Por Sección",
+    "order_by_level": "Por Nivel",
+    "col_sector": "Sector"
+  },
+  "results": {
+    "filters": {
+      "level": "Cota",
+      "no_sector": "(sin sector)"
+    }
+  },
+  "designAchievement": {
+    "title": "Logro de diseño",
+    "loading": "Cargando logro de diseño…",
+    "loadError": "No se pudo cargar el logro de diseño",
+    "retry": "Reintentar",
+    "demoUnavailable": "Logro de diseño no disponible en la demo por ahora.",
+    "noData": "Sin datos",
+    "noDataShort": "—",
+    "globalScore": "Puntaje de Logro Diseño",
+    "scoreScale": "escala 0–100",
+    "weights": "Pesos de Logro Diseño: cresta 40 % · pata 30 % · berma 30 %, con crédito parcial por elemento.",
+    "weighingNote": "Nota: en la fila evaluable los elementos faltantes aportan 0 al puntaje global; los porcentajes y medias de cada elemento excluyen las ausencias de su propio denominador. Una fila parcial no equivale a una medición completa.",
+    "evaluableCounts": "evaluables",
+    "rowsTotal": "filas",
+    "crest": "Cresta",
+    "toe": "Pata",
+    "berm": "Berma",
+    "meanCorrection": "Desviación media",
+    "sector": "Sector",
+    "noSector": "Sin sector",
+    "nEvaluable": "n evaluables",
+    "achievement": "Logro (%)",
+    "tolerances": "Tolerancia",
+    "tolSourceCoreDefault": "predeterminada",
+    "tolSourceSession": "sesión",
+    "provenanceSource": "Fuente",
+    "statusComputed": "calculado",
+    "statusNoData": "sin datos",
+    "assumptions": "Supuestos",
+    "warning_no_results": "No hay resultados de conciliación para evaluar el logro de diseño.",
+    "warning_all_rows_filtered_out": "Todas las filas quedaron excluidas por los filtros activos.",
+    "warning_no_evaluable_rows": "Ninguna fila tiene valores evaluables de cresta y pata.",
+    "warning_session_tolerance_invalid_using_core_default": "Tolerancias de sesión inválidas; se usan las tolerancias predeterminadas del core."
   },
   "blast": {
     "loading": "Cargando datos de tronadura…",
@@ -611,7 +660,8 @@
     "tol_face_angle": "Ángulo de cara (°)",
     "tol_berm_min": "Ancho mínimo de berma (m)",
     "tol_inter_ramp": "Ángulo inter-rampa (°)",
-    "tol_overall": "Ángulo global (°)"
+    "tol_overall": "Ángulo global (°)",
+    "tol_crest_toe": "Desviación cresta-pata (m)"
   },
   "viewer": {
     "cesium_load_error": "Error al cargar CesiumJS: {{message}}",
@@ -960,14 +1010,17 @@
       "global_score": "Score Ponderado Global",
       "profiles_ok": "Perfiles CUMPLE",
       "profiles_outside": "Perfiles FUERA DE TOLERANCIA",
-      "profiles_no": "Perfiles NO CUMPLE"
+      "profiles_no": "Perfiles NO CUMPLE",
+      "classification_note": "La clasificación de perfiles sigue el peor estado de banco por tolerancia y es independiente del Puntaje de Logro Diseño."
     },
     "section": {
       "parameter_breakdown": "Desglose por Parámetro (CUMPLE / NO CUMPLE)",
       "sector_compliance": "Cumplimiento por Sector",
       "deviation_height": "Desviación de Altura (m)",
       "deviation_angle": "Desviación de Ángulo (°)",
-      "deviation_crest": "Desviación de Cresta (m)"
+      "deviation_crest": "Desviación de Cresta (m)",
+      "deviation_toe": "Desviación de Pata (m)",
+      "deviation_berm": "Ancho de berma (m)"
     },
     "table": {
       "parameter": "Parámetro",
@@ -994,7 +1047,9 @@
         "frequency": "Frecuencia",
         "delta_height": "Δ Altura (m)",
         "delta_angle": "Δ Ángulo (°)",
-        "delta_crest": "Δ Cresta (m)"
+        "delta_crest": "Δ Cresta (m)",
+        "delta_toe": "Δ Pata (m)",
+        "berm_width": "Ancho de berma real (m)"
       },
       "hover": {
         "compliance_label": "CUMPLE"
@@ -1082,9 +1137,24 @@
   },
   "project_input": {
     "curve_help": "Cómo definir el tramo",
-    "curve_step1": "Selecciona una línea de quiebre en la vista 3D.",
-    "curve_step2": "Marca el punto inicial de esa línea.",
-    "curve_step3": "Marca el punto final y genera los perfiles.",
+    "curve_step1": "Haz clic sobre una línea para elegirla.",
+    "curve_step2": "Haz clic de nuevo para marcar el inicio y el fin; pueden quedar dentro de un mismo tramo.",
+    "curve_step3": "Revisa el resumen y usa «RESTABLECER SELECCIÓN» o Escape para empezar de nuevo.",
+    "curve_reset": "RESTABLECER SELECCIÓN",
+    "curve_chainage": "Cadenamiento",
+    "curve_range_length": "Longitud del tramo",
+    "curve_sector_note": "El campo sector es solo una etiqueta: no restringe la selección en el espacio.",
+    "curve_phase_choose_curve": "Elige una línea para comenzar.",
+    "curve_phase_start": "Marca el punto inicial.",
+    "curve_phase_end": "Marca el punto final.",
+    "curve_phase_ready": "Tramo listo: puedes generar los perfiles.",
+    "curve_phase_invalid_range": "Tramo no generable: la longitud es cero o no válida; elige otros puntos.",
+    "curve_params_invalid": "Parámetros no válidos: espaciamiento entre 1 y 100 m; longitudes entre 1 y 1000 m.",
+    "curve_rejection_different_curve": "Ese clic está en otra línea: continúa en la línea elegida.",
+    "curve_rejection_stale_context": "La geometría cambió: vuelve a elegir la línea.",
+    "curve_rejection_invalid_anchor": "Clic fuera de la geometría válida.",
+    "curve_rejection_coincident_anchor": "Ese punto coincide con un extremo ya elegido.",
+    "curve_rejection_invalid_geometry": "Geometría no válida para definir el tramo.",
     "selected_curve": "Línea",
     "none": "Sin seleccionar",
     "start": "Inicio",

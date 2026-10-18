@@ -260,8 +260,59 @@
     "col_berm_design": "Design Berm (m)",
     "col_berm_real": "Actual Berm (m)",
     "col_berm_min": "Min (m)",
-    "col_berm_status": "Status"
+    "col_berm_status": "Status",
+    "col_sector": "Sector",
+    "col_level": "Level",
+    "col_delta_crest": "Δ Crest",
+    "col_delta_toe": "Δ Toe",
+    "col_spill": "Spill width (m)",
+    "col_berm_effective": "Effective berm width (m)",
+    "order_label": "Order",
+    "order_by_section": "By section",
+    "order_by_level": "By level"
   },
+  "results": {
+    "filters": {
+      "level": "Level",
+      "no_sector": "(no sector)"
+    }
+  },
+  "designAchievement": {
+    "title": "Design achievement",
+    "loading": "Loading design achievement…",
+    "loadError": "Failed to load design achievement",
+    "retry": "Retry",
+    "demoUnavailable": "Design achievement is not available in the demo yet.",
+    "noData": "No data",
+    "noDataShort": "—",
+    "globalScore": "Design achievement score",
+    "scoreScale": "scale 0–100",
+    "weights": "Design achievement weights: crest 40 % · toe 30 % · berm 30 %, with partial credit per element.",
+    "weighingNote": "Note: on an evaluable row missing elements contribute 0 to the global score; each element’s percentages and means exclude absences from its own denominator. A partial row is not a complete measurement.",
+    "evaluableCounts": "evaluable",
+    "rowsTotal": "rows",
+    "crest": "Crest",
+    "toe": "Toe",
+    "berm": "Berm",
+    "meanCorrection": "Mean deviation",
+    "sector": "Sector",
+    "noSector": "No sector",
+    "nEvaluable": "n evaluable",
+    "achievement": "Achievement (%)",
+    "tolerances": "Tolerance",
+    "tolSourceCoreDefault": "default",
+    "tolSourceSession": "session",
+    "provenanceSource": "Source",
+    "statusComputed": "computed",
+    "statusNoData": "no data",
+    "assumptions": "Assumptions",
+    "warning_no_results": "No reconciliation results to evaluate design achievement.",
+    "warning_all_rows_filtered_out": "All rows were excluded by the active filters.",
+    "warning_no_evaluable_rows": "No rows have evaluable crest and toe values.",
+    "warning_session_tolerance_invalid_using_core_default": "Invalid session tolerances; core default tolerances are used."
+  },
+
+
   "blast": {
     "loading": "Loading blast data…",
     "error": "Failed to load blast data.",
@@ -611,7 +662,8 @@
     "tol_face_angle": "Face angle (°)",
     "tol_berm_min": "Minimum berm width (m)",
     "tol_inter_ramp": "Inter-ramp angle (°)",
-    "tol_overall": "Overall angle (°)"
+    "tol_overall": "Overall angle (°)",
+    "tol_crest_toe": "Crest-toe deviation (m)"
   },
   "viewer": {
     "cesium_load_error": "Failed to load CesiumJS: {{message}}",
@@ -960,14 +1012,17 @@
       "global_score": "Global Weighted Score",
       "profiles_ok": "Compliant Profiles",
       "profiles_outside": "Profiles Outside Tolerance",
-      "profiles_no": "Non-Compliant Profiles"
+      "profiles_no": "Non-Compliant Profiles",
+      "classification_note": "Profile classification follows the worst bench tolerance status and is independent of the design achievement score."
     },
     "section": {
       "parameter_breakdown": "Parameter Breakdown (COMPLIANT / NON-COMPLIANT)",
       "sector_compliance": "Compliance by Sector",
       "deviation_height": "Height Deviation (m)",
       "deviation_angle": "Angle Deviation (°)",
-      "deviation_crest": "Crest Deviation (m)"
+      "deviation_crest": "Crest Deviation (m)",
+      "deviation_toe": "Toe Deviation (m)",
+      "deviation_berm": "Berm Width (m)"
     },
     "table": {
       "parameter": "Parameter",
@@ -994,7 +1049,9 @@
         "frequency": "Frequency",
         "delta_height": "Δ Height (m)",
         "delta_angle": "Δ Angle (°)",
-        "delta_crest": "Δ Crest (m)"
+        "delta_crest": "Δ Crest (m)",
+        "delta_toe": "Δ Toe (m)",
+        "berm_width": "Actual berm width (m)"
       },
       "hover": {
         "compliance_label": "COMPLIANT"
@@ -1082,9 +1139,24 @@
   },
   "project_input": {
     "curve_help": "How to define the segment",
-    "curve_step1": "Select a breakline in the 3D view.",
-    "curve_step2": "Mark the start point on that line.",
-    "curve_step3": "Mark the end point and generate profiles.",
+    "curve_step1": "Click a breakline to choose it.",
+    "curve_step2": "Click again to mark the start and the end; both may sit inside one segment.",
+    "curve_step3": "Review the summary and use \"RESET SELECTION\" or Escape to start over.",
+    "curve_reset": "RESET SELECTION",
+    "curve_chainage": "Chainage",
+    "curve_range_length": "Range length",
+    "curve_sector_note": "The sector field is only a label: it does not spatially restrict the selection.",
+    "curve_phase_choose_curve": "Pick a line to begin.",
+    "curve_phase_start": "Mark the start point.",
+    "curve_phase_end": "Mark the end point.",
+    "curve_phase_ready": "Range ready: you can generate the profiles.",
+    "curve_phase_invalid_range": "Range not generable: its length is zero or invalid; pick different points.",
+    "curve_params_invalid": "Invalid parameters: spacing between 1 and 100 m; lengths between 1 and 1000 m.",
+    "curve_rejection_different_curve": "That click is on another line: stay on the chosen line.",
+    "curve_rejection_stale_context": "The geometry changed: choose the line again.",
+    "curve_rejection_invalid_anchor": "Click outside the valid geometry.",
+    "curve_rejection_coincident_anchor": "That point coincides with a chosen endpoint.",
+    "curve_rejection_invalid_geometry": "Geometry is not valid for the range.",
     "selected_curve": "Line",
     "none": "Not selected",
     "start": "Start",

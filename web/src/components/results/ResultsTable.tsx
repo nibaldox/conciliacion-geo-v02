@@ -20,6 +20,13 @@ import {
   getMatchClass,
 } from '../../utils/format';
 import type { ComparisonResult, MatchType } from '../../api/types';
+import { filterResults, type ResultFilterState } from './resultFilters';
+
+interface ResultsTableProps {
+  filters?: ResultFilterState;
+  onFiltersChange?: (filters: ResultFilterState) => void;
+  ResultFiltersComponent?: React.ComponentType<{ results: ComparisonResult[]; filters: ResultFilterState; onChange: (filters: ResultFilterState) => void }>;
+}
 
 function MatchBadge({ type, t }: { type: MatchType; t: (k: string) => string }) {
   const cls = getMatchClass(type);
@@ -31,49 +38,106 @@ function MatchBadge({ type, t }: { type: MatchType; t: (k: string) => string }) 
   );
 }
 
-export function ResultsTable() {
-  const filters = useSession((s) => s.filters);
+type OrderMode = 'section' | 'level';
+
+function levelNum(level: string): number {
+  if (!level || level.trim() === '') return Number.NEGATIVE_INFINITY;
+  const n = Number(level);
+  return Number.isFinite(n) ? n : Number.NEGATIVE_INFINITY;
+}
+
+function compareSections(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function compareByOrder(a: ComparisonResult, b: ComparisonResult, mode: OrderMode): number {
+  const la = levelNum(a.level);
+  const lb = levelNum(b.level);
+  if (mode === 'level') {
+    if (lb !== la) return lb - la;
+    return compareSections(a.section, b.section);
+  }
+  const s = compareSections(a.section, b.section);
+  return s !== 0 ? s : lb - la;
+}
+
+export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
+  const filtersFromSession = useSession((s) => s.filters);
+  const filters = filtersProp ?? filtersFromSession;
   const { data: results, isLoading, error } = useResults();
   const { t } = useTranslation();
 
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [orderMode, setOrderMode] = useState<OrderMode>('section');
 
-  // Apply filters
-  const filteredData = useMemo(() => {
-    if (!results) return [];
-    let data = results;
+  const filteredData = useMemo(
+    () => filterResults(results ?? [], filters),
+    [results, filters],
+  );
+  const orderedData = useMemo(
+    () => [...filteredData].sort((a, b) => compareByOrder(a, b, orderMode)),
+    [filteredData, orderMode],
+  );
 
-    if (filters.sector.length > 0) {
-      data = data.filter((r) => filters.sector.includes(r.sector));
-    }
-    if (filters.section.length > 0) {
-      data = data.filter((r) => filters.section.includes(r.section));
-    }
-    if (filters.level.length > 0) {
-      data = data.filter((r) => filters.level.includes(r.level));
-    }
-
-    return data;
-  }, [results, filters]);
+  const idColumns = useMemo<ColumnDef<ComparisonResult, unknown>[]>(() => {
+    const sectionCol: ColumnDef<ComparisonResult, unknown> = {
+      accessorKey: 'section',
+      header: t('table.col_section'),
+      size: 100,
+    };
+    const sectorCol: ColumnDef<ComparisonResult, unknown> = {
+      accessorKey: 'sector',
+      header: t('table.col_sector', { defaultValue: 'Sector' }),
+      size: 90,
+      cell: ({ getValue }) => {
+        const sector = getValue<string>();
+        return sector === '' ? '—' : sector;
+      },
+    };
+    const levelCol: ColumnDef<ComparisonResult, unknown> = {
+      accessorKey: 'level',
+      header: t('table.col_level', { defaultValue: 'Nivel' }),
+      size: 70,
+      cell: ({ getValue }) => {
+        const level = getValue<string>();
+        return level === '' ? '—' : level;
+      },
+    };
+    const benchCol: ColumnDef<ComparisonResult, unknown> = {
+      accessorKey: 'bench_num',
+      header: t('table.col_bench'),
+      size: 70,
+      cell: ({ getValue }) => `B${getValue<number>()}`,
+    };
+    return orderMode === 'level'
+      ? [sectorCol, levelCol, sectionCol, benchCol]
+      : [sectionCol, sectorCol, levelCol, benchCol];
+  }, [t, orderMode]);
 
   const columns = useMemo<ColumnDef<ComparisonResult, unknown>[]>(
     () => [
-      {
-        accessorKey: 'section',
-        header: t('table.col_section'),
-        size: 100,
-      },
-      {
-        accessorKey: 'bench_num',
-        header: t('table.col_bench'),
-        size: 70,
-        cell: ({ getValue }) => `B${getValue<number>()}`,
-      },
+      ...idColumns,
       {
         accessorKey: 'type',
         header: t('table.col_type'),
         size: 90,
         cell: ({ getValue }) => <MatchBadge type={getValue() as MatchType} t={t} />,
+      },
+      {
+        accessorKey: 'delta_crest',
+        header: t('table.col_delta_crest', { defaultValue: 'Δ Cresta' }),
+        size: 90,
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+        ),
+      },
+      {
+        accessorKey: 'delta_toe',
+        header: t('table.col_delta_toe', { defaultValue: 'Δ Pata' }),
+        size: 90,
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+        ),
       },
       // Height group
       {
@@ -156,12 +220,28 @@ export function ResultsTable() {
           <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
         ),
       },
+      {
+        accessorKey: 'spill_width',
+        header: t('table.col_spill', { defaultValue: 'B. Derrame (m)' }),
+        size: 90,
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        ),
+      },
+      {
+        accessorKey: 'effective_berm',
+        header: t('table.col_berm_effective', { defaultValue: 'B. Efectiva (m)' }),
+        size: 90,
+        cell: ({ getValue }) => (
+          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+        ),
+      },
     ],
-    [t],
+    [t, idColumns],
   );
 
   const table = useReactTable({
-    data: filteredData,
+    data: orderedData,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -203,6 +283,21 @@ export function ResultsTable() {
 
   return (
     <div className="space-y-3">
+      <div className="flex items-center gap-2 text-sm">
+        <label htmlFor="results-order" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('table.order_label', { defaultValue: 'Orden' })}
+        </label>
+        <select
+          id="results-order"
+          value={orderMode}
+          onChange={(e) => setOrderMode(e.target.value as OrderMode)}
+          className="px-2 py-1 rounded"
+          style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
+        >
+          <option value="section">{t('table.order_by_section', { defaultValue: 'Por Sección' })}</option>
+          <option value="level">{t('table.order_by_level', { defaultValue: 'Por Nivel' })}</option>
+        </select>
+      </div>
       <div className="overflow-x-auto rounded-lg shadow-sm" style={{ border: '1px solid var(--color-border)' }}>
         <table className="w-full text-sm">
           <thead>

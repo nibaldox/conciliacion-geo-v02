@@ -1,10 +1,14 @@
 import { useMemo } from 'react';
 import { BenchFilter } from './BenchFilter';
 import { CompliancePlanView } from './CompliancePlanView';
+import { ResultFilters } from './ResultFilters';
+import { DesignAchievementPanel } from './DesignAchievementPanel';
+import { filterResults, type ResultFilterState } from './resultFilters';
 import { useTranslation } from 'react-i18next';
 import Plot from '../charts/Plot';
 import type { Data, Layout, Config, Shape } from 'plotly.js';
-import { useResults } from '../../api/hooks';
+import { useResults, useSettings } from '../../api/hooks';
+import { DEFAULT_TOLERANCES } from '../../utils/constants';
 import { useSession } from '../../stores/session';
 import type { ComparisonResult } from '../../api/types';
 import { compareStatus } from './ProfileView/domain/status';
@@ -284,7 +288,7 @@ export function sectorComplianceColor(pct: number): string {
 // ─── Deviation histograms ─────────────────────────────────────
 
 /** Numeric deviation/real-value fields used by the histograms. */
-export type HistogramField = 'height_dev' | 'angle_dev' | 'delta_crest';
+export type HistogramField = 'height_dev' | 'angle_dev' | 'delta_crest' | 'delta_toe' | 'berm_real';
 
 export function collectField(
   rows: readonly ComparisonResult[],
@@ -296,6 +300,70 @@ export function collectField(
     if (v != null && Number.isFinite(v)) out.push(v);
   }
   return out;
+}
+
+export type HistogramBand =
+  | { readonly neg: number; readonly pos: number }
+  | { readonly min: number };
+
+const HISTOGRAM_LAYOUT_BASE: Partial<Layout> = {
+  height: 260,
+  margin: { l: 50, r: 20, t: 20, b: 40 },
+  paper_bgcolor: 'rgba(0,0,0,0)',
+  plot_bgcolor: 'rgba(0,0,0,0)',
+  font: { color: 'var(--color-text-secondary)' },
+};
+
+export function buildHistogram(
+  values: readonly number[],
+  title: string,
+  xLabel: string,
+  band: HistogramBand,
+  frequencyLabel: string,
+): { data: Data[]; layout: Partial<Layout> } {
+  const shape: Partial<Shape> = 'min' in band
+    ? {
+        type: 'rect',
+        xref: 'x',
+        yref: 'paper',
+        x0: band.min,
+        x1: values.length === 0 ? band.min : Math.max(band.min, ...values),
+        y0: 0,
+        y1: 1,
+        fillcolor: 'rgba(16, 185, 129, 0.15)',
+        line: { color: 'rgba(16, 185, 129, 0.6)', width: 1 },
+        layer: 'below',
+      }
+    : {
+        type: 'rect',
+        xref: 'x',
+        yref: 'paper',
+        x0: -band.neg,
+        x1: band.pos,
+        y0: 0,
+        y1: 1,
+        fillcolor: 'rgba(16, 185, 129, 0.15)',
+        line: { color: 'rgba(16, 185, 129, 0.6)', width: 1 },
+        layer: 'below',
+      };
+  return {
+    data: [
+      {
+        type: 'histogram',
+        x: [...values],
+        nbinsx: 15,
+        marker: { color: '#3b82f6' },
+        name: title,
+      },
+    ] as unknown as Data[],
+    layout: {
+      ...HISTOGRAM_LAYOUT_BASE,
+      xaxis: { title: { text: xLabel } },
+      yaxis: { title: { text: frequencyLabel } },
+      shapes: [shape],
+      showlegend: false,
+    },
+  };
 }
 
 // ─── Legacy helpers (kept for back-compat with tests) ────────
@@ -454,13 +522,21 @@ function getValueColor(pct: number): string {
 export function Dashboard() {
   const { t } = useTranslation();
   const { data: results } = useResults();
+  const { data: settings } = useSettings();
   const filters = useSession((s) => s.filters);
   const setFilters = useSession((s) => s.setFilters);
 
-  // G10: bench filter propagates to every Dashboard visualization.
+  const tolerances = settings?.tolerances ?? DEFAULT_TOLERANCES;
+  const heightTol = tolerances.bench_height;
+  const angleTol = tolerances.face_angle;
+  const crestTol = tolerances.crest_toe_deviation ?? DEFAULT_TOLERANCES.crest_toe_deviation;
+  const bermTol = tolerances.berm_width;
+
+  const setScenarioFilters = (next: ResultFilterState) => setFilters(next);
+
   const filteredResults = useMemo(
-    () => filterByBench(results ?? [], filters.bench),
-    [results, filters.bench],
+    () => filterResults(results, filters),
+    [results, filters],
   );
 
   const benchNumbers = useMemo(
@@ -577,81 +653,65 @@ export function Dashboard() {
     [t],
   );
 
-  const histogramLayoutBase = useMemo<Partial<Layout>>(
-    () => ({
-      height: 260,
-      margin: { l: 50, r: 20, t: 20, b: 40 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: 'var(--color-text-secondary)' },
-    }),
-    [],
-  );
-
-  function buildHistogram(
-    values: readonly number[],
-    title: string,
-    xLabel: string,
-    tolerance: number,
-  ): { data: Data[]; layout: Partial<Layout> } {
-    const shape: Partial<Shape> = {
-      type: 'rect',
-      xref: 'x',
-      yref: 'paper',
-      x0: -tolerance,
-      x1: tolerance,
-      y0: 0,
-      y1: 1,
-      fillcolor: 'rgba(16, 185, 129, 0.15)',
-      line: { color: 'rgba(16, 185, 129, 0.6)', width: 1 },
-      layer: 'below',
-    };
-    return {
-      data: [
-        {
-          type: 'histogram',
-          x: [...values],
-          nbinsx: 15,
-          marker: { color: '#3b82f6' },
-          name: title,
-        },
-      ] as unknown as Data[],
-      layout: {
-        ...histogramLayoutBase,
-        xaxis: { title: { text: xLabel } },
-        yaxis: { title: { text: t('dashboard.plot.axis.frequency') } },
-        shapes: [shape],
-        showlegend: false,
-      },
-    };
-  }
+  const frequencyLabel = t('dashboard.plot.axis.frequency');
 
   const heightHist = useMemo(
     () => buildHistogram(
       heightDevs,
       t('dashboard.parameter.height'),
       t('dashboard.plot.axis.delta_height'),
-      1.0,
+      { neg: Number(heightTol.neg), pos: Number(heightTol.pos) },
+      frequencyLabel,
     ),
-    [heightDevs, histogramLayoutBase, t],
+    [heightDevs, heightTol, frequencyLabel, t],
   );
   const angleHist = useMemo(
     () => buildHistogram(
       angleDevs,
       t('dashboard.parameter.angle'),
       t('dashboard.plot.axis.delta_angle'),
-      3.0,
+      { neg: Number(angleTol.neg), pos: Number(angleTol.pos) },
+      frequencyLabel,
     ),
-    [angleDevs, histogramLayoutBase, t],
+    [angleDevs, angleTol, frequencyLabel, t],
   );
   const crestHist = useMemo(
     () => buildHistogram(
       crestDevs,
-      t('dashboard.parameter.berm'),
       t('dashboard.plot.axis.delta_crest'),
-      1.0,
+      t('dashboard.plot.axis.delta_crest'),
+      { neg: Number(crestTol.neg ?? DEFAULT_TOLERANCES.crest_toe_deviation.neg), pos: Number(crestTol.pos ?? DEFAULT_TOLERANCES.crest_toe_deviation.pos) },
+      frequencyLabel,
     ),
-    [crestDevs, histogramLayoutBase, t],
+    [crestDevs, crestTol, frequencyLabel, t],
+  );
+  const toeDevs = useMemo(
+    () => collectField(filteredResults, 'delta_toe'),
+    [filteredResults],
+  );
+  const toeHist = useMemo(
+    () => buildHistogram(
+      toeDevs,
+      t('dashboard.plot.axis.delta_toe', { defaultValue: 'Δ Pata (Δx [m])' }),
+      t('dashboard.plot.axis.delta_toe', { defaultValue: 'Δ Pata (Δx [m])' }),
+      { neg: Number(crestTol.neg ?? DEFAULT_TOLERANCES.crest_toe_deviation.neg), pos: Number(crestTol.pos ?? DEFAULT_TOLERANCES.crest_toe_deviation.pos) },
+      frequencyLabel,
+    ),
+    [toeDevs, crestTol, frequencyLabel, t],
+  );
+  const bermWidths = useMemo(
+    () => collectField(filteredResults, 'berm_real'),
+    [filteredResults],
+  );
+  const bermHist = useMemo(
+    () => buildHistogram(
+      bermWidths,
+      t('dashboard.plot.axis.berm_width', { defaultValue: 'Ancho berma real [m]' }),
+      t('dashboard.plot.axis.berm_width', { defaultValue: 'Ancho berma real [m]' }),
+      { min: Number(bermTol.min) },
+      frequencyLabel,
+    ),
+    [bermWidths, bermTol, frequencyLabel, t],
   );
 
   if (!results || results.length === 0) {
@@ -675,6 +735,8 @@ export function Dashboard() {
       </div>
 
       <BenchFilter available={benchNumbers} selected={filters.bench} onChange={(bench) => setFilters({ bench })} />
+
+      <ResultFilters results={results} filters={filters} onChange={setScenarioFilters} />
 
       {!filteredResults.length ? <p role="status" className="rounded-lg border border-border bg-surface-raised p-4 text-sm text-text-muted">{t('dashboard.bench_filter.no_results')}</p> : <>
       {/* Section 1: Global KPI */}
@@ -714,6 +776,13 @@ export function Dashboard() {
           icon={ProfilesNoIcon}
         />
       </div>
+
+      <p role="note" className="text-xs text-text-muted">
+        {t('dashboard.kpi.classification_note', {
+          defaultValue:
+            'La clasificación de perfiles sigue el peor estado de banco por tolerancia y es independiente del Puntaje de Logro Diseño.',
+        })}
+      </p>
 
       {/* Section 2: Parameter breakdown */}
       <div className="glass-panel rounded-xl p-5 space-y-4">
@@ -808,7 +877,21 @@ export function Dashboard() {
           config={plotConfig}
           emptyText={t('dashboard.histogram.no_data')}
         />
+        <HistogramPanel
+          title={t('dashboard.section.deviation_toe', { defaultValue: 'Desviación Δ Pata' })}
+          chart={toeHist}
+          config={plotConfig}
+          emptyText={t('dashboard.histogram.no_data')}
+        />
+        <HistogramPanel
+          title={t('dashboard.section.deviation_berm', { defaultValue: 'Ancho de berma' })}
+          chart={bermHist}
+          config={plotConfig}
+          emptyText={t('dashboard.histogram.no_data')}
+        />
       </div>
+
+      <DesignAchievementPanel filters={filters} />
       </>}
     </div>
   );

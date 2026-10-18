@@ -21,7 +21,7 @@ import numpy as np
 import pandas as pd
 import trimesh
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 import api.database as db
 import api.schemas as schemas
@@ -44,6 +44,10 @@ from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.blast_correlation import compute_blast_geotech_correlation
 from core.blast_model import fit_powder_factor_damage_model
 from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
+from core.design_achievement import (
+    build_design_achievement_summary,
+    build_sector_achievement_summary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1287,3 +1291,171 @@ async def get_blast_correlation_damage_model(
     except Exception as exc:
         logger.exception("Get blast damage model failed")
         raise HTTPException(500, detail=f"Get blast damage model failed: {exc}")
+
+
+_ACHIEVEMENT_STATUS_MODEL = (
+    "CUMPLE=1, FUERA DE TOLERANCIA=0.5, others=0 for the global score; "
+    "strict percentages count CUMPLE only"
+)
+_ACHIEVEMENT_ASSUMPTIONS = (
+    "global score = 0.4 * crest + 0.3 * toe + 0.3 * berma per evaluable row",
+    "partial credit: CUMPLE=1.0, FUERA DE TOLERANCIA=0.5, others=0",
+    "missing deltas or non-tier berm_status are excluded without inference",
+)
+
+
+def _filter_comparisons(
+    rows: List[dict],
+    sectors: Optional[List[str]],
+    sections: Optional[List[str]],
+    levels: Optional[List[str]],
+    benches: Optional[List[str]],
+) -> List[dict]:
+    """Apply repeated-query filters the same way the web table does.
+
+    Dimensions (sector / section / level / bench) are ANDed; the values
+    inside one dimension are ORed. An absent or empty dimension does not
+    filter. ``''`` is a selectable value (rows without that field). Bench
+    matches ``bench_num`` by its string form.
+    """
+    dimensions = (
+        ("sector", sectors),
+        ("section", sections),
+        ("level", levels),
+        ("bench_num", benches),
+    )
+    out: List[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        keep = True
+        for field, values in dimensions:
+            if not values:
+                continue
+            raw = row.get(field, "")
+            if raw is None:
+                raw = ""
+            if str(raw) not in set(values):
+                keep = False
+                break
+        if keep:
+            out.append(row)
+    return out
+
+
+def _build_design_achievement_sync(
+    session_id: str,
+    sectors: Optional[List[str]],
+    sections: Optional[List[str]],
+    levels: Optional[List[str]],
+    benches: Optional[List[str]],
+) -> dict:
+    """Read-only assembly of the Logro Diseño response off the event loop.
+
+    Rows come from the persisted comparison results of THIS session only
+    (``db.get_results(session_id)``); the caller's session id is never a
+    query parameter, so one session can never read another's data.
+    """
+    unfiltered = db.get_results(session_id)
+    rows = _filter_comparisons(unfiltered, sectors, sections, levels, benches)
+
+    settings = db.get_settings(session_id) or {}
+    session_tol = (settings.get("tolerances") or {}).get("crest_toe_deviation")
+
+    warnings: List[str] = []
+    tolerances_source = "core_default"
+    ct_tol: Optional[dict] = None
+    if isinstance(session_tol, dict):
+        try:
+            build_design_achievement_summary([], session_tol)
+            ct_tol = session_tol
+            tolerances_source = "session"
+        except (TypeError, ValueError):
+            warnings.append("session_tolerance_invalid_using_core_default")
+
+    resolved = _resolved_ct_tol_pair(ct_tol)
+    summary = build_design_achievement_summary(rows, ct_tol)
+    sectors_breakdown = build_sector_achievement_summary(rows, ct_tol)
+
+    if not unfiltered:
+        warnings.append("no_results")
+    elif not rows:
+        warnings.append("all_rows_filtered_out")
+    elif summary["n_evaluable"] == 0:
+        warnings.append("no_evaluable_rows")
+
+    return {
+        "session_id": session_id,
+        "n_total_rows": len(rows),
+        "summary": summary,
+        "sectors": sectors_breakdown,
+        "tolerances": resolved,
+        "tolerances_source": tolerances_source,
+        "filters": {
+            "sector": list(sectors or []),
+            "section": list(sections or []),
+            "level": list(levels or []),
+            "bench": list(benches or []),
+        },
+        "units": {"corrections": "m", "score": "0-100"},
+        "status_model": _ACHIEVEMENT_STATUS_MODEL,
+        "metadata": {
+            "source": "persisted_comparisons",
+            "status": "computed" if summary["n_evaluable"] > 0 else "no_data",
+            "assumptions": list(_ACHIEVEMENT_ASSUMPTIONS),
+        },
+        "warnings": warnings,
+    }
+
+
+def _resolved_ct_tol_pair(ct_tol: Optional[dict]) -> Dict[str, float]:
+    """Validated {'neg','pos'} pair from the session value or core default.
+
+    ``ct_tol`` is ``None`` or was already validated by the core helper;
+    this only re-reads the numeric pair for the response echo.
+    """
+    default = DEFAULT_TOLERANCES.crest_toe_deviation
+    if not isinstance(ct_tol, dict):
+        return {
+            "neg": float(default["neg"]),
+            "pos": float(default["pos"]),
+        }
+    return {
+        "neg": float(ct_tol.get("neg", default["neg"])),
+        "pos": float(ct_tol.get("pos", default["pos"])),
+    }
+
+
+@router.get("/design-achievement")
+async def get_design_achievement(
+    request: Request,
+    sector: Optional[List[str]] = Query(None, alias="sector"),
+    section: Optional[List[str]] = Query(None, alias="section"),
+    level: Optional[List[str]] = Query(None, alias="level"),
+    bench: Optional[List[str]] = Query(None, alias="bench"),
+):
+    """Logro Diseño summary (cresta/pata/berma) for the request's session.
+
+    Reuses :func:`core.design_achievement.build_design_achievement_summary`
+    over the persisted comparison rows of THIS session, with the session's
+    ``crest_toe_deviation`` tolerance (core default when unset). Filters
+    (``?sector=``/``?section=``/``?level=``/``?bench=``, repeatable) are
+    ANDed across dimensions, ORed within one; ``''`` is selectable.
+    """
+    try:
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
+        )
+        return await _run_in_executor(
+            _build_design_achievement_sync,
+            session_id,
+            sector,
+            section,
+            level,
+            bench,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Get design achievement failed")
+        raise HTTPException(500, detail=f"Get design achievement failed: {exc}")

@@ -68,6 +68,7 @@ class TolerancesSchema(BaseModel):
     berm_width: Dict[str, float] = Field(default={"min": 6.0})
     inter_ramp_angle: Dict[str, float] = Field(default={"neg": 3.0, "pos": 2.0})
     overall_angle: Dict[str, float] = Field(default={"neg": 2.0, "pos": 2.0})
+    crest_toe_deviation: Dict[str, float] = Field(default={"neg": 1.0, "pos": 1.0})
 
 
 class BlastSettingsSchema(BaseModel):

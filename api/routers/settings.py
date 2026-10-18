@@ -65,6 +65,14 @@ def _get_default_settings() -> dict:
                 if isinstance(DEFAULT_TOLERANCES.overall_angle, dict)
                 else DEFAULT_TOLERANCES.overall_angle["pos"],
             },
+            "crest_toe_deviation": {
+                "neg": DEFAULT_TOLERANCES.crest_toe_deviation.get("neg", 1.0)
+                if isinstance(DEFAULT_TOLERANCES.crest_toe_deviation, dict)
+                else DEFAULT_TOLERANCES.crest_toe_deviation["neg"],
+                "pos": DEFAULT_TOLERANCES.crest_toe_deviation.get("pos", 1.0)
+                if isinstance(DEFAULT_TOLERANCES.crest_toe_deviation, dict)
+                else DEFAULT_TOLERANCES.crest_toe_deviation["pos"],
+            },
         },
         "blast": {
             "rock_density_tm3": BLAST.rock_density_tm3,
@@ -146,7 +154,26 @@ async def update_settings(request: Request, body: schemas.SettingsUpdate):
     if "tolerances" in body_dict and body_dict["tolerances"] is not None:
         if "tolerances" not in existing:
             existing["tolerances"] = {}
-        existing["tolerances"].update(body_dict["tolerances"])
+        incoming_tolerances = body_dict["tolerances"]
+        incoming_crest_toe = incoming_tolerances.get("crest_toe_deviation")
+        if isinstance(incoming_crest_toe, dict):
+            for _key in ("neg", "pos"):
+                if _key not in incoming_crest_toe:
+                    raise HTTPException(
+                        400, "crest_toe_deviation requires 'neg' and 'pos' values"
+                    )
+                try:
+                    value = float(incoming_crest_toe[_key])
+                except (TypeError, ValueError):
+                    raise HTTPException(
+                        400, f"crest_toe_deviation['{_key}'] must be a finite number"
+                    )
+                if not math.isfinite(value) or value < 0:
+                    raise HTTPException(
+                        400,
+                        f"crest_toe_deviation['{_key}'] must be finite and >= 0",
+                    )
+        existing["tolerances"].update(incoming_tolerances)
 
     if "blast" in body_dict and body_dict["blast"] is not None:
         if "blast" not in existing:

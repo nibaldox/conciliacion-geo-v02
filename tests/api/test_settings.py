@@ -33,6 +33,7 @@ def _default_payload() -> Dict[str, Any]:
             "berm_width": {"min": 6.0},
             "inter_ramp_angle": {"neg": 3.0, "pos": 2.0},
             "overall_angle": {"neg": 2.0, "pos": 2.0},
+            "crest_toe_deviation": {"neg": 1.0, "pos": 1.0},
         },
         "blast": {
             "rock_density_tm3": 2.7,

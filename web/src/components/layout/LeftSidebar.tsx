@@ -19,7 +19,7 @@ import { Button } from '../ui/Button';
 import { ProjectField, PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 import { IconMesh, IconSections, IconSettings, IconLightning } from '../ui/Icons';
 import { useSidebarResize } from './useSidebarResize';
-import { TolerancesForm } from './TolerancesForm';
+import { TolerancesForm, mergeTolerance } from './TolerancesForm';
 import { ViewsToolbar } from './ViewsToolbar';
 import { LanguageToggle } from './LanguageToggle';
 
@@ -106,6 +106,9 @@ export function LeftSidebar() {
   const { data: status } = useProcessStatus();
   const isProcessing = status?.status === 'processing';
 
+  const [tolerancesDraft, setTolerancesDraft] = useState<Tolerances | null>(null);
+  const tolerancesDraftRef = useRef<Tolerances | null>(null);
+
   const [processSettings, setProcessSettings] = useState<ProcessSettings>({
     resolution: DEFAULT_SETTINGS.resolution,
     face_threshold: DEFAULT_SETTINGS.face_threshold,
@@ -126,7 +129,7 @@ export function LeftSidebar() {
     if (!settings) return;
     updateSettings.mutate({
       process: processSettings,
-      tolerances: settings.tolerances,
+      tolerances: tolerancesDraftRef.current ?? settings.tolerances,
     });
   };
 
@@ -176,12 +179,13 @@ export function LeftSidebar() {
     partial: Partial<Tolerances[K]>,
   ) => {
     if (!settings) return;
+    const base = tolerancesDraftRef.current ?? settings.tolerances;
+    const merged = mergeTolerance(base, key, partial);
+    tolerancesDraftRef.current = merged;
+    setTolerancesDraft(merged);
     saveSettings({
       process: processSettings,
-      tolerances: {
-        ...settings.tolerances,
-        [key]: { ...settings.tolerances[key], ...partial },
-      },
+      tolerances: merged,
     });
   };
 
@@ -347,7 +351,7 @@ export function LeftSidebar() {
               {/* Tolerances */}
               {settings && (
                 <TolerancesForm
-                  tolerances={settings.tolerances}
+                  tolerances={tolerancesDraft ?? settings.tolerances}
                   onChange={handleToleranceChange}
                 />
               )}

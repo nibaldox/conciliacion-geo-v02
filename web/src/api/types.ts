@@ -129,6 +129,7 @@ export interface Tolerances {
   berm_width: Record<string, number>;
   inter_ramp_angle: Record<string, number>;
   overall_angle: Record<string, number>;
+  crest_toe_deviation?: Record<string, number>;
 }
 
 /**
@@ -321,6 +322,8 @@ export interface ComparisonResult {
   berm_real: number | null;
   berm_min: number | null;
   berm_status: string;
+  spill_width?: number | null;
+  effective_berm?: number | null;
   delta_crest: number | null;
   delta_toe: number | null;
   bench_score?: number;
