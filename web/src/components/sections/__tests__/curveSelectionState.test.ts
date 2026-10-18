@@ -146,6 +146,36 @@ describe('curveSelectionState', () => {
     });
   });
 
+  it('cancel on already-empty selection returns the same state reference', () => {
+    const empty = createCurveSelectionState(ctxA);
+    expect(reduceCurveSelection(empty, { type: 'cancel' })).toBe(empty);
+
+    const emptyNoContext = createCurveSelectionState(null);
+    expect(reduceCurveSelection(emptyNoContext, { type: 'cancel' })).toBe(emptyNoContext);
+  });
+
+  it('generated on already-empty selection returns the same state reference', () => {
+    const empty = createCurveSelectionState(ctxA);
+    expect(reduceCurveSelection(empty, { type: 'generated' })).toBe(empty);
+
+    const emptyNoContext = createCurveSelectionState(null);
+    expect(reduceCurveSelection(emptyNoContext, { type: 'generated' })).toBe(emptyNoContext);
+  });
+
+  it('cancel and generated on a selecting selection still return a cleared state', () => {
+    let state = createCurveSelectionState(ctxA);
+    state = reduceCurveSelection(state, validClick('A', 10));
+    const canceled = reduceCurveSelection(state, { type: 'cancel' });
+    expect(canceled).not.toBe(state);
+    expect(canceled).toEqual<CurveSelectionState>({
+      context: ctxA,
+      curveId: null,
+      start: null,
+      end: null,
+      rejection: null,
+    });
+  });
+
   it('equal-value context action keeps same state; changed context clears selection and installs new context', () => {
     let state = createCurveSelectionState(ctxA);
     state = reduceCurveSelection(state, validClick('A', 10));

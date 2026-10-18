@@ -14,6 +14,7 @@ import { HorizontalDeviationLegend } from '../results/HorizontalDeviationLegend'
 import { HorizontalDeviationOverview } from '../results/HorizontalDeviationOverview';
 import { getCurveGeometrySnapshot } from '../sections/curveGeometryAdapter';
 import {
+  computeCurveSearchBounds,
   createCurveSceneClickHandler,
   createCurveScenePreviewHandler,
   getCurveSearchThreshold,
@@ -21,7 +22,8 @@ import {
 } from './curveScenePicking';
 import type { CurvePreviewViewSnapshot } from './curveScenePicking';
 import { buildCurveSelectionVisuals, type RenderPoint3D } from './curveSelectionVisuals';
-import type { CurveAnchor } from '../sections/curveSelectionState';
+import { resolveCurveContextAction } from './curveContextSync';
+import type { CurveAnchor, CurveSelectionContext } from '../sections/curveSelectionState';
 import type { MiningPoint3D } from '../sections/curveSelectionTypes';
 
 const DESIGN_HEX = '#7693b7'; // steel blue
@@ -131,15 +133,18 @@ function Scene({
   const { t } = useTranslation();
   const mapClickHandler = useSession((s) => s.mapClickHandler);
   const curveSelection = useSession((s) => s.curveSelection);
+  const dispatchCurveSelection = useSession((s) => s.dispatchCurveSelection);
   const designMeshId = useSession((s) => s.designMeshId);
+  const isDark = useTheme((s) => s.isDark);
   const { raycaster, camera, size, gl } = useThree();
 
   const topoMeshRef = useRef<THREE.Mesh>(null);
   const deviationMeshRef = useRef<THREE.Mesh>(null);
+  const previewRef = useRef<THREE.Points>(null);
 
   useFrame(() => {
     if (raycaster.params.Line) {
-      raycaster.params.Line.threshold = getCurveSearchThreshold(camera, size.height) ?? 0;
+      raycaster.params.Line.threshold = getCurveSearchThreshold(camera, size.height, undefined, curveSearchBounds) ?? 0;
     }
     const preview = previewRef.current;
     if (preview === null || !preview.visible) return;
@@ -205,11 +210,26 @@ function Scene({
     };
   }, [horizontalDeviationGeometry]);
 
-  const curveSnapshot = getCurveGeometrySnapshot(designMeshId, designContours);
+  const curveSnapshot = useMemo(
+    () => getCurveGeometrySnapshot(designMeshId, designContours),
+    [designMeshId, designContours],
+  );
+
+  const publishedCurveContextRef = useRef<CurveSelectionContext | null>(null);
+  useEffect(() => {
+    const nextContext = curveSnapshot ? curveSnapshot.context : null;
+    const action = resolveCurveContextAction(publishedCurveContextRef.current, nextContext);
+    publishedCurveContextRef.current = nextContext;
+    if (action !== null) dispatchCurveSelection(action);
+  }, [curveSnapshot, dispatchCurveSelection]);
 
   const curveCenter = useMemo<MiningPoint3D>(
     () => [bounds.centerX, bounds.centerY, bounds.centerZ],
     [bounds.centerX, bounds.centerY, bounds.centerZ],
+  );
+  const curveSearchBounds = useMemo(
+    () => (curveSnapshot === null ? null : computeCurveSearchBounds(curveSnapshot, curveCenter)),
+    [curveSnapshot, curveCenter],
   );
   const curveSelectionVisuals = useMemo(
     () => buildCurveSelectionVisuals({
@@ -219,9 +239,9 @@ function Scene({
     }),
     [curveSnapshot, curveSelection, curveCenter],
   );
-  const rangeColor = readThemeColor('--color-mine-yellow', 'orange');
-  const startColor = readThemeColor('--color-mine-green', 'green');
-  const endColor = readThemeColor('--color-mine-red', 'red');
+  const rangeColor = useMemo(() => readThemeColor('--color-mine-yellow', 'orange'), [isDark]);
+  const startColor = useMemo(() => readThemeColor('--color-mine-green', 'green'), [isDark]);
+  const endColor = useMemo(() => readThemeColor('--color-mine-red', 'red'), [isDark]);
   const rangeLine = useMemo(() => {
     const positions = curveSelectionVisuals.rangePositions;
     if (!positions || positions.length === 0) return null;
@@ -256,27 +276,31 @@ function Scene({
       if (endMarkerGeometry) endMarkerGeometry.dispose();
     };
   }, [endMarkerGeometry]);
-  const curveCanvas = { getBoundingClientRect: () => gl.domElement.getBoundingClientRect() };
-  const getCurveOccluders = (): THREE.Object3D[] => {
+  const curveCanvas = useMemo(
+    () => ({ getBoundingClientRect: () => gl.domElement.getBoundingClientRect() }),
+    [gl],
+  );
+  const getCurveOccluders = useCallback((): THREE.Object3D[] => {
     const occluders: THREE.Object3D[] = [];
     if (topoMeshRef.current) occluders.push(topoMeshRef.current);
     if (showHorizontalDeviation && deviationMeshRef.current) occluders.push(deviationMeshRef.current);
     return occluders;
-  };
+  }, [showHorizontalDeviation]);
 
-  const curveClickHandler = curveSnapshot
-    ? createCurveSceneClickHandler({
-        snapshot: curveSnapshot,
-        selectedCurveId: curveSelection.curveId,
-        camera,
-        center: curveCenter,
-        canvas: curveCanvas,
-        getOccluders: getCurveOccluders,
-        onPick: mapClickHandler,
-      })
-    : null;
+  const curveClickHandler = useMemo(() => (
+    curveSnapshot
+      ? createCurveSceneClickHandler({
+          snapshot: curveSnapshot,
+          selectedCurveId: curveSelection.curveId,
+          camera,
+          center: curveCenter,
+          canvas: curveCanvas,
+          getOccluders: getCurveOccluders,
+          onPick: mapClickHandler,
+        })
+      : null
+  ), [curveSnapshot, curveSelection.curveId, camera, curveCenter, curveCanvas, getCurveOccluders, mapClickHandler]);
 
-  const previewRef = useRef<THREE.Points>(null);
   const previewAttribute = useMemo(() => new THREE.BufferAttribute(new Float32Array(3), 3), []);
   const previewGeometry = useMemo(() => {
     const geometry = new THREE.BufferGeometry();
@@ -327,20 +351,22 @@ function Scene({
     previewViewportSnapshot.height = size.height;
   }, [mapClickHandler, designMeshId, curveSelection, bounds, camera, size, previewAttribute, previewViewSnapshot, previewViewportSnapshot]);
 
-  const curvePreviewHandler = curveSnapshot
-    ? createCurveScenePreviewHandler(
-        {
-          snapshot: curveSnapshot,
-          selectedCurveId: curveSelection.curveId,
-          camera,
-          center: curveCenter,
-          canvas: curveCanvas,
-          getOccluders: getCurveOccluders,
-          onPick: mapClickHandler,
-        },
-        applyCurvePreview,
-      )
-    : null;
+  const curvePreviewHandler = useMemo(() => (
+    curveSnapshot
+      ? createCurveScenePreviewHandler(
+          {
+            snapshot: curveSnapshot,
+            selectedCurveId: curveSelection.curveId,
+            camera,
+            center: curveCenter,
+            canvas: curveCanvas,
+            getOccluders: getCurveOccluders,
+            onPick: mapClickHandler,
+          },
+          applyCurvePreview,
+        )
+      : null
+  ), [curveSnapshot, curveSelection.curveId, camera, curveCenter, curveCanvas, getCurveOccluders, mapClickHandler, applyCurvePreview]);
 
   useEffect(() => {
     return () => {

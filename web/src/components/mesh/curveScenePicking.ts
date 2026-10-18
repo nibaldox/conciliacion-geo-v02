@@ -42,6 +42,13 @@ function materialIsFullyOpaque(material: Material | Material[]): boolean {
   return !material.transparent && material.opacity >= 1;
 }
 
+const occlusionRaycaster = new Raycaster();
+const scratchTarget = new Vector3();
+const scratchProjected = new Vector3();
+const scratchNdc = new Vector2();
+const scratchHitPoint = new Vector3();
+const scratchOccluderList: Object3D[] = [];
+
 function isOccluded(
   anchor: CurveAnchor,
   center: MiningPoint3D,
@@ -49,35 +56,41 @@ function isOccluded(
   occluders: readonly Object3D[],
 ): boolean {
   if (occluders.length === 0) return false;
-  const target = new Vector3(
+  scratchTarget.set(
     anchor.position[0] - center[0],
     anchor.position[2] - center[2],
     -(anchor.position[1] - center[1]),
   );
   if (
-    !Number.isFinite(target.x) || !Number.isFinite(target.y) || !Number.isFinite(target.z)
+    !Number.isFinite(scratchTarget.x)
+    || !Number.isFinite(scratchTarget.y)
+    || !Number.isFinite(scratchTarget.z)
   ) {
     return false;
   }
-  const ndc = target.clone().project(camera);
-  if (!Number.isFinite(ndc.x) || !Number.isFinite(ndc.y)) return false;
-  const raycaster = new Raycaster();
-  raycaster.layers.mask = camera.layers.mask;
-  raycaster.setFromCamera(new Vector2(ndc.x, ndc.y), camera);
-  const targetDistance = raycaster.ray.origin.distanceTo(target);
+  scratchProjected.copy(scratchTarget).project(camera);
+  if (!Number.isFinite(scratchProjected.x) || !Number.isFinite(scratchProjected.y)) return false;
+  occlusionRaycaster.layers.mask = camera.layers.mask;
+  occlusionRaycaster.near = 0;
+  occlusionRaycaster.far = Number.POSITIVE_INFINITY;
+  occlusionRaycaster.setFromCamera(scratchNdc.set(scratchProjected.x, scratchProjected.y), camera);
+  const targetDistance = occlusionRaycaster.ray.origin.distanceTo(scratchTarget);
   if (!Number.isFinite(targetDistance) || targetDistance <= 0) return false;
-  raycaster.near = 0;
-  raycaster.far = targetDistance;
+  occlusionRaycaster.near = 0;
+  occlusionRaycaster.far = targetDistance;
   const clipBounds = camera as unknown as { near?: number; far?: number };
   const cameraNear = typeof clipBounds.near === 'number' && Number.isFinite(clipBounds.near) ? clipBounds.near : Number.NEGATIVE_INFINITY;
   const cameraFar = typeof clipBounds.far === 'number' && Number.isFinite(clipBounds.far) ? clipBounds.far : Number.POSITIVE_INFINITY;
   const roundoff = Math.abs(targetDistance) * OCCLUSION_ROUNDOFF;
-  for (const hit of raycaster.intersectObjects([...occluders], false)) {
+  scratchOccluderList.length = 0;
+  for (const occluder of occluders) scratchOccluderList.push(occluder);
+  for (const hit of occlusionRaycaster.intersectObjects(scratchOccluderList, false)) {
     if (!isVisibleForCamera(hit.object, camera)) continue;
     if (!(hit.object instanceof Mesh)) continue;
     if (!materialIsFullyOpaque(hit.object.material)) continue;
     if (!Number.isFinite(hit.distance)) continue;
-    const hitViewDepth = -hit.point.clone().applyMatrix4(camera.matrixWorldInverse).z;
+    scratchHitPoint.copy(hit.point).applyMatrix4(camera.matrixWorldInverse);
+    const hitViewDepth = -scratchHitPoint.z;
     if (!Number.isFinite(hitViewDepth)) continue;
     if (hitViewDepth < cameraNear) continue;
     if (hitViewDepth > cameraFar) continue;
@@ -134,19 +147,27 @@ export function resolveCurveSceneCandidate(input: CurveScenePickingInput): Curve
       position: mining,
     });
     if (anchor === null) continue;
-    if (isOccluded(anchor, center, camera, input.occluders)) continue;
     candidates.push({ anchor, visible: true });
   }
-  return pickCurveCandidate({
-    candidates,
-    context: snapshot.context,
-    selectedCurveId,
-    camera,
-    center,
-    viewport,
-    pointer,
-    radiusPx,
-  });
+  let remaining = candidates;
+  while (remaining.length > 0) {
+    const best = pickCurveCandidate({
+      candidates: remaining,
+      context: snapshot.context,
+      selectedCurveId,
+      camera,
+      center,
+      viewport,
+      pointer,
+      radiusPx,
+    });
+    if (best === null) return null;
+    if (!isOccluded(best, center, camera, input.occluders)) return best;
+    const next = remaining.filter((candidate) => candidate.anchor !== best);
+    if (next.length === remaining.length) return null;
+    remaining = next;
+  }
+  return null;
 }
 
 export function handleCurveSceneClick(
@@ -245,10 +266,54 @@ export function hasCurvePreviewViewChanged(
   );
 }
 
+export interface CurveSearchBounds {
+  readonly center: Vector3;
+  readonly radius: number;
+}
+
+export function computeCurveSearchBounds(
+  snapshot: CurveGeometrySnapshot,
+  center: MiningPoint3D,
+): CurveSearchBounds | null {
+  if (!Number.isFinite(center[0]) || !Number.isFinite(center[1]) || !Number.isFinite(center[2])) {
+    return null;
+  }
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let minZ = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  let maxZ = Number.NEGATIVE_INFINITY;
+  let count = 0;
+  for (const polyline of snapshot.curves.values()) {
+    for (const point of polyline.points) {
+      const x = point[0] - center[0];
+      const y = point[2] - center[2];
+      const z = -(point[1] - center[1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (z < minZ) minZ = z;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+      if (z > maxZ) maxZ = z;
+      count += 1;
+    }
+  }
+  if (count === 0) return null;
+  const radius = 0.5 * Math.hypot(maxX - minX, maxY - minY, maxZ - minZ);
+  if (!Number.isFinite(radius)) return null;
+  return {
+    center: new Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
+    radius,
+  };
+}
+
 export function getCurveSearchThreshold(
   camera: Camera,
   viewportHeight: number,
   radiusPx: number = DEFAULT_RADIUS_PX,
+  bounds: CurveSearchBounds | null = null,
 ): number | null {
   if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return null;
   if (!Number.isFinite(radiusPx) || radiusPx < 0) return null;
@@ -257,7 +322,21 @@ export function getCurveSearchThreshold(
   if (!Number.isFinite(projectionY) || projectionY <= 0) return null;
   if (camera instanceof PerspectiveCamera) {
     if (!Number.isFinite(camera.far) || camera.far <= 0) return null;
-    const threshold = (2 * camera.far * radiusPx) / (projectionY * viewportHeight);
+    let depth = camera.far;
+    const boundsAreUsable = bounds !== null
+      && Number.isFinite(bounds.radius)
+      && bounds.radius >= 0
+      && Number.isFinite(bounds.center.x)
+      && Number.isFinite(bounds.center.y)
+      && Number.isFinite(bounds.center.z);
+    if (boundsAreUsable && bounds !== null) {
+      const reach = camera.position.distanceTo(bounds.center) + bounds.radius;
+      if (Number.isFinite(reach) && reach > 0) {
+        const nearPlane = Number.isFinite(camera.near) && camera.near > 0 ? camera.near : 0;
+        depth = Math.min(camera.far, Math.max(nearPlane, reach));
+      }
+    }
+    const threshold = (2 * depth * radiusPx) / (projectionY * viewportHeight);
     return Number.isFinite(threshold) && threshold >= 0 ? threshold : null;
   }
   const orthoThreshold = (2 * radiusPx) / (projectionY * viewportHeight);

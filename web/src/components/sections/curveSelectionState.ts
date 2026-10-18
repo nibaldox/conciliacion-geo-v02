@@ -77,6 +77,14 @@ export function reduceCurveSelection(
   }
 
   if (action.type === 'cancel' || action.type === 'generated') {
+    if (
+      state.curveId === null &&
+      state.start === null &&
+      state.end === null &&
+      state.rejection === null
+    ) {
+      return state;
+    }
     return {
       context: state.context,
       curveId: null,
