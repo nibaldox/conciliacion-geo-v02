@@ -1,7 +1,7 @@
-import { useEffect, useState, useMemo, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Canvas, useThree } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
+import { Html, OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 import { useMeshVertices, useMeshBreaklines, useSections, useResults, useHorizontalDeviationMesh } from '../../api/hooks';
 import { DEMO_MESH_IDS, useSession } from '../../stores/session';
@@ -12,6 +12,17 @@ import { expandHorizontalDeviationFaces, getHorizontalDeviationColor } from '../
 import { horizontalDeviationError, horizontalDeviationWarning } from '../../utils/horizontalDeviationMessages';
 import { HorizontalDeviationLegend } from '../results/HorizontalDeviationLegend';
 import { HorizontalDeviationOverview } from '../results/HorizontalDeviationOverview';
+import { getCurveGeometrySnapshot } from '../sections/curveGeometryAdapter';
+import {
+  createCurveSceneClickHandler,
+  createCurveScenePreviewHandler,
+  getCurveSearchThreshold,
+  hasCurvePreviewViewChanged,
+} from './curveScenePicking';
+import type { CurvePreviewViewSnapshot } from './curveScenePicking';
+import { buildCurveSelectionVisuals, type RenderPoint3D } from './curveSelectionVisuals';
+import type { CurveAnchor } from '../sections/curveSelectionState';
+import type { MiningPoint3D } from '../sections/curveSelectionTypes';
 
 const DESIGN_HEX = '#7693b7'; // steel blue
 const TOPO_HEX = '#cccccc';   // grey
@@ -117,16 +128,26 @@ function Scene({
   bounds,
   layers,
 }: SceneProps) {
+  const { t } = useTranslation();
   const mapClickHandler = useSession((s) => s.mapClickHandler);
-  const selectedCurveId = useSession((s) => s.selectedCurveId);
-  const selectedCurvePoints = useSession((s) => s.selectedCurvePoints);
-  const { raycaster } = useThree();
+  const curveSelection = useSession((s) => s.curveSelection);
+  const designMeshId = useSession((s) => s.designMeshId);
+  const { raycaster, camera, size, gl } = useThree();
 
-  useEffect(() => {
-    if (raycaster?.params?.Line) {
-      raycaster.params.Line.threshold = 5; // increase threshold for easier clicking
+  const topoMeshRef = useRef<THREE.Mesh>(null);
+  const deviationMeshRef = useRef<THREE.Mesh>(null);
+
+  useFrame(() => {
+    if (raycaster.params.Line) {
+      raycaster.params.Line.threshold = getCurveSearchThreshold(camera, size.height) ?? 0;
     }
-  }, [raycaster]);
+    const preview = previewRef.current;
+    if (preview === null || !preview.visible) return;
+    if (hasCurvePreviewViewChanged(previewViewSnapshot, camera, size)) {
+      preview.visible = false;
+    }
+  });
+
 
   // 1. Topography Solid Mesh or Point Cloud Geometry
   const topoGeometry = useMemo(() => {
@@ -184,45 +205,187 @@ function Scene({
     };
   }, [horizontalDeviationGeometry]);
 
+  const curveSnapshot = getCurveGeometrySnapshot(designMeshId, designContours);
+
+  const curveCenter = useMemo<MiningPoint3D>(
+    () => [bounds.centerX, bounds.centerY, bounds.centerZ],
+    [bounds.centerX, bounds.centerY, bounds.centerZ],
+  );
+  const curveSelectionVisuals = useMemo(
+    () => buildCurveSelectionVisuals({
+      snapshot: curveSnapshot,
+      selection: curveSelection,
+      center: curveCenter,
+    }),
+    [curveSnapshot, curveSelection, curveCenter],
+  );
+  const rangeColor = readThemeColor('--color-mine-yellow', 'orange');
+  const startColor = readThemeColor('--color-mine-green', 'green');
+  const endColor = readThemeColor('--color-mine-red', 'red');
+  const rangeLine = useMemo(() => {
+    const positions = curveSelectionVisuals.rangePositions;
+    if (!positions || positions.length === 0) return null;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const line = new THREE.Line(geometry);
+    line.name = 'curve-selection-range';
+    line.userData = { role: 'range' };
+    line.frustumCulled = false;
+    return line;
+  }, [curveSelectionVisuals.rangePositions]);
+  const startMarkerGeometry = useMemo(
+    () => createPointGeometry(curveSelectionVisuals.start),
+    [curveSelectionVisuals.start],
+  );
+  const endMarkerGeometry = useMemo(
+    () => createPointGeometry(curveSelectionVisuals.end),
+    [curveSelectionVisuals.end],
+  );
+  useEffect(() => {
+    return () => {
+      if (rangeLine) rangeLine.geometry.dispose();
+    };
+  }, [rangeLine]);
+  useEffect(() => {
+    return () => {
+      if (startMarkerGeometry) startMarkerGeometry.dispose();
+    };
+  }, [startMarkerGeometry]);
+  useEffect(() => {
+    return () => {
+      if (endMarkerGeometry) endMarkerGeometry.dispose();
+    };
+  }, [endMarkerGeometry]);
+  const curveCanvas = { getBoundingClientRect: () => gl.domElement.getBoundingClientRect() };
+  const getCurveOccluders = (): THREE.Object3D[] => {
+    const occluders: THREE.Object3D[] = [];
+    if (topoMeshRef.current) occluders.push(topoMeshRef.current);
+    if (showHorizontalDeviation && deviationMeshRef.current) occluders.push(deviationMeshRef.current);
+    return occluders;
+  };
+
+  const curveClickHandler = curveSnapshot
+    ? createCurveSceneClickHandler({
+        snapshot: curveSnapshot,
+        selectedCurveId: curveSelection.curveId,
+        camera,
+        center: curveCenter,
+        canvas: curveCanvas,
+        getOccluders: getCurveOccluders,
+        onPick: mapClickHandler,
+      })
+    : null;
+
+  const previewRef = useRef<THREE.Points>(null);
+  const previewAttribute = useMemo(() => new THREE.BufferAttribute(new Float32Array(3), 3), []);
+  const previewGeometry = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', previewAttribute);
+    return geometry;
+  }, [previewAttribute]);
+  const { snapshot: previewViewSnapshot, viewport: previewViewportSnapshot } = useMemo(() => {
+    const viewport = { width: 0, height: 0 };
+    const snapshot: CurvePreviewViewSnapshot = {
+      position: new THREE.Vector3(),
+      quaternion: new THREE.Quaternion(),
+      projection: new THREE.Matrix4(),
+      viewport,
+    };
+    return { snapshot, viewport };
+  }, []);
+
+  const hideCurvePreview = useCallback(() => {
+    const preview = previewRef.current;
+    if (preview) preview.visible = false;
+  }, []);
+
+  const applyCurvePreview = useCallback((anchor: CurveAnchor | null) => {
+    const preview = previewRef.current;
+    if (!preview) return;
+    const state = useSession.getState();
+    if (
+      anchor === null
+      || state.designMeshId !== designMeshId
+      || state.mapClickHandler !== mapClickHandler
+      || state.curveSelection !== curveSelection
+    ) {
+      preview.visible = false;
+      return;
+    }
+    previewAttribute.setXYZ(
+      0,
+      anchor.position[0] - bounds.centerX,
+      anchor.position[2] - bounds.centerZ,
+      -(anchor.position[1] - bounds.centerY),
+    );
+    previewAttribute.needsUpdate = true;
+    preview.visible = true;
+    previewViewSnapshot.position.copy(camera.position);
+    previewViewSnapshot.quaternion.copy(camera.quaternion);
+    previewViewSnapshot.projection.copy(camera.projectionMatrix);
+    previewViewportSnapshot.width = size.width;
+    previewViewportSnapshot.height = size.height;
+  }, [mapClickHandler, designMeshId, curveSelection, bounds, camera, size, previewAttribute, previewViewSnapshot, previewViewportSnapshot]);
+
+  const curvePreviewHandler = curveSnapshot
+    ? createCurveScenePreviewHandler(
+        {
+          snapshot: curveSnapshot,
+          selectedCurveId: curveSelection.curveId,
+          camera,
+          center: curveCenter,
+          canvas: curveCanvas,
+          getOccluders: getCurveOccluders,
+          onPick: mapClickHandler,
+        },
+        applyCurvePreview,
+      )
+    : null;
+
+  useEffect(() => {
+    return () => {
+      previewGeometry.dispose();
+    };
+  }, [previewGeometry]);
+
+  useEffect(() => {
+    if (!layers.designContours) hideCurvePreview();
+  }, [layers.designContours, hideCurvePreview]);
+
+  useEffect(() => {
+    return hideCurvePreview;
+  }, [curveSelection, designMeshId, mapClickHandler, curveSnapshot, hideCurvePreview]);
+
   // 2. Design Contour Lines Geometry
   const designLinesGeometries = useMemo(() => {
-    if (!designContours || !designContours.lines) return [];
-    
+    if (!curveSnapshot) return [];
+
     const geometries: {
       id: string;
-      elevIdx: number;
-      segIdx: number;
       geo: THREE.BufferGeometry;
       color: string;
     }[] = [];
 
-    designContours.lines.forEach((line, elevIdx) => {
-      const isCrest = line.type === 'crest';
-      const isToe = line.type === 'toe';
+    curveSnapshot.curves.forEach((curve) => {
+      const isCrest = curve.type === 'crest';
+      const isToe = curve.type === 'toe';
       const color = isCrest ? '#3b82f6' : isToe ? '#10b981' : '#ef4444';
 
-      line.segments.forEach((segment, segIdx) => {
-        const id = `${elevIdx}-${segIdx}`;
-        const positions = new Float32Array(segment.length * 3);
-        
-        for (let i = 0; i < segment.length; i++) {
-          const p = segment[i]!;
-          const z = p.length > 2 ? p[2] : line.elevation;
-          
-          positions[i * 3] = p[0] - bounds.centerX;
-          positions[i * 3 + 1] = z - bounds.centerZ;
-          positions[i * 3 + 2] = -(p[1] - bounds.centerY);
-        }
-        
-        const geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        
-        geometries.push({ id, elevIdx, segIdx, geo, color });
-      });
+      const positions = new Float32Array(curve.points.length * 3);
+      for (let i = 0; i < curve.points.length; i++) {
+        const p = curve.points[i]!;
+        positions[i * 3] = p[0] - bounds.centerX;
+        positions[i * 3 + 1] = p[2] - bounds.centerZ;
+        positions[i * 3 + 2] = -(p[1] - bounds.centerY);
+      }
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geometries.push({ id: curve.id, geo, color });
     });
 
     return geometries;
-  }, [designContours, bounds]);
+  }, [curveSnapshot, bounds]);
 
   useEffect(() => {
     return () => {
@@ -299,46 +462,6 @@ function Scene({
     };
   }, [sectionsData]);
 
-  // 4. Selected Curve Points
-  const selectedPointsGeo = useMemo(() => {
-    if (!selectedCurvePoints || selectedCurvePoints.length === 0) return null;
-    
-    const positions = new Float32Array(selectedCurvePoints.length * 3);
-    let valid = false;
-    
-    selectedCurvePoints.forEach((pt, i) => {
-      if (!designContours || !designContours.lines) return;
-      const parts = pt.curveId.split('-');
-      const elevIdx = parseInt(parts[0], 10);
-      const segIdx = parseInt(parts[1], 10);
-      
-      const line = designContours.lines[elevIdx];
-      if (!line) return;
-      const segment = line.segments[segIdx];
-      if (!segment) return;
-      const p = segment[pt.pointIndex];
-      if (!p) return;
-      
-      const z = p.length > 2 ? p[2] : line.elevation;
-      
-      positions[i * 3] = p[0] - bounds.centerX;
-      positions[i * 3 + 1] = z - bounds.centerZ;
-      positions[i * 3 + 2] = -(p[1] - bounds.centerY);
-      valid = true;
-    });
-    
-    if (!valid) return null;
-    
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    return geo;
-  }, [selectedCurvePoints, designContours, bounds]);
-
-  useEffect(() => {
-    return () => {
-      if (selectedPointsGeo) selectedPointsGeo.dispose();
-    };
-  }, [selectedPointsGeo]);
 
   return (
     <>
@@ -353,7 +476,7 @@ function Scene({
       {/* Real Topography Solid Mesh or Point Cloud */}
       {layers.topo && topoGeometry && (
         topoGeometry.index ? (
-          <mesh geometry={topoGeometry}>
+          <mesh ref={topoMeshRef} geometry={topoGeometry}>
             <meshStandardMaterial
               color={colors.topo}
               roughness={0.8}
@@ -369,7 +492,7 @@ function Scene({
       )}
 
       {showHorizontalDeviation && horizontalDeviationGeometry && (
-        <mesh geometry={horizontalDeviationGeometry}>
+        <mesh ref={deviationMeshRef} geometry={horizontalDeviationGeometry}>
           <meshStandardMaterial
             vertexColors
             roughness={0.8}
@@ -384,34 +507,93 @@ function Scene({
 
       {/* Design 3D Contour Lines */}
       {layers.designContours && designLinesGeometries.map(item => {
-        const isSelected = selectedCurveId === item.id;
-        const opacity = selectedCurveId ? (isSelected ? 1.0 : 0.2) : 0.9;
+        const isSelected = curveSelection.curveId === item.id;
+        const opacity = curveSelection.curveId ? (isSelected ? 1.0 : 0.2) : 0.9;
         
         return (
           <line
             key={item.id}
             {...{ geometry: item.geo } as any}
-            onClick={(e: { stopPropagation: () => void; index?: number; point: { x: number; z: number } }) => {
-              e.stopPropagation();
-              if (mapClickHandler) {
-                const vertexIndex = e.index;
-                const point = e.point;
-                const worldX = point.x + bounds.centerX;
-                const worldY = -point.z + bounds.centerY; // Since z was inverted
-                
-                mapClickHandler(worldX, worldY, item.id, vertexIndex);
-              }
-            }}
+            userData={{ curveId: item.id }}
+            onClick={
+              curveClickHandler
+                ? (e: ThreeEvent<MouseEvent>) => {
+                    curveClickHandler(e);
+                  }
+                : undefined
+            }
+            onPointerMove={
+              curvePreviewHandler
+                ? (e: ThreeEvent<PointerEvent>) => {
+                    curvePreviewHandler(e);
+                  }
+                : undefined
+            }
+            onPointerOut={curvePreviewHandler ? hideCurvePreview : undefined}
           >
             <lineBasicMaterial color={item.color} linewidth={isSelected ? 3 : 2} transparent opacity={opacity} />
           </line>
         );
       })}
 
-      {/* Selected Points */}
-      {selectedPointsGeo && (
-        <points geometry={selectedPointsGeo}>
-          <pointsMaterial color="yellow" size={10} sizeAttenuation={false} depthTest={false} />
+      {layers.designContours && rangeLine && (
+        <primitive object={rangeLine}>
+          <lineBasicMaterial
+            attach="material"
+            color={rangeColor}
+            linewidth={3}
+            transparent
+            opacity={0.9}
+            depthTest={false}
+          />
+        </primitive>
+      )}
+
+      {layers.designContours && startMarkerGeometry && curveSelectionVisuals.start && (
+        <points name="curve-selection-start" geometry={startMarkerGeometry} userData={{ role: 'start' }}>
+          <pointsMaterial color={startColor} size={9} sizeAttenuation={false} depthTest={false} transparent opacity={1} />
+        </points>
+      )}
+
+      {layers.designContours && startMarkerGeometry && curveSelectionVisuals.start && (
+        <Html position={[...curveSelectionVisuals.start] as [number, number, number]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+          <span className="inline-block" style={{ pointerEvents: 'none', transform: 'translate(0px, -18px)', fontSize: '10px', fontWeight: 700, fontFamily: 'monospace', color: startColor, textShadow: '0 0 4px var(--color-viewer-bg), 0 0 2px var(--color-viewer-bg)' }}>
+            {t('project_input.start')}
+          </span>
+        </Html>
+      )}
+
+      {layers.designContours && endMarkerGeometry && curveSelectionVisuals.end && (
+        <points name="curve-selection-end" geometry={endMarkerGeometry} userData={{ role: 'end' }}>
+          <pointsMaterial color={endColor} size={12} sizeAttenuation={false} depthTest={false} transparent opacity={1} />
+        </points>
+      )}
+
+      {layers.designContours && endMarkerGeometry && curveSelectionVisuals.end && (
+        <Html position={[...curveSelectionVisuals.end] as [number, number, number]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+          <span className="inline-block" style={{ pointerEvents: 'none', transform: 'translate(0px, 18px)', fontSize: '10px', fontWeight: 700, fontFamily: 'monospace', color: endColor, textShadow: '0 0 4px var(--color-viewer-bg), 0 0 2px var(--color-viewer-bg)' }}>
+            {t('project_input.end')}
+          </span>
+        </Html>
+      )}
+
+      {layers.designContours && curveSnapshot && (
+        <points
+          ref={previewRef}
+          name="curve-selection-preview"
+          geometry={previewGeometry}
+          visible={false}
+          frustumCulled={false}
+          userData={{ role: 'preview' }}
+        >
+          <pointsMaterial
+            color={readThemeColor('--color-accent-bright', 'white')}
+            size={7}
+            sizeAttenuation={false}
+            depthTest={false}
+            transparent
+            opacity={0.6}
+          />
         </points>
       )}
 
@@ -709,6 +891,15 @@ export function Mesh3DViewer() {
       )}
     </div>
   );
+}
+
+function createPointGeometry(point: RenderPoint3D | null): THREE.BufferGeometry | null {
+  if (point === null || !point.every((value) => Number.isFinite(value))) {
+    return null;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([point[0], point[1], point[2]]), 3));
+  return geometry;
 }
 
 function FieldLabel({ label, children }: { label: string; children: ReactNode }) {

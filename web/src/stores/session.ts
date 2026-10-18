@@ -1,4 +1,11 @@
 import { create } from 'zustand';
+import {
+  createCurveSelectionState,
+  reduceCurveSelection,
+  type CurveAnchor,
+  type CurveSelectionAction,
+  type CurveSelectionState,
+} from '../components/sections/curveSelectionState';
 
 /** Shape of the precomputed demo payload served from /demo/precomputed.json.
  *  See scripts/generate_demo_data.py for the producer. */
@@ -66,12 +73,10 @@ interface SessionState {
   activeWorkspaceView: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai';
   sidebarCollapsed: boolean;
 
-  // Click handler for placing sections in 3D View
-  mapClickHandler: ((x: number, y: number, curveId?: string, pointIndex?: number) => void) | null;
+  mapClickHandler: ((anchor: CurveAnchor) => void) | null;
 
   // Curve Selection State
-  selectedCurveId: string | null;
-  selectedCurvePoints: Array<{ curveId: string; pointIndex: number; x: number; y: number }>;
+  curveSelection: CurveSelectionState;
 
   // Selections
   selectedSection: string | null;
@@ -100,9 +105,8 @@ interface SessionState {
   prevStep: () => void;
   setActiveWorkspaceView: (view: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai') => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
-  setMapClickHandler: (handler: ((x: number, y: number, curveId?: string, pointIndex?: number) => void) | null) => void;
-  setSelectedCurveId: (id: string | null) => void;
-  setSelectedCurvePoints: (points: Array<{ curveId: string; pointIndex: number; x: number; y: number }>) => void;
+  setMapClickHandler: (handler: ((anchor: CurveAnchor) => void) | null) => void;
+  dispatchCurveSelection: (action: CurveSelectionAction) => void;
   setSelectedSection: (id: string | null) => void;
   setDesignMeshId: (id: string | null) => void;
   setTopoMeshId: (id: string | null) => void;
@@ -118,8 +122,7 @@ const initialState = {
   activeWorkspaceView: '3d' as const,
   sidebarCollapsed: false,
   mapClickHandler: null,
-  selectedCurveId: null,
-  selectedCurvePoints: [],
+  curveSelection: createCurveSelectionState(null),
   selectedSection: null,
   designMeshId: null,
   topoMeshId: null,
@@ -146,10 +149,18 @@ export const useSession = create<SessionState>((set, get) => ({
   setActiveWorkspaceView: (view) => set({ activeWorkspaceView: view }),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   setMapClickHandler: (handler) => set({ mapClickHandler: handler }),
-  setSelectedCurveId: (id) => set({ selectedCurveId: id }),
-  setSelectedCurvePoints: (points) => set({ selectedCurvePoints: points }),
+  dispatchCurveSelection: (action) =>
+    set((s) => {
+      const next = reduceCurveSelection(s.curveSelection, action);
+      return next === s.curveSelection ? s : { curveSelection: next };
+    }),
   setSelectedSection: (id) => set({ selectedSection: id }),
-  setDesignMeshId: (id) => set({ designMeshId: id }),
+  setDesignMeshId: (id) =>
+    set((s) =>
+      s.designMeshId === id
+        ? s
+        : { designMeshId: id, curveSelection: createCurveSelectionState(null) },
+    ),
   setTopoMeshId: (id) => set({ topoMeshId: id }),
   setFilters: (filters) => set((s) => ({ filters: { ...s.filters, ...filters } })),
   resetFilters: () => set({ filters: { sector: [], section: [], level: [], bench: [] } }),
@@ -164,6 +175,7 @@ export const useSession = create<SessionState>((set, get) => ({
         topoMeshId: DEMO_MESH_IDS.topo,
         currentStep: 4,            // skip straight to results
         activeWorkspaceView: 'profiles',
+        curveSelection: createCurveSelectionState(null),
         selectedSection: existing.sections[0]?.section_name ?? null,
         demoLoading: false,
         demoError: null,
@@ -187,6 +199,7 @@ export const useSession = create<SessionState>((set, get) => ({
         topoMeshId: DEMO_MESH_IDS.topo,
         currentStep: 4,
         activeWorkspaceView: 'profiles',
+        curveSelection: createCurveSelectionState(null),
         selectedSection: data.sections[0]?.section_name ?? null,
       });
     } catch (err) {
@@ -208,6 +221,7 @@ export const useSession = create<SessionState>((set, get) => ({
       selectedSection: null,
       currentStep: 1,
       activeWorkspaceView: '3d',
+      curveSelection: createCurveSelectionState(null),
     }),
 
   reset: () => set(initialState),

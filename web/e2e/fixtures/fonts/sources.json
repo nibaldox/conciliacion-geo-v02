@@ -1,0 +1,60 @@
+{
+  "fixtureSet": "t12-native-font-fixtures",
+  "purpose": "Deterministic offline Outfit/JetBrains Mono for native curve-selection QA (T12) so tests no longer depend on fonts.googleapis.com/fonts.gstatic.com availability",
+  "verification": {
+    "traceZip": "data/qa-curve-selection/t12-resumed-attempt-01-failed/test-results/curve-selection-T12b2-nati-ca6be-ates-reversed-real-sections-t12b2-dpr2/trace.zip",
+    "traceZipSha256": "d8a15a3ace24da33cdf74e40a82df2ad58906dc3c9cc48fb2c76b9847a31c5e1",
+    "method": "each woff2 was extracted from the trace only after confirming the extracted content SHA1 equals the trace resource file name; bytes unmodified",
+    "capturedCss": {
+      "traceResource": "resources/bc0b6f63aa8470ea1c1ed7e4bcf1e4f5256140ae.css",
+      "sha256": "0f751ae8a0abaa4bea64e5a01bafccd8663f4270de3fedeb01aada3fe764d7b8",
+      "copy": "data/qa-curve-selection/t12-font-fixture-evidence/google-css-captured.css"
+    }
+  },
+  "sourceCssRequest": {
+    "url": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700&display=swap",
+    "declaredIn": "web/src/styles/globals.css (line 1, read-only)"
+  },
+  "fonts": [
+    {
+      "family": "Outfit",
+      "style": "normal",
+      "subset": "latin",
+      "declaredWeights": [400, 500, 600, 700],
+      "localFile": "outfit-latin.woff2",
+      "bytes": 32292,
+      "sha1": "d8a316f7cbfa46e69876c925e58fbf7b7c1abf0d",
+      "sha256": "6c18d579fd87c3776be068b762cbc83fde3acb543d49eabd3ade842eb987e887",
+      "gstaticUrl": "https://fonts.gstatic.com/s/outfit/v15/QGYvz_MVcBeNP4NJtEtq.woff2",
+      "license": {
+        "spdx": "OFL-1.1",
+        "localFile": "OFL-Outfit.txt",
+        "sha256": "c676351bf8576b9aba743cd5eaa8c0e7ee0d51f805d720447b4df4ddb6a2e416",
+        "copyrightLine": "Copyright 2021 The Outfit Project Authors (https://github.com/Outfitio/Outfit-Fonts)",
+        "upstream": "https://github.com/google/fonts/tree/main/ofl/outfit",
+        "retrievedFrom": "https://raw.githubusercontent.com/google/fonts/main/ofl/outfit/OFL.txt"
+      }
+    },
+    {
+      "family": "JetBrains Mono",
+      "style": "normal",
+      "subset": "latin",
+      "declaredWeights": [400, 500, 700],
+      "localFile": "jetbrains-mono-latin.woff2",
+      "bytes": 31432,
+      "sha1": "4f27206c4b1caf8b7805597fcbc6922ff5805daa",
+      "sha256": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be",
+      "gstaticUrl": "https://fonts.gstatic.com/s/jetbrainsmono/v24/tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2",
+      "license": {
+        "spdx": "OFL-1.1",
+        "localFile": "OFL-JetBrainsMono.txt",
+        "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d",
+        "copyrightLine": "Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)",
+        "upstream": "https://github.com/google/fonts/tree/main/ofl/jetbrainsmono",
+        "retrievedFrom": "https://raw.githubusercontent.com/google/fonts/main/ofl/jetbrainsmono/OFL.txt"
+      }
+    }
+  ],
+  "helper": "web/e2e/fixtures/fontFixtures.ts (installFontFixtures)",
+  "scope": "latin subset only (the exact bytes the browser fetched in the failing run); GET fonts.googleapis.com/css* and these two exact gstatic URLs are fulfilled from the local files; unmatched requests continue to the network"
+}

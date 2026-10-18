@@ -348,7 +348,7 @@ body {
   }
 }
 
-@media (max-height: 850px) {
+@media (max-height: 1000px) {
   .project-sidebar [data-slot="project-heading"] {
     padding-block: 10px;
   }
@@ -372,7 +372,7 @@ body {
   }
 }
 
-@media (max-height: 700px) {
+@media (max-height: 800px) {
   .project-sidebar [data-slot="views-toolbar"] {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
@@ -385,4 +385,54 @@ body {
     justify-content: center;
     padding: 6px;
   }
+}
+
+@media (max-height: 1000px) {
+  .project-sidebar [id^="project-panel-"] > div {
+    padding: 4px 8px;
+  }
+  .project-sidebar [id^="project-panel-"] > div > * {
+    margin-block-end: 0;
+  }
+  .project-sidebar [id^="project-panel-"] > div > * + * {
+    margin-block-start: 4px;
+  }
+  .project-sidebar [id^="project-panel-"] > div > .grid > button {
+    height: 28px;
+  }
+  .project-sidebar [data-slot="project-controls"] {
+    gap: 4px;
+  }
+  .project-sidebar [data-slot="project-controls"] button {
+    min-height: 32px;
+    padding-block: 2px;
+  }
+  .project-sidebar button[aria-controls^="project-panel-"] {
+    height: 28px;
+    min-height: 28px;
+    padding-block: 2px;
+  }
+  .project-sidebar [data-slot="section-curve-form"] > * {
+    margin-block-end: 0;
+  }
+  .project-sidebar [data-slot="section-curve-form"] > * + * {
+    margin-block-start: 4px;
+  }
+  .project-sidebar [data-slot="section-curve-form"] button {
+    height: auto;
+    min-height: 32px;
+  }
+  .project-sidebar [data-slot="section-curve-form"] details {
+    padding-block: 2px;
+  }
+  .project-sidebar input {
+    height: 28px;
+  }
+}
+
+.project-sidebar [data-slot="section-curve-form"] > .flex.items-center.gap-2 {
+  gap: 4px;
+}
+.project-sidebar [data-slot="section-curve-form"] > .flex.items-center.gap-2 > button {
+  padding-inline: 6px;
 }
