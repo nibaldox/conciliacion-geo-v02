@@ -1,0 +1,143 @@
+{
+  "tolerances": {
+    "bench_height": {"neg": 1.0, "pos": 1.5},
+    "face_angle": {"neg": 5.0, "pos": 5.0},
+    "berm_width": {"min": 6.0},
+    "inter_ramp_angle": {"neg": 3.0, "pos": 2.0},
+    "overall_angle": {"neg": 2.0, "pos": 2.0},
+    "crest_toe_deviation": {"neg": 1.0, "pos": 1.0}
+  },
+  "ct_tol": {"neg": 1.0, "pos": 1.0},
+  "rows": [
+    {
+      "sector": "A", "section": "S-01", "bench_num": 1, "bench_num_topo": 1, "type": "MATCH", "level": "100",
+      "height_design": 10.0, "height_real": 10.5, "height_dev": 0.5, "height_status": "CUMPLE",
+      "angle_design": 75.0, "angle_real": 76.0, "angle_dev": 1.0, "angle_status": "CUMPLE",
+      "berm_design": 8.0, "berm_real": 7.6, "berm_min": 7.0, "berm_dev": -0.4, "berm_status": "CUMPLE",
+      "spill_width": 0.5, "effective_berm": 7.1, "delta_crest": 0.5, "delta_toe": 0.2,
+      "bench_score": 100, "section_score": 100.0
+    },
+    {
+      "sector": "A", "section": "S-01", "bench_num": 2, "bench_num_topo": 2, "type": "MATCH", "level": "85",
+      "height_design": 10.0, "height_real": 9.0, "height_dev": -1.0, "height_status": "CUMPLE",
+      "angle_design": 75.0, "angle_real": 74.0, "angle_dev": -1.0, "angle_status": "CUMPLE",
+      "berm_design": 7.0, "berm_real": 7.2, "berm_min": 7.0, "berm_dev": 0.2, "berm_status": "CUMPLE",
+      "spill_width": 0.0, "effective_berm": 7.2, "delta_crest": -0.8, "delta_toe": -0.3,
+      "bench_score": 100, "section_score": 100.0
+    },
+    {
+      "sector": "A", "section": "S-02", "bench_num": 1, "bench_num_topo": 1, "type": "MATCH", "level": "70",
+      "height_design": 12.0, "height_real": 14.0, "height_dev": 2.0, "height_status": "FUERA DE TOLERANCIA",
+      "angle_design": 75.0, "angle_real": 75.0, "angle_dev": 0.0, "angle_status": "CUMPLE",
+      "berm_design": 9.0, "berm_real": 8.0, "berm_min": 7.0, "berm_dev": -1.0, "berm_status": "CUMPLE",
+      "spill_width": 0.3, "effective_berm": 7.7, "delta_crest": 1.2, "delta_toe": 0.9,
+      "bench_score": 70, "section_score": 70.0
+    },
+    {
+      "sector": "B", "section": "S-03", "bench_num": 1, "bench_num_topo": 1, "type": "MATCH", "level": "60",
+      "height_design": 10.0, "height_real": 10.0, "height_dev": 0.0, "height_status": "CUMPLE",
+      "angle_design": 75.0, "angle_real": 75.0, "angle_dev": 0.0, "angle_status": "CUMPLE",
+      "berm_design": 7.0, "berm_real": 4.0, "berm_min": 7.0, "berm_dev": -3.0, "berm_status": "NO CUMPLE",
+      "spill_width": 0.0, "effective_berm": 4.0, "delta_crest": 0.0, "delta_toe": 0.0,
+      "bench_score": 40, "section_score": 40.0
+    },
+    {
+      "sector": "B", "section": "S-03", "bench_num": 2, "bench_num_topo": null, "type": "MISSING", "level": "45",
+      "height_design": 11.0, "height_real": null, "height_dev": null, "height_status": "NO CONSTRUIDO",
+      "angle_design": 75.0, "angle_real": null, "angle_dev": null, "angle_status": "-",
+      "berm_design": 7.0, "berm_real": null, "berm_min": null, "berm_dev": null, "berm_status": "FALTA BANCO",
+      "spill_width": null, "effective_berm": null, "delta_crest": null, "delta_toe": null,
+      "bench_score": 0, "section_score": 40.0
+    },
+    {
+      "sector": "B", "section": "S-04", "bench_num": 1, "bench_num_topo": 1, "type": "EXTRA", "level": "",
+      "height_design": null, "height_real": 6.0, "height_dev": null, "height_status": "BANCO ADICIONAL",
+      "angle_design": null, "angle_real": 70.0, "angle_dev": null, "angle_status": "BANCO ADICIONAL",
+      "berm_design": null, "berm_real": null, "berm_min": null, "berm_dev": null, "berm_status": null,
+      "spill_width": null, "effective_berm": null, "delta_crest": null, "delta_toe": null,
+      "bench_score": 0, "section_score": null
+    }
+  ],
+  "expected": {
+    "n_rows": 6,
+    "n_match": 4,
+    "n_missing": 1,
+    "n_extra": 1,
+    "n_sections": 4,
+    "filter_counts": {
+      "empty": 6,
+      "sector_A": 3,
+      "sector_B": 3,
+      "section_S01": 2,
+      "section_S03": 2,
+      "level_100": 1,
+      "level_60": 1,
+      "level_empty": 1,
+      "bench_1": 4,
+      "bench_2": 2,
+      "sector_A_section_S01": 2,
+      "sector_A_bench_1": 2,
+      "sector_Z": 0,
+      "section_S01_bench_2": 1
+    },
+    "profiles": {"S-01": "CUMPLE", "S-02": "FUERA", "S-03": "NO_CUMPLE", "S-04": "NO_CUMPLE"},
+    "profile_counts": {"CUMPLE": 1, "FUERA": 1, "NO_CUMPLE": 2},
+    "profile_scores": {"S-01": 100.0, "S-02": 70.0, "S-03": 40.0},
+    "global_weighted_score": 70.0,
+    "parameters": [
+      {"parameter": "height", "cumple": 3, "no_cumple": 3, "pct_cumple": 50.0, "mean_real": 9.9},
+      {"parameter": "angle", "cumple": 4, "no_cumple": 1, "pct_cumple": 80.0, "mean_real": 74.0},
+      {"parameter": "berm", "cumple": 3, "no_cumple": 2, "pct_cumple": 60.0, "mean_real": 6.7}
+    ],
+    "bench_labels": ["CUMPLE", "CUMPLE", "FUERA DE TOLERANCIA", "NO CUMPLE", "NO CONSTRUIDO", "BANCO ADICIONAL"],
+    "top_deviations_top3": [
+      {"section": "S-02", "parameter": "height", "deviation": 2.0, "ratio": 1.3333},
+      {"section": "S-01", "parameter": "height", "deviation": -1.0, "ratio": 1.0},
+      {"section": "S-03", "parameter": "berm", "deviation": -2.0, "ratio": 0.3333}
+    ],
+    "conclusions_contains": [
+      "Puntaje ponderado global (0-100): 70.0",
+      "no conformes (peor banco NO CUMPLE): 2 de 4",
+      "Altura de banco (50.0%)",
+      "Bancos de diseño no construidos: 1",
+      "Bancos adicionales (no presentes en el diseño): 1"
+    ]
+  },
+  "fallback_rows": [
+    {
+      "sector": "C", "section": "F-01", "bench_num": 1, "type": "MATCH", "level": "100",
+      "height_status": "CUMPLE", "angle_status": "CUMPLE", "berm_status": "CUMPLE",
+      "bench_score": 55
+    },
+    {
+      "sector": "C", "section": "F-01", "bench_num": 2, "type": "MATCH", "level": "85",
+      "height_status": "CUMPLE", "angle_status": "CUMPLE", "berm_status": "NO CUMPLE",
+      "bench_score": null
+    },
+    {
+      "sector": "C", "section": "F-01", "bench_num": 3, "type": "MISSING", "level": "70",
+      "height_status": "NO CONSTRUIDO", "angle_status": "-", "berm_status": "CUMPLE",
+      "bench_score": null
+    },
+    {
+      "sector": "D", "section": "F-02", "bench_num": 1, "type": "MATCH", "level": "60",
+      "height_status": "CUMPLE", "angle_status": "FUERA DE TOLERANCIA", "berm_status": "CUMPLE"
+    },
+    {
+      "sector": "D", "section": "F-02", "bench_num": 2, "type": "MATCH", "level": "45",
+      "height_status": "FUERA DE TOLERANCIA", "angle_status": "CUMPLE", "berm_status": "CUMPLE"
+    },
+    {
+      "sector": "D", "section": "F-03", "bench_num": 1, "type": "MATCH", "level": "",
+      "height_status": null, "angle_status": null, "berm_status": null
+    },
+    {
+      "sector": "D", "section": "F-03", "bench_num": 2, "type": "MATCH", "level": "30",
+      "height_status": null, "angle_status": null, "berm_status": "CUMPLE"
+    }
+  ],
+  "fallback_expected": {
+    "profile_scores": {"F-01": 47.5, "F-02": 80.0, "F-03": 30.0},
+    "global_weighted_score": 52.5
+  }
+}

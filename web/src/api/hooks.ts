@@ -767,6 +767,9 @@ export interface ExportFilters {
   showBlastHoles: boolean;
   blastTolerance: number;
   selectedBenchNumbers: number[];
+  sector: string[];
+  section: string[];
+  level: string[];
 }
 
 export interface ExportProjectInfo {
@@ -775,6 +778,12 @@ export interface ExportProjectInfo {
   operation?: string;
   phase?: string;
   filters?: ExportFilters;
+}
+
+/** Outcome of an export request, surfaced to the panel for its summary note. */
+export interface ExportResult {
+  filename: string;
+  appliedFilters: string | null;
 }
 
 function buildExportQuery(params?: ExportProjectInfo): Record<string, string> {
@@ -788,6 +797,22 @@ function buildExportQuery(params?: ExportProjectInfo): Record<string, string> {
   return query;
 }
 
+function readHeader(headers: unknown, name: string): string | undefined {
+  if (!headers || typeof headers !== 'object') return undefined;
+  const bag = headers as Record<string, unknown>;
+  const value = bag[name] ?? bag[name.toLowerCase()];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function filenameFromDisposition(header: string | undefined, fallback: string): string {
+  if (!header) return fallback;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8?.[1]) return decodeURIComponent(utf8[1].trim());
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  if (plain?.[1]) return plain[1].trim();
+  return fallback;
+}
+
 function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -798,13 +823,17 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 function useExportMutation(endpoint: string, defaultFilename: string, withParams = true) {
-  return useMutation({
+  return useMutation<ExportResult, Error, ExportProjectInfo | void>({
     mutationFn: (params?: ExportProjectInfo | void) => {
       const config = withParams
         ? { params: buildExportQuery(params as ExportProjectInfo | undefined), responseType: 'blob' as const }
         : { responseType: 'blob' as const };
       return client.get(endpoint, config).then(r => {
-        downloadBlob(r.data, defaultFilename);
+        const disposition = readHeader(r.headers, 'content-disposition');
+        const filename = filenameFromDisposition(disposition, defaultFilename);
+        downloadBlob(r.data, filename);
+        const appliedFilters = readHeader(r.headers, 'x-export-filters-applied') ?? null;
+        return { filename, appliedFilters };
       });
     },
   });
@@ -814,10 +843,10 @@ export function useExportExcel() {
   return useExportMutation('/export/excel', 'Conciliacion_Geotecnica.xlsx');
 }
 export function useExportWord() {
-  return useExportMutation('/export/word', 'Reporte_Geotecnico.docx');
+  return useExportMutation('/export/word', 'Informe_Conciliacion.docx');
 }
 export function useExportPdf() {
-  return useExportMutation('/export/pdf', 'Reporte_Ejecutivo.pdf');
+  return useExportMutation('/export/pdf', 'Informe_Ejecutivo.pdf');
 }
 export function useExportDxf() {
   return useExportMutation('/export/dxf', 'Perfiles_3D.dxf', false);

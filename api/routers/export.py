@@ -10,9 +10,12 @@ Endpoints:
 """
 
 import asyncio
+import io
+import json
 import logging
 import os
 import tempfile
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import numpy as np
@@ -33,9 +36,24 @@ from core import (
     generate_word_report,
     generate_section_images_zip,
 )
+from core.report_data import ReportFilters, build_report_data, filter_comparisons
 from core.section_cutter import azimuth_to_direction
 from core.param_extractor import ExtractionResult
 from core.reconciliation_summary import compute_section_scores
+
+# The ReportData-based Word/PDF builders are produced in parallel; the
+# import is guarded so the API still starts (and the legacy writer keeps
+# working) until those modules land. Tests stub the module attribute.
+try:
+    from core.web_word_report import build_word_report
+except ImportError:  # pragma: no cover — module not present yet
+    build_word_report = None
+
+try:
+    from core.web_pdf_report import build_pdf_report
+except ImportError:  # pragma: no cover — module not present yet
+    build_pdf_report = None
+
 
 # Fase 1.1 cierre §3: reportlab is an optional runtime dependency of the
 # PDF report; the import is LOCALISED so the API still starts without it,
@@ -111,8 +129,14 @@ def _apply_bench_filters(
     return params_list
 
 
-def _filters_header(filters: ExportFilters) -> Dict[str, str]:
+def _filters_header(
+    filters: ExportFilters, *, include_result_filters: bool = True,
+) -> Dict[str, str]:
+    """Echo only filter dimensions supported by the export endpoint."""
     summary = {
+        "sectors": filters.sectors if include_result_filters else [],
+        "sections": filters.sections if include_result_filters else [],
+        "levels": filters.levels if include_result_filters else [],
         "selected_bench_numbers": filters.selected_bench_numbers,
         "show_spill_areas": filters.show_spill_areas,
         "show_blast_holes": filters.show_blast_holes,
@@ -120,7 +144,130 @@ def _filters_header(filters: ExportFilters) -> Dict[str, str]:
         "show_reconciled_design": filters.show_reconciled_design,
         "show_reconciled_topo": filters.show_reconciled_topo,
     }
-    return {"X-Export-Filters-Applied": __import__("json").dumps(summary)}
+    return {"X-Export-Filters-Applied": json.dumps(summary)}
+
+
+def _report_filters(filters: ExportFilters) -> ReportFilters:
+    """Map the API filter model onto the shared report filter model."""
+    return ReportFilters(
+        sectors=tuple(filters.sectors),
+        sections=tuple(filters.sections),
+        levels=tuple(filters.levels),
+        benches=tuple(filters.selected_bench_numbers),
+    )
+
+
+def _report_meta(
+    session_id: str,
+    project: Optional[str],
+    author: Optional[str],
+    operation: Optional[str],
+    phase: Optional[str],
+    settings: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Assemble the report cover meta, including mesh filenames and settings."""
+    design_mesh = db.get_mesh(session_id, "design") or {}
+    topo_mesh = db.get_mesh(session_id, "topo") or {}
+    return {
+        "project": project or "",
+        "author": author or "",
+        "operation": operation or "",
+        "phase": phase or "",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "design_filename": design_mesh.get("filename", ""),
+        "topo_filename": topo_mesh.get("filename", ""),
+        "process": settings.get("process") or {},
+    }
+
+
+def _blast_payload(
+    settings: Dict[str, Any],
+    filters: ExportFilters,
+) -> Optional[Dict[str, Any]]:
+    """Blast-hole payload, with an empty mapping for explicit exclusion."""
+    if not filters.show_blast_holes:
+        return {}
+    if not settings.get("blast_holes"):
+        return None
+    return {"holes": settings["blast_holes"], "tolerance": filters.blast_tolerance}
+
+
+def _build_section_geometry(
+    session_id: str,
+    sections_raw: List[Dict[str, Any]],
+    mesh_design: Any,
+    mesh_topo: Any,
+    filters: ExportFilters,
+    report_filters: ReportFilters,
+    filtered_sections: set,
+) -> List[Dict[str, Any]]:
+    """Rebuild the per-section geometry list, honouring the active filters.
+
+    Sections excluded by the sector/section/level/bench filters are dropped
+    so the report's section detail matches the exported comparison rows.
+    """
+    from core import cut_both_surfaces
+
+    all_data: List[Dict[str, Any]] = []
+    for sec_dict in sections_raw:
+        sec = _section_from_dict(sec_dict)
+        if report_filters.sections and sec.name not in report_filters.sections:
+            continue
+        if report_filters.sectors and (sec.sector or "") not in report_filters.sectors:
+            continue
+        if not report_filters.is_empty() and sec.name not in filtered_sections:
+            continue
+
+        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+        design_ext = db.get_extraction(session_id, sec.name, "design")
+        topo_ext = db.get_extraction(session_id, sec.name, "topo")
+
+        benches_d = (
+            [_dict_to_bench(b) for b in design_ext.get("benches", [])]
+            if design_ext
+            else []
+        )
+        benches_t = (
+            [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
+        )
+
+        p_design = ExtractionResult(
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_d,
+            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
+            if design_ext
+            else 0.0,
+            overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
+        )
+        p_topo = ExtractionResult(
+            section_name=sec.name,
+            sector=sec.sector,
+            benches=benches_t,
+            inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
+            overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
+        )
+
+        p_design, p_topo = _apply_bench_filters([p_design, p_topo], filters)
+
+        all_data.append(
+            {
+                "section_name": sec.name,
+                "params_design": p_design,
+                "params_topo": p_topo,
+                "profile_d": (
+                    (pd_prof.distances, pd_prof.elevations)
+                    if pd_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+                "profile_t": (
+                    (pt_prof.distances, pt_prof.elevations)
+                    if pt_prof is not None
+                    else (np.array([]), np.array([]))
+                ),
+            }
+        )
+    return all_data
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +390,7 @@ async def export_excel(
             tmp,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename="Conciliacion_Geotecnica.xlsx",
-            headers=_filters_header(export_filters),
+            headers=_filters_header(export_filters, include_result_filters=False),
         )
     except HTTPException:
         raise
@@ -265,11 +412,12 @@ def _build_word_payload_sync(
     operation: Optional[str],
     phase: Optional[str],
     filters: Optional[str],
-) -> tuple[str, ExportFilters]:
-    """Build the Word report off the event loop.
+) -> tuple[io.BytesIO, ExportFilters]:
+    """Build the Word report bytes off the event loop.
 
-    Returns ``(tmp_path, export_filters)`` so the async handler can wrap the
-    result in a ``FileResponse`` once the executor task resolves.
+    Loads comparisons, settings and sections, applies every active filter,
+    assembles the shared ``ReportData`` and hands it to the report builder.
+    Returns ``(buffer, export_filters)`` for the async handler.
     """
     export_filters = _parse_filters(filters)
 
@@ -277,87 +425,57 @@ def _build_word_payload_sync(
     if not results:
         raise HTTPException(400, "No results to export — run the pipeline first")
 
-    results = _filter_comparisons(results, export_filters)
-
+    settings = db.get_settings(session_id) or {}
     sections_raw = db.get_sections(session_id)
     mesh_design = _load_mesh_from_db(session_id, "design")
     mesh_topo = _load_mesh_from_db(session_id, "topo")
 
-    # Build all_data structure expected by generate_word_report
-    from core import cut_both_surfaces
+    report_filters = _report_filters(export_filters)
+    filtered = filter_comparisons(results, report_filters)
+    filtered_sections = {row.get("section") for row in filtered}
 
-    all_data: List[Dict[str, Any]] = []
-    for sec_dict in sections_raw:
-        sec = _section_from_dict(sec_dict)
-        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
+    all_data = _build_section_geometry(
+        session_id, sections_raw, mesh_design, mesh_topo,
+        export_filters, report_filters, filtered_sections,
+    )
 
-        # Reconstruct ExtractionResult objects from cache
-        design_ext = db.get_extraction(session_id, sec.name, "design")
-        topo_ext = db.get_extraction(session_id, sec.name, "topo")
+    meta = _report_meta(session_id, project, author, operation, phase, settings)
+    plan_inputs = {
+        "comparisons": filtered,
+        "sections": [_section_from_dict(section) for section in sections_raw],
+        "mesh_topo": mesh_topo,
+        "grid_ref": settings.get("grid_ref", 0.0),
+    }
 
-        benches_d = (
-            [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-            if design_ext
-            else []
-        )
-        benches_t = (
-            [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
-        )
+    data = build_report_data(
+        results,
+        settings,
+        report_filters,
+        meta,
+        section_geometry=all_data,
+        plan_inputs=plan_inputs,
+        blast=_blast_payload(settings, export_filters),
+    )
 
-        p_design = ExtractionResult(
-            section_name=sec.name,
-            sector=sec.sector,
-            benches=benches_d,
-            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
-            if design_ext
-            else 0.0,
-            overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
-        )
-        p_topo = ExtractionResult(
-            section_name=sec.name,
-            sector=sec.sector,
-            benches=benches_t,
-            inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
-            overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
-        )
+    if build_word_report is not None:
+        return build_word_report(data), export_filters
 
-        p_design, p_topo = _apply_bench_filters([p_design, p_topo], export_filters)
-
-        all_data.append(
-            {
-                "section_name": sec.name,
-                "params_design": p_design,
-                "params_topo": p_topo,
-                "profile_d": (
-                    (pd_prof.distances, pd_prof.elevations)
-                    if pd_prof is not None
-                    else (np.array([]), np.array([]))
-                ),
-                "profile_t": (
-                    (pt_prof.distances, pt_prof.elevations)
-                    if pt_prof is not None
-                    else (np.array([]), np.array([]))
-                ),
-            }
-        )
-
+    # Legacy writer while core.web_word_report is unavailable.
     project_info = {
         "project": project or "",
         "author": author or "",
         "operation": operation or "",
         "phase": phase or "",
     }
-
     tmp = os.path.join(tempfile.gettempdir(), f"report_{session_id[:8]}.docx")
-    settings = db.get_settings(session_id) or {}
     generate_word_report(
-        results, all_data, tmp, project_info,
+        filtered, all_data, tmp, project_info,
         sections=[_section_from_dict(section) for section in sections_raw],
         mesh_topo=mesh_topo,
         grid_ref=settings.get("grid_ref", 0.0),
     )
-
-    return tmp, export_filters
+    with open(tmp, "rb") as handle:
+        return io.BytesIO(handle.read()), export_filters
 
 
 @router.get("/word")
@@ -380,7 +498,7 @@ async def export_word(
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
-        tmp, export_filters = await _run_in_executor(
+        buffer, export_filters = await _run_in_executor(
             _build_word_payload_sync,
             session_id,
             project,
@@ -390,11 +508,13 @@ async def export_word(
             filters,
         )
 
-        return FileResponse(
-            tmp,
+        return StreamingResponse(
+            buffer,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            filename="Informe_Conciliacion.docx",
-            headers=_filters_header(export_filters),
+            headers={
+                "Content-Disposition": "attachment; filename=Informe_Conciliacion.docx",
+                **_filters_header(export_filters),
+            },
         )
     except HTTPException:
         raise
@@ -657,36 +777,68 @@ def _build_pdf_payload_sync(
     operation: Optional[str],
     phase: Optional[str],
     filters: Optional[str] = None,
-) -> str:
-    """Build the executive PDF off the event loop."""
+) -> tuple[io.BytesIO, ExportFilters]:
+    """Build the executive PDF bytes off the event loop.
+
+    Mirrors the Word builder: same ``ReportData`` model, same filters, same
+    geometry list, so the two reports show identical numbers.
+    """
     export_filters = _parse_filters(filters)
     results = db.get_results(session_id)
     if not results:
         raise HTTPException(400, "No results to export — run the pipeline first")
 
-    results = _filter_comparisons(results, export_filters)
-
-    # Reconstruct minimal all_data (the PDF doesn't need profiles/plots,
-    # just the section names and comparisons).
+    settings = db.get_settings(session_id) or {}
     sections_raw = db.get_sections(session_id)
-    all_data = [{"section_name": s["name"]} for s in sections_raw]
+    mesh_design = _load_mesh_from_db(session_id, "design")
+    mesh_topo = _load_mesh_from_db(session_id, "topo")
 
+    report_filters = _report_filters(export_filters)
+    filtered = filter_comparisons(results, report_filters)
+    filtered_sections = {row.get("section") for row in filtered}
+
+    all_data = _build_section_geometry(
+        session_id, sections_raw, mesh_design, mesh_topo,
+        export_filters, report_filters, filtered_sections,
+    )
+
+    meta = _report_meta(session_id, project, author, operation, phase, settings)
+    plan_inputs = {
+        "comparisons": filtered,
+        "sections": [_section_from_dict(section) for section in sections_raw],
+        "mesh_topo": mesh_topo,
+        "grid_ref": settings.get("grid_ref", 0.0),
+    }
+
+    data = build_report_data(
+        results,
+        settings,
+        report_filters,
+        meta,
+        section_geometry=all_data,
+        plan_inputs=plan_inputs,
+        blast=_blast_payload(settings, export_filters),
+    )
+
+    if build_pdf_report is not None:
+        return build_pdf_report(data), export_filters
+
+    # Legacy writer while core.web_pdf_report is unavailable.
     project_info = {
         "project": project or "N/A",
         "author": author or "N/A",
         "operation": operation or "N/A",
         "phase": phase or "N/A",
     }
-
     tmp = os.path.join(tempfile.gettempdir(), f"Conciliacion_PDF_{session_id[:8]}.pdf")
-    settings = db.get_settings(session_id) or {}
     _import_pdf_report()(
-        results, all_data, tmp, project_info=project_info,
+        filtered, all_data, tmp, project_info=project_info,
         sections=[_section_from_dict(section) for section in sections_raw],
-        mesh_topo=_load_mesh_from_db(session_id, "topo"),
+        mesh_topo=mesh_topo,
         grid_ref=settings.get("grid_ref", 0.0),
     )
-    return tmp
+    with open(tmp, "rb") as handle:
+        return io.BytesIO(handle.read()), export_filters
 
 
 @router.get("/pdf")
@@ -705,7 +857,7 @@ async def export_pdf(
     """
     try:
         session_id = db.get_or_create_session(request.state.session_id)
-        tmp = await _run_in_executor(
+        buffer, export_filters = await _run_in_executor(
             _build_pdf_payload_sync,
             session_id,
             project,
@@ -714,11 +866,13 @@ async def export_pdf(
             phase,
             filters,
         )
-        return FileResponse(
-            tmp,
+        return StreamingResponse(
+            buffer,
             media_type="application/pdf",
-            filename="Conciliacion_Geotecnica.pdf",
-            headers=_filters_header(_parse_filters(filters)),
+            headers={
+                "Content-Disposition": "attachment; filename=Informe_Ejecutivo.pdf",
+                **_filters_header(export_filters),
+            },
         )
     except HTTPException:
         raise

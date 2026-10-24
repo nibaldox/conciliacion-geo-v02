@@ -170,6 +170,15 @@ class ExportRequest(BaseModel):
 
 
 class ExportFilters(BaseModel):
+    """Active export filters sent by the web UI as camelCase JSON.
+
+    ``sector`` / ``section`` / ``level`` are the aliases the dashboard's
+    ``ResultFilterState`` uses (singular, plural field names); they are
+    accepted alongside the legacy ``selectedBenchNumbers`` for backward
+    compatibility. Every empty dimension means "all", so an empty payload
+    (the historical query) exports everything.
+    """
+
     model_config = ConfigDict(populate_by_name=True)
 
     show_reconciled_design: bool = Field(default=True, alias="showReconciledDesign")
@@ -178,6 +187,9 @@ class ExportFilters(BaseModel):
     show_blast_holes: bool = Field(default=True, alias="showBlastHoles")
     blast_tolerance: float = Field(default=2.0, alias="blastTolerance")
     selected_bench_numbers: List[int] = Field(default_factory=list, alias="selectedBenchNumbers")
+    sectors: List[str] = Field(default_factory=list, alias="sector")
+    sections: List[str] = Field(default_factory=list, alias="section")
+    levels: List[str] = Field(default_factory=list, alias="level")
 
 
 class SettingsResponse(BaseModel):

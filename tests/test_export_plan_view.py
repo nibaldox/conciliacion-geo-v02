@@ -12,24 +12,20 @@ def test_reports_receive_actual_topography_sections_and_filtered_results(format_
     _seed_results(client, headers, headers["x-session-id"])
     captured = {}
 
-    def writer(results, all_data, path, *args, **kwargs):
-        captured.update(kwargs)
-        captured["results"] = results
-        with open(path, "wb") as output:
-            output.write(b"report")
+    def builder(data):
+        captured["data"] = data
+        return io.BytesIO(b"report")
 
-    if format_name == "word":
-        monkeypatch.setattr(export_router, "generate_word_report", writer)
-    else:
-        monkeypatch.setattr(export_router, "_import_pdf_report", lambda: writer)
+    monkeypatch.setattr(export_router, f"build_{format_name}_report", builder)
     response = client.get(
         f"/api/v1/export/{format_name}", headers=headers,
         params={"filters": json.dumps({"selectedBenchNumbers": [2]})},
     )
     assert response.status_code == 200, response.text
-    assert [row["bench_num"] for row in captured["results"]] == [2]
-    assert [section.name for section in captured["sections"]] == ["S-01"]
-    assert len(captured["mesh_topo"].vertices) > 0
+    data = captured["data"]
+    assert [row.bench_num for row in data.rows] == [2]
+    assert [section.name for section in data.plan_inputs["sections"]] == ["S-01"]
+    assert len(data.plan_inputs["mesh_topo"].vertices) > 0
     assert json.loads(response.headers["X-Export-Filters-Applied"])["selected_bench_numbers"] == [2]
 
 

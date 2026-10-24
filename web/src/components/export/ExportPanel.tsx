@@ -8,6 +8,7 @@ import {
   useExportImages,
   type ExportFilters,
   type ExportProjectInfo,
+  type ExportResult,
 } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import { Button } from '../ui/Button';
@@ -42,6 +43,24 @@ function readProfileFilters(): ProfileFilterSnapshot {
   }
 }
 
+function formatAppliedFilters(raw: string | null): string | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const parts: string[] = [];
+    const push = (label: string, value: unknown) => {
+      if (Array.isArray(value) && value.length > 0) parts.push(`${label}: ${value.join(', ')}`);
+    };
+    push('Sectores', parsed.sectors);
+    push('Secciones', parsed.sections);
+    push('Niveles', parsed.levels);
+    push('Bancos', parsed.selected_bench_numbers);
+    return parts.length > 0 ? parts.join(' · ') : null;
+  } catch {
+    return null;
+  }
+}
+
 export function ExportPanel() {
   const { t } = useTranslation();
   const sessionFilters = useSession((s) => s.filters);
@@ -57,6 +76,7 @@ export function ExportPanel() {
     operation: '',
     phase: '',
   });
+  const [appliedNote, setAppliedNote] = useState<string | null>(null);
 
   const handleFieldChange = (field: keyof ExportForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -72,6 +92,20 @@ export function ExportPanel() {
     showBlastHoles: profileFilters.showBlastHoles ?? true,
     blastTolerance: profileFilters.blastTolerance ?? 2,
     selectedBenchNumbers,
+    sector: sessionFilters.sector,
+    section: sessionFilters.section,
+    level: sessionFilters.level,
+  };
+
+  const runExport = async (run: () => Promise<ExportResult | void>) => {
+    try {
+      const result = await run();
+      if (result && typeof result === 'object' && 'appliedFilters' in result) {
+        setAppliedNote(formatAppliedFilters(result.appliedFilters));
+      }
+    } catch {
+      // Failures surface through each mutation's isError state below.
+    }
   };
 
   const hasProjectInfo = form.project.trim() !== '';
@@ -105,21 +139,21 @@ export function ExportPanel() {
           icon={<IconDashboard className="w-6 h-6" />}
           loading={exportExcel.isPending}
           disabled={isAnyExporting}
-          onClick={() => exportExcel.mutate(baseParams)}
+          onClick={() => void runExport(() => exportExcel.mutateAsync(baseParams))}
         />
         <ExportButton
           label={t('export.word')}
           icon={<IconReport className="w-6 h-6" />}
           loading={exportWord.isPending}
           disabled={isAnyExporting}
-          onClick={() => exportWord.mutate(baseParams)}
+          onClick={() => void runExport(() => exportWord.mutateAsync(baseParams))}
         />
         <ExportButton
           label={t('export.pdf')}
           icon={<IconReport className="w-6 h-6" />}
           loading={exportPdf.isPending}
           disabled={isAnyExporting}
-          onClick={() => exportPdf.mutate(baseParams)}
+          onClick={() => void runExport(() => exportPdf.mutateAsync(baseParams))}
         />
         <ExportButton
           label={t('export.dxf')}
@@ -152,6 +186,16 @@ export function ExportPanel() {
           {exportFilters.blastTolerance}m
         </strong>
       </div>
+
+      {appliedNote && (
+        <div
+          data-testid="export-applied-filters"
+          className="text-[11px] leading-relaxed px-1"
+          style={{ color: 'var(--color-text-muted)' }}
+        >
+          Filtros aplicados: {appliedNote}
+        </div>
+      )}
 
       {/* Error feedback — one role="alert" per failing export so
           screen readers announce which action failed (H1). */}
