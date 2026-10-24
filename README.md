@@ -265,6 +265,17 @@ npx playwright test
 
 La cobertura del dominio `src/components/results/ProfileView/domain/**` se exige al **100%** en sentencias, ramas, funciones y líneas. Playwright tiene configuración de servidores en `web/playwright.config.ts` y puede reutilizar servidores existentes; para QA usar datos y sesiones aislados. La configuración Edge `playwright.horizontal.config.ts` presupone un frontend en 5174 y no lo inicia.
 
+### Verificación local — 24 de octubre de 2026
+
+| Validación | Resultado ejecutado | Alcance |
+|---|---|---|
+| Backend | 2.627 aprobadas, 8 omitidas, 12 advertencias | Python 3.11; sin OpenBlast, con `--skip-electron --benchmark-skip-slow`; datos aislados y límite de memoria de 3 GiB |
+| Frontend | 748 aprobadas en 83 archivos | Node 22.23.3; suite completa con cobertura y dominio obligatorio al 100% |
+| TypeScript / ESLint / build | Aprobados | `tsc -b --force`, ESLint completo y build web con PWA |
+| Regresiones precommit de exportación | 35/35 aprobadas | Exclusión explícita de pozos en Word/PDF y cabecera Excel que no anuncia filtros ignorados |
+
+Estas verificaciones preparan la publicación del trabajo existente; no certifican una release ni el cierre visual/de rendimiento de los nuevos informes. No se repitió Playwright ni se verificó un despliegue. Pendientes y evidencia local en [HANDOFF.md](docs/HANDOFF.md).
+
 ### Verificación local — 16–17 de octubre de 2026
 
 | Validación | Resultado ejecutado | Alcance |
@@ -303,7 +314,7 @@ Los conteos cambian al agregar pruebas. La tabla histórica conserva los límite
 
 ### Web y CI
 
-- `ci.yml`: pytest y pipeline con Python 3.12; typecheck, **ESLint** y build web con Node 22; build Docker en main y smoke Docker Compose. No ejecuta Vitest ni Playwright.
+- `ci.yml`: pytest y pipeline con Python 3.12; typecheck, **ESLint**, **Vitest con cobertura** y build web con Node 22; build Docker en main y smoke Docker Compose. No ejecuta Playwright.
 - `deploy-frontend.yml`: despliega a Pages por cambios web en main o ejecución manual, configura la API de Render y copia `index.html` a `404.html` para fallback SPA. Base configurable con `VITE_BASE`.
 - `build.yml`: Python 3.14/Node 22, build web sin PWA, pruebas backend y Electron, PyInstaller, smoke del sidecar y artefactos Linux/AppImage.
 - `build-portable.yml`: ejecución manual, matriz Windows/Linux y publicación de release. Despacharlo tiene efectos de publicación.
