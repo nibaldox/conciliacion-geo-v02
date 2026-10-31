@@ -43,6 +43,7 @@ dist/
 # IDE / OS
 .vscode/
 .idea/
+.claude/
 .DS_Store
 .opencode/
 .atl/
