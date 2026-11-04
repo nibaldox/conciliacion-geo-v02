@@ -5,7 +5,7 @@ import { useSession } from '../../stores/session';
 import { Spinner } from '../ui/Spinner';
 import { createPlanProjection, createSurfaceRaster, expandPlanBounds, projectPlanPoint, sectionPlanPoints, planBounds } from './planGeometry';
 
-export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ sectionId }: { sectionId: string }) {
+export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ sectionId, showTitle = true }: { sectionId: string; showTitle?: boolean }) {
   const { t } = useTranslation();
   const topoMeshId = useSession((state) => state.topoMeshId);
   const { data: sections } = useSections();
@@ -27,7 +27,7 @@ export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ section
   const loading = isLoading || profiles.some((profile) => profile.isLoading);
   return (
     <section data-slot="profile-plan-thumbnail" data-active-section={sectionId} className="min-w-0 rounded-xl border border-border bg-surface-raised p-3 space-y-2">
-      <h3 className="text-xs font-semibold">{t('profile_plan.title')}</h3>
+      {showTitle && <h3 className="text-xs font-semibold">{t('profile_plan.title')}</h3>}
       {loading ? <Spinner /> : error || !projection || !raster ? <p className="text-xs text-text-muted">{t('plan_view.unavailable')}</p> : (
         <svg viewBox="0 0 1000 900" className="aspect-[10/9] w-full rounded-md bg-surface-sunken" role="img" aria-label={t('profile_plan.active', { name: active?.name })}>
           <image href={raster} width="1000" height="900" />

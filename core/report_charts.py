@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import io
 import math
+from functools import wraps
+from threading import RLock, local
 from typing import Optional
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 from matplotlib.collections import PolyCollection
 from matplotlib.patches import Rectangle
@@ -85,6 +88,51 @@ def profile_title(profile: dict) -> str:
 
 
 _MAX_CHART_PIXELS = 40_000_000
+_MATPLOTLIB_LOCK = RLock()
+_FIGURE_SCOPE = local()
+
+
+def _cleanup_failed_figures(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        parent = getattr(_FIGURE_SCOPE, "figures", None)
+        figures = parent if parent is not None else []
+        if parent is None:
+            _FIGURE_SCOPE.figures = figures
+        try:
+            return function(*args, **kwargs)
+        except BaseException:
+            for fig in figures:
+                _clear_figure(fig)
+            raise
+        finally:
+            if parent is None:
+                del _FIGURE_SCOPE.figures
+    return wrapped
+
+
+def _new_figure(*, figsize):
+    fig = Figure(figsize=figsize)
+    figures = getattr(_FIGURE_SCOPE, "figures", None)
+    if figures is not None:
+        figures.append(fig)
+    FigureCanvasAgg(fig)
+    return fig
+
+
+def _clear_figure(fig):
+    if fig.canvas is None:
+        return
+    fig.clear()
+    fig.set_canvas(None)
+
+
+def _serialized_render(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _MATPLOTLIB_LOCK:
+            return function(*args, **kwargs)
+    return wrapped
 
 
 def _fig_to_png(fig, dpi: int) -> bytes:
@@ -95,24 +143,25 @@ def _fig_to_png(fig, dpi: int) -> bytes:
     asking for ``bbox_inches="tight"`` instead makes matplotlib draw every
     artist a second time, which dominated the report chart time.
     """
-    fig.set_dpi(dpi)
-    width_in, height_in = fig.get_size_inches()
-    if not math.isfinite(width_in * height_in) or width_in * dpi * height_in * dpi > _MAX_CHART_PIXELS:
-        plt.close(fig)
-        raise ValueError(f"chart raster too large: {width_in:.1f} x {height_in:.1f} in at {dpi} dpi")
-    renderer = fig.canvas.get_renderer()
-    bbox = fig.get_tightbbox(renderer)
-    if bbox is None or not np.all(np.isfinite(bbox.bounds)) or bbox.width <= 0 or bbox.height <= 0:
-        bbox = Bbox.from_bounds(0, 0, *fig.get_size_inches())
-    bbox = bbox.padded(0.1)
-    pixels = bbox.width * dpi * bbox.height * dpi
-    if not math.isfinite(pixels) or pixels > _MAX_CHART_PIXELS:
-        plt.close(fig)
-        raise ValueError(f"chart raster too large: {bbox.width:.1f} x {bbox.height:.1f} in at {dpi} dpi")
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches=bbox, facecolor="white")
-    plt.close(fig)
-    return buf.getvalue()
+    with _MATPLOTLIB_LOCK:
+        try:
+            fig.set_dpi(dpi)
+            width_in, height_in = fig.get_size_inches()
+            if not math.isfinite(width_in * height_in) or width_in * dpi * height_in * dpi > _MAX_CHART_PIXELS:
+                raise ValueError(f"chart raster too large: {width_in:.1f} x {height_in:.1f} in at {dpi} dpi")
+            renderer = fig.canvas.get_renderer()
+            bbox = fig.get_tightbbox(renderer)
+            if bbox is None or not np.all(np.isfinite(bbox.bounds)) or bbox.width <= 0 or bbox.height <= 0:
+                bbox = Bbox.from_bounds(0, 0, *fig.get_size_inches())
+            bbox = bbox.padded(0.1)
+            pixels = bbox.width * dpi * bbox.height * dpi
+            if not math.isfinite(pixels) or pixels > _MAX_CHART_PIXELS:
+                raise ValueError(f"chart raster too large: {bbox.width:.1f} x {bbox.height:.1f} in at {dpi} dpi")
+            buf = io.BytesIO()
+            fig.savefig(buf, format="png", dpi=dpi, bbox_inches=bbox, facecolor="white")
+            return buf.getvalue()
+        finally:
+            _clear_figure(fig)
 
 
 def _as_series(value) -> Optional[tuple]:
@@ -228,15 +277,18 @@ def _bench_annotation_text(bench: dict) -> str:
     return text
 
 
+@_serialized_render
+@_cleanup_failed_figures
 def parameter_donuts_png(parameters: list, dpi: int = 150) -> Optional[bytes]:
-    """Render one donut per parameter (CUMPLE vs NO CUMPLE) as PNG bytes.
+    """Render one donut per parameter (CUMPLE vs other recorded states) as PNG bytes.
 
     ``parameters`` is a list of dicts with ``label``, ``cumple`` and
     ``no_cumple`` counts (mirroring ``ParameterSummary``). Slice labels show
-    absolute counts and the centre shows the compliance percentage formatted
-    to one decimal, identical to the report table value. Values in the status
-    palette keep dark text readable on the light fills. Returns ``None`` when
-    the list is empty or every chart has zero rows.
+    absolute counts; ``no_cumple`` is the aggregate of every recorded state
+    other than CUMPLE, so its visible label is "Otros estados". The centre
+    shows the compliance percentage formatted to one decimal, identical to the
+    report table value. Slice colors and counts remain aligned with the table.
+    Returns ``None`` when the list is empty or every chart has zero rows.
     """
     if not parameters:
         return None
@@ -254,7 +306,8 @@ def parameter_donuts_png(parameters: list, dpi: int = 150) -> Optional[bytes]:
         return None
 
     n = len(items)
-    fig, axes = plt.subplots(1, n, figsize=(4.0 * n, 4.2))
+    fig = _new_figure(figsize=(2.5 * n, 4.0))
+    axes = fig.subplots(1, n)
     axes = list(np.atleast_1d(axes))
 
     for ax, (label, ok, nok) in zip(axes, items):
@@ -265,7 +318,7 @@ def parameter_donuts_png(parameters: list, dpi: int = 150) -> Optional[bytes]:
             colors.append(_DONUT_OK_FILL)
         if nok > 0:
             values.append(nok)
-            slice_labels.append(f"No cumple\n{nok}")
+            slice_labels.append(f"Otros estados\n{nok}")
             colors.append(_DONUT_NOK_FILL)
 
         ax.pie(
@@ -274,15 +327,16 @@ def parameter_donuts_png(parameters: list, dpi: int = 150) -> Optional[bytes]:
             colors=colors,
             startangle=90,
             wedgeprops={"width": 0.40, "edgecolor": "white", "linewidth": 1.6},
-            textprops={"fontsize": 9, "color": _TEXT_DARK},
+            textprops={"fontsize": 10, "fontweight": "semibold", "color": _TEXT_DARK},
         )
         pct = parameter_pct(ok, nok)
-        ax.text(
-            0, 0, f"{pct:.1f}%\nCumple",
+        center = ax.text(
+            0, 0, f"{pct:.1f}%",
             ha="center", va="center", fontsize=11, fontweight="bold",
             color=_TEXT_DARK,
         )
-        ax.set_title(label, fontsize=11, fontweight="bold", pad=8, color="#111827")
+        center.set_gid("donut-center")
+        ax.set_title(label, fontsize=11, fontweight="bold", pad=18, color="#111827")
         ax.set_aspect("equal")
 
     fig.tight_layout()
@@ -309,6 +363,7 @@ def _section_endpoints(sec: dict) -> Optional[list]:
     return None
 
 
+@_cleanup_failed_figures
 def _build_plan_view_figure(sections: list, contours=None):
     """Build the compliance plan-view figure, returning ``(fig, ax)`` or ``None``.
 
@@ -344,7 +399,8 @@ def _build_plan_view_figure(sections: list, contours=None):
 
     base_w = 10.0
     base_h = min(max(base_w * y_span / x_span, 4.5), 9.0)
-    fig, ax = plt.subplots(figsize=(base_w, base_h))
+    fig = _new_figure(figsize=(base_w, base_h))
+    ax = fig.subplots()
 
     if isinstance(contours, dict) and all(k in contours for k in ("x", "y", "z")):
         try:
@@ -377,7 +433,11 @@ def _build_plan_view_figure(sections: list, contours=None):
                         linewidth=0.5, alpha=0.6, zorder=1)
 
     counts = {s: 0 for s in _STATUS_ORDER}
+    excluded_count = 0
     for sec, _pts in valid:
+        if sec.get("included", True) is False:
+            excluded_count += 1
+            continue
         status = sec.get("worst_status") or STATUS_UNKNOWN
         if status not in STATUS_COLORS:
             status = STATUS_UNKNOWN
@@ -388,15 +448,20 @@ def _build_plan_view_figure(sections: list, contours=None):
     span = max(x_span, y_span)
     placed = []
     for idx, (sec, pts) in enumerate(valid):
+        excluded = sec.get("included", True) is False
         status = sec.get("worst_status") or STATUS_UNKNOWN
         if status not in STATUS_COLORS:
             status = STATUS_UNKNOWN
-        color = STATUS_COLORS[status]
+        color = "#9CA3AF" if excluded else STATUS_COLORS[status]
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
-        ax.plot(xs, ys, color=color, linewidth=3.2, solid_capstyle="round", zorder=5)
+        section_line, = ax.plot(
+            xs, ys, color=color, linewidth=2.5 if excluded else 3.2,
+            linestyle="--" if excluded else "-", solid_capstyle="round", zorder=5,
+        )
+        section_line.set_gid("plan-section-excluded" if excluded else "plan-section")
 
-        show = (idx % k == 0) or (status != STATUS_CUMPLE) or idx in (0, n_valid - 1)
+        show = excluded or (idx % k == 0) or (status != STATUS_CUMPLE) or idx in (0, n_valid - 1)
         if not show:
             continue
         ex, ey = pts[-1]
@@ -426,13 +491,18 @@ def _build_plan_view_figure(sections: list, contours=None):
             rotation=angle, rotation_mode="anchor", ha=ha, va=va,
             zorder=7, clip_on=True,
         )
-        ann.set_gid("plan-label")
+        ann.set_gid("plan-label-excluded" if excluded else "plan-label")
 
     handles = [
         Line2D([0], [0], color=STATUS_COLORS[s], lw=3,
                label=f"{STATUS_LABELS_ES[s]} ({counts[s]})")
         for s in _STATUS_ORDER if counts[s] > 0
     ]
+    if excluded_count:
+        handles.append(Line2D(
+            [0], [0], color="#9CA3AF", lw=2.5, linestyle="--",
+            label=f"Excluida por filtros ({excluded_count})",
+        ))
     if handles:
         ax.legend(handles=handles, loc="lower right", fontsize=8,
                   framealpha=0.9, title="Estado del perfil (peor banco)",
@@ -463,6 +533,8 @@ def _build_plan_view_figure(sections: list, contours=None):
     return fig, ax
 
 
+@_serialized_render
+@_cleanup_failed_figures
 def plan_view_png(sections: list, contours=None, dpi: int = 150) -> Optional[bytes]:
     """Render the compliance plan view as PNG bytes.
 
@@ -476,7 +548,9 @@ def plan_view_png(sections: list, contours=None, dpi: int = 150) -> Optional[byt
     the first/last section. ``contours`` is optional: a dict with scattered
     ``x``, ``y``, ``z`` (plus optional ``interval``, ``grid_ref``,
     ``grid_size``) for topographic contour lines, or a list of x/y polylines.
-    Uses equal aspect with a north arrow and a scale bar. Returns ``None`` when
+    A section with ``included=False`` is shown in gray with a dashed line and
+    counted separately in the legend. Uses equal aspect with a north arrow and
+    a scale bar. Returns ``None`` when
     no section has usable geometry.
     """
     built = _build_plan_view_figure(sections, contours)
@@ -486,6 +560,7 @@ def plan_view_png(sections: list, contours=None, dpi: int = 150) -> Optional[byt
     return _fig_to_png(fig, dpi)
 
 
+@_cleanup_failed_figures
 def _build_section_profile_figure(profile: dict, size: str = "full"):
     """Build the annotated section-profile figure, returning ``(fig, ax)`` or ``None``.
 
@@ -509,7 +584,8 @@ def _build_section_profile_figure(profile: dict, size: str = "full"):
     compact = size == "compact"
     figsize = (6.6, 4.6) if compact else (10.0, 8.0)
     fs = 7.5 if compact else 9.5
-    fig, ax = plt.subplots(figsize=figsize)
+    fig = _new_figure(figsize=figsize)
+    ax = fig.subplots()
 
     zs = []
     xs = []
@@ -598,7 +674,7 @@ def _build_section_profile_figure(profile: dict, size: str = "full"):
                 xs.append(x)
 
     if not zs or not xs:
-        plt.close(fig)
+        _clear_figure(fig)
         return None
 
     zmin, zmax = float(np.min(zs)), float(np.max(zs))
@@ -690,6 +766,8 @@ def _build_section_profile_figure(profile: dict, size: str = "full"):
     return fig, ax
 
 
+@_serialized_render
+@_cleanup_failed_figures
 def section_profile_png(profile: dict, size: str = "full", dpi: int = 130) -> Optional[bytes]:
     """Render a large, annotated section profile as PNG bytes.
 

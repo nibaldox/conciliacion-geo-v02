@@ -8,9 +8,9 @@
 #   4. Render reads this file and creates the services below
 #   5. The first deploy happens automatically on every push to main
 #
-# After the API is up, copy its URL (https://conciliacion-api.onrender.com)
-# into the VITE_API_URL secret on the GitHub repo so the frontend
-# deployed to GitHub Pages can find the backend.
+# GitHub Pages currently builds with the API base configured in
+# .github/workflows/deploy-frontend.yml, including its /api/v1 prefix.
+# This comment does not verify that the configured host is currently deployed.
 
 services:
   - type: web
@@ -29,7 +29,9 @@ services:
     # If persistent data is needed, upgrade to a paid tier or use an external DB.
 
     envVars:
-      # ── Required ────────────────────────────────────────────────
+      # ── Data location ───────────────────────────────────────────
+      # api/database.py currently derives its SQLite path from
+      # CONCILIACION_DATA_DIR; it does not read DATABASE_URL.
       - key: DATABASE_URL
         value: sqlite:////app/data/conciliacion.db
       - key: CONCILIACION_DATA_DIR

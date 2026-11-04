@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 from core.design_achievement import (
@@ -102,6 +103,22 @@ def _as_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return f if math.isfinite(f) else None
+
+
+def _sector_identity(value: Any) -> Optional[str]:
+    if value is None or not str(value).strip():
+        return None
+    return str(value)
+
+
+def _depth_sector_identity(value: Any) -> Optional[str]:
+    if value is None or not str(value).strip():
+        return None
+    return str(value).strip()
+
+
+def _section_identity(row: Mapping[str, Any]) -> tuple[str, Optional[str]]:
+    return str(row.get("section", "")), _sector_identity(row.get("sector"))
 
 
 def filter_comparisons(
@@ -204,6 +221,24 @@ class ReportData:
     blast: Optional[dict] = None
     conclusions: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
+    section_plan_states: tuple[tuple[str, Optional[str], bool, str], ...] = ()
+
+    def resolve_section_plan_state(
+        self, section: str, sector: Optional[str], infer_missing_sector: bool = True
+    ) -> Optional[tuple[str, Optional[str], bool, str]]:
+        """Resolve a plan section by name and sector; ambiguous identities return None."""
+        name = str(section)
+        sector_key = _sector_identity(sector)
+        if self.filters.sections and name not in self.filters.sections:
+            return name, sector_key, False, "UNKNOWN"
+        if self.filters.sectors and sector_key is not None and sector_key not in self.filters.sectors:
+            return name, sector_key, False, "UNKNOWN"
+        candidates = [state for state in self.section_plan_states if state[0] == name]
+        if sector_key is not None:
+            return next((state for state in candidates if state[1] == sector_key), None)
+        if not infer_missing_sector:
+            return None
+        return candidates[0] if len(candidates) == 1 else None
 
 
 def _status_label(row_type: Any, worst: str) -> str:
@@ -227,7 +262,7 @@ def _to_bench_row(row: Mapping[str, Any]) -> BenchRow:
     h_status = row.get("height_status")
     a_status = row.get("angle_status")
     b_status = row.get("berm_status")
-    worst = worst_of_three(h_status, a_status, b_status)
+    worst = _bench_score_status(row)
     row_type = row.get("type")
     return BenchRow(
         section=str(row.get("section", "")),
@@ -254,16 +289,31 @@ def _to_bench_row(row: Mapping[str, Any]) -> BenchRow:
     )
 
 
-def _web_bench_score(row: Mapping[str, Any]) -> float:
-    """Port of ``Dashboard.tsx::benchScore``: explicit bench score, else weighted fallback."""
+def _web_bench_score(row: Mapping[str, Any]) -> Optional[float]:
+    """Return the explicit or fully supported weighted score for a matched bank."""
     raw = row.get("bench_score")
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw):
-        return float(raw)
+    if raw is not None:
+        if isinstance(raw, Real) and not isinstance(raw, bool) and math.isfinite(raw) and 0 <= raw <= 100:
+            return float(raw)
+        return None
+    valid_statuses = {"CUMPLE", "FUERA", "FUERA DE TOLERANCIA", "NO CUMPLE"}
+    statuses = [row.get(f"{parameter}_status") for parameter in _WEB_SCORE_WEIGHTS]
+    if any(not isinstance(status, str) or status.strip().upper() not in valid_statuses for status in statuses):
+        return None
     score = 0.0
     for parameter, weight in _WEB_SCORE_WEIGHTS.items():
-        if row.get(f"{parameter}_status") == "CUMPLE":
+        if str(row.get(f"{parameter}_status")).strip().upper() == "CUMPLE":
             score += weight
     return score
+
+
+def _bench_score_status(row: Mapping[str, Any]) -> str:
+    if row.get("type") in ("MISSING", "EXTRA"):
+        return "NO_CUMPLE"
+    if row.get("type") != "MATCH":
+        return "UNKNOWN"
+    score = _web_bench_score(row)
+    return "UNKNOWN" if score is None else "CUMPLE" if score >= 70 else "NO_CUMPLE"
 
 
 def _web_profile_scores(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
@@ -272,17 +322,21 @@ def _web_profile_scores(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     for row in rows:
         if row.get("type") != "MATCH":
             continue
-        grouped.setdefault(str(row.get("section", "")), []).append(_web_bench_score(row))
+        score = _web_bench_score(row)
+        if score is not None:
+            grouped.setdefault(str(row.get("section", "")), []).append(score)
     return {section: sum(scores) / len(scores) for section, scores in grouped.items()}
 
 
-def _profile_statuses(rows: Sequence[Mapping[str, Any]]) -> dict[str, str]:
-    statuses: dict[str, str] = {}
+def _profile_statuses(
+    rows: Sequence[Mapping[str, Any]], by_sector: bool = False
+) -> dict[Any, str]:
+    statuses: dict[Any, str] = {}
     for row in rows:
         if row.get("type") not in BENCH_TYPES:
             continue
-        section = str(row.get("section", ""))
-        worst = worst_of_three(row.get("height_status"), row.get("angle_status"), row.get("berm_status"))
+        section = _section_identity(row) if by_sector else str(row.get("section", ""))
+        worst = _bench_score_status(row)
         previous = statuses.get(section)
         if previous is None or STATUS_SEVERITY[worst] > STATUS_SEVERITY[previous]:
             statuses[section] = worst
@@ -430,10 +484,39 @@ def _top_deviations(
     return tuple(entries)
 
 
-def _depth_metrics(rows: Sequence[Mapping[str, Any]]) -> Optional[dict]:
+def _depth_metrics(
+    rows: Sequence[Mapping[str, Any]],
+    depth_extractions: Optional[Mapping[tuple[str, str], Sequence[Any]]] = None,
+) -> Optional[dict]:
     from core.pdf_report import _compute_depth_metrics
 
-    metrics = _compute_depth_metrics([dict(r) for r in rows])
+    metric_rows = [dict(r) for r in rows]
+    if depth_extractions is not None:
+        resolved_rows = []
+        for row in metric_rows:
+            if row.get("type") not in ("MATCH", "EXTRA"):
+                continue
+            section = str(row.get("section", ""))
+            sector = _depth_sector_identity(row.get("sector"))
+            topo_number = row.get("bench_num_topo")
+            if sector is None or not isinstance(topo_number, int) or isinstance(topo_number, bool):
+                return None
+            benches = depth_extractions.get((section, sector))
+            if benches is None:
+                return None
+            matches = [b for b in benches if getattr(b, "bench_number", None) == topo_number]
+            if len(matches) != 1:
+                return None
+            bench = matches[0]
+            floor = _as_float(getattr(bench, "floor_elevation", None))
+            crest = _as_float(getattr(bench, "crest_elevation", None))
+            if floor is None or floor <= 0 or crest is None:
+                return None
+            row["bench_real"] = bench
+            resolved_rows.append(row)
+        metric_rows = resolved_rows
+
+    metrics = _compute_depth_metrics(metric_rows)
     return None if metrics.get("profundidad") is None else metrics
 
 
@@ -482,6 +565,24 @@ def _warnings(
         out.append("No hay comparaciones en la sesión.")
     elif not filtered and not filters.is_empty():
         out.append("Los filtros aplicados no coinciden con ningún banco.")
+    sectors_by_section: dict[str, set[Optional[str]]] = {}
+    for row in filtered:
+        if row.get("type") not in BENCH_TYPES:
+            continue
+        section = str(row.get("section", ""))
+        sectors_by_section.setdefault(section, set()).add(_sector_identity(row.get("sector")))
+    ambiguous_sections = sorted(
+        section for section, sectors in sectors_by_section.items() if len(sectors) > 1
+    )
+    if ambiguous_sections:
+        out.append(
+            "La agrupación actual de estados y puntajes por perfil usa el nombre de sección; "
+            "estos nombres aparecen asociados a más de una identidad de sector, incluida "
+            "la ausencia de sector, dentro del alcance filtrado "
+            "y no se pueden atribuir a un sector de forma inequívoca: "
+            + ", ".join(ambiguous_sections)
+            + "."
+        )
     return tuple(out)
 
 
@@ -493,6 +594,7 @@ def build_report_data(
     section_geometry: Optional[Sequence[Any]] = None,
     plan_inputs: Optional[dict] = None,
     blast: Optional[dict] = None,
+    depth_extractions: Optional[Mapping[tuple[str, str], Sequence[Any]]] = None,
 ) -> ReportData:
     """Assemble the frozen report model from persisted comparison rows."""
     settings = settings or {}
@@ -500,6 +602,29 @@ def build_report_data(
     unfiltered = [dict(r) for r in (comparisons or ()) if isinstance(r, Mapping)]
     filtered = filter_comparisons(unfiltered, filters)
     bench_rows = [r for r in filtered if r.get("type") in BENCH_TYPES]
+    identities_with_data = {
+        _section_identity(row)
+        for row in unfiltered
+        if row.get("type") in BENCH_TYPES
+    }
+    statuses_by_identity = _profile_statuses(bench_rows, by_sector=True)
+    excluded_identities = (
+        identities_with_data - set(statuses_by_identity)
+        if not filters.is_empty()
+        else set()
+    )
+    section_plan_states = tuple(
+        (
+            section,
+            sector,
+            (section, sector) not in excluded_identities,
+            statuses_by_identity.get((section, sector), "UNKNOWN"),
+        )
+        for section, sector in sorted(
+            identities_with_data,
+            key=lambda identity: (identity[0], identity[1] or ""),
+        )
+    )
 
     rows = tuple(_to_bench_row(r) for r in bench_rows)
 
@@ -565,7 +690,7 @@ def build_report_data(
         parameters=_parameter_summaries(bench_rows),
         design_achievement=design_achievement,
         top_deviations=_top_deviations(bench_rows, tolerances),
-        depth=_depth_metrics(bench_rows),
+        depth=_depth_metrics(bench_rows, depth_extractions),
         counts=counts,
         section_geometry=tuple(section_geometry or ()),
         plan_inputs=plan_inputs,
@@ -575,4 +700,5 @@ def build_report_data(
             design_achievement, counts,
         ),
         warnings=_warnings(len(unfiltered), filtered, filters),
+        section_plan_states=section_plan_states,
     )

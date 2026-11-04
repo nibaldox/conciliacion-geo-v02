@@ -75,7 +75,10 @@ function makeRow(overrides: Partial<ComparisonResult> = {}): ComparisonResult {
   };
 }
 
-beforeAll(async () => i18n.changeLanguage('es'));
+beforeAll(async () => {
+  i18n.addResource('es', 'translation', 'dashboard.filters.no_matching_results', 'Ningún resultado coincide con la combinación de filtros activa. Ajusta o restablece los filtros de sector, sección, nivel o banco.');
+  await i18n.changeLanguage('es');
+});
 
 function plotData(): { data: unknown; layout: { shapes?: { x0: number; x1: number }[] } }[] {
   return screen
@@ -137,6 +140,17 @@ describe('Dashboard filtros compartidos', () => {
     expect(serialized.every((json) => !json.includes('"Norte"'))).toBe(true);
     expect(serialized.some((json) => json.includes('"Sur"'))).toBe(true);
     expect(screen.getByTestId('design-achievement-panel')).toBeTruthy();
+  });
+
+  it('explica que la combinación de filtros activa no tiene resultados', () => {
+    mocks.rows = [makeRow()];
+    mocks.tolerances = null;
+    mocks.filters = { sector: ['Sur'], section: ['S-002'], level: ['3200'], bench: [2] };
+    render(<Dashboard />);
+    expect(screen.getByRole('status').textContent).toBe(
+      'Ningún resultado coincide con la combinación de filtros activa. Ajusta o restablece los filtros de sector, sección, nivel o banco.',
+    );
+    expect(screen.queryByText('Desviación de Altura (m)')).toBeNull();
   });
 });
 

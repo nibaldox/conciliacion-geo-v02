@@ -20,7 +20,7 @@ import {
   getMatchClass,
 } from '../../utils/format';
 import type { ComparisonResult, MatchType } from '../../api/types';
-import { filterResults, type ResultFilterState } from './resultFilters';
+import { filterResults, type ResultFilterState } from './resultFilters.utils';
 
 interface ResultsTableProps {
   filters?: ResultFilterState;

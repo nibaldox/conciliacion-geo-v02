@@ -201,7 +201,11 @@ app.add_middleware(
         "Origin",
         "Referer",
     ],
-    expose_headers=["X-Session-ID", "x-session-id"],
+    expose_headers=[
+        "X-Session-ID",
+        "Content-Disposition",
+        "X-Export-Filters-Applied",
+    ],
 )
 
 

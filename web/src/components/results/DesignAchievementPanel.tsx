@@ -4,7 +4,7 @@ import {
   type DesignAchievementResponse,
   type DesignAchievementSummary,
 } from '../../api/designAchievement';
-import { EMPTY_RESULT_FILTERS, type ResultFilterState } from './resultFilters';
+import { EMPTY_RESULT_FILTERS, type ResultFilterState } from './resultFilters.utils';
 
 const TEXT = {
   title: { es: 'Logro de diseño', en: 'Design achievement' },

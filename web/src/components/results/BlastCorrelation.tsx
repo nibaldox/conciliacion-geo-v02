@@ -13,6 +13,7 @@ import { BlastSectorDensityEditor } from './BlastSectorDensityEditor';
 import { BlastCorrelationTable } from './BlastCorrelationTable';
 import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { useBlastSettings } from './useBlastSettings';
+import { DEMO_MESH_IDS, useSession } from '../../stores/session';
 // Re-exports below kept for backwards-compat with existing tests:
 //   - damage test suite imports `buildDamageTraces` / `DAMAGE_MODEL_MIN_SAMPLES`
 //     (canonical home: PowderFactorDamagePanel.tsx)
@@ -112,6 +113,8 @@ export function buildOverlayHistogram(
 export function BlastCorrelation() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const { designMeshId, topoMeshId } = useSession();
+  const hasVirtualMesh = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
   const { data, isLoading, error } = useBlastCorrelation();
 
   const rows: BlastCorrelationRow[] = data?.rows ?? [];
@@ -156,10 +159,14 @@ export function BlastCorrelation() {
           className="text-xs leading-relaxed max-w-md"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          {t('blast.empty_desc', {
-            defaultValue:
-              'Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.',
-          })}
+          {hasVirtualMesh
+            ? t('blast.empty_demo_desc', {
+                defaultValue: 'La demo usa mallas virtuales y no incluye datos de tronadura.',
+              })
+            : t('blast.empty_desc', {
+                defaultValue:
+                  'Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.',
+              })}
         </p>
         <div className="w-full max-w-md">
           <BlastUploader

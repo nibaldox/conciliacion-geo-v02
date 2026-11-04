@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SectionHeader } from './SectionHeader';
 import { FilterBar } from './FilterBar';
@@ -21,8 +21,10 @@ export interface ProfileViewProps {
 
 export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileViewProps) {
   const { t } = useTranslation();
+  const [isPlanOpen, setIsPlanOpen] = useState(true);
   const selectedSectionId = useSession((s: ReturnType<typeof useSession.getState>) => s.selectedSection);
   const selectedDesignBenches = useSession((s) => s.filters.bench);
+  const setSessionFilters = useSession((s) => s.setFilters);
   const filter = useFilterState();
   const crossLink = useCrossLinkState();
   const clearCrossLink = crossLink.clear;
@@ -32,14 +34,6 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
   useEffect(() => {
     clearCrossLink();
   }, [selectedSectionId, clearCrossLink]);
-
-  useEffect(() => {
-    if (!viewModel || crossLink.selected == null) return;
-    const selectedTopoBench = viewModel.benches.find((bench) => bench.benchNumber === crossLink.selected);
-    const remainsVisible = selectedDesignBenches.length === 0
-      || (selectedTopoBench?.designBenchNumber != null && selectedDesignBenches.includes(selectedTopoBench.designBenchNumber));
-    if (!remainsVisible) clearCrossLink();
-  }, [viewModel, crossLink.selected, selectedDesignBenches, clearCrossLink]);
 
   const selectedDesignStatuses = (viewModel?.comparisonBenchStatuses ?? []).filter((bench) =>
     selectedDesignBenches.length === 0 || (bench.designBenchNumber != null && selectedDesignBenches.includes(bench.designBenchNumber)));
@@ -100,6 +94,29 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
         crestElevationMax={viewModel.crestElevationMax ?? undefined}
         lastRunAt={lastRunAt}
       />
+      {selectedDesignBenches.length > 0 && (
+        <div
+          data-slot="profile-bank-filter-note"
+          role="note"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface-muted px-4 py-3 text-sm text-text-secondary"
+        >
+          <span>
+            {t('profileView.filter.design_bank_scope_active', {
+              banks: selectedDesignBenches.map((number) => `D${number}`).join(', '),
+              defaultValue: 'Filtro de bancos de diseño activo: {{banks}}. La tabla y el resumen de cumplimiento usan esos bancos; el gráfico y la inspección conservan todos los bancos topográficos.',
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setSessionFilters({ bench: [] })}
+            className="shrink-0 font-medium text-accent underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            {t('profileView.filter.clear_design_bench', {
+              defaultValue: 'Quitar filtro de bancos',
+            })}
+          </button>
+        </div>
+      )}
       {recoveredProfileWarnings.length > 0 && (
         <div data-slot="profile-recovery-warning" role="status" className="flex flex-col gap-1 rounded-lg border border-status-warn-border bg-status-warn-bg px-4 py-3 text-sm text-status-warn-text">
           {recoveredProfileWarnings.map(({ surface, code }) => (
@@ -119,7 +136,7 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
         </div>
       )}
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+      <div className="grid min-w-0 grid-cols-1 gap-4 2xl:grid-cols-[minmax(0,1fr)_420px]">
         <div
           className="min-w-0 overflow-hidden rounded-xl bg-surface-raised"
           style={{ border: '1px solid var(--color-border)' }}
@@ -138,16 +155,16 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
             >
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 <HorizontalDeviationOverview summary={viewModel.horizontalDeviation.summary} compact />
-                <p className="text-[10px] leading-snug" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="text-xs leading-relaxed text-text-secondary">
                   {t('horizontalDeviation.method_caption')} · {t('horizontalDeviation.direction_caption')}
                 </p>
-                <p className="text-[10px] leading-snug" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="text-xs leading-relaxed text-text-secondary">
                   {t('horizontalDeviation.sample_hint')}
                 </p>
                 {viewModel.horizontalDeviation.warnings.slice(0, 3).map((warning, index) => {
                   const message = horizontalDeviationWarning(warning);
                   return (
-                    <p key={`${index}-${warning}`} className="text-[10px] leading-snug" style={{ color: 'var(--color-text-muted)' }}>
+                    <p key={`${index}-${warning}`} className="text-xs leading-relaxed text-text-secondary">
                       {t(message.key, message.options)}
                     </p>
                   );
@@ -160,8 +177,24 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
             <ProfileChart viewModel={viewModel} filterState={filter.state} crossLink={crossLink} />
           </div>
         </div>
-        <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:flex xl:flex-col">
-          <ProfilePlanThumbnail sectionId={selectedSectionId} />
+        <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 2xl:flex 2xl:flex-col">
+          <section data-slot="profile-plan-panel" className="min-w-0 self-start overflow-hidden rounded-xl border border-border bg-surface-raised">
+            <h3>
+              <button
+                type="button"
+                aria-expanded={isPlanOpen}
+                aria-controls="profile-plan-content"
+                onClick={() => setIsPlanOpen((open) => !open)}
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold"
+              >
+                <span>{t('profile_plan.title')}</span>
+                <span aria-hidden="true">{isPlanOpen ? '−' : '+'}</span>
+              </button>
+            </h3>
+            <div id="profile-plan-content" hidden={!isPlanOpen} className="border-t border-border p-3">
+              {isPlanOpen && <ProfilePlanThumbnail sectionId={selectedSectionId} showTitle={false} />}
+            </div>
+          </section>
           <BenchInspector bench={viewModel.benches.find((bench) => bench.benchNumber === crossLink.selected) ?? null} />
         </div>
       </div>

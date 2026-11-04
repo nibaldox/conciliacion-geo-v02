@@ -3,7 +3,7 @@ import { BenchFilter } from './BenchFilter';
 import { CompliancePlanView } from './CompliancePlanView';
 import { ResultFilters } from './ResultFilters';
 import { DesignAchievementPanel } from './DesignAchievementPanel';
-import { filterResults, type ResultFilterState } from './resultFilters';
+import { filterResults, type ResultFilterState } from './resultFilters.utils';
 import { useTranslation } from 'react-i18next';
 import Plot from '../charts/Plot';
 import type { Data, Layout, Config, Shape } from 'plotly.js';
@@ -11,7 +11,7 @@ import { useResults, useSettings } from '../../api/hooks';
 import { DEFAULT_TOLERANCES } from '../../utils/constants';
 import { useSession } from '../../stores/session';
 import type { ComparisonResult } from '../../api/types';
-import { compareStatus } from './ProfileView/domain/status';
+import { BENCH_SCORE_MAX, SCORE_WEIGHTS, compareStatus, resolveBenchScore } from './ProfileView/domain/status';
 import type { BenchStatus } from './ProfileView/domain/types';
 import { toComparisonBenchStatuses } from './ProfileView/domain/mapping';
 
@@ -88,24 +88,12 @@ export function designBenchOptions(
 
 // ─── Binary compliance scoring (Track 1-WEB) ─────────────────
 //
-export const BENCH_SCORE_MAX = 100;
-
-/** Per-parameter weights (sum = 100). */
-export const SCORE_WEIGHTS = {
-  berm: 60,
-  angle: 10,
-  height: 30,
-} as const;
+export { BENCH_SCORE_MAX, SCORE_WEIGHTS };
 
 /** Threshold above which a profile is considered CUMPLE. */
 /** Score for a single bench row. Kept for the explicitly numeric KPI. */
-export function benchScore(row: ComparisonResult): number {
-  if (typeof row.bench_score === 'number' && Number.isFinite(row.bench_score)) return row.bench_score;
-  let score = 0;
-  if (row.berm_status === 'CUMPLE') score += SCORE_WEIGHTS.berm;
-  if (row.angle_status === 'CUMPLE') score += SCORE_WEIGHTS.angle;
-  if (row.height_status === 'CUMPLE') score += SCORE_WEIGHTS.height;
-  return score;
+export function benchScore(row: ComparisonResult): number | null {
+  return resolveBenchScore(row);
 }
 
 /**
@@ -115,10 +103,15 @@ export function benchScore(row: ComparisonResult): number {
 export function profileScore(
   rows: readonly ComparisonResult[],
 ): number {
-  if (rows.length === 0) return 0;
   let total = 0;
-  for (const r of rows) total += benchScore(r);
-  return total / rows.length;
+  let count = 0;
+  for (const r of rows) {
+    const score = benchScore(r);
+    if (score == null) continue;
+    total += score;
+    count += 1;
+  }
+  return count === 0 ? 0 : total / count;
 }
 
 /**
@@ -131,15 +124,16 @@ export function computeProfileScores(
 ): Map<string, number> {
   const map = new Map<string, number[]>();
   for (const r of rows) {
-    if (r.type !== 'MATCH') continue;
+    const score = benchScore(r);
+    if (score == null) continue;
     const list = map.get(r.section) ?? [];
-    list.push(benchScore(r));
+    list.push(score);
     map.set(r.section, list);
   }
   const out = new Map<string, number>();
   for (const [section, scores] of map) {
     const sum = scores.reduce((a, b) => a + b, 0);
-    out.set(section, scores.length === 0 ? 0 : sum / scores.length);
+    out.set(section, sum / scores.length);
   }
   return out;
 }
@@ -473,9 +467,10 @@ interface KPICardProps {
   valueColor: string;
   pct: number;
   icon: React.ReactNode;
+  description?: string;
 }
 
-function KPICard({ title, value, valueColor, pct, icon }: KPICardProps) {
+function KPICard({ title, value, valueColor, pct, icon, description }: KPICardProps) {
   const safePct = Number.isFinite(pct) ? pct : 0;
   return (
     <dl className="glass-card rounded-xl p-5 flex flex-col gap-4 relative overflow-hidden group">
@@ -500,6 +495,7 @@ function KPICard({ title, value, valueColor, pct, icon }: KPICardProps) {
         <dd className="text-3xl font-extrabold tracking-tight m-0" style={{ color: 'var(--color-text-primary)' }}>
           {value}
         </dd>
+        {description && <dd className="text-sm leading-relaxed m-0" style={{ color: 'var(--color-text-secondary)' }}>{description}</dd>}
 
         <dd className="w-full h-1.5 rounded-full overflow-hidden m-0" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
           <div
@@ -738,15 +734,16 @@ export function Dashboard() {
 
       <ResultFilters results={results} filters={filters} onChange={setScenarioFilters} />
 
-      {!filteredResults.length ? <p role="status" className="rounded-lg border border-border bg-surface-raised p-4 text-sm text-text-muted">{t('dashboard.bench_filter.no_results')}</p> : <>
+      {!filteredResults.length ? <p role="status" className="rounded-lg border border-border bg-surface-raised p-4 text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p> : <>
       {/* Section 1: Global KPI */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <KPICard
-          title={t('dashboard.kpi.global_score')}
+          title={`${t('dashboard.kpi.global_score')} (0–100)`}
           value={globalScore.toFixed(1)}
           valueColor={getValueColor(globalScore)}
           pct={globalScore / 100}
           icon={GlobalIcon}
+          description={t('dashboard.kpi.global_score_help')}
         />
         <KPICard
           title={t('dashboard.kpi.profiles_ok')}
@@ -777,11 +774,8 @@ export function Dashboard() {
         />
       </div>
 
-      <p role="note" className="text-xs text-text-muted">
-        {t('dashboard.kpi.classification_note', {
-          defaultValue:
-            'La clasificación de perfiles sigue el peor estado de banco por tolerancia y es independiente del Puntaje de Logro Diseño.',
-        })}
+      <p role="note" className="text-sm text-text-secondary">
+        {t('dashboard.kpi.profile_classification_help')}
       </p>
 
       {/* Section 2: Parameter breakdown */}

@@ -482,3 +482,73 @@ class TestExportReportFilters:
         assert "Informe_Ejecutivo.pdf" in resp.headers["content-disposition"]
         applied = json.loads(resp.headers["X-Export-Filters-Applied"])
         assert applied["sectors"] == ["B"]
+
+
+def test_report_depth_extractions_are_unfiltered_and_reject_duplicate_names(
+    session_id, monkeypatch,
+):
+    sections = [
+        {"name": "S-01", "sector": "Norte"},
+        {"name": "DUP", "sector": "Norte"},
+        {"name": "DUP", "sector": "Sur"},
+        {"name": "NO-SECTOR", "sector": ""},
+    ]
+    db.save_sections(session_id, sections)
+    db.save_extraction(session_id, "S-01", "topo", {
+        "sector": "Norte", "benches": [_bench(1), _bench(2)],
+    })
+    db.save_extraction(session_id, "DUP", "topo", {
+        "sector": "Sur", "benches": [_bench(1)],
+    })
+    calls = []
+    original = db.get_extraction
+
+    def track_get(sid, name, kind):
+        calls.append((sid, name, kind))
+        return original(sid, name, kind)
+
+    monkeypatch.setattr(db, "get_extraction", track_get)
+    found = export_router._load_report_depth_extractions(session_id, sections)
+
+    assert list(found) == [("S-01", "Norte")]
+    assert [bench.bench_number for bench in found[("S-01", "Norte")]] == [1, 2]
+    assert (session_id, "S-01", "topo") in calls
+    assert all(name != "DUP" for _, name, _ in calls)
+
+
+def test_pdf_builder_joins_persisted_rows_to_sqlite_topo_cache(
+    session_id, monkeypatch,
+):
+    row = {
+        "section": "S-01", "sector": " Norte ", "bench_num": 7,
+        "bench_num_topo": 2, "type": "MATCH", "level": "90",
+        "height_status": "CUMPLE", "angle_status": "CUMPLE",
+        "berm_status": "CUMPLE",
+    }
+    topo_benches = [_bench(2)]
+    topo_benches[0].update({"floor_elevation": 80.0, "crest_elevation": 90.0})
+    db.save_results(session_id, [row])
+    db.save_sections(session_id, [{
+        "name": "S-01", "sector": "Norte", "origin": [0, 0],
+        "azimuth": 0, "length": 100,
+    }])
+    db.save_extraction(session_id, "S-01", "topo", {
+        "sector": "Norte", "benches": topo_benches,
+    })
+
+    captured = {}
+    monkeypatch.setattr(export_router, "_load_mesh_from_db", lambda *_: None)
+    monkeypatch.setattr(export_router, "_build_section_geometry", lambda *args: [])
+    monkeypatch.setattr(export_router, "_report_meta", lambda *args: {})
+    monkeypatch.setattr(export_router, "_blast_payload", lambda *args: None)
+
+    def capture_report(data):
+        captured["data"] = data
+        return io.BytesIO(b"pdf")
+
+    monkeypatch.setattr(export_router, "build_pdf_report", capture_report)
+    export_router._build_pdf_payload_sync(
+        session_id, None, None, None, None,
+    )
+
+    assert captured["data"].depth["profundidad"] == 10.0

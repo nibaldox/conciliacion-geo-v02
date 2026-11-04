@@ -134,8 +134,19 @@ export type ProfileDataDto = ProfileData;
 /** The minimal slice of `SectionResponse` the domain actually consumes. */
 export type SectionResponseDto = SectionResponse;
 
+export interface BenchScoreInput {
+  readonly type?: 'MATCH' | 'MISSING' | 'EXTRA' | null;
+  readonly bench_score?: number | null;
+  readonly height_status?: string | null;
+  readonly angle_status?: string | null;
+  readonly berm_status?: string | null;
+}
+
 /** The minimal slice of `ComparisonResult` the domain actually consumes. */
-export type ComparisonResultDto = ComparisonResult;
+export type ComparisonResultDto = Omit<ComparisonResult, 'bench_score' | 'section_score'> & {
+  bench_score?: number | null;
+  section_score?: number | null;
+};
 
 /** The minimal slice of `BenchParams` the domain actually consumes. */
 export type BenchParamsDto = BenchParams;

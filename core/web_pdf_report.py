@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import io
 import math
+import os
+import threading
 from datetime import datetime
 from typing import Any, Optional
 from xml.sax.saxutils import escape
@@ -24,6 +26,9 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen import canvas as pdf_canvas
+from reportlab import __file__ as reportlab_path
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
@@ -77,6 +82,12 @@ _PARAMETER_LABELS = {
     "berm": ("Ancho de berma", "m", 2),
 }
 
+_PARAMETER_TOLERANCE_KEYS = {
+    "height": "bench_height",
+    "angle": "face_angle",
+    "berm": "berm_width",
+}
+
 _TOLERANCE_ROWS = (
     ("bench_height", "Altura de banco", "m", 2),
     ("face_angle", "Ángulo de cara", "°", 1),
@@ -96,6 +107,34 @@ _PROCESS_ROWS = (
 _MAX_DEVIATIONS_PER_PARAMETER = 5
 
 _DEVIATION_PARAMETER_ORDER = ("height", "angle", "berm")
+
+_REPORTLAB_FONTS = os.path.join(os.path.dirname(reportlab_path), "fonts")
+_FONT_FILES = (
+    ("GeoVera", "Vera.ttf"),
+    ("GeoVera-Bold", "VeraBd.ttf"),
+    ("GeoVera-Italic", "VeraIt.ttf"),
+    ("GeoVera-BoldItalic", "VeraBI.ttf"),
+)
+
+
+def _register_report_fonts(font_dir: str) -> tuple[str, str]:
+    if not all(os.path.isfile(os.path.join(font_dir, filename)) for _, filename in _FONT_FILES):
+        return "Helvetica", "Helvetica-Bold"
+    for font_name, filename in _FONT_FILES:
+        if font_name not in pdfmetrics.getRegisteredFontNames():
+            pdfmetrics.registerFont(TTFont(font_name, os.path.join(font_dir, filename)))
+    pdfmetrics.registerFontFamily(
+        "GeoVera",
+        normal="GeoVera",
+        bold="GeoVera-Bold",
+        italic="GeoVera-Italic",
+        boldItalic="GeoVera-BoldItalic",
+    )
+    return "GeoVera", "GeoVera-Bold"
+
+
+_BODY_FONT, _BOLD_FONT = _register_report_fonts(_REPORTLAB_FONTS)
+_PDF_BUILD_LOCK = threading.RLock()
 
 
 class _NumberedCanvas(pdf_canvas.Canvas):
@@ -124,9 +163,9 @@ class _NumberedCanvas(pdf_canvas.Canvas):
         self.setStrokeColor(COLOR_NAVY)
         self.setLineWidth(0.6)
         self.setFillColor(COLOR_NAVY)
-        self.setFont("Helvetica-Bold", 9)
+        self.setFont(_BOLD_FONT, 9)
         self.drawString(PAGE_MARGIN, PAGE_HEIGHT - 1.2 * cm, self._project[:70])
-        self.setFont("Helvetica", 8)
+        self.setFont(_BODY_FONT, 8)
         self.setFillColor(colors.grey)
         self.drawRightString(
             PAGE_WIDTH - PAGE_MARGIN,
@@ -139,7 +178,7 @@ class _NumberedCanvas(pdf_canvas.Canvas):
             PAGE_WIDTH - PAGE_MARGIN,
             PAGE_HEIGHT - 1.45 * cm,
         )
-        self.setFont("Helvetica", 8)
+        self.setFont(_BODY_FONT, 8)
         self.drawRightString(
             PAGE_WIDTH - PAGE_MARGIN, 1.1 * cm, f"Página {page} de {total}"
         )
@@ -149,6 +188,10 @@ class _NumberedCanvas(pdf_canvas.Canvas):
 def _report_styles() -> dict:
     """Return the reportlab styles, extending the shared executive palette."""
     styles = dict(_build_styles())
+    for style in styles.values():
+        style.fontName = style.fontName.replace("Helvetica-Bold", _BOLD_FONT).replace(
+            "Helvetica", _BODY_FONT
+        )
     styles["bullet"] = ParagraphStyle(
         "Bullet", parent=styles["body"], leftIndent=12, bulletIndent=2, spaceAfter=2
     )
@@ -163,6 +206,10 @@ def _report_styles() -> dict:
     )
     styles["cell_bold_small"] = ParagraphStyle(
         "CellBoldSmall", parent=styles["cell_bold"], fontSize=7.5, leading=9
+    )
+    styles["table_header"] = ParagraphStyle(
+        "TableHeader", parent=styles["cell_bold_small"], textColor=colors.white,
+        fontSize=7, leading=8,
     )
     styles["group"] = ParagraphStyle(
         "Group",
@@ -260,6 +307,16 @@ def _bullets(story: list, items: Any, styles: dict, style_key: str = "bullet") -
 
 def _cover(story: list, data: ReportData, styles: dict) -> None:
     meta = data.meta or {}
+    counts = data.counts or {}
+    classified_profiles = sum((data.profile_counts or {}).values())
+    profile_summary = (
+        f"Denominador {classified_profiles}: "
+        f"CUMPLE {int((data.profile_counts or {}).get('CUMPLE', 0))} · "
+        f"FUERA {int((data.profile_counts or {}).get('FUERA', 0))} · "
+        f"NO CUMPLE {int((data.profile_counts or {}).get('NO_CUMPLE', 0))}"
+    )
+    design_file = meta.get("design_file") or meta.get("design_filename") or "No disponible en metadatos"
+    topo_file = meta.get("topo_file") or meta.get("topo_filename") or "No disponible en metadatos"
     story.append(Spacer(1, 3.2 * cm))
     story.append(Paragraph("Informe de Conciliación Geotécnica", styles["title"]))
     story.append(
@@ -287,7 +344,32 @@ def _cover(story: list, data: ReportData, styles: dict) -> None:
             col_widths=[5.2 * cm, 4.0 * cm, 4.0 * cm, 3.6 * cm],
         )
     )
-    story.append(Spacer(1, 2.4 * cm))
+    scope_style = ParagraphStyle("CoverScope", parent=styles["body"], fontSize=9, leading=12)
+    scope_rows = [
+        [Paragraph("Estado de perfiles clasificados", styles["cell_bold"]), Paragraph(_esc(profile_summary), scope_style)],
+        [Paragraph("Alcance", styles["cell_bold"]), Paragraph(
+            _esc(f"{counts.get('n_rows', 0)} registros de banco · {counts.get('n_sections', 0)} secciones en el modelo"),
+            scope_style,
+        )],
+        [Paragraph("Filtros aplicados", styles["cell_bold"]), Paragraph(_esc(_filters_text(data)), scope_style)],
+        [Paragraph("Fuentes", styles["cell_bold"]), Paragraph(
+            f"Diseño: {_esc(design_file)}<br/>Topografía: {_esc(topo_file)}", scope_style
+        )],
+    ]
+    scope_table = Table(scope_rows, colWidths=[4.0 * cm, 12.8 * cm], hAlign="CENTER")
+    scope_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), COLOR_ALT_ROW),
+        ("BOX", (0, 0), (-1, -1), 0.5, COLOR_NAVY),
+        ("INNERGRID", (0, 0), (-1, -1), 0.3, colors.lightgrey),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(Spacer(1, 0.8 * cm))
+    story.append(scope_table)
+    story.append(Spacer(1, 0.8 * cm))
     story.append(
         Paragraph(f"<b>Elaborado por:</b> {_esc(meta.get('author') or 'N/A')}", styles["body"])
     )
@@ -305,9 +387,11 @@ def _cover(story: list, data: ReportData, styles: dict) -> None:
 def _summary_section(story: list, data: ReportData, styles: dict) -> None:
     story.append(
         Paragraph(
-            "Criterio de perfil: cada perfil se clasifica por el peor estado de sus "
-            "bancos de diseño (CUMPLE &lt; FUERA DE TOLERANCIA &lt; NO CUMPLE), igual "
-            "que el tablero web; el puntaje ponderado se informa por separado.",
+            "El estado del perfil corresponde al peor estado entre sus registros de "
+            "banco, incluidos faltantes y adicionales. Un banco emparejado cumple "
+            "con 70 puntos o más; sus mediciones individuales conservan sus "
+            "estados de tolerancia. El puntaje global promedio es un indicador "
+            "separado de la clasificación del perfil.",
             styles["note"],
         )
     )
@@ -321,56 +405,78 @@ def _summary_section(story: list, data: ReportData, styles: dict) -> None:
             _bullets(story, data.warnings, styles, style_key="warn")
         return
 
-    total = len(data.profiles)
-    table_rows = [
-        [
-            Paragraph("Estado del perfil", styles["cell_bold"]),
-            Paragraph("Perfiles", styles["cell_bold"]),
-            Paragraph("%", styles["cell_bold"]),
+    total = sum((data.profile_counts or {}).values())
+    unclassified = sum(1 for profile in data.profiles if profile.worst_status == "UNKNOWN")
+    if total == 0:
+        story.append(Paragraph(
+            "El modelo no aporta perfiles con estado clasificado para este resumen. "
+            "No se asignan perfiles sin clasificación a NO CUMPLE.",
+            styles["body"],
+        ))
+    else:
+        story.append(Paragraph(
+            f"Perfiles con estado clasificado: <b>{total}</b>. "
+            "El denominador suma únicamente los estados incluidos en el modelo.",
+            styles["note"],
+        ))
+    story.append(Paragraph(
+        f"Perfiles UNKNOWN / SIN EVALUAR: <b>{unclassified}</b>; "
+        "se informan por separado y quedan fuera del denominador clasificado.",
+        styles["note"],
+    ))
+    if total > 0:
+        table_rows = [
+            [
+                Paragraph("Estado del perfil", styles["table_header"]),
+                Paragraph("Perfiles", styles["table_header"]),
+                Paragraph("% del denominador", styles["table_header"]),
+            ]
         ]
-    ]
-    style_cmds = [
-        ("BACKGROUND", (1, 1), (1, -1), colors.white),
-    ]
-    for status in PROFILE_STATUS_ORDER:
-        count = int(data.profile_counts.get(status, 0))
-        pct = (100.0 * count / total) if total else 0.0
+        style_cmds = []
+        for status in PROFILE_STATUS_ORDER:
+            count = int(data.profile_counts.get(status, 0))
+            pct = 100.0 * count / total
+            table_rows.append(
+                [
+                    _status_paragraph(status, styles),
+                    Paragraph(str(count), styles["cell_center"]),
+                    Paragraph(f"{pct:.1f}%", styles["cell_center"]),
+                ]
+            )
+            style_cmds.append(("BACKGROUND", (0, len(table_rows) - 1), (0, len(table_rows) - 1), STATUS_FILL[status]))
         table_rows.append(
             [
-                _status_paragraph(status, styles),
-                Paragraph(str(count), styles["cell_center"]),
-                Paragraph(f"{pct:.1f}%", styles["cell_center"]),
+                Paragraph("Total clasificado", styles["cell_bold"]),
+                Paragraph(str(total), styles["cell_center"]),
+                Paragraph("100.0%", styles["cell_center"]),
             ]
         )
-        style_cmds.append(("BACKGROUND", (0, len(table_rows) - 1), (0, len(table_rows) - 1), STATUS_FILL[status]))
-    table_rows.append(
-        [
-            Paragraph("Total de perfiles", styles["cell_bold"]),
-            Paragraph(str(total), styles["cell_center"]),
-            Paragraph("100.0%", styles["cell_center"]),
-        ]
-    )
-    table = _base_table(table_rows, col_widths=[7.0 * cm, 3.0 * cm, 3.0 * cm])
-    table.setStyle(TableStyle(style_cmds))
-    story.append(table)
-    story.append(Spacer(1, 0.3 * cm))
+        table = _base_table(table_rows, col_widths=[7.0 * cm, 3.0 * cm, 4.0 * cm])
+        table.setStyle(TableStyle(style_cmds))
+        story.append(table)
+        story.append(Spacer(1, 0.3 * cm))
 
     counts = data.counts or {}
     story.append(
         Paragraph(
-            f"Bancos evaluados: <b>{counts.get('n_rows', 0)}</b> "
-            f"({counts.get('n_match', 0)} emparejados, "
-            f"{counts.get('n_missing', 0)} no construidos, "
-            f"{counts.get('n_extra', 0)} adicionales) en "
-            f"{counts.get('n_sections', 0)} secciones.",
+            f"Registros de banco en el modelo: <b>{counts.get('n_rows', 0)}</b> "
+            f"(MATCH {counts.get('n_match', 0)}, MISSING {counts.get('n_missing', 0)}, "
+            f"EXTRA {counts.get('n_extra', 0)}) en {counts.get('n_sections', 0)} "
+            "secciones según el modelo.",
             styles["body"],
         )
     )
+    if data.warnings:
+        story.append(Paragraph("Advertencias", styles["h2"]))
+        _bullets(story, data.warnings, styles, style_key="warn")
+
     if data.global_weighted_score is not None:
+        scored_profiles = sum(1 for profile in data.profiles if profile.weighted_score is not None)
         story.append(
             Paragraph(
                 f"Puntaje ponderado global (0-100): <b>{data.global_weighted_score:.1f}</b> "
-                "— dato independiente del criterio por peor banco.",
+                f"(media de {scored_profiles} perfiles con puntaje disponible); "
+                "indicador independiente del peor estado por perfil.",
                 styles["body"],
             )
         )
@@ -379,20 +485,60 @@ def _summary_section(story: list, data: ReportData, styles: dict) -> None:
     if achievement.get("global_score") is not None:
         parts = [
             f"Logro de diseño global (0-100): <b>{achievement['global_score']}</b>",
-            f"cresta {_fmt_pct(achievement.get('crest_pct')) or 'N/A'}",
-            f"pie {_fmt_pct(achievement.get('toe_pct')) or 'N/A'}",
-            f"berma {_fmt_pct(achievement.get('berm_pct')) or 'N/A'}",
-            f"elementos evaluables {achievement.get('n_evaluable', 0)}",
+            f"cresta {_fmt_pct(achievement.get('crest_pct')) or 'N/A'} (n={achievement.get('crest_denom', 0)})",
+            f"pie {_fmt_pct(achievement.get('toe_pct')) or 'N/A'} (n={achievement.get('toe_denom', 0)})",
+            f"berma {_fmt_pct(achievement.get('berm_pct')) or 'N/A'} (n={achievement.get('berm_denom', 0)})",
+            f"registros con algún componente disponible {achievement.get('n_evaluable', 0)}",
         ]
         story.append(Paragraph(" · ".join(parts) + ".", styles["body"]))
+        story.append(Paragraph(
+            "Cada porcentaje de componente usa su propio n disponible. Los registros "
+            "contados como evaluables pueden tener solo uno de los componentes.",
+            styles["note"],
+        ))
 
-    if data.conclusions:
-        story.append(Paragraph("Conclusiones", styles["h2"]))
-        _bullets(story, data.conclusions, styles)
+    _priority_summary(story, data, styles)
 
-    if data.warnings:
-        story.append(Paragraph("Advertencias", styles["h2"]))
-        _bullets(story, data.warnings, styles, style_key="warn")
+def _priority_summary(story: list, data: ReportData, styles: dict) -> None:
+    entries = [entry for entry in (data.top_deviations or ()) if isinstance(entry, dict)]
+    if not entries:
+        story.append(Paragraph(
+            "No hay desviaciones prioritarias calculables con los datos y criterios disponibles.",
+            styles["note"],
+        ))
+        return
+    story.append(Paragraph("Prioridad principal por parámetro", styles["h2"]))
+    for parameter in _DEVIATION_PARAMETER_ORDER:
+        entry = next((item for item in entries if item.get("parameter") == parameter), None)
+        if entry is None:
+            continue
+        label, unit, decimals = _PARAMETER_LABELS.get(parameter, (parameter, "", 2))
+        bench = entry.get("bench_num")
+        identity = f"Sección {_esc(entry.get('section'))}"
+        if entry.get("sector"):
+            identity += f" · Sector {_esc(entry.get('sector'))}"
+        identity += f" · Banco {'—' if bench is None else f'B{bench}'}"
+        real = _fmt_number(entry.get("real"), decimals)
+        design = _fmt_number(entry.get("design"), decimals)
+        deviation = _fmt_number(entry.get("deviation"), decimals)
+        ratio = _fmt_number(entry.get("ratio"), 2)
+        if entry.get("criterion") == "min":
+            difference = (
+                f"déficit vs. mínimo {abs(float(entry['deviation'])):.{decimals}f} {unit}"
+                if deviation is not None else "déficit no disponible"
+            )
+        else:
+            difference = (
+                f"desviación de criterio {deviation} {unit}"
+                if deviation is not None else "desviación no disponible"
+            )
+        status = STATUS_LABELS[parse_bench_status(entry.get("status"))]
+        story.append(Paragraph(
+            f"<b>{_esc(label)}</b>: {identity}; diseño {'—' if design is None else design} {unit}, "
+            f"real {'—' if real is None else real} {unit}; {difference}; "
+            f"base {_esc(entry.get('tolerance_text') or 'No disponible')}; índice {ratio or '—'}×; {status}.",
+            styles["bullet"], bulletText="•",
+        ))
 
 
 def _depth_section(story: list, data: ReportData, styles: dict) -> bool:
@@ -400,7 +546,7 @@ def _depth_section(story: list, data: ReportData, styles: dict) -> bool:
     if not depth or depth.get("profundidad") is None:
         return False
     rows = [
-        [Paragraph("Métrica", styles["cell_bold"]), Paragraph("Valor", styles["cell_bold"])]
+        [Paragraph("Métrica", styles["table_header"]), Paragraph("Valor", styles["table_header"])]
     ]
     for label, value in (
         ("Cota piso global", depth.get("cota_piso")),
@@ -479,8 +625,8 @@ def _process_text(data: ReportData) -> str:
 def _criteria_section(story: list, data: ReportData, styles: dict) -> None:
     rows = [
         [
-            Paragraph("Criterio", styles["cell_bold"]),
-            Paragraph("Tolerancia efectiva", styles["cell_bold"]),
+            Paragraph("Criterio", styles["table_header"]),
+            Paragraph("Tolerancia efectiva", styles["table_header"]),
         ]
     ]
     for key, label, unit, decimals in _TOLERANCE_ROWS:
@@ -505,46 +651,69 @@ def _criteria_section(story: list, data: ReportData, styles: dict) -> None:
         Paragraph(f"<b>Filtros aplicados:</b> {_esc(_filters_text(data))}", styles["body"])
     )
     story.append(Paragraph(f"<b>Proceso:</b> {_esc(_process_text(data))}", styles["body"]))
+    story.append(Paragraph(
+            "Para altura y ángulo: CUMPLE dentro de tolerancia; FUERA DE TOLERANCIA "
+            "hasta 1,5 veces la tolerancia; NO CUMPLE sobre 1,5 veces, según la "
+            "clasificación del modelo. Para berma, se compara el ancho con el mínimo "
+            "configurado; esta regla no usa los tres tramos de tolerancia.",
+        styles["note"],
+    ))
     meta = data.meta or {}
-    design_file = meta.get("design_file") or meta.get("design_filename")
-    topo_file = meta.get("topo_file") or meta.get("topo_filename")
-    if design_file or topo_file:
-        story.append(
-            Paragraph(
-                f"<b>Archivos:</b> diseño {_esc(design_file or 'N/A')} · "
-                f"topografía {_esc(topo_file or 'N/A')}",
-                styles["body"],
-            )
+    design_file = meta.get("design_file") or meta.get("design_filename") or "No disponible en metadatos"
+    topo_file = meta.get("topo_file") or meta.get("topo_filename") or "No disponible en metadatos"
+    story.append(
+        Paragraph(
+            f"<b>Fuentes:</b> diseño {_esc(design_file)} · "
+            f"topografía {_esc(topo_file)}",
+            styles["body"],
         )
+    )
 
 
 def _parameters_section(story: list, data: ReportData, styles: dict) -> None:
     parameters = [p for p in data.parameters if (p.cumple + p.no_cumple) > 0]
     if not parameters:
         story.append(
-            Paragraph("Sin mediciones de parámetros para los bancos filtrados.", styles["body"])
+            Paragraph("No hay registros con estado de parámetro disponible para los filtros aplicados.", styles["body"])
         )
         return
     rows = [
         [
-            Paragraph("Parámetro", styles["cell_bold"]),
-            Paragraph("Cumple", styles["cell_bold"]),
-            Paragraph("No cumple", styles["cell_bold"]),
-            Paragraph("% Cumplimiento", styles["cell_bold"]),
-            Paragraph("Valor medio real", styles["cell_bold"]),
+            Paragraph("Parámetro", styles["table_header"]),
+            Paragraph("Criterio", styles["table_header"]),
+            Paragraph("Cumple", styles["table_header"]),
+            Paragraph("Otros estados", styles["table_header"]),
+            Paragraph("Con estado", styles["table_header"]),
+            Paragraph("% cumple", styles["table_header"]),
+            Paragraph("Media real (n)", styles["table_header"]),
         ]
     ]
     for parameter in parameters:
         decimals = 2 if parameter.unit == "m" else 1
         mean = _fmt_number(parameter.mean_real, decimals)
+        status_key = f"{parameter.parameter}_status"
+        real_key = f"{parameter.parameter}_real"
+        real_count = sum(
+            1 for row in data.rows
+            if getattr(row, status_key) and getattr(row, status_key) != "-"
+            and getattr(row, real_key) is not None
+        )
+        denominator = parameter.cumple + parameter.no_cumple
+        tolerance = _tolerance_value(
+            (data.tolerances or {}).get(_PARAMETER_TOLERANCE_KEYS[parameter.parameter]),
+            parameter.unit,
+            decimals,
+        )
         rows.append(
             [
                 Paragraph(f"{_esc(parameter.label)} ({_esc(parameter.unit)})", styles["cell"]),
+                Paragraph(_esc(tolerance), styles["cell_center"]),
                 Paragraph(str(parameter.cumple), styles["cell_center"]),
                 Paragraph(str(parameter.no_cumple), styles["cell_center"]),
+                Paragraph(str(denominator), styles["cell_center"]),
                 Paragraph(_fmt_pct(parameter.pct_cumple) or "N/A", styles["cell_center"]),
                 Paragraph(
-                    f"{mean} {parameter.unit}" if mean is not None else "N/A",
+                    f"{mean} {parameter.unit} ({real_count})" if mean is not None else "N/A",
                     styles["cell_center"],
                 ),
             ]
@@ -552,10 +721,19 @@ def _parameters_section(story: list, data: ReportData, styles: dict) -> None:
     story.append(
         _base_table(
             rows,
-            col_widths=[5.6 * cm, 2.0 * cm, 2.3 * cm, 3.1 * cm, 3.5 * cm],
+            col_widths=[3.5 * cm, 2.7 * cm, 1.8 * cm, 2.1 * cm, 1.8 * cm, 1.6 * cm, 3.0 * cm],
             align_center_from=1,
         )
     )
+    story.append(Paragraph(
+        "El denominador ‘Con estado’ suma los conteos del modelo. ‘Otros estados’ "
+        "agrupa estados registrados distintos de CUMPLE, incluidos FUERA DE "
+        "TOLERANCIA y NO CUMPLE; no equivale solo a NO CUMPLE. Los registros sin "
+        "estado no entran en ese denominador; las donas usan estos mismos conteos. "
+        "La media real muestra entre paréntesis "
+        "el número de valores reales disponibles con estado registrado.",
+        styles["note"],
+    ))
 
     donuts = parameter_donuts_png(
         [
@@ -585,12 +763,12 @@ def _sector_section(story: list, data: ReportData, styles: dict) -> bool:
         return False
     rows = [
         [
-            Paragraph("Sector", styles["cell_bold"]),
-            Paragraph("Logro (0-100)", styles["cell_bold"]),
-            Paragraph("Cresta", styles["cell_bold"]),
-            Paragraph("Pie", styles["cell_bold"]),
-            Paragraph("Berma", styles["cell_bold"]),
-            Paragraph("Elementos", styles["cell_bold"]),
+            Paragraph("Sector", styles["table_header"]),
+            Paragraph("Logro (0-100)", styles["table_header"]),
+            Paragraph("Cresta % (n)", styles["table_header"]),
+            Paragraph("Pie % (n)", styles["table_header"]),
+            Paragraph("Berma % (n)", styles["table_header"]),
+            Paragraph("Filas con algún componente", styles["table_header"]),
         ]
     ]
     for sector in sectors:
@@ -599,24 +777,25 @@ def _sector_section(story: list, data: ReportData, styles: dict) -> bool:
             [
                 Paragraph(_esc(sector.get("sector") or "Sin sector"), styles["cell"]),
                 Paragraph("N/A" if score is None else str(score), styles["cell_center"]),
-                Paragraph(_fmt_pct(sector.get("crest_pct")) or "N/A", styles["cell_center"]),
-                Paragraph(_fmt_pct(sector.get("toe_pct")) or "N/A", styles["cell_center"]),
-                Paragraph(_fmt_pct(sector.get("berm_pct")) or "N/A", styles["cell_center"]),
+                Paragraph(f"{_fmt_pct(sector.get('crest_pct')) or 'N/A'} ({sector.get('crest_denom', 0)})", styles["cell_center"]),
+                Paragraph(f"{_fmt_pct(sector.get('toe_pct')) or 'N/A'} ({sector.get('toe_denom', 0)})", styles["cell_center"]),
+                Paragraph(f"{_fmt_pct(sector.get('berm_pct')) or 'N/A'} ({sector.get('berm_denom', 0)})", styles["cell_center"]),
                 Paragraph(str(sector.get("n_evaluable", 0)), styles["cell_center"]),
             ]
         )
     story.append(
         _base_table(
             rows,
-            col_widths=[4.3 * cm, 2.8 * cm, 2.3 * cm, 2.3 * cm, 2.3 * cm, 2.5 * cm],
+            col_widths=[3.2 * cm, 2.3 * cm, 2.2 * cm, 2.2 * cm, 2.2 * cm, 3.1 * cm],
             align_center_from=1,
         )
     )
     story.append(
         Paragraph(
-            "Logro de diseño calculado sobre las desviaciones cresta-pie de los "
-            "bancos evaluables; los porcentajes por componente usan la misma "
-            "tolerancia efectiva de la sesión.",
+            "El puntaje global usa componentes disponibles por registro. ‘Filas con "
+            "algún componente’ cuenta registros con al menos una desviación de cresta "
+            "o pie, o un estado de berma. Cada porcentaje muestra su propio n "
+            "disponible; cresta y pie usan la tolerancia efectiva de la sesión.",
             styles["note"],
         )
     )
@@ -632,18 +811,20 @@ def _deviation_table(parameter: str, entries: list, styles: dict) -> Table:
         "Banco",
         f"Diseño ({unit})",
         f"Real ({unit})",
-        f"Desviación ({unit})",
-        f"Tolerancia ({unit})",
+        f"Desv. criterio ({unit})",
+        "Base e índice",
         "Estado",
     )
-    rows = [[Paragraph(_esc(header), styles["cell_bold_small"]) for header in headers]]
+    rows = [[Paragraph(_esc(header), styles["table_header"]) for header in headers]]
     style_cmds = []
     for index, entry in enumerate(entries, start=1):
         status = parse_bench_status(entry.get("status"))
         design = _fmt_number(entry.get("design"), decimals)
         real = _fmt_number(entry.get("real"), decimals)
         deviation = _fmt_number(entry.get("deviation"), decimals)
-        tolerance = _fmt_number(entry.get("tolerance"), decimals)
+        tolerance_text = _esc(entry.get("tolerance_text") or "No disponible")
+        ratio = _fmt_number(entry.get("ratio"), 2)
+        criterion_label = "déficit/mínimo" if entry.get("criterion") == "min" else "|desvío|/límite"
         bench = entry.get("bench_num")
         rows.append(
             [
@@ -653,7 +834,7 @@ def _deviation_table(parameter: str, entries: list, styles: dict) -> Table:
                 Paragraph("—" if design is None else design, styles["cell_center"]),
                 Paragraph("—" if real is None else real, styles["cell_center"]),
                 Paragraph("—" if deviation is None else deviation, styles["cell_center"]),
-                Paragraph("—" if tolerance is None else tolerance, styles["cell_center"]),
+                Paragraph(f"{tolerance_text}<br/>{criterion_label}: {ratio or '—'}×", styles["cell_center"]),
                 _status_paragraph(status, styles),
             ]
         )
@@ -664,14 +845,14 @@ def _deviation_table(parameter: str, entries: list, styles: dict) -> Table:
     table = _base_table(
         rows,
         col_widths=[
-            0.9 * cm,
-            1.7 * cm,
-            1.3 * cm,
-            2.1 * cm,
-            2.1 * cm,
-            2.4 * cm,
-            2.4 * cm,
-            2.8 * cm,
+            0.7 * cm,
+            1.8 * cm,
+            1.2 * cm,
+            1.8 * cm,
+            1.8 * cm,
+            3.1 * cm,
+            4.0 * cm,
+            2.3 * cm,
         ],
         align_center_from=0,
     )
@@ -684,7 +865,7 @@ def _deviations_section(story: list, data: ReportData, styles: dict) -> None:
     if not deviations:
         story.append(
             Paragraph(
-                "Sin desviaciones comparables contra tolerancias con signo.",
+                "No hay desviaciones prioritarias calculables con los datos y criterios disponibles.",
                 styles["body"],
             )
         )
@@ -698,10 +879,13 @@ def _deviations_section(story: list, data: ReportData, styles: dict) -> None:
     )
     story.append(
         Paragraph(
-            "Desviaciones ordenadas por |desviación| / tolerancia aplicable y "
-            "agrupadas por parámetro: se listan hasta "
-            f"{_MAX_DEVIATIONS_PER_PARAMETER} mayores de cada parámetro. La unidad "
-            "de cada tabla corresponde al parámetro evaluado.",
+            "Prioridades ordenadas por parámetro: hasta "
+            f"{_MAX_DEVIATIONS_PER_PARAMETER} mayores de cada uno, usando el índice "
+            "que muestra cada fila. Altura y ángulo usan |desviación| dividido por "
+            "el límite de tolerancia en el sentido del desvío. Berma usa el déficit "
+            "respecto del mínimo dividido por ese mínimo, solo cuando la berma real "
+            "está bajo el criterio. ‘Desv. criterio’ conserva la diferencia calculada "
+            "por el modelo; diseño, real y estado provienen de la fila comparativa.",
             styles["note"],
         )
     )
@@ -782,8 +966,6 @@ def _plan_sections(data: ReportData) -> tuple:
             if isinstance(geometry, dict)
             and ("origin" in geometry or "polyline" in geometry)
         ]
-    status_by_section = {p.section: p.worst_status for p in data.profiles}
-    sector_by_section = {p.section: p.sector for p in data.profiles}
     sections = []
     for entry in raw or ():
         section = _geometry_entry(entry)
@@ -791,11 +973,26 @@ def _plan_sections(data: ReportData) -> tuple:
             continue
         name = section.get("name") or section.get("section") or section.get("section_name")
         section["name"] = "" if name is None else str(name)
-        if not section.get("worst_status"):
-            section["worst_status"] = status_by_section.get(section["name"], "UNKNOWN")
-        if not section.get("sector"):
-            section["sector"] = sector_by_section.get(section["name"], "")
         sections.append(section)
+
+    name_counts = {}
+    for section in sections:
+        name_counts[section["name"]] = name_counts.get(section["name"], 0) + 1
+    for section in sections:
+        state = data.resolve_section_plan_state(
+            section["name"],
+            section.get("sector"),
+            infer_missing_sector=name_counts[section["name"]] == 1,
+        )
+        if state is None:
+            section["included"] = True
+            section["sector"] = ""
+            section["worst_status"] = "UNKNOWN"
+        else:
+            _name, sector, included, status = state
+            section["included"] = included
+            section["sector"] = sector or ""
+            section["worst_status"] = status
     return sections, contours
 
 
@@ -849,6 +1046,19 @@ def _blast_rows(data: ReportData, styles: dict) -> Optional[list]:
             Paragraph(str(len(holes)), styles["cell_center"]),
         ]
     ]
+    if any(
+        hole.get("Z_collar_semantic", hole.get("z_collar_semantic")) == "design_surface_estimate"
+        for hole in holes
+    ):
+        rows.append(
+            [
+                Paragraph("Advertencia sobre la cota", styles["cell"]),
+                Paragraph(
+                    "La Z del collar de algunos pozos fue estimada desde la superficie de diseño; no es una medición de terreno ni una cota real levantada.",
+                    styles["cell"],
+                ),
+            ]
+        )
     collars = _values("Z_collar", "cota_collar", "collar_z")
     if collars:
         rows.append(
@@ -894,7 +1104,7 @@ def _blast_rows(data: ReportData, styles: dict) -> Optional[list]:
     return rows
 
 
-def build_pdf_report(data: ReportData) -> io.BytesIO:
+def _build_pdf_report_unlocked(data: ReportData) -> io.BytesIO:
     """Build the executive PDF report from ``data`` and return a seekable buffer."""
     styles = _report_styles()
     story: list = []
@@ -934,11 +1144,16 @@ def build_pdf_report(data: ReportData) -> io.BytesIO:
     number += 1
 
     plan_png = _render_plan(data)
+    story.append(PageBreak())
+    story.append(Paragraph(f"{number}. Plano de cumplimiento", styles["h1"]))
     if plan_png:
-        story.append(PageBreak())
-        story.append(Paragraph(f"{number}. Plano de cumplimiento", styles["h1"]))
         story.append(_image(plan_png, max_width=CONTENT_WIDTH))
-        number += 1
+    else:
+        story.append(Paragraph(
+            "No hay geometría de secciones disponible para generar el plano en este informe.",
+            styles["body"],
+        ))
+    number += 1
 
     blast_rows = _blast_rows(data, styles)
     if blast_rows:
@@ -946,7 +1161,7 @@ def build_pdf_report(data: ReportData) -> io.BytesIO:
         story.append(Paragraph(f"{number}. Resumen de tronadura", styles["h1"]))
         story.append(
             _base_table(
-                [[Paragraph("Métrica", styles["cell_bold"]), Paragraph("Valor", styles["cell_bold"])]]
+                [[Paragraph("Métrica", styles["table_header"]), Paragraph("Valor", styles["table_header"])]]
                 + blast_rows,
                 col_widths=[7.5 * cm, 7.0 * cm],
                 align_center_from=1,
@@ -1002,6 +1217,12 @@ def build_pdf_report(data: ReportData) -> io.BytesIO:
     doc.build(story, canvasmaker=_canvas_factory)
     buffer.seek(0)
     return buffer
+
+
+def build_pdf_report(data: ReportData) -> io.BytesIO:
+    """Build a PDF while serializing ReportLab's shared font state."""
+    with _PDF_BUILD_LOCK:
+        return _build_pdf_report_unlocked(data)
 
 
 __all__ = ["build_pdf_report"]

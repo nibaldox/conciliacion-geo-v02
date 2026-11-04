@@ -581,6 +581,8 @@ export interface BlastGeometryForm {
     | 'COUNTERCLOCKWISE_FROM_EAST';
   azimuth_unit: 'DEGREES' | 'RADIANS';
   bench_height_m?: number;
+  collar_elevation_source?: 'design_surface';
+  spatial_reference_confirmed?: boolean;
 }
 
 /**
@@ -649,25 +651,46 @@ export function buildBlastUploadFormData(
   if (geometry.bench_height_m != null) {
     form.append('bench_height_m', String(geometry.bench_height_m));
   }
+  if (geometry.collar_elevation_source) {
+    form.append('collar_elevation_source', geometry.collar_elevation_source);
+  }
+  if (geometry.spatial_reference_confirmed != null) {
+    form.append('spatial_reference_confirmed', String(geometry.spatial_reference_confirmed));
+  }
   return form;
 }
 
 export function useUploadBlastCsv() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
       sessionId,
       file,
       geometry,
+      onUploadProgress,
     }: {
       sessionId: string;
       file: File;
       geometry: BlastGeometryForm;
+      onUploadProgress?: (progress: number | null) => void;
     }) => {
       const form = buildBlastUploadFormData(sessionId, file, geometry);
       const { data } = await client.post<BlastUploadResponse>('/blast/upload', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (event) => {
+          const total = event.total;
+          onUploadProgress?.(total && total > 0 ? Math.min(100, Math.floor((event.loaded / total) * 100)) : null);
+        },
       });
       return data;
+    },
+    onSuccess: async () => {
+      useSession.getState().setSelectedBlastHoleRowId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['blast-holes-3d'] }),
+        queryClient.invalidateQueries({ queryKey: ['blast-holes-by-session'] }),
+        queryClient.invalidateQueries({ queryKey: ['blast-holes'] }),
+      ]);
     },
   });
 }

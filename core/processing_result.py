@@ -42,6 +42,7 @@ class ProcessingResult:
     rows_accepted: int = 0
     rejected_source_rows: int = 0
     rejection_records: int = 0
+    legacy_rejection_summary: dict[str, str] = field(default_factory=dict)
     accepted_dataframe: Optional[Any] = None  # pandas DataFrame kept for back-compat
     scatter_lines: tuple = ((), (), ())  # (x_lines, y_lines, z_lines)
 
@@ -52,7 +53,7 @@ class ProcessingResult:
         ``rejected_source_rows``. ``rejection_records`` is the total
         number of (row × error) records emitted.
         """
-        return {
+        summary = {
             "rows_received": self.rows_received,
             "rows_accepted": self.rows_accepted,
             "rejected_source_rows": self.rejected_source_rows,
@@ -64,6 +65,9 @@ class ProcessingResult:
                 self.geometry_configuration.get("geometry_configuration_version")
             ),
         }
+        if self.legacy_rejection_summary:
+            summary["legacy_rejection_summary"] = self.legacy_rejection_summary
+        return summary
 
     def to_dict(self, *, include_dataframe: bool = False) -> dict[str, Any]:
         """JSON-serializable view (the DataFrame is dropped by default)."""
@@ -104,6 +108,12 @@ class ProcessingResult:
             idx = r.get("source_row_index")
             unique_rows.add(idx)
         rejected_source_rows = len(unique_rows)
+        legacy_rejection_summary: dict[str, str] = {}
+        if accepted_dataframe is not None and not accepted_dataframe.empty:
+            first_row = accepted_dataframe.iloc[0]
+            for field_name in ("processing_rejected_ids", "processing_rejected_reasons"):
+                if field_name in accepted_dataframe.columns:
+                    legacy_rejection_summary[field_name] = str(first_row[field_name] or "")
         return cls(
             geometry_configuration=geometry_configuration,
             accepted_rows=accepted_rows,
@@ -121,6 +131,7 @@ class ProcessingResult:
             rows_accepted=len(accepted_rows),
             rejected_source_rows=rejected_source_rows,
             rejection_records=len(rejected_rows),
+            legacy_rejection_summary=legacy_rejection_summary,
             accepted_dataframe=accepted_dataframe,
             scatter_lines=scatter_lines,
         )

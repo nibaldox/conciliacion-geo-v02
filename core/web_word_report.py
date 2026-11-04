@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import io
 import math
-from datetime import datetime
 from typing import Any, Mapping, Optional
 
 from docx import Document
@@ -29,7 +28,7 @@ from docx.oxml.ns import qn
 from docx.shared import Emu, Mm, Pt, RGBColor
 
 from core import report_charts
-from core.report_data import ProfileSummary, ReportData
+from core.report_data import ProfileSummary, ReportData, parse_bench_status
 from core.word_report_layout import (
     REPORT_TITLE,
     _append_field,
@@ -93,10 +92,33 @@ _META_ALTERNATES = {
     "generated_at": ("generated", "date"),
 }
 
+
+def _parameter_status_text(status: Optional[str]) -> str:
+    if status is None or not str(status).strip() or str(status).strip() == "-":
+        return EMPTY
+    normalized = str(status).strip().upper().replace("_", " ")
+    return {
+        "CUMPLE": "CUMPLE",
+        "FUERA": "FUERA DE TOLERANCIA",
+        "FUERA DE TOLERANCIA": "FUERA DE TOLERANCIA",
+        "NO CUMPLE": "NO CUMPLE",
+        "NO CONSTRUIDO": "NO CONSTRUIDO",
+        "BANCO ADICIONAL": "BANCO ADICIONAL",
+        "EXTRA": "BANCO ADICIONAL",
+        "UNKNOWN": "SIN EVALUAR",
+        "SIN EVALUAR": "SIN EVALUAR",
+    }.get(normalized, normalized)
+
+
+def _bench_identity(row) -> str:
+    if row.bench_num is None:
+        return EMPTY
+    return f"{'T' if row.type == 'EXTRA' else 'D'}{row.bench_num}"
+
 _PROFILE_COLUMNS = (
     ("section", "Sección", 0.9, lambda r: r.section or EMPTY, "text"),
     ("sector", "Sector", 0.8, lambda r: r.sector or "", "text"),
-    ("bench", "Banco", 0.8, lambda r: f"B{r.bench_num}" if r.bench_num is not None else EMPTY, "text"),
+    ("bench", "Banco (D/T)", 0.8, _bench_identity, "text"),
     ("level", "Nivel", 0.7, lambda r: r.level or "", "text"),
     ("h_design", "Altura diseño (m)", 0.9, lambda r: _fmt(r.height_design, 2), "num"),
     ("h_real", "Altura real (m)", 0.9, lambda r: _fmt(r.height_real, 2), "num"),
@@ -109,7 +131,10 @@ _PROFILE_COLUMNS = (
     ("b_dev", "Desv. berma (m)", 0.9, lambda r: _fmt_signed(r.berm_dev, 2), "num"),
     ("spill", "Derrame (m)", 0.9, lambda r: _fmt(r.spill_width, 2), "num"),
     ("effective", "Berma efectiva (m)", 0.9, lambda r: _fmt(r.effective_berm, 2), "num"),
-    ("status", "Estado", 1.2, lambda r: r.status_label or EMPTY, "status"),
+    ("h_status", "Estado altura", 0.8, lambda r: _parameter_status_text(r.height_status), "text"),
+    ("a_status", "Estado ángulo", 0.8, lambda r: _parameter_status_text(r.angle_status), "text"),
+    ("b_status", "Estado berma", 0.8, lambda r: _parameter_status_text(r.berm_status), "text"),
+    ("status", "Estado banco", 1.2, lambda r: r.status_label or EMPTY, "status"),
 )
 
 
@@ -232,18 +257,52 @@ def _image_paragraph(doc, blob: bytes, max_width, max_height) -> None:
     _add_picture_bounded(paragraph, blob, max_width, max_height)
 
 
-def _add_cover(doc, meta: Mapping[str, Any]) -> None:
+def _format_filters(filters) -> str:
+    if filters is None or filters.is_empty():
+        return "Sin filtros"
+    parts = []
+    if filters.sectors:
+        parts.append("sectores: " + ", ".join(filters.sectors))
+    if filters.sections:
+        parts.append("secciones: " + ", ".join(filters.sections))
+    if filters.levels:
+        parts.append("niveles: " + ", ".join(filters.levels))
+    if filters.benches:
+        parts.append("bancos de diseño: " + ", ".join(f"D{b}" for b in filters.benches))
+    return "; ".join(parts)
+
+
+def _display_count(value: Any) -> str:
+    if value is None or isinstance(value, bool):
+        return EMPTY
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return EMPTY
+    return str(number)
+
+
+def _status_counts(data: ReportData) -> dict[str, int]:
+    counts = data.profile_counts or {}
+    return {
+        "CUMPLE": int(counts.get("CUMPLE", 0) or 0),
+        "FUERA": int(counts.get("FUERA", 0) or 0),
+        "NO_CUMPLE": int(counts.get("NO_CUMPLE", 0) or 0),
+    }
+
+
+def _add_cover(doc, meta: Mapping[str, Any], data: Optional[ReportData] = None) -> None:
     title = doc.add_heading(REPORT_TITLE, 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_before = Pt(96)
     title.paragraph_format.space_after = Pt(24)
 
     lines = [
-        ("Proyecto", _text(meta, "project") or "N/A"),
-        ("Operación", _text(meta, "operation") or "N/A"),
-        ("Fase", _text(meta, "phase") or "N/A"),
-        ("Elaborado por", _text(meta, "author") or "N/A"),
-        ("Fecha", _text(meta, "generated_at") or datetime.now().strftime("%d/%m/%Y")),
+        ("Proyecto", _text(meta, "project") or "No informado"),
+        ("Operación", _text(meta, "operation") or "No informada"),
+        ("Fase", _text(meta, "phase") or "No informada"),
+        ("Elaborado por", _text(meta, "author") or "No informado"),
+        ("Fecha", _text(meta, "generated_at") or "No informada"),
     ]
     for label, value in lines:
         paragraph = doc.add_paragraph()
@@ -262,12 +321,36 @@ def _add_cover(doc, meta: Mapping[str, Any]) -> None:
     heading_run.bold = True
     heading_run.font.size = Pt(12)
 
+    if data is not None:
+        _heading(doc, "Alcance del resultado", 2)
+        scope_rows = [("Filtros aplicados", _format_filters(data.filters))]
+        for key, label in (("design_file", "Superficie de diseño"), ("topo_file", "Superficie topográfica")):
+            value = _text(meta, key)
+            if value:
+                scope_rows.append((label, value))
+        counts = data.counts or {}
+        available_counts = [
+            ("Registros de banco en el modelo", counts.get("n_rows")),
+            ("Emparejados", counts.get("n_match")),
+            ("No construidos", counts.get("n_missing")),
+            ("Adicionales", counts.get("n_extra")),
+        ]
+        scope_rows.extend((label, _display_count(value)) for label, value in available_counts)
+        scope_table = doc.add_table(rows=1, cols=2)
+        scope_table.rows[0].cells[0].text = "Alcance"
+        scope_table.rows[0].cells[1].text = "Dato disponible"
+        for label, value in scope_rows:
+            cells = scope_table.add_row().cells
+            cells[0].text = label
+            cells[1].text = value
+        style_data_table(scope_table, column_weights=[1.1, 2.2])
+
     revision_rows = [
-        ("Revisión", _text(meta, "revision") or "Rev. 0"),
-        ("Elaborado por", _text(meta, "author") or "N/A"),
-        ("Revisado por", _text(meta, "reviewed_by") or "N/A"),
-        ("Aprobado por", _text(meta, "approved_by") or "N/A"),
-        ("Fecha de emisión", _text(meta, "generated_at") or datetime.now().strftime("%d/%m/%Y")),
+        ("Revisión", _text(meta, "revision") or "No informada"),
+        ("Elaborado por", _text(meta, "author") or "No informado"),
+        ("Revisado por", _text(meta, "reviewed_by") or "No informado"),
+        ("Aprobado por", _text(meta, "approved_by") or "No informado"),
+        ("Fecha de emisión", _text(meta, "generated_at") or "No informada"),
     ]
     table = doc.add_table(rows=len(revision_rows), cols=2)
     for row_idx, (label, value) in enumerate(revision_rows):
@@ -295,90 +378,146 @@ def _add_toc(doc) -> None:
 
 def _add_executive_summary(doc, data: ReportData) -> None:
     _heading(doc, "1. Resumen ejecutivo", 1)
-
-    total = len(data.profiles)
-    counts = data.profile_counts or {}
-    cumple = int(counts.get("CUMPLE", 0))
-    fuera = int(counts.get("FUERA", 0))
-    no_cumple = int(counts.get("NO_CUMPLE", 0))
-
     doc.add_paragraph(
-        f"De {total} perfiles evaluados: {cumple} conformes (CUMPLE), "
-        f"{fuera} fuera de tolerancia (FUERA DE TOLERANCIA) y {no_cumple} no "
-        "conformes (NO CUMPLE)."
-    )
-    doc.add_paragraph(
-        "El estado de un perfil corresponde al peor estado entre los bancos de "
-        "diseño que lo componen, con la misma semántica que el tablero web: "
-        "basta un banco fuera de tolerancia o no construido para que el perfil "
-        "deje de ser conforme. El desglose por banco se detalla en la sección 6."
+        "El estado de cada perfil sigue el peor estado entre los registros de banco "
+        "asociados al perfil, incluidos los faltantes y los adicionales. Un banco "
+        "emparejado cumple con 70 puntos o más; sus mediciones individuales "
+        "conservan sus estados de tolerancia. El puntaje global promedio y el "
+        "logro de diseño son indicadores separados de la clasificación del perfil."
     )
 
-    if data.global_weighted_score is not None:
+    status_counts = _status_counts(data)
+    classified_count = sum(status_counts.values())
+    if classified_count:
+        status_table = doc.add_table(rows=1, cols=3)
+        for index, label in enumerate(("Estado del perfil", "Perfiles", "% del desglose")):
+            status_table.rows[0].cells[index].text = label
+        for status, label in (
+            ("CUMPLE", "CUMPLE"),
+            ("FUERA", "FUERA DE TOLERANCIA"),
+            ("NO_CUMPLE", "NO CUMPLE"),
+        ):
+            count = status_counts[status]
+            cells = status_table.add_row().cells
+            cells[0].text = label
+            cells[1].text = str(count)
+            cells[2].text = f"{100.0 * count / classified_count:.1f}%"
+        style_data_table(status_table, column_weights=[1.8, 0.7, 1.0])
         doc.add_paragraph(
-            f"Puntaje ponderado global (0-100): {data.global_weighted_score:.1f}."
+            f"Denominador del desglose: {classified_count} perfiles con estado "
+            "CUMPLE, FUERA o NO CUMPLE en el resumen del modelo. No se infiere "
+            "una categoría adicional a partir de la diferencia con otros conteos."
         )
     else:
-        doc.add_paragraph("Puntaje ponderado global (0-100): sin datos suficientes.")
+        doc.add_paragraph(
+            "No hay perfiles clasificados como CUMPLE, FUERA o NO CUMPLE en el "
+            "resumen disponible del modelo."
+        )
+    unknown_profiles = sum(
+        profile.worst_status == "UNKNOWN" for profile in data.profiles
+    )
     doc.add_paragraph(
-        "Definición del puntaje ponderado: promedio de los puntajes por sección "
-        "calculados sobre las desviaciones de altura, ángulo y berma respecto de "
-        "sus tolerancias. Se informa como dato independiente del estado de perfil, "
-        "que se define por el peor banco."
+        f"SIN EVALUAR (UNKNOWN): {unknown_profiles} "
+        f"{'perfil' if unknown_profiles == 1 else 'perfiles'} en el detalle. "
+        "Conteo directo de perfiles con ese estado; queda fuera del desglose "
+        "porcentual de estados clasificados."
+    )
+
+    _heading(doc, "Indicadores complementarios", 2)
+    indicator_table = doc.add_table(rows=1, cols=3)
+    for index, label in enumerate(("Indicador", "Resultado", "Alcance informado")):
+        indicator_table.rows[0].cells[index].text = label
+    scored_profiles = sum(profile.weighted_score is not None for profile in data.profiles)
+    score_cells = indicator_table.add_row().cells
+    score_cells[0].text = "Puntaje ponderado global (0–100)"
+    score_cells[1].text = "—" if data.global_weighted_score is None else f"{data.global_weighted_score:.1f}"
+    score_cells[2].text = (
+        f"Puntaje disponible en {scored_profiles} perfiles; dato separado del estado por peor banco."
+        if scored_profiles
+        else "Sin perfiles con puntaje disponible en el modelo."
     )
 
     achievement = (data.design_achievement or {}).get("global") or {}
-    if achievement.get("global_score") is not None:
-        doc.add_paragraph(
-            f"Logro de diseño global (0-100): {achievement['global_score']}. "
-            f"Evaluado sobre {achievement.get('n_evaluable', 0)} de "
-            f"{achievement.get('n_total', 0)} bancos con evidencia de cresta y pie."
-        )
+    achievement_cells = indicator_table.add_row().cells
+    achievement_cells[0].text = "Logro de diseño global (0–100)"
+    score = achievement.get("global_score")
+    achievement_cells[1].text = "—" if score is None else str(score)
+    if score is None:
+        achievement_cells[2].text = "Sin resultado disponible en el modelo."
     else:
-        doc.add_paragraph(
-            "Logro de diseño global: sin datos suficientes de cresta y pie."
+        achievement_cells[2].text = (
+            f"{_display_count(achievement.get('n_evaluable'))} de "
+            f"{_display_count(achievement.get('n_total'))} bancos contabilizados; "
+            "se considera evaluable si tiene al menos una desviación de cresta o pie, "
+            "o un estado de berma disponible."
         )
+    style_data_table(indicator_table, column_weights=[1.5, 0.9, 2.4])
 
     counts_row = data.counts or {}
-    doc.add_paragraph(
-        "Alcance: "
-        f"{counts_row.get('n_rows', 0)} bancos ({counts_row.get('n_match', 0)} emparejados, "
-        f"{counts_row.get('n_missing', 0)} no construidos, {counts_row.get('n_extra', 0)} adicionales) "
-        f"en {counts_row.get('n_sections', total)} secciones."
-    )
+    _heading(doc, "Alcance de la comparación", 2)
+    scope_table = doc.add_table(rows=1, cols=2)
+    scope_table.rows[0].cells[0].text = "Registro"
+    scope_table.rows[0].cells[1].text = "Cantidad"
+    for label, key in (
+        ("Filas de comparación", "n_rows"),
+        ("Emparejados", "n_match"),
+        ("Bancos de diseño no construidos", "n_missing"),
+        ("Bancos adicionales", "n_extra"),
+        ("Secciones representadas en el modelo", "n_sections"),
+    ):
+        cells = scope_table.add_row().cells
+        cells[0].text = label
+        cells[1].text = _display_count(counts_row.get(key))
+    style_data_table(scope_table, column_weights=[2.0, 0.8])
 
     if data.depth and data.depth.get("profundidad") is not None:
         _heading(doc, "Profundidad total de la excavación", 2)
         depth_table = doc.add_table(rows=1, cols=2)
         depth_table.rows[0].cells[0].text = "Métrica"
-        depth_table.rows[0].cells[1].text = "Valor"
-        for metric, value in (
-            ("Cota piso global", f"{data.depth['cota_piso']:.2f} m"),
-            ("Cota cresta global", f"{data.depth['cota_cresta']:.2f} m"),
-            ("Profundidad total", f"{data.depth['profundidad']:.2f} m"),
+        depth_table.rows[0].cells[1].text = "Valor disponible"
+        for metric, key in (
+            ("Cota piso global", "cota_piso"),
+            ("Cota cresta global", "cota_cresta"),
+            ("Profundidad total", "profundidad"),
         ):
             cells = depth_table.add_row().cells
+            value = data.depth.get(key)
             cells[0].text = metric
-            cells[1].text = value
+            cells[1].text = "—" if value is None else f"{float(value):.2f} m"
         style_data_table(depth_table, column_weights=[1.0, 1.0])
+        doc.add_paragraph(
+            f"Cotas de origen disponibles: {_display_count(data.depth.get('n_floors'))} de piso y "
+            f"{_display_count(data.depth.get('n_crests'))} de cresta.",
+            style="Caption",
+        )
+    else:
+        doc.add_paragraph(
+            "Profundidad total: no disponible en el modelo recibido.",
+            style="Caption",
+        )
 
-    _heading(doc, "Conclusiones", 2)
-    if data.conclusions:
-        for conclusion in data.conclusions:
+    _heading(doc, "Conclusiones del modelo", 2)
+    conclusions = [
+        conclusion for conclusion in data.conclusions
+        if not str(conclusion).startswith("Perfiles no conformes (peor banco NO CUMPLE):")
+        and not str(conclusion).startswith("Puntaje ponderado global")
+    ]
+    if conclusions:
+        for conclusion in conclusions:
             doc.add_paragraph(str(conclusion), style="List Bullet")
     else:
-        doc.add_paragraph("No se generaron conclusiones automáticas para esta sesión.")
+        doc.add_paragraph("No hay otras conclusiones generadas por el modelo.")
 
     _heading(doc, "Advertencias", 2)
     if data.warnings:
         for warning in data.warnings:
             doc.add_paragraph(str(warning), style="List Bullet")
     else:
-        doc.add_paragraph("Sin advertencias.")
+        doc.add_paragraph("El modelo no registró advertencias para este informe.")
 
 
 def _add_criteria(doc, data: ReportData) -> None:
-    _heading(doc, "2. Parámetros y criterios", 1)
+    _heading(doc, "2. Alcance, fuentes y criterios", 1, page_break=True)
 
     _heading(doc, "Tolerancias aplicadas", 2)
     tolerances = data.tolerances or {}
@@ -419,32 +558,26 @@ def _add_criteria(doc, data: ReportData) -> None:
     if not isinstance(process, Mapping):
         process = data.meta.get("process_settings")
     if isinstance(process, Mapping) and process:
+        process_rows = [
+            (key, value) for key, value in process.items()
+            if value is not None and not (isinstance(value, float) and not math.isfinite(value))
+        ]
+    else:
+        process_rows = []
+    if process_rows:
         process_table = doc.add_table(rows=1, cols=2)
         process_table.rows[0].cells[0].text = "Ajuste"
-        process_table.rows[0].cells[1].text = "Valor"
-        for key, value in process.items():
+        process_table.rows[0].cells[1].text = "Valor informado"
+        for key, value in process_rows:
             cells = process_table.add_row().cells
             cells[0].text = str(key).replace("_", " ").capitalize()
             cells[1].text = f"{float(value):.2f}" if isinstance(value, (int, float)) and not isinstance(value, bool) else str(value)
         style_data_table(process_table, column_weights=[1.4, 1.0])
     else:
-        doc.add_paragraph("Sin ajustes de proceso declarados.")
+        doc.add_paragraph("No se informaron ajustes de proceso.")
 
     _heading(doc, "Filtros aplicados", 2)
-    filters = data.filters
-    if filters is None or filters.is_empty():
-        doc.add_paragraph("Sin filtros.")
-    else:
-        parts = []
-        if filters.sectors:
-            parts.append("sectores: " + ", ".join(filters.sectors))
-        if filters.sections:
-            parts.append("secciones: " + ", ".join(filters.sections))
-        if filters.levels:
-            parts.append("niveles: " + ", ".join(filters.levels))
-        if filters.benches:
-            parts.append("bancos: " + ", ".join(f"B{b}" for b in filters.benches))
-        doc.add_paragraph("Filtros aplicados → " + "; ".join(parts) + ".")
+    doc.add_paragraph("Filtros aplicados → " + _format_filters(data.filters) + ".")
 
     _heading(doc, "Datos de origen", 2)
     files_table = doc.add_table(rows=1, cols=2)
@@ -452,47 +585,85 @@ def _add_criteria(doc, data: ReportData) -> None:
     files_table.rows[0].cells[1].text = "Valor"
     for key, label in _META_LABELS:
         value = _text(data.meta, key)
+        if not value:
+            continue
         cells = files_table.add_row().cells
         cells[0].text = label
-        cells[1].text = value or "N/A"
-    style_data_table(files_table, column_weights=[1.0, 2.0])
+        cells[1].text = value
+    if len(files_table.rows) > 1:
+        style_data_table(files_table, column_weights=[1.0, 2.0])
+    else:
+        files_table._element.getparent().remove(files_table._element)
+        doc.add_paragraph("No se informaron nombres de archivos ni metadatos de origen.")
 
 
 def _add_parameter_compliance(doc, data: ReportData) -> None:
-    _heading(doc, "3. Cumplimiento por parámetro", 1)
+    _heading(doc, "3. Resultados por parámetro", 1)
     parameters = list(data.parameters or ())
     if not parameters:
-        doc.add_paragraph("Sin datos de cumplimiento por parámetro.")
+        doc.add_paragraph("Sin resultados por parámetro en el modelo.")
         return
 
-    table = doc.add_table(rows=1, cols=5)
-    headers = ("Parámetro", "Cumple", "No cumple", "% Cumplimiento", "Valor medio real")
+    table = doc.add_table(rows=1, cols=6)
+    headers = (
+        "Parámetro",
+        "Registros contabilizados",
+        "CUMPLE",
+        "Otro estado*",
+        "% CUMPLE",
+        "Media real (n con estado)",
+    )
     for idx, header in enumerate(headers):
         table.rows[0].cells[idx].text = header
     for parameter in parameters:
+        accounted = parameter.cumple + parameter.no_cumple
         cells = table.add_row().cells
         cells[0].text = f"{parameter.label} ({parameter.unit})"
-        cells[1].text = str(parameter.cumple)
-        cells[2].text = str(parameter.no_cumple)
-        cells[3].text = _fmt_pct(parameter.pct_cumple)
+        cells[1].text = str(accounted) if accounted else EMPTY
+        cells[2].text = str(parameter.cumple) if accounted else EMPTY
+        cells[3].text = str(parameter.no_cumple) if accounted else EMPTY
+        cells[4].text = _fmt_pct(parameter.pct_cumple)
         decimals = 1 if parameter.parameter == "angle" else 2
         mean = _fmt(parameter.mean_real, decimals)
-        cells[4].text = EMPTY if mean == EMPTY else f"{mean} {parameter.unit}"
-    style_data_table(table, column_weights=[1.4, 0.7, 0.8, 1.0, 1.2])
+        status_key = f"{parameter.parameter}_status"
+        real_key = f"{parameter.parameter}_real"
+        real_count = sum(
+            1 for row in data.rows
+            if getattr(row, status_key)
+            and getattr(row, status_key) != "-"
+            and getattr(row, real_key) is not None
+        )
+        cells[5].text = (
+            EMPTY if mean == EMPTY else f"{mean} {parameter.unit} (n={real_count})"
+        )
+    style_data_table(table, column_weights=[1.1, 1.0, 0.55, 0.65, 0.7, 1.2])
+    doc.add_paragraph(
+        "* El modelo suma aquí los registros con estado distinto de CUMPLE, "
+        "incluidos FUERA DE TOLERANCIA y NO CUMPLE; su conteo puede incluir "
+        "filas de bancos no construidos. El porcentaje usa los registros "
+        "contabilizados en esta tabla, no una estimación de mediciones válidas. "
+        "La media usa los valores reales disponibles.",
+        style="Caption",
+    )
 
     donut_payload = [
         {"label": p.label, "cumple": p.cumple, "no_cumple": p.no_cumple}
-        for p in parameters
+        for p in parameters if p.cumple + p.no_cumple > 0
     ]
     try:
         blob = report_charts.parameter_donuts_png(donut_payload)
     except Exception:
         blob = None
     if blob:
-        _heading(doc, "Distribución de cumplimiento", 2)
+        _heading(doc, "Distribución de estados contabilizados", 2)
+        doc.add_paragraph(
+            "El segmento «No cumple» del gráfico agrupa todos los estados "
+            "contabilizados distintos de CUMPLE, como se explica en la nota de la tabla.",
+            style="Caption",
+        )
         _image_paragraph(doc, blob, Mm(220), Mm(90))
     else:
-        doc.add_paragraph("Sin datos suficientes para los gráficos de cumplimiento.")
+        doc.add_paragraph("No hay registros contabilizados para graficar por parámetro.")
 
 
 def _add_design_achievement(doc, data: ReportData) -> None:
@@ -502,7 +673,7 @@ def _add_design_achievement(doc, data: ReportData) -> None:
     if not achievement or not sectors:
         doc.add_paragraph(
             "Sin datos suficientes de logro de diseño (se requiere evidencia de "
-            "cresta y pie por banco)."
+            "al menos una desviación de cresta o pie, o un estado de berma disponible)."
         )
         return
 
@@ -527,6 +698,59 @@ def _add_design_achievement(doc, data: ReportData) -> None:
         "respecto de la tolerancia declarada; los porcentajes indican la fracción "
         "de bancos dentro de tolerancia para cada métrica."
     )
+
+
+def _add_priority_deviations(doc, data: ReportData) -> None:
+    _heading(doc, "5. Mayores desviaciones comparables", 1, page_break=True)
+    deviations = [entry for entry in data.top_deviations if isinstance(entry, Mapping)]
+    if not deviations:
+        doc.add_paragraph(
+            "No hay desviaciones comparables calculadas con las tolerancias y valores disponibles."
+        )
+        return
+
+    parameters = {
+        "height": ("Altura de banco", "m", 2),
+        "angle": ("Ángulo de cara", "°", 1),
+        "berm": ("Ancho de berma", "m", 2),
+    }
+    doc.add_paragraph(
+        "Se muestran hasta cinco registros por parámetro, en el orden calculado "
+        "por el modelo. Este orden relativo no cambia el estado del banco. En "
+        "altura y ángulo se compara la desviación con el límite aplicable; para "
+        "bermas con criterio mínimo se ordena el déficit respecto del mínimo."
+    )
+    grouped: dict[str, list[Mapping[str, Any]]] = {}
+    for entry in deviations:
+        grouped.setdefault(str(entry.get("parameter") or ""), []).append(entry)
+    order = ("height", "angle", "berm")
+    for parameter in order + tuple(sorted(key for key in grouped if key not in order)):
+        entries = grouped.get(parameter)
+        if not entries:
+            continue
+        label, unit, decimals = parameters.get(parameter, (parameter or "Parámetro", "", 2))
+        shown = entries[:5]
+        _heading(doc, f"{label} — {len(shown)} de {len(entries)} registros", 2)
+        table = doc.add_table(rows=1, cols=9)
+        headers = (
+            "Perfil", "Sector", "Nivel", "Banco", f"Diseño ({unit})",
+            f"Real ({unit})", f"Diferencia ({unit})", "Criterio", "Estado",
+        )
+        for index, header in enumerate(headers):
+            table.rows[0].cells[index].text = header
+        for entry in shown:
+            cells = table.add_row().cells
+            bench = entry.get("bench_num")
+            cells[0].text = str(entry.get("section") or EMPTY)
+            cells[1].text = str(entry.get("sector") or EMPTY)
+            cells[2].text = str(entry.get("level") or EMPTY)
+            cells[3].text = EMPTY if bench is None else str(bench)
+            cells[4].text = _fmt(entry.get("design"), decimals)
+            cells[5].text = _fmt(entry.get("real"), decimals)
+            cells[6].text = _fmt_signed(entry.get("deviation"), decimals)
+            cells[7].text = str(entry.get("tolerance_text") or EMPTY)
+            cells[8].text = _status_label(parse_bench_status(entry.get("status")))
+        style_data_table(table, column_weights=[1.0, 0.8, 0.7, 0.6, 0.8, 0.8, 0.9, 1.1, 1.0])
 
 
 def _plan_section_items(data: ReportData) -> list:
@@ -556,7 +780,6 @@ def _section_as_dict(item: Any) -> Optional[dict]:
 
 
 def _plan_sections(data: ReportData) -> list:
-    statuses = {p.section: p.worst_status for p in data.profiles}
     sections = []
     for item in _plan_section_items(data):
         section = _section_as_dict(item)
@@ -566,9 +789,27 @@ def _plan_sections(data: ReportData) -> list:
         if not name:
             continue
         section["name"] = name
-        if not section.get("worst_status"):
-            section["worst_status"] = statuses.get(name, "UNKNOWN")
         sections.append(section)
+
+    name_counts = {}
+    for section in sections:
+        name_counts[section["name"]] = name_counts.get(section["name"], 0) + 1
+    for section in sections:
+        name = section["name"]
+        state = data.resolve_section_plan_state(
+            name,
+            section.get("sector"),
+            infer_missing_sector=name_counts[name] == 1,
+        )
+        if state is None:
+            section["included"] = True
+            section["sector"] = ""
+            section["worst_status"] = "UNKNOWN"
+        else:
+            _name, sector, included, status = state
+            section["included"] = included
+            section["sector"] = sector or ""
+            section["worst_status"] = status
     return sections
 
 
@@ -603,7 +844,7 @@ def _plan_contours(data: ReportData):
 
 
 def _add_plan(doc, data: ReportData) -> None:
-    _heading(doc, "5. Plano de cumplimiento", 1)
+    _heading(doc, "6. Plano de cumplimiento", 1, page_break=True)
     sections = _plan_sections(data)
     blob = None
     if sections:
@@ -624,7 +865,7 @@ def _add_plan(doc, data: ReportData) -> None:
 
 
 def _add_profile_table(doc, data: ReportData) -> None:
-    _heading(doc, "6. Tabla por perfil", 1)
+    _heading(doc, "7. Detalle por banco", 1, page_break=True)
     rows = sorted(
         data.rows or (),
         key=lambda r: (r.section, -1 if r.bench_num is None else r.bench_num, r.level),
@@ -796,6 +1037,7 @@ def _project_holes(data: ReportData, section: str) -> Optional[list]:
             distance = getattr(row, "dist_along", None)
             collar = getattr(row, "Z_collar", None)
             toe = getattr(row, "Z_toe", None)
+            toe_distance = getattr(row, "dist_along_toe", None)
             if distance is None or collar is None or pd.isna(distance) or pd.isna(collar):
                 continue
             out.append(
@@ -803,7 +1045,7 @@ def _project_holes(data: ReportData, section: str) -> Optional[list]:
                     "dist": float(distance),
                     "collar_z": float(collar),
                     "toe_z": None if toe is None or pd.isna(toe) else float(toe),
-                    "toe_dist": float(distance),
+                    "toe_dist": float(distance if toe_distance is None or pd.isna(toe_distance) else toe_distance),
                 }
             )
         return out or None
@@ -821,6 +1063,14 @@ def _blast_holes_for(data: ReportData, section: str) -> Optional[list]:
     return _project_holes(data, section)
 
 
+def _ambiguous_profile_sections(data: ReportData) -> set[str]:
+    sectors_by_section: dict[str, set[str]] = {}
+    for row in data.rows:
+        if row.section:
+            sectors_by_section.setdefault(row.section, set()).add(row.sector or "")
+    return {section for section, sectors in sectors_by_section.items() if len(sectors) > 1}
+
+
 def _profile_payload(data: ReportData, profile: ProfileSummary) -> Optional[dict]:
     item = _geometry_for(data, profile.section)
     if item is None:
@@ -831,7 +1081,10 @@ def _profile_payload(data: ReportData, profile: ProfileSummary) -> Optional[dict
     if isinstance(item, Mapping) and any(k in item for k in ("design", "topo", "benches")):
         payload = dict(item)
         payload.setdefault("name", profile.section)
-        payload.setdefault("sector", profile.sector)
+        if profile.section not in _ambiguous_profile_sections(data):
+            payload.setdefault("sector", profile.sector)
+        else:
+            payload.pop("sector", None)
         payload.setdefault("status_label", _status_label(profile.worst_status))
         if tolerance_band:
             payload.setdefault("tolerance_band", tolerance_band)
@@ -866,12 +1119,13 @@ def _profile_payload(data: ReportData, profile: ProfileSummary) -> Optional[dict
 
     payload = {
         "name": profile.section,
-        "sector": profile.sector,
         "status_label": _status_label(profile.worst_status),
         "design": _series(_attribute(item, "profile_d")),
         "topo": _series(_attribute(item, "profile_t")),
         "benches": benches,
     }
+    if profile.section not in _ambiguous_profile_sections(data) and profile.sector:
+        payload["sector"] = profile.sector
     if tolerance_band:
         payload["tolerance_band"] = tolerance_band
     if blast_holes:
@@ -915,16 +1169,30 @@ def _render_profile_grid(doc, data, profiles, size, per_page, max_width, max_hei
 
 
 def _add_section_details(doc, data: ReportData) -> None:
-    _heading(doc, "7. Detalle por sección", 1, page_break=True)
+    _heading(doc, "8. Detalle por sección", 1, page_break=True)
     profiles = list(data.profiles or ())
     if not profiles:
         doc.add_paragraph("No hay perfiles para detallar.")
         return
 
     non_compliant = [p for p in profiles if p.worst_status in NON_COMPLIANT]
-    compliant = [p for p in profiles if p.worst_status not in NON_COMPLIANT]
+    compliant = [p for p in profiles if p.worst_status == "CUMPLE"]
+    unresolved = [p for p in profiles if p.worst_status not in (*NON_COMPLIANT, "CUMPLE")]
 
-    if non_compliant and not compliant:
+    sectors_by_section: dict[str, set[str]] = {}
+    for row in data.rows:
+        if row.section and row.sector:
+            sectors_by_section.setdefault(row.section, set()).add(row.sector)
+    ambiguous = sorted(section for section, sectors in sectors_by_section.items() if len(sectors) > 1)
+    if ambiguous:
+        doc.add_paragraph(
+            "Identidad de sector no resuelta para secciones con nombre repetido: "
+            + ", ".join(ambiguous)
+            + ". El modelo de perfiles agrupa por nombre de sección; estos detalles "
+            "no permiten atribuir un sector inequívoco."
+        )
+
+    if non_compliant and not compliant and not unresolved:
         doc.add_paragraph(
             "Todos los perfiles presentan estado no conforme; para mantener un "
             "tamaño de documento razonable se muestran dos perfiles por página "
@@ -960,6 +1228,18 @@ def _add_section_details(doc, data: ReportData) -> None:
             Mm(DETAIL_COLUMN_MM), Mm(DETAIL_ANNEX_HEIGHT_MM),
         )
 
+    if unresolved:
+        doc.add_page_break()
+        _heading(doc, "Perfiles sin estado concluyente", 2)
+        doc.add_paragraph(
+            f"Perfiles con estado UNKNOWN u otro estado no clasificado ({len(unresolved)}): "
+            "se muestran por separado, sin contarlos como conformes ni no conformes."
+        )
+        _render_profile_grid(
+            doc, data, unresolved, "compact", 2,
+            Mm(DETAIL_COLUMN_MM), Mm(DETAIL_ANNEX_HEIGHT_MM),
+        )
+
 
 def _blast_frame_rows(holes) -> list:
     rows = []
@@ -983,7 +1263,7 @@ def _blast_frame_rows(holes) -> list:
 def _add_blast(doc, data: ReportData) -> None:
     if isinstance(data.blast, Mapping) and data.blast.get("holes"):
         doc.add_page_break()
-    _heading(doc, "8. Análisis de perforación y tronadura", 1)
+    _heading(doc, "9. Análisis de perforación y tronadura", 1)
     blast = data.blast
     if not isinstance(blast, Mapping):
         doc.add_paragraph("Sin datos de pozos de tronadura en esta sesión.")
@@ -995,6 +1275,16 @@ def _add_blast(doc, data: ReportData) -> None:
             "La sesión declara configuración de tronadura pero no pozos registrados."
         )
         return
+
+    if any(
+        isinstance(hole, Mapping)
+        and hole.get("Z_collar_semantic", hole.get("z_collar_semantic")) == "design_surface_estimate"
+        for hole in holes
+    ):
+        doc.add_paragraph(
+            "Advertencia: la cota Z del collar de algunos pozos fue estimada desde la superficie de diseño; "
+            "no es una medición de terreno y no debe interpretarse como cota real levantada."
+        )
 
     stats = None
     try:
@@ -1059,12 +1349,13 @@ def build_word_report(data: ReportData) -> io.BytesIO:
     configure_document(doc, data.meta)
     _enable_field_updates(doc)
 
-    _add_cover(doc, data.meta or {})
+    _add_cover(doc, data.meta or {}, data)
     _add_toc(doc)
     _add_executive_summary(doc, data)
     _add_criteria(doc, data)
     _add_parameter_compliance(doc, data)
     _add_design_achievement(doc, data)
+    _add_priority_deviations(doc, data)
     _add_plan(doc, data)
     _add_profile_table(doc, data)
     _add_section_details(doc, data)

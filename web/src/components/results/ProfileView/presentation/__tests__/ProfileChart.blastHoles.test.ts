@@ -35,7 +35,7 @@ function makeViewModel(overrides: Partial<ProfileViewModel> = {}): ProfileViewMo
   };
 }
 
-function makeBlastHole(overrides: Partial<BlastHoleOnProfile> = {}): BlastHoleOnProfile {
+function makeBlastHole(overrides: Partial<BlastHoleOnProfile> & { row_id?: string | null } = {}): BlastHoleOnProfile {
   return {
     hole_id: 'P-001',
     distance: 10,
@@ -65,15 +65,21 @@ type MarkerTrace = {
   mode?: string;
   x?: number[];
   y?: number[];
-  marker?: { color?: string | string[]; size?: number; symbol?: string };
+  marker?: { color?: string | string[]; size?: number | number[]; symbol?: string; line?: { color?: string | string[]; width?: number } };
   text?: string[];
-  customdata?: number[][];
+  customdata?: unknown[][];
+  hovertemplate?: string;
+  meta?: { profileViewRole?: string; profilePointKind?: string };
 };
 
 function findBlastTrace(traces: ReturnType<typeof buildTraces>): MarkerTrace | undefined {
-  return traces.find((t) => (t as MarkerTrace).name === 'Pozos de tronadura') as
+  return traces.find((t) => (t as MarkerTrace).meta?.profilePointKind === 'projected_collar') as
     | MarkerTrace
     | undefined;
+}
+
+function findIntersectionTrace(traces: ReturnType<typeof buildTraces>): MarkerTrace | undefined {
+  return traces.find((t) => (t as MarkerTrace).meta?.profilePointKind === 'intersection') as MarkerTrace | undefined;
 }
 
 // ─── Tests ──────────────────────────────────────────────────
@@ -102,11 +108,11 @@ describe('buildTraces — blast holes', () => {
     expect(trace?.marker?.symbol).toBe('diamond');
     // customdata carries [burden, spacing] for the hovertemplate.
     expect(trace?.customdata).toEqual([
-      [3.5, 4.0],
-      [3.5, 4.0],
-      [3.5, 4.0],
+      [3.5, 4.0, 'Collar proyectado'],
+      [3.5, 4.0, 'Collar proyectado'],
+      [3.5, 4.0, 'Collar proyectado'],
     ]);
-    expect(trace?.text).toEqual(['Hole P-1', 'Hole P-2', 'Hole P-3']);
+    expect(trace?.text).toEqual(['Pozo P-1', 'Pozo P-2', 'Pozo P-3']);
   });
 
   it('emits no markers trace when blastHoles is an empty array', () => {
@@ -166,5 +172,55 @@ describe('buildTraces — blast holes', () => {
     const benchTrace = traces.find((t) => (t as MarkerTrace).name === 'Bancos');
     expect(benchTrace).toBeDefined();
     expect(findBlastTrace(traces)).toBeDefined();
+  });
+
+  it('highlights only the matching row_id when hole IDs are duplicated', () => {
+    const holes = [
+      makeBlastHole({ hole_id: 'DUP', row_id: 'row-a', distance: 5 }),
+      makeBlastHole({ hole_id: 'DUP', row_id: 'row-b', distance: 10, is_within_tolerance: false }),
+    ] as BlastHoleOnProfile[];
+
+    const trace = findBlastTrace(buildTraces(makeViewModel(), makeFilterState(), stubCrossLink, false, holes,
+      undefined, undefined, undefined, 'row-b'));
+
+    expect(trace?.marker?.color).toEqual(['#22c55e', '#fde047']);
+    expect(trace?.marker?.size).toEqual([8, 13]);
+    expect(trace?.marker?.line?.color).toEqual(['rgba(0,0,0,0)', '#7c2d12']);
+  });
+
+  it('does not highlight a matching hole_id when row_id is missing', () => {
+    const holes = [makeBlastHole({ hole_id: 'DUP', distance: 5 })];
+    const trace = findBlastTrace(buildTraces(makeViewModel(), makeFilterState(), stubCrossLink, false, holes,
+      undefined, undefined, undefined, 'row-a'));
+
+    expect(trace?.marker?.color).toEqual(['#22c55e']);
+    expect(trace?.marker?.size).toBe(8);
+  });
+
+  it('separates projected collars and intersections in legend and hover, highlighting by row_id', () => {
+    const holes = [
+      makeBlastHole({ hole_id: 'DUP', row_id: 'row-collar' }),
+      makeBlastHole({ hole_id: 'DUP', row_id: 'row-cross', profile_point_kind: 'intersection', distance: 25 }),
+    ];
+    const traces = buildTraces(makeViewModel(), makeFilterState(), stubCrossLink, false, holes,
+      undefined, undefined, undefined, 'row-cross');
+    const collarTrace = findBlastTrace(traces);
+    const intersectionTrace = findIntersectionTrace(traces);
+
+    expect(collarTrace?.name).toBe('Collares de pozos proyectados');
+    expect(collarTrace?.customdata?.[0]?.[2]).toBe('Collar proyectado');
+    expect(intersectionTrace?.name).toBe('Intersecciones pozo-sección');
+    expect(intersectionTrace?.hovertemplate).toContain('Tipo de punto=%{customdata[2]}');
+    expect(intersectionTrace?.marker?.size).toEqual([13]);
+    expect(intersectionTrace?.customdata?.[0]?.[2]).toBe('Intersección segmento-sección');
+  });
+
+  it('keeps legacy records without profile_point_kind in the projected-collar trace', () => {
+    const trace = findBlastTrace(buildTraces(makeViewModel(), makeFilterState(), stubCrossLink, false,
+      [makeBlastHole({ row_id: 'legacy-row' })]));
+
+    expect(trace?.name).toBe('Collares de pozos proyectados');
+    expect(findIntersectionTrace(buildTraces(makeViewModel(), makeFilterState(), stubCrossLink, false,
+      [makeBlastHole({ row_id: 'legacy-row' })]))).toBeUndefined();
   });
 });

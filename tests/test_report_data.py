@@ -75,6 +75,113 @@ def test_filter_counts_per_dimension(data):
         assert len(filter_comparisons(rows, filters)) == exp[name], name
 
 
+def test_section_plan_states_require_unfiltered_bench_data():
+    rows = [
+        {"section": "S-01", "type": "MATCH", "bench_num": 1},
+        {"section": "S-01", "type": "MATCH", "bench_num": 2},
+        {"section": "S-02", "type": "MATCH", "bench_num": 2},
+    ]
+    filtered = build_report_data(
+        rows, {}, _f(benches=(1,)), {},
+        plan_inputs={"sections": [
+            {"name": "S-01"}, {"name": "S-02"}, {"name": "S-03"},
+        ]},
+    )
+
+    assert filtered.section_plan_states == (
+        ("S-01", None, True, "UNKNOWN"),
+        ("S-02", None, False, "UNKNOWN"),
+    )
+    assert filtered.resolve_section_plan_state("S-01", None) == filtered.section_plan_states[0]
+
+    unfiltered = build_report_data(rows, {}, _f(), {})
+    assert all(state[2] for state in unfiltered.section_plan_states)
+
+    no_original_rows = build_report_data(
+        [], {}, _f(benches=(1,)), {},
+        plan_inputs={"sections": [{"name": "S-03"}]},
+    )
+    assert no_original_rows.section_plan_states == ()
+    assert no_original_rows.resolve_section_plan_state("S-03", None) is None
+    sector_filtered_no_rows = build_report_data([], {}, _f(sectors=("A",)), {})
+    assert sector_filtered_no_rows.resolve_section_plan_state("S-03", "B") == (
+        "S-03", "B", False, "UNKNOWN",
+    )
+
+
+def test_section_plan_states_use_sector_identity_and_leave_ambiguous_names_unresolved():
+    rows = [
+        {"section": "S-01", "sector": "A", "type": "MATCH", "bench_num": 1,
+         "height_status": "CUMPLE", "angle_status": "CUMPLE", "berm_status": "CUMPLE"},
+        {"section": "S-01", "sector": "B", "type": "MATCH", "bench_num": 1,
+         "height_status": "NO CUMPLE", "angle_status": "NO CUMPLE", "berm_status": "NO CUMPLE"},
+    ]
+    data = build_report_data(rows, {}, _f(sectors=("A",)), {})
+
+    assert data.section_plan_states == (
+        ("S-01", "A", True, "CUMPLE"),
+        ("S-01", "B", False, "UNKNOWN"),
+    )
+    assert data.resolve_section_plan_state("S-01", "A") == data.section_plan_states[0]
+    assert data.resolve_section_plan_state("S-01", "B") == data.section_plan_states[1]
+    assert data.resolve_section_plan_state("S-01", None) is None
+
+
+def test_ambiguous_section_warning_preserves_existing_profile_grouping_and_scores():
+    rows = [
+        {"section": "S-01", "sector": "A", "type": "MATCH", "bench_num": 1,
+         "height_status": "CUMPLE", "angle_status": "CUMPLE", "berm_status": "CUMPLE",
+         "bench_score": 100},
+        {"section": "S-01", "sector": "B", "type": "MATCH", "bench_num": 1,
+         "height_status": "NO CUMPLE", "angle_status": "NO CUMPLE", "berm_status": "NO CUMPLE",
+         "bench_score": 0},
+    ]
+
+    data = build_report_data(rows, {}, ReportFilters(), {})
+
+    assert len(data.profiles) == 1
+    assert data.profiles[0].section == "S-01"
+    assert data.profiles[0].worst_status == "NO_CUMPLE"
+    assert data.profiles[0].weighted_score == 50
+    assert data.global_weighted_score == 50
+    assert data.counts["n_sections"] == 1
+    assert any("S-01" in warning and "más de una identidad de sector" in warning for warning in data.warnings)
+
+
+def test_section_sector_filter_suppresses_resolved_ambiguity_warning():
+    rows = [
+        {"section": "S-01", "sector": "A", "type": "MATCH", "bench_num": 1},
+        {"section": "S-01", "sector": "B", "type": "MATCH", "bench_num": 1},
+    ]
+
+    data = build_report_data(rows, {}, _f(sectors=("A",)), {})
+
+    assert data.warnings == ()
+    assert len(data.profiles) == 1
+
+
+def test_same_section_and_sector_across_benches_is_not_ambiguous():
+    rows = [
+        {"section": "S-01", "sector": "A", "type": "MATCH", "bench_num": 1},
+        {"section": "S-01", "sector": "A", "type": "MATCH", "bench_num": 2},
+    ]
+
+    data = build_report_data(rows, {}, ReportFilters(), {})
+
+    assert not any("más de una identidad de sector" in warning for warning in data.warnings)
+
+
+def test_missing_and_present_sector_identities_are_ambiguous():
+    rows = [
+        {"section": "S-02", "sector": None, "type": "MATCH", "bench_num": 1},
+        {"section": "S-02", "sector": "A", "type": "MATCH", "bench_num": 1},
+    ]
+
+    data = build_report_data(rows, {}, ReportFilters(), {})
+
+    assert any("S-02" in warning and "más de una identidad de sector" in warning for warning in data.warnings)
+
+
 def test_counts_and_profile_statuses(data):
     fx, rd = data
     exp = fx["expected"]
@@ -92,6 +199,24 @@ def test_counts_and_profile_statuses(data):
 def test_bench_status_labels(data):
     fx, rd = data
     assert [r.status_label for r in rd.rows] == fx["expected"]["bench_labels"]
+
+
+@pytest.mark.parametrize("score, expected", [(69.9, "NO_CUMPLE"), (70, "CUMPLE"), (90, "CUMPLE"),
+                                             (-1, "UNKNOWN"), (101, "UNKNOWN"),
+                                             (float("nan"), "UNKNOWN"), (True, "UNKNOWN")])
+def test_bench_status_uses_valid_score_independently_of_parameter_status(score, expected):
+    row = {"type": "MATCH", "section": "S", "bench_score": score,
+           "height_status": "CUMPLE", "angle_status": "NO CUMPLE", "berm_status": "CUMPLE"}
+    result = build_report_data([row], {}, ReportFilters(), {})
+    assert result.rows[0].worst_status == expected
+    assert result.rows[0].angle_status == "NO CUMPLE"
+
+
+def test_incomplete_bank_without_score_is_unknown():
+    row = {"type": "MATCH", "section": "S", "berm_status": "CUMPLE"}
+    result = build_report_data([row], {}, ReportFilters(), {})
+    assert result.rows[0].worst_status == "UNKNOWN"
+    assert result.profiles[0].weighted_score is None
 
 
 def test_weighted_scores(data):
@@ -167,6 +292,70 @@ def test_depth_uses_existing_metric_and_none_without_geometry(data):
     assert rd2.depth["profundidad"] == 30.0
 
 
+def test_depth_joins_filtered_rows_to_unfiltered_topo_by_topo_bank_number():
+    from types import SimpleNamespace
+
+    rows = [
+        {"type": "MATCH", "section": "S-01", "sector": "N", "bench_num": 7,
+         "bench_num_topo": 2, "bench_real": None},
+        {"type": "MATCH", "section": "S-01", "sector": "N", "bench_num": 8,
+         "bench_num_topo": 1, "bench_real": None},
+        {"type": "EXTRA", "section": "S-01", "sector": "N", "bench_num": 999,
+         "bench_num_topo": 3, "bench_real": None},
+    ]
+    topo = {("S-01", "N"): [
+        SimpleNamespace(bench_number=1, floor_elevation=90.0, crest_elevation=100.0),
+        SimpleNamespace(bench_number=2, floor_elevation=80.0, crest_elevation=90.0),
+        SimpleNamespace(bench_number=3, floor_elevation=70.0, crest_elevation=80.0),
+    ]}
+
+    report = build_report_data(rows, {}, _f(benches=(7,)), {}, depth_extractions=topo)
+
+    assert report.depth == {
+        "cota_piso": 80.0, "cota_cresta": 90.0, "profundidad": 10.0,
+        "n_floors": 1, "n_crests": 1,
+    }
+    unfiltered = build_report_data(rows, {}, ReportFilters(), {}, depth_extractions=topo)
+    assert unfiltered.depth["cota_piso"] == 70.0
+    assert unfiltered.depth["cota_cresta"] == 100.0
+    assert unfiltered.depth["profundidad"] == 30.0
+
+
+def test_depth_is_unknown_when_filtered_row_cannot_be_resolved_completely():
+    from types import SimpleNamespace
+
+    rows = [
+        {"type": "MATCH", "section": "S-01", "sector": "N", "bench_num": 1,
+         "bench_num_topo": 1},
+        {"type": "MATCH", "section": "S-01", "sector": "N", "bench_num": 2,
+         "bench_num_topo": 2},
+    ]
+    topo = {("S-01", "N"): [
+        SimpleNamespace(bench_number=1, floor_elevation=80.0, crest_elevation=90.0),
+    ]}
+
+    report = build_report_data(rows, {}, ReportFilters(), {}, depth_extractions=topo)
+
+    assert report.depth is None
+
+
+def test_depth_join_trims_sector_without_changing_report_filter_matching():
+    from types import SimpleNamespace
+
+    rows = [{
+        "type": "MATCH", "section": "S-01", "sector": " Norte ",
+        "bench_num": 7, "bench_num_topo": 2,
+    }]
+    topo = {("S-01", "Norte"): [
+        SimpleNamespace(bench_number=2, floor_elevation=80.0, crest_elevation=90.0),
+    ]}
+
+    report = build_report_data(rows, {}, ReportFilters(), {}, depth_extractions=topo)
+
+    assert report.depth["profundidad"] == 10.0
+    assert filter_comparisons(rows, ReportFilters(sectors=("Norte",))) == []
+
+
 def test_empty_filters_result_all_and_empty_warnings():
     empty = build_report_data([], {"tolerances": {}}, ReportFilters(), {})
     assert empty.rows == ()
@@ -185,7 +374,10 @@ def test_weighted_scores_fallback_matches_web_bench_score():
     exp = fx["fallback_expected"]
     by_section = {p.section: p.weighted_score for p in rd.profiles}
     for section, score in exp["profile_scores"].items():
-        assert by_section[section] == pytest.approx(score), section
+        if score is None:
+            assert by_section[section] is None, section
+        else:
+            assert by_section[section] == pytest.approx(score), section
     assert rd.global_weighted_score == pytest.approx(exp["global_weighted_score"])
 
 

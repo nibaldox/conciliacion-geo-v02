@@ -6,6 +6,7 @@ import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import es from '../../../locales/es.json';
 import type { Tolerances } from '../../../api/types';
+import { useSession } from '../../../stores/session';
 import { LeftSidebar } from '../LeftSidebar';
 
 const updateSpy = vi.hoisted(() => vi.fn());
@@ -54,6 +55,17 @@ const BENCH_POS = 'Tolerancia positiva: Altura de banco (m)';
 
 const i18n = createInstance();
 void i18n.init({ lng: 'es', resources: { es: { translation: es } }, initAsync: false });
+const keyPathI18n = createInstance();
+void keyPathI18n.init({
+  lng: 'es',
+  resources: { es: { translation: { sidebar: {
+    expand: 'LABEL_EXPAND', collapse: 'LABEL_COLLAPSE', mallas: 'LABEL_MALLAS',
+    secciones: 'LABEL_SECCIONES', tolerancias: 'LABEL_TOLERANCIAS',
+    procesamiento: 'LABEL_PROCESAMIENTO',
+    no_surfaces_for_sections: 'LABEL_NO_SURFACES',
+  } } } },
+  initAsync: false,
+});
 
 function getMutateCalls(): Array<{
   tolerances?: Tolerances;
@@ -65,6 +77,14 @@ function getMutateCalls(): Array<{
 function renderSidebar() {
   return render(
     <I18nextProvider i18n={i18n}>
+      <LeftSidebar />
+    </I18nextProvider>,
+  );
+}
+
+function renderSidebarWithKeyPathResources() {
+  return render(
+    <I18nextProvider i18n={keyPathI18n}>
       <LeftSidebar />
     </I18nextProvider>,
   );
@@ -165,6 +185,87 @@ describe('LeftSidebar — edición rápida de tolerancias (draft + debounce)', (
       </I18nextProvider>,
     );
     expect((screen.getByLabelText(BENCH_NEG) as HTMLInputElement).value).toBe('4');
+  });
+});
+
+describe('LeftSidebar — definición de secciones por curvas', () => {
+  beforeAll(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: () => false,
+    }));
+  });
+
+  beforeEach(() => {
+    useSession.getState().reset();
+  });
+
+  it('mantiene los destinos aria-controls y el foco al alternar un acordeón por teclado', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+
+    const accordionButtons = screen.getAllByRole('button').filter((button) => button.hasAttribute('aria-controls'));
+    expect(accordionButtons).toHaveLength(4);
+    for (const button of accordionButtons) {
+      expect(document.getElementById(button.getAttribute('aria-controls') ?? '')).toBeInTheDocument();
+      expect(button).toHaveAttribute('type', 'button');
+    }
+
+    const surfacesButton = screen.getByRole('button', { name: 'Superficies' });
+    const controlledPanel = document.getElementById(surfacesButton.getAttribute('aria-controls') ?? '');
+    expect(surfacesButton).toHaveAttribute('aria-expanded', 'true');
+    expect(controlledPanel).toBeVisible();
+
+    await user.click(surfacesButton);
+    expect(surfacesButton).toHaveAttribute('aria-expanded', 'false');
+    expect(document.getElementById(surfacesButton.getAttribute('aria-controls') ?? '')).toBe(controlledPanel);
+    expect(controlledPanel).not.toBeVisible();
+    expect(document.activeElement).toBe(surfacesButton);
+
+    await user.keyboard('{Enter}');
+    expect(surfacesButton).toHaveAttribute('aria-expanded', 'true');
+    expect(controlledPanel).toBeVisible();
+    expect(document.activeElement).toBe(surfacesButton);
+  });
+
+  it('resuelve etiquetas compactas y el estado sin superficies desde las claves del sidebar', async () => {
+    const user = userEvent.setup();
+    useSession.setState({ sidebarCollapsed: true });
+    renderSidebarWithKeyPathResources();
+
+    expect(screen.getByRole('button', { name: 'LABEL_EXPAND' })).toBeInTheDocument();
+    for (const label of ['LABEL_MALLAS', 'LABEL_SECCIONES', 'LABEL_TOLERANCIAS', 'LABEL_PROCESAMIENTO']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+    await user.click(screen.getByRole('button', { name: 'LABEL_EXPAND' }));
+    await user.click(screen.getByRole('button', { name: 'workspace.sections' }));
+    expect(screen.getByText('LABEL_NO_SURFACES')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'LABEL_COLLAPSE' })).toBeInTheDocument();
+  });
+
+  it('avisa que activa 3D y conserva la curva seleccionada al abrir el formulario', async () => {
+    const user = userEvent.setup();
+    const selection = { context: null, curveId: 'curva-1', start: null, end: null, rejection: null } as const;
+    useSession.setState({
+      designMeshId: 'design-1',
+      topoMeshId: 'topo-1',
+      activeWorkspaceView: 'dashboard',
+      curveSelection: selection,
+    });
+    renderSidebar();
+    useSession.getState().setActiveWorkspaceView('dashboard');
+
+    await user.click(screen.getByRole('button', { name: 'Secciones' }));
+
+    expect(useSession.getState().activeWorkspaceView).toBe('3d');
+    expect(useSession.getState().curveSelection).toBe(selection);
+    expect(screen.getByRole('note')).toHaveTextContent('La vista 3D se activa automáticamente. Elige una curva en la superficie para definir la sección.');
   });
 });
 

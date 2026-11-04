@@ -245,12 +245,20 @@ class ContourResponse(BaseModel):
 
 
 class BlastHoleOnProfile(BaseModel):
+    row_id: str
     hole_id: str
     distance: float
     elevation: float
     burden: float
     spacing: float
     is_within_tolerance: bool
+    section_relation: Optional[str] = None
+    profile_point_kind: str
+    z_collar_semantic: Optional[str] = None
+    surface_sample_status: Optional[str] = None
+    surface_sample_method: Optional[str] = None
+    surface_sample_mesh_id: Optional[str] = None
+    surface_sample_mesh_sha256: Optional[str] = None
 
 
 class BlastHolesOnProfileResponse(BaseModel):
@@ -375,6 +383,14 @@ class BlastHoleSummary(BaseModel):
     length: float = 0.0
     inclination: float = 0.0
     azimuth: float = 0.0
+    z_collar_semantic: Optional[str] = None
+    surface_sample_status: Optional[str] = None
+    surface_sample_reason: Optional[str] = None
+    surface_sample_method: Optional[str] = None
+    surface_sample_mesh_id: Optional[str] = None
+    surface_sample_mesh_sha256: Optional[str] = None
+    surface_sample_unit: Optional[str] = None
+    surface_sample_assumption: Optional[str] = None
 
 
 class BlastHolesResponse(BaseModel):
@@ -382,6 +398,37 @@ class BlastHolesResponse(BaseModel):
 
     session_id: str
     holes: List[BlastHoleSummary] = Field(default_factory=list)
+
+
+class BlastHole3D(BaseModel):
+    row_id: str
+    hole_id: str
+    source_row_index: Optional[int] = None
+    collar: Optional[List[float]] = None
+    toe: Optional[List[float]] = None
+    geometry_status: str
+    provenance: Dict[str, Any] = Field(default_factory=dict)
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+    section_relation: Optional[str] = None
+    section_distance_m: Optional[float] = None
+
+
+class BlastHoles3DSummary(BaseModel):
+    total_loaded: int = 0
+    drawable: int = 0
+    complete_geometry: int = 0
+    collar_only: int = 0
+    without_geometry: int = 0
+    rejected: int = 0
+
+
+class BlastHoles3DResponse(BaseModel):
+    session_id: str
+    section_id: Optional[int] = None
+    corridor_m: Optional[float] = None
+    holes: List[BlastHole3D] = Field(default_factory=list)
+    rejected_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    summary: BlastHoles3DSummary
 
 
 class GeometryConfigurationSchema(BaseModel):
@@ -461,3 +508,4 @@ class BlastUploadResponse(BaseModel):
     blocking_errors: List[Dict[str, Any]] = Field(default_factory=list)
     geometry_configuration: Dict[str, Any] = Field(default_factory=dict)
     spatial_diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    design_surface: Optional[Dict[str, Any]] = None

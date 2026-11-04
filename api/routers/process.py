@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 import api.database as db
 import api.schemas as schemas
+from api.blast_identity import blast_hole_id, blast_row_ids
 from core import (
     load_mesh,
     SectionLine,
@@ -127,6 +128,8 @@ def _section_from_dict(d: dict) -> SectionLine:
         azimuth=float(d["azimuth"]),
         length=float(d.get("length", 200)),
         sector=d.get("sector", ""),
+        length_up=d.get("length_up"),
+        length_down=d.get("length_down"),
     )
 
 
@@ -828,6 +831,7 @@ def _load_session_blast_holes(session_id: str) -> Optional[pd.DataFrame]:
 def _projected_to_holes(
     projected: pd.DataFrame,
     tolerance: float,
+    session_id: str,
 ) -> List[schemas.BlastHoleOnProfile]:
     """Map a projected blast-hole DataFrame to ``BlastHoleOnProfile`` schemas.
 
@@ -844,7 +848,6 @@ def _projected_to_holes(
         return []
 
     cols = set(projected.columns)
-    has_hole_id = "hole_id" in cols
     has_burden = "Burden" in cols
     has_esp = "Esp" in cols
     has_z_collar = "Z_collar" in cols
@@ -866,6 +869,7 @@ def _projected_to_holes(
 
     out: List[schemas.BlastHoleOnProfile] = []
     for i, row in enumerate(projected.itertuples(index=False)):
+        row_data = projected.iloc[i].to_dict()
         d_perp = float(getattr(row, "dist_perp", 0.0))
 
         if has_burden:
@@ -882,23 +886,134 @@ def _projected_to_holes(
         else:
             spacing = 0.0
 
-        if has_z_collar:
+        profile_elevation = row_data.get("_profile_elevation", np.nan)
+        if pd.notna(profile_elevation) and math.isfinite(float(profile_elevation)):
+            elevation = float(profile_elevation)
+        elif has_z_collar:
             z_raw = getattr(row, "Z_collar", 0.0)
-            elevation = float(z_raw) if pd.notna(z_raw) else 0.0
+            if pd.isna(z_raw) or not math.isfinite(float(z_raw)):
+                continue
+            elevation = float(z_raw)
         else:
-            elevation = 0.0
+            continue
 
-        hole_id = str(getattr(row, "hole_id", i)) if has_hole_id else str(i)
+        hole_id = blast_hole_id(row_data, i)
+        row_id = row_data.get("_blast_row_id")
+        if not row_id:
+            row_id = blast_row_ids(session_id, [row_data])[0]
+        section_relation = row_data.get("section_relation")
+        if pd.isna(section_relation):
+            section_relation = None
+        profile_point_kind = (
+            "intersection"
+            if pd.notna(row_data.get("_profile_elevation"))
+            or row_data.get("closest_point") == "segment_intersection"
+            else "projected_collar"
+        )
 
         out.append(schemas.BlastHoleOnProfile(
+            row_id=row_id,
             hole_id=hole_id,
             distance=round(float(getattr(row, "dist_along", 0.0)), 3),
             elevation=round(elevation, 3),
             burden=round(burden, 3),
             spacing=round(spacing, 3),
             is_within_tolerance=bool(d_perp <= tolerance + 1e-9),
+            section_relation=section_relation,
+            profile_point_kind=profile_point_kind,
+            z_collar_semantic=getattr(row, "Z_collar_semantic", None),
+            surface_sample_status=getattr(row, "surface_sample_status", None),
+            surface_sample_method=getattr(row, "surface_sample_method", None),
+            surface_sample_mesh_id=getattr(row, "surface_sample_mesh_id", None),
+            surface_sample_mesh_sha256=getattr(row, "surface_sample_mesh_sha256", None),
         ))
     return out
+
+
+def _append_exact_section_crossings(
+    holes: pd.DataFrame,
+    projected: pd.DataFrame,
+    section: SectionLine,
+    corridor_m: float,
+) -> pd.DataFrame:
+    from core.hole_section_geometry import classify_hole_segment_to_section
+    from core.section_cutter import azimuth_to_direction
+
+    def values(column: str) -> np.ndarray:
+        source = holes[column] if column in holes else pd.Series(np.nan, index=holes.index)
+        return pd.to_numeric(source, errors="coerce").to_numpy(dtype=float)
+
+    x0, y0, z0 = values("X"), values("Y"), values("Z_collar")
+    x1, y1, z1 = values("X_toe"), values("Y_toe"), values("Z_toe")
+    valid = np.isfinite(np.column_stack((x0, y0, z0, x1, y1, z1))).all(axis=1)
+    direction = azimuth_to_direction(float(section.azimuth))
+    normal = np.array([direction[1], -direction[0]])
+    origin = np.asarray(section.origin, dtype=float)[:2]
+    s0 = (x0 - origin[0]) * normal[0] + (y0 - origin[1]) * normal[1]
+    s1 = (x1 - origin[0]) * normal[0] + (y1 - origin[1]) * normal[1]
+    crosses_plane = ((s0 <= 1e-9) & (s1 >= -1e-9)) | ((s1 <= 1e-9) & (s0 >= -1e-9))
+    candidate_indices = np.flatnonzero(valid & crosses_plane)
+    if not len(candidate_indices):
+        return projected
+
+    projected_ids = set(projected["_blast_row_id"].astype(str)) if "_blast_row_id" in projected else set()
+    extra_rows = []
+    exact_projected_ids = set()
+    for index in candidate_indices:
+        record = holes.iloc[int(index)].to_dict()
+        classification = classify_hole_segment_to_section(
+            [x0[index], y0[index], z0[index]],
+            [x1[index], y1[index], z1[index]],
+            section,
+            corridor_m=corridor_m,
+        )
+        if classification.relation != "exact_intersection":
+            continue
+        row_id = str(record.get("_blast_row_id", ""))
+        if row_id in projected_ids:
+            exact_projected_ids.add(row_id)
+            continue
+
+        station0 = float(classification.along_section_collar_m)
+        station1 = float(classification.along_section_toe_m)
+        signed0 = float(classification.signed_distance_collar_m)
+        signed1 = float(classification.signed_distance_toe_m)
+        if abs(signed0) <= 1e-9 and abs(signed1) <= 1e-9:
+            if section.length_up is not None and section.length_down is not None:
+                lower, upper = -float(section.length_down), float(section.length_up)
+            else:
+                lower, upper = -float(section.length) / 2.0, float(section.length) / 2.0
+            overlap_lower = max(min(station0, station1), lower)
+            overlap_upper = min(max(station0, station1), upper)
+            station = (overlap_lower + overlap_upper) / 2.0
+            fraction = 0.0 if station1 == station0 else (station - station0) / (station1 - station0)
+        else:
+            denominator = signed0 - signed1
+            fraction = 0.0 if abs(denominator) <= 1e-9 else float(np.clip(signed0 / denominator, 0.0, 1.0))
+            station = station0 + fraction * (station1 - station0)
+
+        record.update({
+            "dist_along": station,
+            "dist_along_toe": station1,
+            "dist_perp": abs(signed0),
+            "dist_perp_toe": abs(signed1),
+            "closest_point": "segment_intersection",
+            "_profile_elevation": z0[index] + fraction * (z1[index] - z0[index]),
+            "section_relation": "exact_intersection",
+        })
+        extra_rows.append(record)
+        projected_ids.add(row_id)
+
+    if exact_projected_ids:
+        projected.loc[
+            projected["_blast_row_id"].astype(str).isin(exact_projected_ids),
+            "section_relation",
+        ] = "exact_intersection"
+    if not extra_rows:
+        return projected
+    return pd.concat((projected, pd.DataFrame(extra_rows)), ignore_index=True, sort=False).sort_values(
+        "dist_along", kind="stable"
+    ).reset_index(drop=True)
 
 
 def _project_blast_holes_sync(
@@ -933,6 +1048,16 @@ def _project_blast_holes_sync(
             holes=[],
         )
 
+    df_holes["_blast_row_id"] = blast_row_ids(
+        session_id, df_holes.to_dict(orient="records")
+    )
+
+    if "source_row_index" not in df_holes.columns:
+        df_holes["source_row_index"] = range(len(df_holes))
+    else:
+        missing_source_index = df_holes["source_row_index"].isna()
+        df_holes.loc[missing_source_index, "source_row_index"] = np.flatnonzero(missing_source_index.to_numpy())
+
     inclusion_radius = max(
         float(tolerance),
         float(DEFAULTS.blast_correlation_radius_m),
@@ -944,7 +1069,10 @@ def _project_blast_holes_sync(
         length=sec.length,
         tolerance=inclusion_radius,
     )
-    holes = _projected_to_holes(projected, float(tolerance))
+    projected = _append_exact_section_crossings(
+        df_holes, projected, sec, inclusion_radius,
+    )
+    holes = _projected_to_holes(projected, float(tolerance), session_id)
     return schemas.BlastHolesOnProfileResponse(
         section_id=sec.name,
         mesh_id=mesh_id,

@@ -25,11 +25,18 @@ import { buildCurveSelectionVisuals, type RenderPoint3D } from './curveSelection
 import { resolveCurveContextAction } from './curveContextSync';
 import type { CurveAnchor, CurveSelectionContext } from '../sections/curveSelectionState';
 import type { MiningPoint3D } from '../sections/curveSelectionTypes';
+import { BlastHolesLayer } from './BlastHolesLayer';
+import { BlastHoleFilters, type BlastHole3DRecord } from './BlastHoleFilters';
+import { useBlastHoles3D } from './useBlastHoles3D';
+import { getSectionExtent } from './sectionExtent';
+import { BlastHoleColorControls } from './BlastHoleColorControls';
+import type { BlastHoleColorLegend, BlastHoleColorMapping } from './blastHoleColors';
 
 const DESIGN_HEX = '#7693b7'; // steel blue
 const TOPO_HEX = '#cccccc';   // grey
 const SECTION_HEX = '#e83149'; // red
 const SELECTED_SECTION_HEX = '#f43f5e'; // bright pink-red
+const EMPTY_BLAST_HOLES: readonly BlastHole3DRecord[] = [];
 
 interface Bounds3D {
   xmin: number;
@@ -447,12 +454,7 @@ function Scene({
     const LIFT = bounds.maxDim * 0.004;
 
     return sections.map((sec) => {
-      const azimuthRad = (sec.azimuth * Math.PI) / 180;
-      const dx = Math.sin(azimuthRad) * sec.length;
-      const dy = Math.cos(azimuthRad) * sec.length;
-
-      const wx0 = sec.origin[0];
-      const wy0 = sec.origin[1];
+      const { start, end } = getSectionExtent(sec);
       
       // Sample every 2 meters to drape the line geometrically
       const numPoints = Math.max(2, Math.ceil(sec.length / 2) + 1);
@@ -460,8 +462,8 @@ function Scene({
 
       for (let i = 0; i < numPoints; i++) {
         const t = i / (numPoints - 1);
-        const wx = wx0 + dx * t;
-        const wy = wy0 + dy * t;
+        const wx = start[0] + (end[0] - start[0]) * t;
+        const wy = start[1] + (end[1] - start[1]) * t;
         
         const px = wx - bounds.centerX;
         const pz = -(wy - bounds.centerY);
@@ -476,7 +478,7 @@ function Scene({
       geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       const line = new THREE.Line(geo);
 
-      return { name: sec.name, line };
+      return { id: sec.id, name: sec.name, line };
     });
   }, [sections, bounds, topoVerts]);
 
@@ -625,9 +627,9 @@ function Scene({
 
       {/* Section Lines */}
       {layers.sections && sectionsData.map((sec) => {
-        const isSelected = selectedSection === sec.name;
+        const isSelected = selectedSection === sec.id || selectedSection === sec.name;
         return (
-          <primitive key={sec.name} object={sec.line}>
+          <primitive key={sec.id} object={sec.line}>
             <lineBasicMaterial
               color={isSelected ? SELECTED_SECTION_HEX : SECTION_HEX}
               linewidth={isSelected ? 3 : 1}
@@ -655,6 +657,9 @@ export function Mesh3DViewer() {
   const designMeshId = useSession((s) => s.designMeshId);
   const topoMeshId = useSession((s) => s.topoMeshId);
   const selectedSection = useSession((s) => s.selectedSection);
+  const setSelectedSection = useSession((s) => s.setSelectedSection);
+  const selectedHoleKey = useSession((s) => s.selectedBlastHoleRowId);
+  const setSelectedHoleKey = useSession((s) => s.setSelectedBlastHoleRowId);
   const hasDemoMeshes = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
   const { data: designVerts, isLoading: loadingDesign } = useMeshVertices(designMeshId);
   const { data: topoVerts, isLoading: loadingTopo } = useMeshVertices(topoMeshId);
@@ -672,15 +677,55 @@ export function Mesh3DViewer() {
     sections: true,
   });
   const [showHorizontalDeviation, setShowHorizontalDeviation] = useState(false);
+  const [showBlastHoles, setShowBlastHoles] = useState(false);
+  const [confirmedBlastSpatialKey, setConfirmedBlastSpatialKey] = useState<string | null>(null);
+  const [holeCorridor, setHoleCorridor] = useState(10);
+  const [filteredHoles, setFilteredHoles] = useState<{ source: unknown; holes: BlastHole3DRecord[] }>({ source: null, holes: [] });
+  const [holeColorState, setHoleColorState] = useState<{ source: readonly BlastHole3DRecord[]; mapping: BlastHoleColorMapping; kind: BlastHoleColorLegend['kind'] } | null>(null);
   const [sectorOverride, setSectorOverride] = useState<string | null>(null);
   const [benchNum, setBenchNum] = useState<number | null>(null);
   const [longitudinalStep, setLongitudinalStep] = useState(2);
   const [verticalStep, setVerticalStep] = useState(1);
+  const [controlsSize, setControlsSize] = useState({ width: 320, height: 480 });
+  const controlsResizeStart = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+
+  const beginControlsResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    controlsResizeStart.current = { x: event.clientX, y: event.clientY, ...controlsSize };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const moveControlsResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const start = controlsResizeStart.current;
+    if (!start) return;
+    const panel = event.currentTarget.parentElement;
+    const viewport = panel?.parentElement;
+    const panelRect = panel?.getBoundingClientRect();
+    const viewportRect = viewport?.getBoundingClientRect();
+    const maxWidth = Math.max(280, Math.min(640, panelRect && viewportRect ? panelRect.right - viewportRect.left - 16 : window.innerWidth - 16));
+    const maxHeight = Math.max(280, Math.min(900, panelRect && viewportRect ? viewportRect.bottom - panelRect.top - 16 : window.innerHeight - 16));
+    setControlsSize({
+      width: Math.max(280, Math.min(maxWidth, start.width + start.x - event.clientX)),
+      height: Math.max(280, Math.min(maxHeight, start.height + event.clientY - start.y)),
+    });
+  };
 
   const sectorOptions = useMemo(() => Array.from(new Set(
     (sections ?? []).map((section) => section.sector.trim()),
   )).sort((a, b) => a.localeCompare(b)), [sections]);
   const activeSection = sections?.find((section) => section.id === selectedSection || section.name === selectedSection);
+  const activeSectionIndex = activeSection && sections ? sections.indexOf(activeSection) : -1;
+  const holesQuery = useBlastHoles3D(showBlastHoles && !hasDemoMeshes, activeSectionIndex < 0 ? null : activeSectionIndex,
+    activeSection ? JSON.stringify([activeSection.origin, activeSection.azimuth, activeSection.length, activeSection.length_up, activeSection.length_down]) : '');
+  const blastSpatialKey = JSON.stringify([designMeshId, topoMeshId, holesQuery.data?.session_id ?? null]);
+  const confirmBlastSpatialReference = confirmedBlastSpatialKey === blastSpatialKey;
+  const updateVisibleHoles = useCallback((holes: BlastHole3DRecord[], corridor: number) => {
+    setFilteredHoles({ source: holesQuery.data, holes });
+    setHoleCorridor(corridor);
+  }, [holesQuery.data]);
+  const updateHoleColors = useCallback((mapping: BlastHoleColorMapping, kind: BlastHoleColorLegend['kind']) => {
+    setHoleColorState({ source: filteredHoles.holes, mapping, kind });
+  }, [filteredHoles.holes]);
   const sectionSector = activeSection?.sector.trim() ?? null;
   const selectedSector = sectorOverride !== null && sectorOptions.includes(sectorOverride)
     ? sectorOverride
@@ -705,6 +750,17 @@ export function Mesh3DViewer() {
   const bounds = useMemo(() => {
     return calculateBounds(topoVerts, designVerts);
   }, [topoVerts, designVerts]);
+  const holeCenter = useMemo(() => [bounds.centerX, bounds.centerY, bounds.centerZ] as const, [bounds.centerX, bounds.centerY, bounds.centerZ]);
+  const sceneHoles = useMemo(() => (filteredHoles.source === holesQuery.data ? filteredHoles.holes : []).map((hole) => ({
+    key: hole.row_id,
+    collar: hole.collar?.length === 3 ? hole.collar as [number, number, number] : null,
+    toe: hole.toe?.length === 3 ? hole.toe as [number, number, number] : null,
+    color: holeColorState?.source === filteredHoles.holes ? holeColorState.mapping.colorsByRowId.get(hole.row_id) : undefined,
+  })), [filteredHoles, holesQuery.data, holeColorState]);
+  const selectedHole = filteredHoles.source === holesQuery.data ? filteredHoles.holes.find((hole) => hole.row_id === selectedHoleKey) : undefined;
+  const selectedHoleRelation = selectedHole?.section_relation === 'exact_intersection' || selectedHole?.section_relation === 'incomplete'
+    ? selectedHole.section_relation
+    : selectedHole?.section_distance_m != null ? (selectedHole.section_distance_m <= holeCorridor ? 'near_section' : 'outside') : null;
 
   if (hasNoData) {
     return (
@@ -730,45 +786,103 @@ export function Mesh3DViewer() {
         <>
           {/* Floating Layer Selector */}
           <div
-            className="absolute top-4 right-4 z-20 max-h-[calc(100%-2rem)] w-72 max-w-[calc(100%-2rem)] overflow-y-auto p-3 rounded-lg bg-surface-raised flex flex-col gap-2 border text-[10px] font-mono select-none"
+            data-testid="mesh-layer-panel"
+            role="group"
+            aria-label={t('viewer.layers', { defaultValue: 'Capas visibles' })}
+            className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20 overflow-auto p-3 rounded-lg bg-surface-raised flex flex-col gap-3 border text-xs sm:text-sm select-none"
             style={{
+              width: controlsSize.width,
+              height: controlsSize.height,
+              minWidth: 280,
+              minHeight: 280,
+              maxWidth: 'calc(100% - 1rem)',
+              maxHeight: 'calc(100% - 1rem)',
               borderColor: 'var(--color-border-strong)',
               boxShadow: 'var(--shadow-glow-accent)',
             }}
           >
-            <span className="font-semibold uppercase tracking-wider text-accent-bright mb-1 border-b border-border pb-1">
-              {t('viewer.layers', { defaultValue: 'CAPAS VISIBLES' })}
-            </span>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-accent-bright transition-colors">
+            <button type="button" aria-label={t('viewer.panel_resize_corner', { defaultValue: 'Cambiar ancho y alto del panel' })} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" title={t('viewer.panel_resize_hint', { defaultValue: 'Arrastra la esquina para ajustar' })} onPointerDown={beginControlsResize} onPointerMove={moveControlsResize} onPointerUp={() => { controlsResizeStart.current = null; }} onPointerCancel={() => { controlsResizeStart.current = null; }} onKeyDown={(event) => {
+              if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+              event.preventDefault();
+              const step = event.shiftKey ? 40 : 16;
+              const maxWidth = Math.max(280, Math.min(640, (event.currentTarget.parentElement?.parentElement?.clientWidth ?? window.innerWidth) - 16));
+              const maxHeight = Math.max(280, Math.min(900, (event.currentTarget.parentElement?.parentElement?.clientHeight ?? window.innerHeight) - 16));
+              setControlsSize((size) => ({ width: Math.max(280, Math.min(maxWidth, size.width + (event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0))), height: Math.max(280, Math.min(maxHeight, size.height + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0))) }));
+            }} className="absolute bottom-0 left-0 z-10 flex h-11 w-11 cursor-sw-resize touch-none items-end justify-start p-1 text-text-muted hover:text-accent focus-visible:outline focus-visible:outline-2" aria-describedby="mesh-panel-resize-hint"><svg aria-hidden="true" viewBox="0 0 18 18" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 15 15 3M8 15 15 8M13 15l2-2" /></svg></button>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+              <span className="font-semibold uppercase tracking-wider text-accent-bright">
+                {t('viewer.layers', { defaultValue: 'CAPAS VISIBLES' })}
+              </span>
+              <span id="mesh-panel-resize-hint" className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{t('viewer.panel_resize_hint', { defaultValue: 'Arrastra una esquina para ajustar' })}</span>
+            </div>
+            <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
               <input
                 type="checkbox"
                 checked={layers.topo}
                 onChange={(e) => setLayers(prev => ({ ...prev, topo: e.target.checked }))}
-                className="rounded border-border bg-surface-muted text-gray-500 focus:ring-0 focus:ring-offset-0 w-3 h-3 cursor-pointer animate-none"
+                className="rounded border-border bg-surface-muted text-gray-500 focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
               />
               <span style={{ color: sceneColors.topo }}>●</span>
               <span>{t('viewer.layer_topo', { defaultValue: 'Topografía Real' })}</span>
             </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-accent-bright transition-colors">
+            <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
               <input
                 type="checkbox"
                 checked={layers.designContours}
                 onChange={(e) => setLayers(prev => ({ ...prev, designContours: e.target.checked }))}
-                className="rounded border-border bg-surface-muted text-mine-blue focus:ring-0 focus:ring-offset-0 w-3 h-3 cursor-pointer animate-none"
+                className="rounded border-border bg-surface-muted text-mine-blue focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
               />
               <span style={{ color: DESIGN_HEX }}>●</span>
               <span>{t('viewer.layer_design', { defaultValue: 'Curvas de Diseño' })}</span>
             </label>
-            <label className="flex items-center gap-2 cursor-pointer hover:text-accent-bright transition-colors">
+            <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
               <input
                 type="checkbox"
                 checked={layers.sections}
                 onChange={(e) => setLayers(prev => ({ ...prev, sections: e.target.checked }))}
-                className="rounded border-border bg-surface-muted text-red-500 focus:ring-0 focus:ring-offset-0 w-3 h-3 cursor-pointer animate-none"
+                className="rounded border-border bg-surface-muted text-red-500 focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
               />
               <span style={{ color: SECTION_HEX }}>●</span>
               <span>{t('viewer.layer_sections', { defaultValue: 'Líneas de Sección' })}</span>
             </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input data-testid="blast-holes-toggle" type="checkbox" checked={showBlastHoles} disabled={hasDemoMeshes}
+                onChange={(event) => setShowBlastHoles(event.target.checked)} />
+              <span>{t('blast.layer')}</span>
+            </label>
+            {showBlastHoles && !hasDemoMeshes && (
+              <div>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" checked={confirmBlastSpatialReference} disabled={!holesQuery.data}
+                    onChange={(event) => setConfirmedBlastSpatialKey(event.target.checked ? blastSpatialKey : null)} />
+                  <span>{t('blast.confirmSpatial3d')}</span>
+                </label>
+                {holesQuery.isLoading && <p>{t('blast.layerLoading')}</p>}
+                {holesQuery.isError && <p role="alert">{t('blast.layerError')}</p>}
+                {holesQuery.data && confirmBlastSpatialReference && <>
+                  <label className="flex flex-col gap-1">
+                    <span>{t('blast.sectionSelect')}</span>
+                    <select value={activeSection?.id ?? ''} onChange={(event) => setSelectedSection(event.target.value || null)}
+                      className="w-full rounded border px-1.5 py-1" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
+                      <option value="">{t('blast.sectionNone')}</option>
+                      {(sections ?? []).map((section) => <option key={section.id} value={section.id}>{section.sector ? `${section.sector} · ` : ''}{section.name}</option>)}
+                    </select>
+                  </label>
+                  <p>{t('blast.rejected', { count: holesQuery.data.summary.rejected })}</p>
+                  <p>{t('blast.legend')}</p>
+                  <BlastHoleFilters holes={holesQuery.data.holes} hasSection={activeSectionIndex >= 0} onFilteredChange={updateVisibleHoles} />
+                  <BlastHoleColorControls records={holesQuery.data.holes} filteredRecords={filteredHoles.source === holesQuery.data ? filteredHoles.holes : EMPTY_BLAST_HOLES} onColorsChange={updateHoleColors} />
+                  {selectedHole && <div className="rounded border p-2" style={{ borderColor: 'var(--color-border)' }}>
+                    <strong>{t('blast.selection')}: {selectedHole.hole_id}</strong>
+                    <p>{t('blast.collar')}: {selectedHole.collar?.join(', ') ?? t('blast.noData')}</p>
+                    <p>{t('blast.toe')}: {selectedHole.toe?.join(', ') ?? t('blast.noData')}</p>
+                    {selectedHole.provenance.z_collar_semantic === 'design_surface_estimate' && <p>{t('blast.estimated')}</p>}
+                    {selectedHoleRelation && <p>{t('blast.relation')}: {t(`blast.holeFilters.relation.${selectedHoleRelation}`)}</p>}
+                    {selectedHole.section_distance_m != null && <p>{t('blast.distance')}: {selectedHole.section_distance_m.toFixed(2)} m</p>}
+                  </div>}
+                </>}
+              </div>
+            )}
             <div className="mt-1 border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
               <label className={`flex items-center gap-2 ${canRequestMap ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
                 <input
@@ -777,12 +891,12 @@ export function Mesh3DViewer() {
                   checked={showHorizontalDeviation}
                   disabled={!canRequestMap}
                   onChange={(event) => setShowHorizontalDeviation(event.target.checked)}
-                  className="h-3 w-3 rounded border-border bg-surface-muted text-accent focus:ring-0 focus:ring-offset-0"
+                  className="h-5 w-5 rounded border-border bg-surface-muted text-accent focus:ring-0 focus:ring-offset-0"
                 />
                 <span className="font-semibold">{t('viewer.horizontal_map')}</span>
               </label>
               {!canRequestMap && (
-                <p className="mt-1 text-[9px] leading-snug" style={{ color: 'var(--color-text-muted)' }}>
+                <p className="mt-1 text-xs leading-snug" style={{ color: 'var(--color-text-muted)' }}>
                   {hasDemoMeshes
                     ? t('viewer.horizontal_demo')
                     : !designMeshId || !topoMeshId
@@ -800,7 +914,7 @@ export function Mesh3DViewer() {
                         setSectorOverride(event.target.value);
                         setBenchNum(null);
                       }}
-                      className="w-full rounded border px-1.5 py-1 text-[10px]"
+                      className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
                       style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
                     >
                       {sectorOptions.map((sector) => <option key={sector} value={sector}>{sector || t('viewer.horizontal_unnamed_sector')}</option>)}
@@ -811,7 +925,7 @@ export function Mesh3DViewer() {
                       data-testid="horizontal-deviation-bench"
                       value={selectedBenchNum == null ? '' : String(selectedBenchNum)}
                       onChange={(event) => setBenchNum(event.target.value ? Number(event.target.value) : null)}
-                      className="w-full rounded border px-1.5 py-1 text-[10px]"
+                      className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
                       style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
                     >
                       <option value="">{t('viewer.horizontal_all_benches')}</option>
@@ -828,7 +942,7 @@ export function Mesh3DViewer() {
                         step={1}
                         value={longitudinalStep}
                         onChange={(event) => setLongitudinalStep(clampStep(event.target.value, 1, 20, 2))}
-                        className="w-full rounded border px-1.5 py-1 text-[10px]"
+                        className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
                       />
                     </FieldLabel>
@@ -841,7 +955,7 @@ export function Mesh3DViewer() {
                         step={0.5}
                         value={verticalStep}
                         onChange={(event) => setVerticalStep(clampStep(event.target.value, 0.5, 5, 1))}
-                        className="w-full rounded border px-1.5 py-1 text-[10px]"
+                        className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
                         style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
                       />
                     </FieldLabel>
@@ -859,11 +973,11 @@ export function Mesh3DViewer() {
                     <>
                       <HorizontalDeviationOverview summary={mapQuery.data.summary} compact />
                       <HorizontalDeviationLegend compact />
-                      <p className="text-[9px] leading-snug" style={{ color: 'var(--color-text-muted)' }}>
+                      <p className="text-xs leading-snug" style={{ color: 'var(--color-text-muted)' }}>
                         {t('horizontalDeviation.method_caption')} · {t('horizontalDeviation.interpolated_caption')}
                       </p>
                       {mapQuery.data.effective_resolution && (
-                        <p className="text-[9px] leading-snug" style={{ color: 'var(--color-text-muted)' }}>
+                        <p className="text-xs leading-snug" style={{ color: 'var(--color-text-muted)' }}>
                           {t('horizontalDeviation.effective_resolution', {
                             longitudinal: formatEffectiveStep(mapQuery.data.effective_resolution.longitudinal_step_min, mapQuery.data.effective_resolution.longitudinal_step_max),
                             vertical: formatEffectiveStep(mapQuery.data.effective_resolution.vertical_step_min, mapQuery.data.effective_resolution.vertical_step_max),
@@ -904,6 +1018,7 @@ export function Mesh3DViewer() {
                 bounds={bounds}
                 layers={layers}
               />
+              {showBlastHoles && confirmBlastSpatialReference && holesQuery.data && <BlastHolesLayer holes={sceneHoles} center={holeCenter} selectedKey={selectedHoleKey} onSelect={setSelectedHoleKey} colorTrajectories={holeColorState?.source === filteredHoles.holes && holeColorState.kind === 'category'} trajectoryColor="#969696" />}
               <GizmoHelper alignment="bottom-left" margin={[60, 60]}>
                 <GizmoViewport
                   axisColors={['#ff3653', '#0adb21', '#2c8fdf']}
@@ -930,7 +1045,7 @@ function createPointGeometry(point: RenderPoint3D | null): THREE.BufferGeometry 
 
 function FieldLabel({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="flex min-w-0 flex-col gap-1 text-[9px]" style={{ color: 'var(--color-text-muted)' }}>
+    <label className="flex min-w-0 flex-col gap-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
       <span>{label}</span>
       {children}
     </label>

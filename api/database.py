@@ -577,11 +577,13 @@ def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
     settings["spatial_diagnostics"] = payload.get("spatial_diagnostics", {})
     settings["data_warnings"] = payload.get("data_warnings", "")
     settings["geometry_configuration"] = payload.get("geometry_configuration", {})
+    settings["design_surface"] = payload.get("design_surface")
     settings["blast_upload_meta"] = {
         "n_holes": payload.get("n_holes", 0),
         "n_rows_loaded": payload.get("n_rows_loaded", 0),
         "n_rows_skipped": payload.get("n_rows_skipped", 0),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "design_surface": payload.get("design_surface"),
     }
     save_settings(session_id, settings)
 

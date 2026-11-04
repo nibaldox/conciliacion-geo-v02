@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import client from './client';
+import { useSession } from '../stores/session';
 import {
   extractBlastErrorDiagnostics,
   useUploadBlastCsv,
@@ -22,12 +23,14 @@ const geometry: BlastGeometryForm = {
   azimuth_unit: 'RADIANS',
 };
 
-function wrapper({ children }: { children: ReactNode }) {
+function wrapper(queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } })) {
+  return function Wrapper({ children }: { children: ReactNode }) {
   return (
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
+    <QueryClientProvider client={queryClient}>
       {children}
     </QueryClientProvider>
   );
+  };
 }
 
 describe('useUploadBlastCsv production request', () => {
@@ -35,7 +38,7 @@ describe('useUploadBlastCsv production request', () => {
 
   it('sends the exact complete v2 FormData through the real hook', async () => {
     const post = vi.spyOn(client, 'post').mockResolvedValue({ data: { accepted_rows: [] } });
-    const { result } = renderHook(() => useUploadBlastCsv(), { wrapper });
+    const { result } = renderHook(() => useUploadBlastCsv(), { wrapper: wrapper() });
     const file = new File(['x,y'], 'pozos.csv', { type: 'text/csv' });
 
     await act(async () => {
@@ -63,6 +66,67 @@ describe('useUploadBlastCsv production request', () => {
     expect(entries.geometry_configuration_version).toBe('2.0');
     expect(entries).not.toHaveProperty('angle_unit');
     expect(entries).not.toHaveProperty('incl_convention');
+  });
+
+  it('forwards Axios upload progress as a bounded percentage when total bytes are known', async () => {
+    const post = vi.spyOn(client, 'post').mockResolvedValue({ data: { accepted_rows: [] } });
+    const onUploadProgress = vi.fn();
+    const { result } = renderHook(() => useUploadBlastCsv(), { wrapper: wrapper() });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionId: 'session-1',
+        file: new File(['x,y'], 'pozos.csv', { type: 'text/csv' }),
+        geometry,
+        onUploadProgress,
+      });
+    });
+
+    const config = post.mock.calls[0][2] as { onUploadProgress?: (event: { loaded: number; total?: number }) => void };
+    config.onUploadProgress?.({ loaded: 50, total: 100 });
+    config.onUploadProgress?.({ loaded: 120, total: 100 });
+    expect(onUploadProgress.mock.calls.map(([value]) => value)).toEqual([50, 100]);
+  });
+
+  it('invalidates 3D, session, and profile blast-hole queries after a successful upload', async () => {
+    useSession.getState().setSelectedBlastHoleRowId('previous-row-5');
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    vi.spyOn(client, 'post').mockResolvedValue({ data: { accepted_rows: [{ hole_id: 'P-1' }] } });
+    const { result } = renderHook(() => useUploadBlastCsv(), { wrapper: wrapper(queryClient) });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        sessionId: 'session-1', file: new File(['x'], 'holes.csv', { type: 'text/csv' }), geometry,
+      });
+    });
+
+    expect(invalidate).toHaveBeenCalledTimes(3);
+    const invalidatedKeys = invalidate.mock.calls.map(([filters]) => {
+      if (!filters) throw new Error('invalidateQueries se llamó sin filtros');
+      return filters.queryKey;
+    });
+    expect(invalidatedKeys).toEqual([
+      ['blast-holes-3d'], ['blast-holes-by-session'], ['blast-holes'],
+    ]);
+    expect(useSession.getState().selectedBlastHoleRowId).toBeNull();
+  });
+
+  it('does not invalidate blast-hole queries when the upload fails', async () => {
+    useSession.getState().setSelectedBlastHoleRowId('keep-on-failure');
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    vi.spyOn(client, 'post').mockRejectedValue(new Error('upload failed'));
+    const { result } = renderHook(() => useUploadBlastCsv(), { wrapper: wrapper(queryClient) });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync({
+        sessionId: 'session-1', file: new File(['x'], 'holes.csv', { type: 'text/csv' }), geometry,
+      })).rejects.toThrow('upload failed');
+    });
+
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(useSession.getState().selectedBlastHoleRowId).toBe('keep-on-failure');
   });
 
   it('unwraps FastAPI HTTP 400 detail into structured blocking errors', () => {

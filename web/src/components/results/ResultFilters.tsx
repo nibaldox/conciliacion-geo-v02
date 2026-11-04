@@ -8,7 +8,7 @@ import {
   uniqueSectionOptions,
   uniqueSectorOptions,
   type ResultFilterState,
-} from './resultFilters';
+} from './resultFilters.utils';
 
 interface DimensionOption {
   readonly value: string;
@@ -65,7 +65,6 @@ function DimensionSelect({ dimension, label, options, selected, onToggle }: Dime
         <details className="relative">
           <summary
             aria-labelledby={`${labelId} ${valueId}`}
-            aria-haspopup="listbox"
             className="flex h-9 cursor-pointer list-none items-center justify-between gap-2 rounded-md bg-surface-sunken px-3 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             style={{ border: '1px solid var(--color-border)' }}
           >
@@ -73,15 +72,12 @@ function DimensionSelect({ dimension, label, options, selected, onToggle }: Dime
             <span aria-hidden="true" className="text-xs text-text-muted">▾</span>
           </summary>
           <ul
-            role="listbox"
-            aria-multiselectable="true"
-            aria-label={`${label}: ${summary}`}
             className="absolute left-0 top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg bg-surface-raised p-1 shadow-lg"
           >
             {options.map((option) => {
               const isSelected = selected.includes(option.value);
               return (
-                <li key={option.value} role="option" aria-selected={isSelected}>
+                <li key={option.value}>
                   <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface-muted">
                     <input
                       type="checkbox"
@@ -126,9 +122,14 @@ export function ResultFilters({ results, filters, onChange }: {
   const toggleLevel = (value: string) => onChange({ ...filters, level: toggleDimensionValue(filters.level, value) });
 
   const noDimensionSelected = filters.sector.length === 0 && filters.section.length === 0 && filters.level.length === 0;
+  const activeFilters = [
+    ...filters.sector.map((value) => `${sectorLabel}: ${value === '' ? noSectorLabel : value}`),
+    ...filters.section.map((value) => `${sectionLabel}: ${value}`),
+    ...filters.level.map((value) => `${levelLabel}: ${value}`),
+  ];
 
   return (
-    <section data-slot="result-filters" className="flex flex-wrap items-end gap-3 rounded-xl bg-surface-raised p-4">
+    <section data-slot="result-filters" aria-label={t('results.filters.group_label', { defaultValue: 'Filtros de resultados' })} className="flex flex-wrap items-end gap-3 rounded-xl bg-surface-raised p-4">
       <DimensionSelect
         dimension="sector"
         label={sectorLabel}
@@ -150,14 +151,26 @@ export function ResultFilters({ results, filters, onChange }: {
         selected={filters.level}
         onToggle={toggleLevel}
       />
-      <Button
-        size="sm"
-        variant="secondary"
-        disabled={noDimensionSelected}
-        onClick={() => onChange({ ...filters, sector: [], section: [], level: [] })}
-      >
-        {t('dashboard.bench_filter.reset')}
-      </Button>
+      <div className="flex flex-col gap-1">
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={noDimensionSelected}
+          aria-describedby="result-filters-reset-help"
+          onClick={() => onChange({ ...filters, sector: [], section: [], level: [] })}
+        >
+          {t('dashboard.bench_filter.reset')}
+        </Button>
+        <p id="result-filters-reset-help" className="max-w-52 text-xs text-text-secondary">
+          {t('results.filters.reset_help', { defaultValue: 'Restablece sector, sección y cota; conserva el filtro de banco.' })}
+        </p>
+      </div>
+      {activeFilters.length > 0 && (
+        <p className="min-w-0 basis-full break-words text-xs text-text-secondary" aria-live="polite">
+          <span className="font-semibold">{t('results.filters.active_label', { defaultValue: 'Filtros activos en este panel:' })}</span>{' '}
+          {activeFilters.join(' · ')}
+        </p>
+      )}
     </section>
   );
 }

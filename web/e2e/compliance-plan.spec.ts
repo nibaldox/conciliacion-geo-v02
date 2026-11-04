@@ -21,9 +21,9 @@ test('summary plan shows topography and processed profiles with canonical compli
   const plan = page.locator('[data-slot="compliance-plan-view"]');
   await expect(plan.locator('image')).toHaveAttribute('href', /^data:image\/png;base64,/);
   await expect(plan.locator('polyline')).toHaveCount(5);
-  await expect(plan.locator('[data-section-name="DEMO-S01"]')).toHaveAttribute('data-status', 'cumple');
-  await expect(plan.locator('[data-section-name="DEMO-S02"]')).toHaveAttribute('data-status', 'no_cumple');
-  await expect(plan.locator('[data-section-name="DEMO-S03"]')).toHaveAttribute('data-status', 'unknown');
+  await expect(plan.locator('[data-section-name="DEMO-S01"]')).toHaveAttribute('data-status', 'CUMPLE');
+  await expect(plan.locator('[data-section-name="DEMO-S02"]')).toHaveAttribute('data-status', 'NO_CUMPLE');
+  await expect(plan.locator('[data-section-name="DEMO-S03"]')).toHaveAttribute('data-status', 'NO_CUMPLE');
   const linePoints = await plan.locator('[data-section-name="DEMO-S01"] polyline').getAttribute('points');
   const points = linePoints!.split(' ').map((point) => point.split(',').map(Number));
   expect(points[0]![0]).toBeCloseTo(points.at(-1)![0]!);

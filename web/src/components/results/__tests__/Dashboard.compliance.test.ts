@@ -25,7 +25,7 @@ describe('Streamlit compliance parity', () => {
     expect(computeGlobalScore(rows)).toBe(65);
     expect([...computeProfileScores(rows)]).toEqual([['S-01', 90], ['S-02', 40]]);
   });
-  it('uses worst backend tolerance tier for profile classification instead of the score threshold', () => {
+  it('classifies profile banks by score and takes the worst bank status', () => {
     const rows = [
       row({ section: 'OK', bench_score: 0 }),
       row({ section: 'OUT', height_status: 'FUERA DE TOLERANCIA', bench_score: 100 }),
@@ -35,9 +35,19 @@ describe('Streamlit compliance parity', () => {
       row({ section: 'EXTRA', type: 'EXTRA', bench_num: 999, height_status: 'NO CUMPLE' }),
     ];
     expect([...computeProfileStatuses(rows)]).toEqual([
-      ['OK', 'CUMPLE'], ['OUT', 'FUERA'], ['FAIL', 'NO_CUMPLE'], ['MISSING', 'NO_CUMPLE'], ['UNKNOWN', 'UNKNOWN'], ['EXTRA', 'NO_CUMPLE'],
+      ['OK', 'NO_CUMPLE'], ['OUT', 'CUMPLE'], ['FAIL', 'CUMPLE'], ['MISSING', 'NO_CUMPLE'], ['UNKNOWN', 'UNKNOWN'], ['EXTRA', 'NO_CUMPLE'],
     ]);
-    expect(computeProfileComplianceCounts(rows)).toEqual({ cumple: 1, fuera: 1, noCumple: 3 });
+    expect(computeProfileComplianceCounts(rows)).toEqual({ cumple: 2, fuera: 0, noCumple: 3 });
+  });
+
+  it('keeps the 0–100 weighted score separate from the profile classification counts', () => {
+    const rows = [
+      row({ section: 'CUMPLE', bench_score: 100 }),
+      row({ section: 'FUERA', height_status: 'FUERA DE TOLERANCIA', bench_score: 100 }),
+      row({ section: 'NO CUMPLE', berm_status: 'NO CUMPLE', bench_score: 0 }),
+    ];
+    expect(computeGlobalScore(rows)).toBe(200 / 3);
+    expect(computeProfileComplianceCounts(rows)).toEqual({ cumple: 2, fuera: 0, noCumple: 1 });
   });
 
   it('includes additional topography in All, but excludes it when a design bank is selected', () => {

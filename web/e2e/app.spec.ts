@@ -18,14 +18,14 @@ test.describe('Conciliación Geotécnica App', () => {
     await page.goto('/');
 
     const navLabels = [
-      'Cargar Superficies',
-      'Definir Secciones',
-      'Parámetros de Procesamiento',
-      'Análisis',
+      'Superficies',
+      'Secciones',
+      'Parámetros',
     ];
     for (const label of navLabels) {
       await expect(page.getByRole('button', { name: label })).toBeVisible();
     }
+    await expect(page.getByRole('heading', { name: 'Análisis' })).toBeVisible();
 
     const uploadZones = page.getByRole('button', { name: 'Cargar archivo' });
     await expect(uploadZones).toHaveCount(2);

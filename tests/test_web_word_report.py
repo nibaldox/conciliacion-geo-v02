@@ -3,13 +3,22 @@
 import io
 import time
 
+import numpy as np
+import pandas as pd
 import pytest
 from docx import Document
 from docx.oxml.ns import qn
 from docx.shared import Mm
 
 from core.report_data import ReportFilters, build_report_data
-from core.web_word_report import DETAIL_COLUMN_MM, build_word_report
+from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
+from core.web_word_report import (
+    DETAIL_COLUMN_MM,
+    _plan_sections,
+    _profile_payload,
+    _project_holes,
+    build_word_report,
+)
 
 STATUS_LABELS = {
     "CUMPLE",
@@ -51,6 +60,7 @@ def _rows(n=12, sections=3, sector=""):
                 "level": str(3100 - index),
                 "bench_num": index % 6 + 1,
                 "type": "MATCH",
+                "bench_score": 100.0 if status == "CUMPLE" else 60.0,
                 "height_design": 15.0,
                 "height_real": 15.0 + (index % 5) * 0.3,
                 "height_dev": (index % 5) * 0.3,
@@ -122,13 +132,14 @@ def test_numbered_section_headings_are_stable(base_blob):
     headings = _headings(_document(base_blob))
     for expected in (
         "1. Resumen ejecutivo",
-        "2. Parámetros y criterios",
-        "3. Cumplimiento por parámetro",
+        "2. Alcance, fuentes y criterios",
+        "3. Resultados por parámetro",
         "4. Logro de diseño por sector",
-        "5. Plano de cumplimiento",
-        "6. Tabla por perfil",
-        "7. Detalle por sección",
-        "8. Análisis de perforación y tronadura",
+        "5. Mayores desviaciones comparables",
+        "6. Plano de cumplimiento",
+        "7. Detalle por banco",
+        "8. Detalle por sección",
+        "9. Análisis de perforación y tronadura",
     ):
         assert expected in headings
 
@@ -151,14 +162,19 @@ def test_footer_keeps_page_x_of_y_fields(base_blob):
 
 
 def test_executive_summary_contains_counts_score_and_conclusions(base_blob):
-    text = "\n".join(_paragraphs(_document(base_blob)))
-    assert "perfiles evaluados" in text
-    assert "peor estado entre los bancos de diseño" in text
-    assert "Puntaje ponderado global (0-100)" in text
-    assert "Definición del puntaje ponderado" in text
+    doc = _document(base_blob)
+    text = "\n".join(_paragraphs(doc) + [cell for row in _tables(doc) for cell in row])
+    assert "Denominador del desglose" in text
+    assert (
+        "peor estado entre los registros de banco asociados al perfil, "
+        "incluidos los faltantes y los adicionales"
+    ) in text
+    assert "Puntaje ponderado global (0–100)" in text
+    assert "Puntaje disponible en" in text
+    assert "bancos contabilizados; se considera evaluable si tiene al menos una desviación" in text
     assert "Logro de diseño global" in text
     assert "Conclusiones" in text
-    assert "Sin advertencias." in text
+    assert "El modelo no registró advertencias" in text
 
 
 def test_criteria_section_shows_signed_tolerances_and_no_filters(base_blob):
@@ -176,13 +192,28 @@ def test_criteria_reports_applied_filters():
     text = "\n".join(_paragraphs(_document(build_word_report(data).getvalue())))
     assert "Filtros aplicados" in text
     assert "sectores: A" in text
-    assert "bancos: B1, B2" in text
+    assert "bancos de diseño: D1, D2" in text
 
 
 def test_parameter_table_and_donut_image(base_blob):
     doc = _document(base_blob)
     assert any("Altura de banco (m)" in row for row in [" | ".join(r) for r in _tables(doc)])
     assert len(doc.inline_shapes) == 1
+
+
+def test_parameter_mean_denominator_counts_only_finite_values_with_status():
+    rows = _rows()
+    rows[0]["height_status"] = None
+    rows[2]["height_real"] = float("nan")
+    rows[1]["angle_status"] = "-"
+    doc = _document(build_word_report(_data(rows)).getvalue())
+    table = _table_with_header(doc, "Media real (n con estado)")
+    headers = table[0]
+    mean_index = headers.index("Media real (n con estado)")
+    height_row = next(row for row in table[1:] if row[0] == "Altura de banco (m)")
+    angle_row = next(row for row in table[1:] if row[0] == "Ángulo de cara (°)")
+    assert height_row[mean_index].endswith("(n=10)")
+    assert angle_row[mean_index].endswith("(n=11)")
 
 
 def test_design_achievement_section_has_global_row(base_blob):
@@ -215,6 +246,59 @@ def test_plan_image_rendered_from_plan_inputs():
     assert "Sin geometría de secciones disponible" not in "\n".join(_paragraphs(doc))
 
 
+def test_plan_sections_mark_filter_exclusions_without_reclassifying_unknown():
+    plan_inputs = {"sections": [
+        {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-02", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-99", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
+    ]}
+    data = _data(
+        filters=ReportFilters(sections=("S-01",)),
+        plan_inputs=plan_inputs,
+    )
+
+    sections = _plan_sections(data)
+
+    assert [(section["name"], section["included"]) for section in sections] == [
+        ("S-01", True), ("S-02", False), ("S-99", False),
+    ]
+    assert sections[1]["worst_status"] == "UNKNOWN"
+
+
+def test_plan_sections_resolve_duplicate_names_by_sector_and_keep_ambiguous_unknown():
+    rows = _rows(n=1, sections=1, sector="A") + _rows(n=1, sections=1, sector="B")
+    plan_inputs = {"sections": [
+        {"name": "S-01", "sector": "A", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "sector": "B", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
+    ]}
+    data = _data(rows, filters=ReportFilters(sectors=("A",)), plan_inputs=plan_inputs)
+
+    sections = _plan_sections(data)
+
+    assert [(section["sector"], section["included"], section["worst_status"]) for section in sections] == [
+        ("A", True, "NO_CUMPLE"),
+        ("B", False, "UNKNOWN"),
+        ("", True, "UNKNOWN"),
+    ]
+
+
+def test_plan_section_without_sector_stays_unknown_when_same_name_geometry_is_unmatched():
+    rows = _rows(n=1, sections=1, sector="A")
+    plan_inputs = {"sections": [
+        {"name": "S-01", "sector": "A", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "sector": "B", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
+    ]}
+    data = _data(rows, filters=ReportFilters(sectors=("A",)), plan_inputs=plan_inputs)
+
+    sections = _plan_sections(data)
+
+    assert [(section["included"], section["worst_status"]) for section in sections] == [
+        (True, "NO_CUMPLE"), (False, "UNKNOWN"), (True, "UNKNOWN"),
+    ]
+
+
 def test_profile_table_columns_dropped_when_empty():
     rows = _rows()
     for row in rows:
@@ -222,7 +306,7 @@ def test_profile_table_columns_dropped_when_empty():
         row["effective_berm"] = None
     blob = build_word_report(_data(rows)).getvalue()
     doc = _document(blob)
-    header_rows = _table_with_header(doc, "Sección")
+    header_rows = _table_with_header(doc, "Estado banco")
     assert header_rows, "profile table not found"
     headers = header_rows[0]
     assert "Derrame (m)" not in headers
@@ -234,18 +318,18 @@ def test_profile_table_columns_dropped_when_empty():
 
 
 def test_profile_table_keeps_columns_with_data():
-    header_rows = _table_with_header(_document(build_word_report(_data()).getvalue()), "Sección")
+    header_rows = _table_with_header(_document(build_word_report(_data()).getvalue()), "Estado banco")
     headers = header_rows[0]
     assert "Derrame (m)" in headers
     assert "Berma efectiva (m)" in headers
-    assert "Estado" in headers
+    assert "Estado banco" in headers
 
 
 def test_status_column_is_labeled_never_numeric(base_blob):
     doc = _document(base_blob)
-    header_rows = _table_with_header(doc, "Sección")
+    header_rows = _table_with_header(doc, "Estado banco")
     headers = header_rows[0]
-    index = headers.index("Estado")
+    index = headers.index("Estado banco")
     values = [row[index] for row in header_rows[1:]]
     assert values
     for value in values:
@@ -255,21 +339,15 @@ def test_status_column_is_labeled_never_numeric(base_blob):
 
 def test_status_cells_use_light_fill_with_dark_text(base_blob):
     doc = _document(base_blob)
+    table_rows = _table_with_header(doc, "Estado banco")
+    status_column = table_rows[0].index("Estado banco")
     fills = set()
-    for table in doc.tables:
-        for row in table.rows:
-            for cell in row.cells:
-                if cell.text in STATUS_LABELS:
-                    tcPr = cell._tc.tcPr
-                    if tcPr is None:
-                        continue
-                    shd = tcPr.findall(
-                        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd"
-                    )
-                    for element in shd:
-                        fills.add(element.get(
-                            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fill"
-                        ))
+    for values, row in zip(table_rows[1:], next(t for t in doc.tables if t.rows[0].cells[0].text == "Sección").rows[1:]):
+        if values[status_column] not in STATUS_LABELS:
+            continue
+        tcPr = row.cells[status_column]._tc.tcPr
+        shd = tcPr.findall("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd")
+        fills.update(element.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fill") for element in shd)
     assert fills
     assert fills <= {"C9E7CB", "FBE3BF", "F6C6C6", "E2E8F0"}
 
@@ -281,8 +359,8 @@ def test_missing_bench_status_label_is_not_numeric():
     rows[0]["angle_status"] = None
     rows[0]["berm_status"] = None
     doc = _document(build_word_report(_data(rows)).getvalue())
-    header_rows = _table_with_header(doc, "Sección")
-    index = header_rows[0].index("Estado")
+    header_rows = _table_with_header(doc, "Estado banco")
+    index = header_rows[0].index("Estado banco")
     assert "NO CONSTRUIDO" in {row[index] for row in header_rows[1:]}
 
 
@@ -322,6 +400,16 @@ def test_synthetic_blast_renders_summary_table():
     assert "Sin datos de pozos de tronadura en esta sesión." not in "\n".join(_paragraphs(doc))
 
 
+def test_design_surface_collar_elevation_is_labeled_as_estimated():
+    blast = {
+        "holes": [{"dist": 5.0, "collar_z": 3125.0, "toe_z": 3112.0, "Z_collar_semantic": "design_surface_estimate"}],
+        "tolerance": {"neg": 1.0, "pos": 1.0},
+    }
+    text = "\n".join(_paragraphs(_document(build_word_report(_data(blast=blast)).getvalue())))
+    assert "fue estimada desde la superficie de diseño" in text
+    assert "no debe interpretarse como cota real levantada" in text
+
+
 def test_blast_without_bench_height_never_prints_nan():
     blast = {
         "holes": [{"dist": 5.0, "collar_z": 3125.0, "toe_z": 3112.0}],
@@ -340,10 +428,43 @@ def test_section_details_split_non_compliant_and_annex():
     assert "Anexo: perfiles conformes" in text
 
 
+def test_unknown_profile_is_separate_from_compliant_and_non_compliant():
+    from dataclasses import replace
+
+    data = _data(_rows(n=2, sections=2))
+    profiles = list(data.profiles)
+    profiles[0] = replace(profiles[0], worst_status="UNKNOWN")
+    object.__setattr__(data, "profiles", tuple(profiles))
+    text = "\n".join(_paragraphs(_document(build_word_report(data).getvalue())))
+    assert "Perfiles con estado UNKNOWN u otro estado no clasificado (1)" in text
+    assert "se muestran por separado, sin contarlos como conformes ni no conformes" in text
+    assert "SIN EVALUAR (UNKNOWN): 1 perfil en el detalle" in text
+    assert "Denominador del desglose: 2 perfiles" in text
+    assert "no hay perfiles clasificados como CUMPLE, FUERA o NO CUMPLE" not in text
+
+
+def test_ambiguous_profile_does_not_display_arbitrary_sector():
+    rows = _rows(n=1, sections=1, sector="A") + _rows(n=1, sections=1, sector="B")
+    geometry = [{
+        "section_name": "S-01",
+        "params_design": None,
+        "profile_d": ([0.0, 10.0], [3110.0, 3125.0]),
+        "profile_t": ([0.0, 10.0], [3109.5, 3124.0]),
+    }]
+    data = _data(rows, section_geometry=geometry)
+    payload = _profile_payload(data, data.profiles[0])
+    assert "sector" not in payload
+    assert any("no se pueden atribuir a un sector" in warning for warning in data.warnings)
+    text = "\n".join(_paragraphs(_document(build_word_report(data).getvalue())))
+    assert "no se pueden atribuir a un sector" in text
+    assert "Sector con menor logro de diseño:  (" not in text
+
+
 def test_all_non_compliant_uses_two_per_page():
     rows = _rows(n=6, sections=3)
     for row in rows:
         row["angle_status"] = "NO CUMPLE"
+        row["bench_score"] = 60.0
     text = "\n".join(_paragraphs(_document(build_word_report(_data(rows)).getvalue())))
     assert "Todos los perfiles presentan estado no conforme" in text
     assert "Anexo: perfiles conformes" not in text
@@ -406,6 +527,56 @@ def test_blast_with_float_tolerance_and_geo_holes_projects_on_profiles():
     assert any("Total de pozos registrados | 2" in row for row in flat)
 
 
+@pytest.mark.parametrize(
+    ("inclination", "expected_toe_station"),
+    [(30.0, 10.0), (0.0, 0.0)],
+    ids=("inclined-hole", "vertical-hole"),
+)
+def test_blast_hole_report_toe_uses_projected_toe_station(inclination, expected_toe_station):
+    source = pd.DataFrame([{
+        "Latitud_Geo": 0.0,
+        "Longitud_Geo": 0.0,
+        "Nombre_Banco": 4000.0,
+        "Inclinacion_real": inclination,
+        "Azimuth_real": 0.0,
+        "longitud_real": 20.0,
+        "Incl_convention": "from_vertical",
+        "bench_height_m": 15.0,
+    }])
+    accepted_rows = procesar_pozos(
+        source,
+        geometry_user_confirmed=True,
+        incl_convention="from_vertical",
+    )[0]
+    reference = proyectar_pozos_en_seccion(
+        accepted_rows,
+        origin=np.array([0.0, 0.0]),
+        azimuth=0.0,
+        length=100.0,
+        tolerance=1.0,
+    ).iloc[0]
+    plan_inputs = {
+        "sections": [{
+            "name": "S-01",
+            "origin": [0.0, 0.0],
+            "azimuth": 0.0,
+            "length": 100.0,
+        }],
+    }
+    data = _data(
+        _rows(n=1, sections=1),
+        plan_inputs=plan_inputs,
+        blast={"holes": accepted_rows.to_dict(orient="records"), "tolerance": 1.0},
+    )
+
+    report_holes = _project_holes(data, "S-01")
+
+    assert reference["dist_along_toe"] - reference["dist_along"] == pytest.approx(expected_toe_station)
+    assert report_holes is not None
+    assert report_holes[0]["dist"] == pytest.approx(reference["dist_along"])
+    assert report_holes[0]["toe_dist"] == pytest.approx(reference["dist_along_toe"])
+
+
 def test_empty_dataset_degrades_to_notes():
     data = build_report_data([], {"tolerances": dict(TOLERANCES)}, ReportFilters(), dict(META))
     doc = _document(build_word_report(data).getvalue())
@@ -466,6 +637,7 @@ def test_detail_plots_are_side_by_side_two_per_page():
     rows = _rows(n=8, sections=4)
     for row in rows:
         row["angle_status"] = "NO CUMPLE"
+        row["bench_score"] = 60.0
     doc = _document(build_word_report(_data(rows, section_geometry=_detail_geometry())).getvalue())
 
     grids = [grid for grid in _grid_rows(doc) if len(grid[0]) == 2]
@@ -515,6 +687,7 @@ def test_all_non_compliant_note_matches_parallel_layout():
     rows = _rows(n=8, sections=4)
     for row in rows:
         row["angle_status"] = "NO CUMPLE"
+        row["bench_score"] = 60.0
     text = "\n".join(_paragraphs(_document(build_word_report(_data(rows)).getvalue())))
     assert "Todos los perfiles presentan estado no conforme" in text
     assert "a ancho completo" not in text
@@ -523,7 +696,7 @@ def test_all_non_compliant_note_matches_parallel_layout():
 
 def test_section_seven_starts_on_a_new_page(base_blob):
     doc = _document(base_blob)
-    heading = next(p for p in doc.paragraphs if p.text == "7. Detalle por sección")
+    heading = next(p for p in doc.paragraphs if p.text == "8. Detalle por sección")
     assert heading.paragraph_format.page_break_before is True
 
 
@@ -536,7 +709,9 @@ def test_major_headings_keep_with_next(base_blob):
     ]
     assert len(headings) > 5
     for heading in headings:
-        assert heading.paragraph_format.keep_with_next is True
+        keep_next = heading._p.pPr.find(qn("w:keepNext"))
+        assert keep_next is not None
+        assert keep_next.get(qn("w:val")) in (None, "true", "1")
 
 
 def test_settings_request_field_update_on_open(base_blob):

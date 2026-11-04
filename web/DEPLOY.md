@@ -13,7 +13,7 @@ the FastAPI backend runs on Render.com (free tier). Architecture:
                ▼
 ┌──────────────────────────────────────┐
 │  Render.com (FastAPI + Docker)       │
-│  conciliacion-api.onrender.com       │
+│  Host configured in Pages workflow   │
 └──────────────┬───────────────────────┘
                │
        ┌───────┴────────┐
@@ -29,13 +29,17 @@ the FastAPI backend runs on Render.com (free tier). Architecture:
    - **Source**: "GitHub Actions"
    - Don't set a custom branch — the workflow deploys directly.
 
-2. **Settings → Secrets and variables → Actions → New repository secret**
-   (only if you're not using defaults)
-   - `VITE_BASE` — `"/"` for custom domain, `"/conciliacion-geo-v02/"` for
-     the default project page. **Default is fine** if you don't set it.
-   - `VITE_API_URL` — full URL of the backend
-     (e.g. `https://conciliacion-api.onrender.com`). Default points to
-     the not-yet-deployed Render service.
+2. The workflow accepts `VITE_BASE` as a repository variable or secret:
+   use `"/"` for a custom domain, or leave it unset for the default
+   `"/conciliacion-geo-v02/"` project-page path.
+
+   `.github/workflows/deploy-frontend.yml` currently builds Pages with
+   `VITE_API_URL=https://conciliacion-api-ewbb.onrender.com/api/v1`.
+   The workflow does not read a `VITE_API_URL` repository secret or
+   variable. The client uses this value as-is, so the API base must end
+   in `/api/v1`; change the workflow value if the intended API host
+   changes. This documents the checked-in setting and does not verify
+   that the host is currently deployed.
 
 3. **Settings → Environments → github-pages**
    - Deployment branches: only `main`.
@@ -72,9 +76,16 @@ If you point a custom domain at the GH Pages site:
 A `render.yaml` lives in the repo root (added in Phase 2). Render
 auto-detects it and creates the service on first push to `main`.
 
-Once deployed, the backend URL is `https://<service-name>.onrender.com`.
-Configure CORS via the `CONCILIACION_CORS_ORIGINS` env var (comma-
-separated list of allowed origins) — see `api/main.py`.
+The service URL depends on the Render service name. The Pages workflow
+currently points to `https://conciliacion-api-ewbb.onrender.com`; this
+repository configuration does not verify the remote service or its
+availability. Configure CORS using `CONCILIACION_CORS_ORIGINS`, a
+comma-separated list of allowed origins — see `api/main.py`.
+
+The API reads its SQLite database from
+`<CONCILIACION_DATA_DIR>/conciliacion.db` (`api/database.py`). The
+`DATABASE_URL` entry in `render.yaml` is not read by the current API
+database module; `CONCILIACION_DATA_DIR` determines the path.
 
 ## Local testing of the production build
 
@@ -88,10 +99,10 @@ For end-to-end with the backend:
 
 ```bash
 # Terminal 1
-cd api && uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --reload --port 8000
 
 # Terminal 2
-cd web && VITE_API_URL=http://localhost:8000 npm run dev
+cd web && VITE_API_URL=http://localhost:8000/api/v1 npm run dev
 ```
 
 ## Observability
@@ -135,8 +146,9 @@ alerts. Setup:
 
 1. Create a free account at [uptimerobot.com](https://uptimerobot.com).
 2. **Add New Monitor → HTTP(s)**.
-3. **URL**: `https://conciliacion-api.onrender.com/api/v1/health`
-   (use your actual Render URL).
+3. **URL**: `https://conciliacion-api-ewbb.onrender.com/api/v1/health`
+   (the host configured by the Pages workflow; confirm the actual Render
+   service URL before relying on this monitor).
 4. **Monitoring interval**: 5 minutes (free tier limit).
 5. **Alert contacts**: add your email.
 

@@ -7,6 +7,7 @@ import {
   type BlastGeometryForm,
 } from '../../api/hooks';
 import { getSessionId } from '../../api/client';
+import { DEMO_MESH_IDS, useSession } from '../../stores/session';
 import type { BlastUploadResponse, BlockingError, RejectedRow } from '../../api/types';
 import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { Button } from '../ui/Button';
@@ -30,6 +31,55 @@ const AZ_CONVENTIONS = [
 ] as const;
 const UNITS = ['DEGREES', 'RADIANS'] as const;
 const SOURCE_RULES = ['negative_is_downward_dip', 'positive_only', 'absolute_value'] as const;
+const CSV_HEADER_READ_LIMIT = 64 * 1024;
+
+function parseCsvHeader(text: string): string[] {
+  const firstLine = text.replace(/^\uFEFF/, '').split(/\r?\n/, 1)[0] ?? '';
+  const columns: string[] = [];
+  let value = '';
+  let quoted = false;
+  for (let index = 0; index < firstLine.length; index += 1) {
+    const character = firstLine[index];
+    if (character === '"' && quoted && firstLine[index + 1] === '"') {
+      value += '"';
+      index += 1;
+    } else if (character === '"') {
+      quoted = !quoted;
+    } else if (character === ',' && !quoted) {
+      columns.push(value.trim());
+      value = '';
+    } else {
+      value += character;
+    }
+  }
+  columns.push(value.trim());
+  return [...new Set(columns.filter(Boolean))];
+}
+
+function readCsvHeader(file: File): Promise<string[]> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const rawBytes = new Uint8Array(reader.result as ArrayBuffer);
+        const hasUtf8Bom = rawBytes.length >= 3 && rawBytes[0] === 0xef && rawBytes[1] === 0xbb && rawBytes[2] === 0xbf;
+        const bytes = hasUtf8Bom ? rawBytes.subarray(3) : rawBytes;
+        const utf8 = new TextDecoder('utf-8', { fatal: true });
+        let decoded: string;
+        try {
+          decoded = utf8.decode(bytes);
+        } catch {
+          decoded = new TextDecoder('windows-1252').decode(bytes);
+        }
+        resolve(parseCsvHeader(decoded));
+      } catch {
+        resolve([]);
+      }
+    };
+    reader.onerror = () => resolve([]);
+    reader.readAsArrayBuffer(file.slice(0, CSV_HEADER_READ_LIMIT));
+  });
+}
 
 type Empty = '';
 type Option<T extends string> = T | Empty;
@@ -45,6 +95,8 @@ interface GeometryState {
   azimuthConvention: Option<(typeof AZ_CONVENTIONS)[number]>;
   azimuthUnit: Option<(typeof UNITS)[number]>;
   benchHeightM: string;
+  collarElevationSource: 'bench_height' | 'design_surface';
+  spatialReferenceConfirmed: boolean;
 }
 
 // INTEGRACIÓN §5.3 — NO defaults are pre-selected. Every field begins
@@ -61,6 +113,8 @@ const DEFAULT_STATE: GeometryState = {
   azimuthConvention: '',
   azimuthUnit: '',
   benchHeightM: '',
+  collarElevationSource: 'design_surface',
+  spatialReferenceConfirmed: false,
 };
 
 /**
@@ -79,6 +133,8 @@ function buildGeometry(state: GeometryState): BlastGeometryForm | null {
   if (!state.inclinationUnit) return null;
   if (!state.azimuthConvention) return null;
   if (!state.azimuthUnit) return null;
+  if (state.inclinationConvention === 'FROM_VERTICAL' && state.inclinationSignConvention === 'NEGATIVE_IS_DOWNWARD_DIP') return null;
+  if (state.collarElevationSource === 'design_surface' && !state.spatialReferenceConfirmed) return null;
   if (
     state.inclinationSignConvention === 'SOURCE_DEFINED' &&
     !state.inclinationSourceRule
@@ -99,19 +155,30 @@ function buildGeometry(state: GeometryState): BlastGeometryForm | null {
     azimuth_source_column: state.azimuthSourceColumn.trim(),
     azimuth_convention: state.azimuthConvention,
     azimuth_unit: state.azimuthUnit,
-    bench_height_m: state.benchHeightM ? Number(state.benchHeightM) : undefined,
+    bench_height_m: state.collarElevationSource === 'bench_height' && state.benchHeightM ? Number(state.benchHeightM) : undefined,
+    ...(state.collarElevationSource === 'design_surface'
+      ? { collar_elevation_source: 'design_surface' as const, spatial_reference_confirmed: true }
+      : {}),
   };
 }
 
 export function BlastUploader({ onUploaded }: BlastUploaderProps) {
   const { t } = useTranslation();
+  const { designMeshId, topoMeshId } = useSession();
+  const hasVirtualMesh = (
+    designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo
+  );
   const sessionId = getSessionId();
   const upload = useUploadBlastCsv();
-  const holes = useBlastHolesBySession(sessionId ?? null);
+  const holes = useBlastHolesBySession(hasVirtualMesh ? null : sessionId ?? null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const contractRef = useRef<HTMLDetailsElement>(null);
+  const headerReadVersion = useRef(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [sourceColumns, setSourceColumns] = useState<string[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [uploadPhase, setUploadPhase] = useState<'transfer' | 'processing' | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const filename = selectedFile?.name ?? null;
   const [state, setState] = useState<GeometryState>(DEFAULT_STATE);
 
@@ -128,7 +195,10 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
   };
 
   const geometry: BlastGeometryForm | null = useMemo(() => buildGeometry(state), [state]);
-  const canSubmit = Boolean(sessionId) && selectedFile !== null && geometry !== null && !upload.isPending;
+  const sourceColumnsValid = sourceColumns.length === 0 || (
+    sourceColumns.includes(state.inclinationSourceColumn) && sourceColumns.includes(state.azimuthSourceColumn)
+  );
+  const canSubmit = !hasVirtualMesh && Boolean(sessionId) && selectedFile !== null && geometry !== null && !upload.isPending && sourceColumnsValid;
 
   // INTEGRACIÓN §5.4 — extract structured diagnostics from HTTP 400/422
   // error responses (AxiosError.response.data) so the operator sees the
@@ -150,6 +220,26 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
     : successBlockingErrors;
   const rejectedRows: RejectedRow[] = upload.isError ? errorRejectedRows : successRejectedRows;
   const diagnostics = upload.isError ? errorDiagnostics : upload.data;
+  const eventWarningMessages = (diagnostics?.event_warnings ?? []).map((warning) =>
+    typeof warning.message === 'string'
+      ? warning.message
+      : t('blast.event_warning_generic', { defaultValue: 'Revise las advertencias de los datos de tronadura.' }),
+  );
+
+  if (hasVirtualMesh) {
+    return (
+      <section className="flex flex-col gap-3 rounded-lg border p-4 text-left" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-muted)' }} data-testid="blast-uploader">
+        <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('blast.upload_title')}
+        </h3>
+        <p className="text-xs leading-relaxed text-text-muted" role="status" data-testid="blast-demo-notice">
+          {t('blast.demo_upload_unavailable', {
+            defaultValue: 'La demo usa mallas virtuales y no incluye datos de tronadura. La carga está disponible en una sesión real.',
+          })}
+        </p>
+      </section>
+    );
+  }
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -161,17 +251,36 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
     }
     setFileError(null);
     setSelectedFile(file);
+    setSourceColumns([]);
+    const readVersion = headerReadVersion.current + 1;
+    headerReadVersion.current = readVersion;
+    void readCsvHeader(file).then((columns) => {
+      if (headerReadVersion.current === readVersion) setSourceColumns(columns);
+    });
     upload.reset?.();
     update('confirmed', false);
     if (contractRef.current) contractRef.current.open = true;
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || !sessionId || !geometry || upload.isPending) return;
+    if (hasVirtualMesh || !selectedFile || !sessionId || !geometry || upload.isPending) return;
+    setUploadPhase('transfer');
+    setUploadProgress(0);
     try {
-      const result = await upload.mutateAsync({ sessionId, file: selectedFile, geometry });
+      const result = await upload.mutateAsync({
+        sessionId,
+        file: selectedFile,
+        geometry,
+        onUploadProgress: (progress) => {
+          if (progress == null) return;
+          setUploadProgress(progress);
+          if (progress >= 100) setUploadPhase('processing');
+        },
+      });
+      setUploadPhase(null);
       onUploaded?.(result);
     } catch {
+      setUploadPhase(null);
       return;
     }
   };
@@ -207,26 +316,39 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
         <div className="mt-2 grid grid-cols-2 gap-2">
           <label className="flex flex-col gap-1">
             <span>{t('blast.incl_source_col', { defaultValue: 'Columna fuente de inclinación' })}</span>
-            <input
-              type="text"
-              value={state.inclinationSourceColumn}
-              onChange={(e) => update('inclinationSourceColumn', e.target.value)}
-              placeholder="Inclinacion_real"
-              data-testid="incl-source-column"
-              className={PROJECT_INPUT_CLASS}
-            />
+            {sourceColumns.length > 0 ? (
+              <select value={state.inclinationSourceColumn} onChange={(e) => update('inclinationSourceColumn', e.target.value)} data-testid="incl-source-column" aria-invalid={Boolean(state.inclinationSourceColumn && !sourceColumns.includes(state.inclinationSourceColumn))} className={PROJECT_INPUT_CLASS}>
+                <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
+                {state.inclinationSourceColumn && !sourceColumns.includes(state.inclinationSourceColumn) && <option value={state.inclinationSourceColumn}>{state.inclinationSourceColumn}</option>}
+                {sourceColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            ) : (
+              <input type="text" value={state.inclinationSourceColumn} onChange={(e) => update('inclinationSourceColumn', e.target.value)} placeholder="Inclinacion_real" data-testid="incl-source-column" className={PROJECT_INPUT_CLASS} />
+            )}
           </label>
+          {sourceColumns.length > 0 && state.inclinationSourceColumn && !sourceColumns.includes(state.inclinationSourceColumn) && (
+            <p className="col-span-2 text-xs text-text-muted" role="status">{t('blast.source_column_missing', { column: state.inclinationSourceColumn, defaultValue: 'La columna «{{column}}» no está en el encabezado del archivo seleccionado. Elija una columna disponible.' })}</p>
+          )}
+          {state.inclinationConvention === 'FROM_VERTICAL' && state.inclinationSignConvention === 'NEGATIVE_IS_DOWNWARD_DIP' && (
+            <p className="col-span-2 rounded-md border p-2 text-xs" role="alert" style={{ borderColor: 'var(--color-status-error)', color: 'var(--color-status-error)' }}>
+              {t('blast.inclination_convention_sign_incompatible', { defaultValue: 'La convención desde la vertical no es compatible con la regla «negativo indica buzamiento descendente». Seleccione buzamiento desde la horizontal o una política de signo compatible.' })}
+            </p>
+          )}
           <label className="flex flex-col gap-1">
             <span>{t('blast.az_source_col', { defaultValue: 'Columna fuente de azimut' })}</span>
-            <input
-              type="text"
-              value={state.azimuthSourceColumn}
-              onChange={(e) => update('azimuthSourceColumn', e.target.value)}
-              placeholder="Azimuth_real"
-              data-testid="az-source-column"
-              className={PROJECT_INPUT_CLASS}
-            />
+            {sourceColumns.length > 0 ? (
+              <select value={state.azimuthSourceColumn} onChange={(e) => update('azimuthSourceColumn', e.target.value)} data-testid="az-source-column" aria-invalid={Boolean(state.azimuthSourceColumn && !sourceColumns.includes(state.azimuthSourceColumn))} className={PROJECT_INPUT_CLASS}>
+                <option value="">{t('blast.select_option', { defaultValue: 'Seleccione una opción' })}</option>
+                {state.azimuthSourceColumn && !sourceColumns.includes(state.azimuthSourceColumn) && <option value={state.azimuthSourceColumn}>{state.azimuthSourceColumn}</option>}
+                {sourceColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+              </select>
+            ) : (
+              <input type="text" value={state.azimuthSourceColumn} onChange={(e) => update('azimuthSourceColumn', e.target.value)} placeholder="Azimuth_real" data-testid="az-source-column" className={PROJECT_INPUT_CLASS} />
+            )}
           </label>
+          {sourceColumns.length > 0 && state.azimuthSourceColumn && !sourceColumns.includes(state.azimuthSourceColumn) && (
+            <p className="col-span-2 text-xs text-text-muted" role="status">{t('blast.source_column_missing', { column: state.azimuthSourceColumn, defaultValue: 'La columna «{{column}}» no está en el encabezado del archivo seleccionado. Elija una columna disponible.' })}</p>
+          )}
           <label className="flex flex-col gap-1">
             <span>{t('blast.incl_convention', { defaultValue: 'Convención de inclinación' })}</span>
             <select
@@ -314,17 +436,31 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             </select>
           </label>
           <label className="flex flex-col gap-1 col-span-2">
-            <span>{t('blast.bench_height', { defaultValue: 'Altura de banco (m)' })}</span>
-            <input
-              type="number"
-              min="0"
-              step="0.1"
-              value={state.benchHeightM}
-              onChange={(e) => update('benchHeightM', e.target.value)}
-              data-testid="bench-height"
+            <span>{t('blast.collar_elevation_source', { defaultValue: 'Fuente de cota de collar' })}</span>
+            <select
+              value={state.collarElevationSource}
+              onChange={(e) => update('collarElevationSource', e.target.value as GeometryState['collarElevationSource'])}
+              data-testid="collar-elevation-source"
               className={PROJECT_INPUT_CLASS}
-            />
+            >
+              <option value="bench_height">{t('blast.collar_source_height', { defaultValue: 'Altura de banco (modo actual)' })}</option>
+              <option value="design_surface">{t('blast.collar_source_design', { defaultValue: 'Superficie de diseño' })}</option>
+            </select>
           </label>
+          {state.collarElevationSource === 'bench_height' ? (
+            <label className="flex flex-col gap-1 col-span-2">
+              <span>{t('blast.bench_height', { defaultValue: 'Altura de banco (m)' })}</span>
+              <input type="number" min="0" step="0.1" value={state.benchHeightM} onChange={(e) => update('benchHeightM', e.target.value)} data-testid="bench-height" className={PROJECT_INPUT_CLASS} />
+            </label>
+          ) : (
+            <div className="col-span-2 flex flex-col gap-2 rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }} data-testid="design-surface-elevation">
+              <p>{t('blast.design_surface_help', { defaultValue: 'La cota del collar se estimará desde la superficie de diseño. El factor de carga volumétrico puede quedar indisponible o ser aproximado; no se infiere la altura real del banco.' })}</p>
+              <label className="flex items-start gap-2">
+                <input type="checkbox" checked={state.spatialReferenceConfirmed} onChange={(e) => update('spatialReferenceConfirmed', e.target.checked)} data-testid="spatial-reference-confirmed" />
+                <span>{t('blast.spatial_reference_confirm', { defaultValue: 'Confirmo que coordenadas, CRS, unidades y datum de la CSV son compatibles con la superficie de diseño.' })}</span>
+              </label>
+            </div>
+          )}
           <label className="col-span-2 flex items-center gap-2 mt-1" data-testid="confirm-row">
             <input
               type="checkbox"
@@ -358,10 +494,20 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
           })}
         </p>
       )}
-      {upload.isPending && (
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          {t('blast.uploading')}
-        </p>
+      {(upload.isPending || uploadPhase !== null) && (
+        <div className="space-y-1" role="status" aria-live="polite" data-testid="blast-upload-progress">
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+            {uploadPhase === 'processing'
+              ? t('blast.processing_geometry')
+              : t('blast.transferring_file')}
+          </p>
+          {uploadPhase !== 'processing' && uploadProgress != null && (
+            <div className="flex items-center gap-2">
+              <progress className="h-2 w-full" max={100} value={uploadProgress} aria-label={t('blast.transfer_progress')} />
+              <span className="shrink-0 text-xs" style={{ color: 'var(--color-text-muted)' }}>{uploadProgress}%</span>
+            </div>
+          )}
+        </div>
       )}
       {upload.isError && (
         <div className="text-xs" role="alert" data-testid="upload-error" style={{ color: 'var(--color-status-error, #ef4444)' }}>
@@ -400,6 +546,11 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
         <div className="grid gap-2 text-xs" data-testid="processing-diagnostics">
           <div data-testid="accepted-rows">{t('blast.accepted_rows_label')}: {diagnostics.accepted_rows?.length ?? 0}</div>
           <div data-testid="event-warnings">{t('blast.event_warnings_label')}: {diagnostics.event_warnings?.length ?? 0}</div>
+          {eventWarningMessages.length > 0 && (
+            <ul aria-label={t('blast.event_warnings_label')} aria-live="polite" className="ml-4 list-disc" data-testid="event-warning-messages">
+              {eventWarningMessages.map((message, index) => <li key={index}>{message}</li>)}
+            </ul>
+          )}
           <div>
             <strong>{t('blast.processing_summary_label')}</strong>
             <pre data-testid="processing-summary">{JSON.stringify(diagnostics.processing_summary ?? {}, null, 2)}</pre>
@@ -428,6 +579,18 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               {t('blast.descarga_mean', { value: upload.data.descarga_mean.toFixed(2) })}
             </p>
+          )}
+          {upload.data.design_surface && (
+            <div className="mt-2 rounded-md border p-2 text-xs" style={{ borderColor: 'var(--color-border)' }} data-testid="design-surface-sampling-summary">
+              <strong>{t('blast.design_surface_sampling_title')}</strong>
+              <p>{t('blast.design_surface_sampling_coverage', { coverage: (upload.data.design_surface.coverage * 100).toFixed(1), rows: upload.data.design_surface.rows })}</p>
+              <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1">
+                <div><dt className="inline">{t('blast.design_surface_sampled')}: </dt><dd className="inline" data-testid="design-surface-sampled">{upload.data.design_surface.counts.sampled}</dd></div>
+                <div><dt className="inline">{t('blast.design_surface_outside')}: </dt><dd className="inline" data-testid="design-surface-outside">{upload.data.design_surface.counts.outside}</dd></div>
+                <div><dt className="inline">{t('blast.design_surface_ambiguous')}: </dt><dd className="inline" data-testid="design-surface-ambiguous">{upload.data.design_surface.counts.ambiguous}</dd></div>
+                <div><dt className="inline">{t('blast.design_surface_invalid')}: </dt><dd className="inline" data-testid="design-surface-invalid">{upload.data.design_surface.counts.invalid}</dd></div>
+              </dl>
+            </div>
           )}
         </div>
       )}

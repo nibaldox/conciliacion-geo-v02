@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import type { ComparisonResult } from '../../../api/types';
-import { filterResults, type ResultFilterState } from '../resultFilters';
+import { filterResults, type ResultFilterState } from '../resultFilters.utils';
 import {
   computeGlobalScore,
   computeParameterBreakdown,
@@ -91,7 +91,8 @@ describe('report_parity fixture — web dashboard functions', () => {
   it('computeProfileScores / computeGlobalScore match the weighted scores', () => {
     const scores = computeProfileScores(rows);
     for (const [section, score] of Object.entries(expected.profile_scores)) {
-      expect(scores.get(section), section).toBeCloseTo(score, 9);
+      if (score == null) expect(scores.has(section), section).toBe(false);
+      else expect(scores.get(section), section).toBeCloseTo(score, 9);
     }
     expect(scores.has('S-04')).toBe(false);
     expect(computeGlobalScore(rows)).toBeCloseTo(expected.global_weighted_score, 9);
@@ -115,7 +116,8 @@ describe('report_parity fixture — web dashboard functions', () => {
     const fallbackExpected = fixture.fallback_expected;
     const scores = computeProfileScores(fallbackRows);
     for (const [section, score] of Object.entries(fallbackExpected.profile_scores)) {
-      expect(scores.get(section), section).toBeCloseTo(score, 9);
+      if (score == null) expect(scores.has(section), section).toBe(false);
+      else expect(scores.get(section), section).toBeCloseTo(score, 9);
     }
     expect(computeGlobalScore(fallbackRows)).toBeCloseTo(fallbackExpected.global_weighted_score, 9);
   });

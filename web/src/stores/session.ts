@@ -80,6 +80,7 @@ interface SessionState {
 
   // Selections
   selectedSection: string | null;
+  selectedBlastHoleRowId: string | null;
   designMeshId: string | null;
   topoMeshId: string | null;
 
@@ -108,6 +109,7 @@ interface SessionState {
   setMapClickHandler: (handler: ((anchor: CurveAnchor) => void) | null) => void;
   dispatchCurveSelection: (action: CurveSelectionAction) => void;
   setSelectedSection: (id: string | null) => void;
+  setSelectedBlastHoleRowId: (rowId: string | null) => void;
   setDesignMeshId: (id: string | null) => void;
   setTopoMeshId: (id: string | null) => void;
   setFilters: (filters: Partial<SessionState['filters']>) => void;
@@ -124,6 +126,7 @@ const initialState = {
   mapClickHandler: null,
   curveSelection: createCurveSelectionState(null),
   selectedSection: null,
+  selectedBlastHoleRowId: null,
   designMeshId: null,
   topoMeshId: null,
   filters: { sector: [], section: [], level: [], bench: [] },
@@ -155,6 +158,7 @@ export const useSession = create<SessionState>((set, get) => ({
       return next === s.curveSelection ? s : { curveSelection: next };
     }),
   setSelectedSection: (id) => set({ selectedSection: id }),
+  setSelectedBlastHoleRowId: (rowId) => set({ selectedBlastHoleRowId: rowId }),
   setDesignMeshId: (id) =>
     set((s) =>
       s.designMeshId === id
@@ -177,6 +181,7 @@ export const useSession = create<SessionState>((set, get) => ({
         activeWorkspaceView: 'profiles',
         curveSelection: createCurveSelectionState(null),
         selectedSection: existing.sections[0]?.section_name ?? null,
+        selectedBlastHoleRowId: null,
         demoLoading: false,
         demoError: null,
       });
@@ -201,6 +206,7 @@ export const useSession = create<SessionState>((set, get) => ({
         activeWorkspaceView: 'profiles',
         curveSelection: createCurveSelectionState(null),
         selectedSection: data.sections[0]?.section_name ?? null,
+        selectedBlastHoleRowId: null,
       });
     } catch (err) {
       set({
@@ -219,6 +225,7 @@ export const useSession = create<SessionState>((set, get) => ({
       designMeshId: null,
       topoMeshId: null,
       selectedSection: null,
+      selectedBlastHoleRowId: null,
       currentStep: 1,
       activeWorkspaceView: '3d',
       curveSelection: createCurveSelectionState(null),
