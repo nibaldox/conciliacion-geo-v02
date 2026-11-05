@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useHotkeys } from './hooks/useHotkeys';
-import { useSession } from './stores/session';
+import { DEMO_MESH_IDS, useSession } from './stores/session';
 import { useTheme } from './stores/theme';
 import { useSections, useProcessStatus } from './api/hooks';
 
@@ -133,6 +133,7 @@ function WorkspaceRouter() {
   const activeWorkspaceView = useSession((s) => s.activeWorkspaceView);
   const designMeshId = useSession((s) => s.designMeshId);
   const topoMeshId = useSession((s) => s.topoMeshId);
+  const isVirtualDemoSession = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
   const { data: sections } = useSections();
   const { data: status } = useProcessStatus();
   const { t } = useTranslation();
@@ -153,7 +154,7 @@ function WorkspaceRouter() {
   }
 
   // 2. Sections prerequisite check
-  if (bothUploaded && !hasSections && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
+  if (bothUploaded && !hasSections && !(isVirtualDemoSession && activeWorkspaceView === 'export-ai') && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
     return (
       <WarningState
         icon="📏"
@@ -164,7 +165,7 @@ function WorkspaceRouter() {
   }
 
   // 3. Process completion check
-  if (bothUploaded && hasSections && !isComplete && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
+  if (bothUploaded && hasSections && !isComplete && !(isVirtualDemoSession && activeWorkspaceView === 'export-ai') && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
     return (
       <WarningState
         icon="⚡"
@@ -209,7 +210,7 @@ function WorkspaceRouter() {
       return (
         <div data-slot="export-workspace" className="h-full flex flex-col gap-5 overflow-y-auto pb-4">
           <ExportPanel />
-          <LazyAIReporter />
+          {!isVirtualDemoSession && <LazyAIReporter />}
         </div>
       );
     default:
@@ -229,7 +230,7 @@ function LoadingSpinner() {
   );
 }
 
-function App() {
+function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean }) {
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -272,6 +273,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppLayout>
+        {sessionRestoreFailed && (
+          <div role="alert" className="mx-4 mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--color-status-error)', color: 'var(--color-status-error)' }}>
+            {i18n.t('sessionRecovery.failed')}
+          </div>
+        )}
         <ErrorBoundary>
           <Suspense fallback={<LoadingSpinner />}>
             <WorkspaceRouter />

@@ -12,7 +12,7 @@
 
 import type { ComparisonResultDto, ProfileDataDto, SectionResponseDto } from './types';
 import type { Bench, ComparisonBenchStatus, DesignBenchStatus, ProfileLine, ProfilePoint, ProfileViewModel, ProfileWarnings, SectionMeta } from './types';
-import { worstOfThree, parseBenchStatus } from './status';
+import { classifyComparisonBenchStatus, parseBenchStatus, resolveBenchScore } from './status';
 
 // ─── Section meta ───────────────────────────────────────────
 
@@ -114,9 +114,7 @@ export function toBench(
 ): SpillBench {
   const matched = comparison?.type === 'MATCH';
   const designComparison = matched ? comparison : null;
-  const status = comparison
-    ? worstOfThree(comparison.height_status, comparison.angle_status, comparison.berm_status)
-    : 'UNKNOWN';
+  const status = classifyComparisonBenchStatus(comparison);
 
   return {
     benchNumber: raw.bench_number,
@@ -147,7 +145,7 @@ export function toBench(
     spillStartDistance: raw.spill_start_distance != null && Number.isFinite(raw.spill_start_distance) ? raw.spill_start_distance : null,
     spillStartElevation: raw.spill_start_elevation != null && Number.isFinite(raw.spill_start_elevation) ? raw.spill_start_elevation : null,
     floorElevation: raw.floor_elevation != null && Number.isFinite(raw.floor_elevation) && raw.floor_elevation > 0 ? raw.floor_elevation : null,
-    benchScore: comparison?.bench_score ?? null,
+    benchScore: resolveBenchScore(comparison),
   };
 }
 
@@ -197,7 +195,7 @@ export function toComparisonBenchStatuses(
         sectionName: comparison.section,
         designBenchNumber: comparison.type === 'EXTRA' ? null : comparison.bench_num,
         designElevation: Number.isFinite(parsedElevation) ? parsedElevation : null,
-        status: worstOfThree(comparison.height_status, comparison.angle_status, comparison.berm_status),
+        status: classifyComparisonBenchStatus(comparison),
         hasTopo: comparison.type !== 'MISSING',
         isAdditional: comparison.type === 'EXTRA',
       };

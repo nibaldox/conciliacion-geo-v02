@@ -689,14 +689,20 @@ def compute_influence_area_report(
 
     # Classify each collar against the domain BEFORE Voronoi/early returns.
     site_status_arr: list[str] = []
+    domain_status = report["collar_domain_status"].to_numpy(copy=True)
+    inside_domain = report["collar_inside_domain"].to_numpy(dtype=bool, copy=True)
+    on_boundary = report["collar_on_boundary"].to_numpy(dtype=bool, copy=True)
+    area_values = report["area_m2"].to_numpy(dtype=float, copy=True)
+    area_status = report["area_status"].to_numpy(dtype=object, copy=True)
+    validation_messages = report["collar_validation_message"].to_numpy(dtype=object, copy=True)
     for i in range(n):
         if not finite[i]:
             site_status_arr.append("INVALID_COORDINATES")
-            report.iat[i, report.columns.get_loc("collar_domain_status")] = "INVALID_COORDINATES"
-            report.iat[i, report.columns.get_loc("collar_inside_domain")] = False
-            report.iat[i, report.columns.get_loc("area_m2")] = 0.0
-            report.iat[i, report.columns.get_loc("area_status")] = "invalid_coordinates"
-            report.iat[i, report.columns.get_loc("collar_validation_message")] = (
+            domain_status[i] = "INVALID_COORDINATES"
+            inside_domain[i] = False
+            area_values[i] = 0.0
+            area_status[i] = "invalid_coordinates"
+            validation_messages[i] = (
                 "Coordenadas no finitas/no numéricas: excluido del dominio."
             )
             continue
@@ -706,22 +712,29 @@ def compute_influence_area_report(
             # Exact geometric predicates — NO invented tolerance.
             if poly.boundary.covers(pt):
                 site_status_arr.append("BOUNDARY")
-                report.iat[i, report.columns.get_loc("collar_domain_status")] = "BOUNDARY"
-                report.iat[i, report.columns.get_loc("collar_on_boundary")] = True
+                domain_status[i] = "BOUNDARY"
+                on_boundary[i] = True
             elif poly.covers(pt):
                 site_status_arr.append("INSIDE")
             else:
                 site_status_arr.append("OUTSIDE")
-                report.iat[i, report.columns.get_loc("collar_domain_status")] = "OUTSIDE"
-                report.iat[i, report.columns.get_loc("collar_inside_domain")] = False
-                report.iat[i, report.columns.get_loc("area_m2")] = 0.0
-                report.iat[i, report.columns.get_loc("area_status")] = "outside_domain"
-                report.iat[i, report.columns.get_loc("collar_validation_message")] = (
+                domain_status[i] = "OUTSIDE"
+                inside_domain[i] = False
+                area_values[i] = 0.0
+                area_status[i] = "outside_domain"
+                validation_messages[i] = (
                     f"Collar ({x}, {y}) fuera del dominio evaluado: excluido, "
                     "recibe 0 m² y no participa del reparto."
                 )
         else:
             site_status_arr.append("INSIDE")
+
+    report["collar_domain_status"] = domain_status
+    report["collar_inside_domain"] = inside_domain
+    report["collar_on_boundary"] = on_boundary
+    report["area_m2"] = area_values
+    report["area_status"] = area_status
+    report["collar_validation_message"] = validation_messages
 
     # Early returns — AFTER spatial validation so OUTSIDE collars are
     # correctly classified even with fewer than 4 sites (4.1).
@@ -733,10 +746,12 @@ def compute_influence_area_report(
     if len(uniq_inside) < 4:
         # Not enough interior sites for a Voronoi partition: interior rows
         # keep INSIDE status but influence area stays NaN (blocked).
-        inside_rows = df.index[inside_finite]
-        report.loc[inside_rows, "collar_validation_message"] = (
-            "Sitios interiores insuficientes para partición Voronoi (n<4): bloqueado."
-        )
+        message = "Sitios interiores insuficientes para partición Voronoi (n<4): bloqueado."
+        if report.index.is_unique:
+            validation_messages[inside_finite] = message
+            report["collar_validation_message"] = validation_messages
+        else:
+            report.loc[df.index[inside_finite], "collar_validation_message"] = message
         return report
 
     # Remediación final 4.2: Voronoi built EXCLUSIVELY with valid interior
@@ -804,14 +819,13 @@ def compute_influence_area_report(
 
     # Assign areas to interior collars ONLY — external/invalid collars were
     # already set to 0.0 during the spatial validation (above).
-    inside_rows = df.index[inside_finite]
-    # Map each inside row to its unique-interior-site index.
-    inside_pos_map = np.flatnonzero(inside_finite)
+    inside_positions = np.flatnonzero(inside_finite)
+    grouped_positions = inside_positions[np.argsort(inverse_inside, kind="stable")]
+    group_offsets = np.concatenate(([0], np.cumsum(counts)))
 
     for site in range(len(uniq_inside)):
-        mask = inverse_inside == site
-        idx = inside_rows[mask]
-        if len(idx) == 0:
+        positions = grouped_positions[group_offsets[site]:group_offsets[site + 1]]
+        if len(positions) == 0:
             continue
         if polys_for_clip is not None and not polys_for_clip[site].is_empty:
             clipped = polys_for_clip[site].intersection(poly_clip)
@@ -832,19 +846,34 @@ def compute_influence_area_report(
                 st = "voronoi_cell"
         # H-03: duplicate collars SPLIT the shared cell.
         a = a / float(counts[site])
-        report.loc[idx, "area_m2"] = a
-        report.loc[idx, "area_status"] = st
+        if report.index.is_unique:
+            area_values[positions] = a
+            area_status[positions] = st
+        else:
+            idx = df.index[positions]
+            report.loc[idx, "area_m2"] = a
+            report.loc[idx, "area_status"] = st
 
     # Duplicate classification AFTER spatial validation: only interior dups.
     if counts.max() > 1:
         for site in range(len(uniq_inside)):
             if counts[site] <= 1:
                 continue
-            mask = inverse_inside == site
-            idx = inside_rows[mask]
-            if (report.loc[idx, "area_m2"] > 0).all():
-                report.loc[idx, "area_status"] = "duplicate_shared"
-                report.loc[idx, "collar_domain_status"] = "DUPLICATE_INSIDE"
+            positions = grouped_positions[group_offsets[site]:group_offsets[site + 1]]
+            if report.index.is_unique:
+                if (area_values[positions] > 0).all():
+                    area_status[positions] = "duplicate_shared"
+                    domain_status[positions] = "DUPLICATE_INSIDE"
+            else:
+                idx = df.index[positions]
+                if (report.loc[idx, "area_m2"] > 0).all():
+                    report.loc[idx, "area_status"] = "duplicate_shared"
+                    report.loc[idx, "collar_domain_status"] = "DUPLICATE_INSIDE"
+
+    if report.index.is_unique:
+        report["area_m2"] = area_values
+        report["area_status"] = area_status
+        report["collar_domain_status"] = domain_status
 
     if domain_area is not None:
         report["domain_area_m2"] = float(domain_area)

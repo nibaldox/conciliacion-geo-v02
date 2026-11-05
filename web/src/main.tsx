@@ -12,9 +12,15 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './styles/globals.css'
 import App from './App'
+import { restoreSessionFromHash } from './sessionRecovery'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+async function mountApp() {
+  const sessionRestoreFailed = await restoreSessionFromHash();
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <App sessionRestoreFailed={sessionRestoreFailed} />
+    </StrictMode>,
+  );
+}
+
+void mountApp();

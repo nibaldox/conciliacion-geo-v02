@@ -156,6 +156,9 @@ def test_happy_path_returns_rows_with_pf_g_per_ton(client):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["rows"]) == 1
+    assert data["temporal_filter"]["enabled"] is False
+    assert data["temporal_filter"]["included"] == 2
+    assert data["temporal_filter"]["total"] == 2
 
     row = data["rows"][0]
     assert row["section_name"] == "S-01"
@@ -166,6 +169,50 @@ def test_happy_path_returns_rows_with_pf_g_per_ton(client):
     assert row["total_kg"] == pytest.approx(400.0, abs=1e-3)
     assert row["n_over"] == 1
     assert row["n_under"] == 1
+
+
+def test_survey_date_filters_known_late_and_missing_holes(client):
+    headers = _seed_session(client)
+    session_id = headers["x-session-id"]
+    holes = [
+        {**_hole("H-early", 0.0, 10.0), "fecha_tronadura": "2026-05-01"},
+        {**_hole("H-late", 0.0, 12.0), "fecha_tronadura": "2026-05-04"},
+        {**_hole("H-missing", 0.0, 14.0), "fecha_tronadura": None},
+    ]
+    db.save_settings(session_id, {"blast_holes": holes})
+    db.save_results(session_id, [{"section": "S-01", "delta_crest": 0.3}])
+
+    resp = client.get(
+        "/api/v1/process/blast-correlation?survey_date=2026-05-10",
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["rows"][0]["num_wells"] == 1
+    assert len(data["carga"]) == 1
+    assert data["carga"][0] == pytest.approx(200.0 / 12.0)
+    assert data["descarga"] == []
+    assert data["n_sections"] == 1
+    assert data["temporal_filter"] == {
+        "enabled": True,
+        "survey_date": "2026-05-10",
+        "effective_cutoff_date": "2026-05-03",
+        "buffer_days": 7,
+        "policy": "include known blast dates on or before effective_cutoff_date; exclude later known dates; never include missing or invalid dates",
+        "included": 1,
+        "excluded": 1,
+        "missing": 1,
+        "total": 3,
+    }
+
+
+def test_invalid_survey_date_returns_422(client):
+    headers = _seed_session(client)
+    resp = client.get(
+        "/api/v1/process/blast-correlation?survey_date=not-a-date",
+        headers=headers,
+    )
+    assert resp.status_code == 422
 
 
 def test_response_schema_is_correct(client):

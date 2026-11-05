@@ -204,6 +204,17 @@ def get_or_create_session(session_id: Optional[str] = None) -> str:
     return create_session()
 
 
+def session_exists(session_id: str) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
+
+
 def cleanup_old_sessions(max_age_hours: int = 24):
     """Delete sessions older than max_age_hours."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
@@ -577,11 +588,13 @@ def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
     settings["spatial_diagnostics"] = payload.get("spatial_diagnostics", {})
     settings["data_warnings"] = payload.get("data_warnings", "")
     settings["geometry_configuration"] = payload.get("geometry_configuration", {})
+    settings["design_surface"] = payload.get("design_surface")
     settings["blast_upload_meta"] = {
         "n_holes": payload.get("n_holes", 0),
         "n_rows_loaded": payload.get("n_rows_loaded", 0),
         "n_rows_skipped": payload.get("n_rows_skipped", 0),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "design_surface": payload.get("design_surface"),
     }
     save_settings(session_id, settings)
 

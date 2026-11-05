@@ -20,8 +20,8 @@ const BLOCK1: Record<string, Entry> = {
   'dashboard.plot.axis.delta_toe': { es: 'Δ Pata (m)', en: 'Δ Toe (m)' },
   'dashboard.plot.axis.berm_width': { es: 'Ancho de berma real (m)', en: 'Actual berm width (m)' },
   'dashboard.kpi.classification_note': {
-    es: 'La clasificación de perfiles sigue el peor estado de banco por tolerancia y es independiente del Puntaje de Logro Diseño.',
-    en: 'Profile classification follows the worst bench tolerance status and is independent of the design achievement score.',
+    es: 'La clasificación del perfil sigue el peor score de sus bancos (≥70 cumple). Es independiente del Puntaje de Logro Diseño; las métricas individuales se evalúan por tolerancias.',
+    en: 'Profile classification follows the worst bench score (≥70 passes). It is independent of design achievement; individual metrics are evaluated against tolerances.',
   },
   'table.order_label': { es: "Orden", en: "Order" },
   'table.order_by_section': { es: "Por Sección", en: "By section" },

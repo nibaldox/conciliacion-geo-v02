@@ -51,6 +51,7 @@ function AccordionItem({ id, title, icon, openSection, toggle, children }: Accor
   return (
     <div className="contents">
       <button
+        type="button"
         onClick={() => toggle(id)}
         aria-expanded={isOpen}
         aria-controls={`project-panel-${id}`}
@@ -64,7 +65,9 @@ function AccordionItem({ id, title, icon, openSection, toggle, children }: Accor
       >
         <span className="flex min-w-0 items-center gap-1.5">{icon}<span className="truncate">{title}</span></span>
       </button>
-      {isOpen && <div id={`project-panel-${id}`} className="col-span-2 row-start-3 overflow-hidden rounded-lg border border-border">{children}</div>}
+      <div id={`project-panel-${id}`} hidden={!isOpen} className="col-span-2 row-start-3 overflow-hidden rounded-lg border border-border">
+        {isOpen && children}
+      </div>
     </div>
   );
 }
@@ -203,8 +206,8 @@ export function LeftSidebar() {
           onClick={() => setSidebarCollapsed(false)}
           className="w-8 h-8 rounded-md flex items-center justify-center border hover:bg-surface-muted transition-colors cursor-pointer text-xs mb-6"
           style={{ borderColor: 'var(--color-border)' }}
-          title={t('sidebar.expand', { defaultValue: 'Expandir Panel' })}
-          aria-label={t('sidebar.expand', { defaultValue: 'Expandir Panel' })}
+          title={t('sidebar.expand', { defaultValue: 'Expandir panel' })}
+          aria-label={t('sidebar.expand', { defaultValue: 'Expandir panel' })}
         >
           ▶
         </button>
@@ -278,7 +281,7 @@ export function LeftSidebar() {
             {!bothUploaded ? (
               <div className="p-2 rounded-md border border-dashed text-center" style={{ borderColor: 'var(--status-nok-border)', backgroundColor: 'var(--status-nok-bg)' }}>
                 <p className="text-xs font-medium" style={{ color: 'var(--status-nok-text)' }}>
-                  {t('plan_view_no_data', { defaultValue: 'Cargue superficies primero para definir secciones' })}
+                  {t('sidebar.no_surfaces_for_sections', { defaultValue: 'Cargue superficies primero para definir secciones' })}
                 </p>
               </div>
             ) : (
@@ -304,7 +307,12 @@ export function LeftSidebar() {
                 {/* Selected form */}
                 <div className="min-w-0">
                   {sectionTab === 'curves' && (
-                    <SectionCurveForm onRegisterClickHandler={setMapClickHandler} />
+                    <>
+                      <p role="note" className="rounded-md border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-secondary">
+                        {t('workspace.curve_view_hint', { defaultValue: 'La vista 3D se activa automáticamente. Elige una curva en la superficie para definir la sección.' })}
+                      </p>
+                      <SectionCurveForm onRegisterClickHandler={setMapClickHandler} />
+                    </>
                   )}
                   {sectionTab === 'file' && <SectionFileUpload />}
                 </div>

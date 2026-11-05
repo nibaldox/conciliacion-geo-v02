@@ -103,6 +103,61 @@ class TestEndToEndColumnMapping:
         assert "Tipo_Explosivo" in df_proc.columns
         assert "Hole_ID" in df_proc.columns
 
+    def test_confirmed_mapping_wins_alias_collision_and_keeps_bench_semantics(self):
+        df = pd.DataFrame({
+            "X": [999.0],
+            "Easting_m": [100.0],
+            "Northing_m": [200.0],
+            "Nombre_Banco": [300.0],
+            "Dip_deg": [5.0],
+            "Heading_deg": [90.0],
+            "Drill_Length_m": [10.0],
+        })
+        mapping = {
+            "X": "Easting_m", "Y": "Northing_m", "Z_collar": "Nombre_Banco",
+            "Incl": "Dip_deg", "Az": "Heading_deg", "Len": "Drill_Length_m",
+        }
+
+        result = procesar_pozos(
+            df, column_map=mapping, preserve_invalid_mapped_rows=True,
+            incl_convention="from_vertical", geometry_user_confirmed=True,
+            return_result=True,
+        )
+
+        assert result.accepted_dataframe.iloc[0]["X"] == 100.0
+        assert result.accepted_dataframe.iloc[0]["Z_collar"] == 300.0
+        assert result.accepted_dataframe.iloc[0]["Z_collar_semantic"] == "bench_elevation_untransformed"
+
+    def test_mapping_preserves_invalid_rows_and_design_surface_replaces_missing_z(self):
+        from core.design_surface_sampling import DesignSurfaceSample
+
+        df = pd.DataFrame({
+            "East": [100.0, 101.0], "North": [200.0, 201.0],
+            "Dip": [5.0, 5.0], "Heading": [90.0, 90.0],
+            "DrillLength": [10.0, None], "__design_surface_z_pending": [0.0, 0.0],
+        })
+        mapping = {
+            "X": "East", "Y": "North", "Z_collar": "__design_surface_z_pending",
+            "Incl": "Dip", "Az": "Heading", "Len": "DrillLength",
+        }
+
+        result = procesar_pozos(
+            df, column_map=mapping, preserve_invalid_mapped_rows=True,
+            incl_convention="from_vertical", geometry_user_confirmed=True,
+            design_surface_samples=(
+                DesignSurfaceSample("sampled", 305.0, "test", ""),
+                DesignSurfaceSample("outside", None, "test", "outside"),
+            ),
+            design_surface_mesh_id="mesh", design_surface_sha256="sha",
+            return_result=True,
+        )
+
+        assert len(result.accepted_dataframe) == 1
+        assert result.accepted_dataframe.iloc[0]["Z_collar"] == 305.0
+        assert result.accepted_dataframe.iloc[0]["Z_collar_semantic"] == "design_surface_estimate"
+        assert len(result.rejected_rows) == 2
+        assert {row["source_column"] for row in result.rejected_rows} == {"superficie_diseno", "DrillLength"}
+
     def test_completely_alien_schema(self):
         """CSV with zero recognizable columns → auto_map returns all None."""
         df = pd.DataFrame({

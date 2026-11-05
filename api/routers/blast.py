@@ -12,14 +12,17 @@ import asyncio
 import io
 import logging
 import math
+import hashlib
+import json
 from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
 import api.database as db
 import api.schemas as schemas
+from api.blast_identity import blast_hole_id, blast_row_ids
 from core.calculo_tronadura import procesar_pozos
 from core.column_utils import KILOS_CANDIDATES, first_present_column
 from core.geometry_contract import (
@@ -39,8 +42,73 @@ def _run_in_executor(func, *args):
 
 router = APIRouter(prefix="/blast", tags=["blast"])
 
+from api.blast_import import mapping_errors, preview_payload, read_blast_file
+
 _LENGTH_CANDIDATES = ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
 _TACO_CANDIDATES = ("Taco_m", "Taco", "Stemming")
+
+
+def _decode_csv_bytes(file_bytes: bytes) -> str:
+    try:
+        return file_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            return file_bytes.decode("cp1252")
+        except UnicodeDecodeError:
+            return file_bytes.decode("latin-1")
+
+
+def _resolve_design_xy_columns(
+    df: pd.DataFrame,
+) -> tuple[str, str]:
+    from core.column_mapping import CANONICAL_FIELDS
+    alias_map = {field.name: field.aliases for field in CANONICAL_FIELDS if field.name in {"X", "Y"}}
+    legacy_aliases = {"X": ("Latitud_Geo", "Latitud", "X", "Este"), "Y": ("Longitud_Geo", "Longitud", "Y", "Norte")}
+    by_lower = {str(column).lower(): column for column in df.columns}
+
+    def resolve(canonical: str) -> Optional[str]:
+        candidates = tuple(dict.fromkeys((*alias_map[canonical], *legacy_aliases[canonical])))
+        return next((column for candidate in candidates if (column := by_lower.get(candidate.lower())) is not None), None)
+
+    resolved_x, resolved_y = resolve("X"), resolve("Y")
+    if resolved_x is None or resolved_y is None:
+        raise ValueError("required X/Y coordinate columns absent")
+    return resolved_x, resolved_y
+
+
+def _sample_uploaded_design_surface(content: bytes, mesh_id: str, filename: str = "upload.csv", sheet_name: Optional[str] = None, column_map: Optional[dict[str, str | None]] = None):
+    from core.design_surface_sampling import sample_design_surface
+
+    csv_df, headers, _, _ = read_blast_file(content, filename, sheet_name)
+    if column_map:
+        x_column, y_column = column_map.get("X"), column_map.get("Y")
+        if not x_column or not y_column or x_column not in headers or y_column not in headers:
+            raise ValueError("El mapeo confirmado debe incluir columnas existentes para X e Y.")
+    else:
+        x_column, y_column = _resolve_design_xy_columns(csv_df)
+    design_mesh = db.get_trimesh_by_id(mesh_id)
+    samples = sample_design_surface(design_mesh, csv_df[[x_column, y_column]].to_numpy())
+    mesh_info = db.get_mesh_by_id(mesh_id)
+    if not mesh_info or not mesh_info.get("data"):
+        raise ValueError("design mesh blob unavailable")
+    return samples, {"X": x_column, "Y": y_column}, hashlib.sha256(mesh_info["data"]).hexdigest()
+
+
+@router.post("/preview")
+async def preview_blast_file(
+    file: UploadFile = File(...),
+    sheet_name: Optional[str] = Form(None),
+):
+    content = await file.read()
+    try:
+        frame, headers, sheets, encoding = read_blast_file(content, file.filename or "", sheet_name, preview=True)
+    except ValueError as exc:
+        raise HTTPException(400, detail={"error_code": "BLAST_FILE_INVALID", "message": str(exc)}) from exc
+    if frame.empty:
+        raise HTTPException(400, detail={"error_code": "BLAST_FILE_EMPTY", "message": "El archivo no contiene filas."})
+    if len(headers) != len(set(headers)):
+        raise HTTPException(400, detail={"error_code": "DUPLICATE_COLUMNS", "message": "El archivo contiene encabezados duplicados."})
+    return preview_payload(frame, headers, sheets, sheet_name or (sheets[0] if sheets else None), encoding)
 
 
 def _read_uploaded_csv(file: UploadFile) -> pd.DataFrame:
@@ -51,7 +119,7 @@ def _read_uploaded_csv(file: UploadFile) -> pd.DataFrame:
         raise HTTPException(400, f"Could not read uploaded file: {exc}")
 
     if isinstance(content, bytes):
-        content = content.decode("utf-8", errors="replace")
+        content = _decode_csv_bytes(content)
 
     try:
         df = pd.read_csv(io.StringIO(content), engine="python", on_bad_lines="warn")
@@ -186,6 +254,14 @@ def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
         length=_float_or_zero("Len"),
         inclination=_float_or_zero("Incl"),
         azimuth=_float_or_zero("Az"),
+        z_collar_semantic=_str_or_none("Z_collar_semantic"),
+        surface_sample_status=_str_or_none("surface_sample_status"),
+        surface_sample_reason=_str_or_none("surface_sample_reason"),
+        surface_sample_method=_str_or_none("surface_sample_method"),
+        surface_sample_mesh_id=_str_or_none("surface_sample_mesh_id"),
+        surface_sample_mesh_sha256=_str_or_none("surface_sample_mesh_sha256"),
+        surface_sample_unit=_str_or_none("surface_sample_unit"),
+        surface_sample_assumption=_str_or_none("surface_sample_assumption"),
     )
 
 
@@ -249,6 +325,13 @@ def _build_upload_payload(
     file_bytes: bytes,
     config: GeometryConfiguration,
     bench_height_m: Optional[float],
+    design_surface_samples=None,
+    design_surface_mesh_id: Optional[str] = None,
+    design_surface_sha256: Optional[str] = None,
+    coordinate_column_map: Optional[dict[str, str]] = None,
+    filename: str = "upload.csv",
+    sheet_name: Optional[str] = None,
+    column_map: Optional[dict[str, str | None]] = None,
 ) -> dict:
     """Run the full blast-upload pipeline off the event-loop thread.
 
@@ -261,18 +344,23 @@ def _build_upload_payload(
     whether to map that to a 4xx status code, but the body never loses
     the rejection detail (remediación 3.2).
     """
-    if isinstance(file_bytes, bytes):
-        content = file_bytes.decode("utf-8", errors="replace")
-    else:
-        content = file_bytes
-
     try:
-        df = pd.read_csv(io.StringIO(content), engine="python", on_bad_lines="warn")
-    except Exception as exc:
-        raise HTTPException(400, f"Invalid CSV: {exc}")
+        df, headers, _, _ = read_blast_file(file_bytes if isinstance(file_bytes, bytes) else file_bytes.encode(), filename, sheet_name)
+    except ValueError as exc:
+        raise HTTPException(400, f"Invalid upload: {exc}") from exc
 
     if df.empty:
         raise HTTPException(400, "CSV file is empty")
+
+    if coordinate_column_map and not column_map:
+        for canonical, source in coordinate_column_map.items():
+            compatibility_alias = {"X": "Latitud_Geo", "Y": "Longitud_Geo"}.get(canonical)
+            if compatibility_alias and compatibility_alias not in df.columns:
+                df[compatibility_alias] = df[source]
+    processing_map = column_map
+    if column_map and design_surface_samples is not None and not column_map.get("Z_collar"):
+        df["__design_surface_z_pending"] = 0.0
+        processing_map = {**column_map, "Z_collar": "__design_surface_z_pending"}
 
     n_rows_input = len(df)
 
@@ -290,6 +378,11 @@ def _build_upload_payload(
             geometry_configuration=config,
             bench_height_m=bench_height_m,
             return_result=True,
+            design_surface_samples=design_surface_samples,
+            design_surface_mesh_id=design_surface_mesh_id,
+            design_surface_sha256=design_surface_sha256,
+            column_map=processing_map,
+            preserve_invalid_mapped_rows=column_map is not None,
         )
     except KeyError as exc:
         blocking_errors.append({
@@ -318,6 +411,25 @@ def _build_upload_payload(
             rows_received=n_rows_input,
         )
         result.blocking_errors = list(blocking_errors)
+
+    source_inclination = config.inclination_source_column
+    if source_inclination in df.columns and not df.empty:
+        inclination_values = pd.to_numeric(df[source_inclination], errors="coerce")
+        if inclination_values.notna().all() and (inclination_values == 0).all():
+            result.event_warnings.append({
+                "warning_code": "INCLINATION_ALL_ZERO",
+                "message": (
+                    "La columna de inclinación declarada contiene cero en todas las filas. "
+                    "Verifique el dato y la convención confirmada; no se asumió una orientación."
+                ),
+                "hole_id": None,
+                "source_row_index": None,
+                "context": {
+                    "source_column": source_inclination,
+                    "row_count": int(len(inclination_values)),
+                    "inclination_convention": config.inclination_convention,
+                },
+            })
 
     # Enrichment runs over the accepted frame only. Failures here are
     # non-fatal — the canonical result is preserved either way. The
@@ -371,6 +483,7 @@ async def upload_blast_csv(
     request: Request,
     file: UploadFile = File(..., description="Blast-hole CSV"),
     session_id: str = Form(..., description="Session UUID"),
+    compact: bool = Query(False, description="Omit accepted_rows from successful responses"),
     geometry_configuration_version: Optional[str] = Form(
         None, description="OBLIGATORIO v2: versión exacta del contrato geométrico"
     ),
@@ -430,6 +543,11 @@ async def upload_blast_csv(
     incl_sign_convention: Optional[str] = Form(None, description="LEGACY"),
     sign_source_rule: Optional[str] = Form(None, description="LEGACY"),
     az_convention: Optional[str] = Form(None, description="LEGACY"),
+    design_surface_mode: Optional[str] = Form(None, description="Opt-in: sample_design"),
+    sheet_name: Optional[str] = Form(None),
+    column_map: Optional[str] = Form(None),
+    collar_elevation_source: Optional[str] = Form(None),
+    spatial_reference_confirmed: Optional[bool] = Form(None),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
 
@@ -444,7 +562,7 @@ async def upload_blast_csv(
     """
     form = await request.form()
     allowed_fields = {
-        "file", "session_id", "bench_height_m",
+        "file", "session_id", "bench_height_m", "sheet_name", "column_map",
         "geometry_configuration_version", "geometry_user_confirmed",
         "inclination_source_column", "inclination_convention",
         "inclination_sign_convention", "inclination_unit",
@@ -452,6 +570,7 @@ async def upload_blast_csv(
         "azimuth_convention", "azimuth_unit", "angle_unit",
         "incl_source_column", "incl_convention", "incl_sign_convention",
         "sign_source_rule", "az_source_column", "az_convention",
+        "design_surface_mode", "collar_elevation_source", "spatial_reference_confirmed",
     }
     unknown_fields = sorted(set(form.keys()) - allowed_fields)
     if unknown_fields:
@@ -593,8 +712,52 @@ async def upload_blast_csv(
     except Exception as exc:
         raise HTTPException(400, f"Could not read uploaded file: {exc}")
 
+    confirmed_map = None
+    if column_map is not None:
+        try:
+            confirmed_map = json.loads(column_map)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, detail={"error_code": "COLUMN_MAP_INVALID", "message": "column_map debe ser JSON válido."}) from exc
+        if not isinstance(confirmed_map, dict):
+            raise HTTPException(400, detail={"error_code": "COLUMN_MAP_INVALID", "message": "column_map debe ser un objeto JSON."})
+        try:
+            _, headers, _, _ = await _run_in_executor(
+                read_blast_file, content, file.filename or "", sheet_name, True
+            )
+        except ValueError as exc:
+            raise HTTPException(400, detail={"error_code": "BLAST_FILE_INVALID", "message": str(exc)}) from exc
+        errors = mapping_errors(confirmed_map, headers, allow_missing_z=design_surface_mode == "sample_design" or collar_elevation_source == "design_surface")
+        if errors:
+            raise HTTPException(400, detail={"error_code": "COLUMN_MAP_INVALID", "message": "El mapeo no es válido.", "details": {"errors": errors}})
+        confirmed_map = {key: (value or None) for key, value in confirmed_map.items()}
+        if confirmed_map.get("Incl") != final_incl_col or confirmed_map.get("Az") != final_az_col:
+            raise HTTPException(400, detail={"error_code": "GEOMETRY_COLUMN_MAP_CONFLICT", "message": "Las columnas geométricas confirmadas deben coincidir con el mapeo de inclinación y azimut."})
+
+    design_samples = None
+    design_mesh_id = None
+    design_sha256 = None
+    coordinate_column_map = None
+    use_design_surface = design_surface_mode is not None or collar_elevation_source is not None
+    if use_design_surface:
+        if design_surface_mode not in (None, "sample_design") or collar_elevation_source != "design_surface":
+            raise HTTPException(400, detail={"error_code": "DESIGN_SURFACE_MODE_INVALID"})
+        if spatial_reference_confirmed is not True:
+            raise HTTPException(400, detail={"error_code": "DESIGN_SURFACE_CONFIRMATION_REQUIRED", "message": "Confirme que CSV y diseño comparten CRS, datum y coordenadas en metros."})
+        if session_id != getattr(request.state, "session_id", None):
+            raise HTTPException(403, detail={"error_code": "SESSION_ID_MISMATCH"})
+        mesh_info = await _run_in_executor(db.get_mesh, session_id, "design")
+        if not mesh_info or not mesh_info.get("data"):
+            raise HTTPException(404, detail={"error_code": "DESIGN_SURFACE_NOT_FOUND"})
+        try:
+            design_samples, coordinate_column_map, design_sha256 = await _run_in_executor(
+                _sample_uploaded_design_surface, content, mesh_info["id"], file.filename or "", sheet_name, confirmed_map
+            )
+            design_mesh_id = mesh_info["id"]
+        except Exception as exc:
+            raise HTTPException(400, detail={"error_code": "DESIGN_SURFACE_SAMPLING_FAILED", "message": str(exc)}) from exc
+
     try:
-        payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m)
+        payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m, design_samples, design_mesh_id, design_sha256, coordinate_column_map, file.filename or "upload.csv", sheet_name, confirmed_map)
     except GeometryConfigurationError as exc:
         # The processor may raise GEOMETRY errors after the contract check
         # (e.g. declared source column not found in dataset).
@@ -606,6 +769,23 @@ async def upload_blast_csv(
                 "details": exc.details,
             },
         )
+
+    surface_summary = None
+    if design_samples is not None:
+        counts = {status: sum(sample.status == status for sample in design_samples) for status in ("sampled", "outside", "ambiguous", "invalid")}
+        surface_summary = {
+            "mode": "sample_design",
+            "mesh_id": design_mesh_id,
+            "mesh_sha256": design_sha256,
+            "spatial_reference_confirmed": True,
+            "unit": "m",
+            "method": "vertical_triangle_intersection",
+            "x_source_column": coordinate_column_map["X"],
+            "y_source_column": coordinate_column_map["Y"],
+            "rows": len(design_samples),
+            "coverage": counts["sampled"] / len(design_samples) if design_samples else 0.0,
+            "counts": counts,
+        }
 
     db.save_blast_upload(
         session_id,
@@ -622,6 +802,7 @@ async def upload_blast_csv(
             "blocking_errors": payload.get("blocking_errors", []),
             "spatial_diagnostics": payload.get("spatial_diagnostics", {}),
             "geometry_configuration": config.to_dict(),
+            "design_surface": surface_summary,
         },
     )
 
@@ -643,6 +824,7 @@ async def upload_blast_csv(
         blocking_errors=payload.get("blocking_errors", []),
         geometry_configuration=config.to_dict(),
         spatial_diagnostics=payload.get("spatial_diagnostics", {}),
+        design_surface=surface_summary,
         carga_mean=payload["carga_mean"],
         descarga_mean=payload["descarga_mean"],
         hardness_distribution=payload["hardness_distribution"],
@@ -656,6 +838,10 @@ async def upload_blast_csv(
             status_code=422,
             content=response_body.model_dump(),
         )
+    if compact:
+        return JSONResponse(
+            content=response_body.model_dump(mode="json", exclude={"accepted_rows"}),
+        )
     return response_body
 
 
@@ -666,6 +852,19 @@ def _build_hole_summaries(records: List[Dict[str, object]]) -> List[schemas.Blas
 # ---------------------------------------------------------------------------
 # GET /blast/{session_id}/holes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/{session_id}/summary")
+async def get_blast_holes_summary(session_id: str, request: Request) -> dict[str, int]:
+    if session_id != request.state.session_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"error_code": "SESSION_ID_MISMATCH"},
+        )
+    settings = db.get_settings(session_id) or {}
+    records = settings.get("blast_holes", [])
+    n_holes = len(records) if isinstance(records, list) else 0
+    return {"n_holes": n_holes}
 
 
 @router.get("/{session_id}/holes")
@@ -682,3 +881,148 @@ async def get_blast_holes(
 
     holes = await _run_in_executor(_build_hole_summaries, raw)
     return schemas.BlastHolesResponse(session_id=session_id, holes=holes)
+
+
+def _finite_number(value: object) -> Optional[float]:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _rejected_source_row_count(
+    settings: Dict[str, object], rejected_rows: List[Dict[str, object]],
+) -> int:
+    processing_summary = settings.get("processing_summary")
+    if isinstance(processing_summary, dict):
+        count = processing_summary.get("rejected_source_rows")
+        if count is None:
+            count = processing_summary.get("rows_rejected")
+        try:
+            parsed_count = int(count)
+            if parsed_count >= 0:
+                return parsed_count
+        except (TypeError, ValueError, OverflowError):
+            pass
+    source_indices = {
+        row.get("source_row_index")
+        for row in rejected_rows
+        if row.get("source_row_index") is not None
+    }
+    return len(source_indices) if source_indices else len(rejected_rows)
+
+
+def _build_holes_3d(
+    settings: Dict[str, object],
+    session_id: str,
+    section=None,
+    corridor_m: Optional[float] = None,
+    section_id: Optional[int] = None,
+) -> schemas.BlastHoles3DResponse:
+    records = settings.get("blast_holes", [])
+    records = records if isinstance(records, list) else []
+    records = [record if isinstance(record, dict) else {} for record in records]
+    row_ids = blast_row_ids(session_id, records)
+    rejected = settings.get("rejected_rows", [])
+    rejected = rejected if isinstance(rejected, list) else []
+    output = []
+    counts = {"complete_geometry": 0, "collar_only": 0, "without_geometry": 0}
+    for ordinal, (record, row_id) in enumerate(zip(records, row_ids)):
+        hole_id = blast_hole_id(record, ordinal)
+        raw_index = record.get("source_row_index")
+        try:
+            source_index = int(raw_index) if raw_index is not None else None
+        except (TypeError, ValueError):
+            source_index = None
+        xyz = [_finite_number(record.get(key)) for key in ("X", "Y", "Z_collar")]
+        collar = xyz if all(value is not None for value in xyz) else None
+        toe_values = [_finite_number(record.get(key)) for key in ("X_toe", "Y_toe", "Z_toe")]
+        toe = toe_values if all(value is not None for value in toe_values) else None
+        state = "complete" if collar is not None and toe is not None else "collar_only" if collar is not None else "none"
+        counts[{"complete": "complete_geometry", "collar_only": "collar_only", "none": "without_geometry"}[state]] += 1
+        provenance_keys = (
+            "z_collar_semantic", "surface_sample_status", "surface_sample_reason",
+            "surface_sample_method", "surface_sample_mesh_id", "surface_sample_mesh_sha256",
+            "surface_sample_unit", "surface_sample_assumption", "geometry_configuration",
+        )
+        provenance = {key: record[key] for key in provenance_keys if record.get(key) is not None}
+        z_semantic = record.get("z_collar_semantic", record.get("Z_collar_semantic"))
+        if z_semantic is not None:
+            provenance["z_collar_semantic"] = z_semantic
+        attributes = {
+            key: record[key] for key in (
+                "Banco_Original", "bench", "bench_num", "bench_num_topo", "sector",
+                "fecha", "fecha_tronadura", "Fecha", "Fecha_Tronadura", "event_id",
+                "uniqid", "id_pozo", "label_pozo",
+                "Len", "longitud_real", "Incl", "Inclinacion_real", "Az",
+                "Azimuth_real", "Diam_mm", "hole_type",
+                "Nombre_Malla_Original", "holes_polygon", "Malla", "Nombre_Fase", "Fase",
+                "Kilos_Cargados_real", "Kilos_Cargados", "Carga_kg", "Explosivo_kg", "carga",
+                "PF", "pf_g_per_ton", "PF_g_per_ton", "pf_g_per_ton_net", "pf_g_per_ton_inf",
+                "Banco", "banco", "Banco_Diseno", "Nombre_Banco",
+                "Diametro", "Diametro_pozo", "Diametro_mm", "Diameter", "D_mm", "diameter_mm",
+                "dureza", "Dureza", "hardness",
+                "indice_dureza", "Indice_Dureza", "hardness_index",
+                "tasa_penetracion", "Tasa_Penetracion", "penetration_rate",
+                "Longitud_real", "depth_m", "Inclinacion", "inclination",
+            ) if key in record
+        }
+        attributes = {
+            key: None if isinstance(value, float) and not math.isfinite(value) else value
+            for key, value in attributes.items()
+        }
+        relation = None
+        section_distance = None
+        if section is not None:
+            from core.hole_section_geometry import classify_hole_segment_to_section
+
+            classification = classify_hole_segment_to_section(
+                collar, toe, section, corridor_m=float(corridor_m)
+            )
+            relation = classification.relation
+            section_distance = classification.min_distance_to_section_m
+        output.append(schemas.BlastHole3D(
+            row_id=row_id, hole_id=hole_id, source_row_index=source_index,
+            collar=collar, toe=toe, geometry_status=state,
+            provenance=provenance, attributes=attributes,
+            section_relation=relation, section_distance_m=section_distance,
+        ))
+    return schemas.BlastHoles3DResponse(
+        session_id=session_id,
+        section_id=section_id,
+        corridor_m=corridor_m if section_id is not None else None,
+        holes=output,
+        rejected_rows=rejected,
+        summary=schemas.BlastHoles3DSummary(
+            total_loaded=len(records), drawable=counts["complete_geometry"] + counts["collar_only"],
+            complete_geometry=counts["complete_geometry"], collar_only=counts["collar_only"],
+            without_geometry=counts["without_geometry"],
+            rejected=_rejected_source_row_count(settings, rejected),
+        ),
+    )
+
+
+@router.get("/holes/3d", response_model=schemas.BlastHoles3DResponse)
+async def get_blast_holes_3d(
+    request: Request,
+    section_id: Optional[int] = Query(default=None, ge=0),
+    corridor_m: float = Query(default=10.0, ge=0.0, le=10000.0),
+) -> schemas.BlastHoles3DResponse:
+    """Return compact collar/toe coordinates and provenance for the session."""
+    session_id = request.state.session_id
+    settings = db.get_settings(session_id) or {}
+    section = None
+    if section_id is not None:
+        section_rows = db.get_sections(session_id)
+        if section_id >= len(section_rows):
+            raise HTTPException(404, detail={"error_code": "SECTION_NOT_FOUND"})
+        try:
+            from api.routers.process import _section_from_dict
+
+            section = _section_from_dict(section_rows[section_id])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(400, detail={"error_code": "SECTION_INVALID"}) from exc
+    return await _run_in_executor(
+        _build_holes_3d, settings, session_id, section, corridor_m, section_id
+    )

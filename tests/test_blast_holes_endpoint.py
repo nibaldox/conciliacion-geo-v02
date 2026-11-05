@@ -192,6 +192,9 @@ def test_response_schema_is_correct(client):
     assert len(model.holes) == 1
     assert isinstance(model.holes[0], schemas.BlastHoleOnProfile)
     assert set(schemas.BlastHoleOnProfile.model_fields.keys()) == {
-        "hole_id", "distance", "elevation", "burden",
-        "spacing", "is_within_tolerance",
+        "row_id", "hole_id", "distance", "elevation", "burden",
+        "spacing", "is_within_tolerance", "section_relation",
+        "profile_point_kind",
+        "z_collar_semantic", "surface_sample_status", "surface_sample_method",
+        "surface_sample_mesh_id", "surface_sample_mesh_sha256",
     }

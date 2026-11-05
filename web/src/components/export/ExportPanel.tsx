@@ -10,7 +10,7 @@ import {
   type ExportProjectInfo,
   type ExportResult,
 } from '../../api/hooks';
-import { useSession } from '../../stores/session';
+import { DEMO_MESH_IDS, useSession } from '../../stores/session';
 import { Button } from '../ui/Button';
 import { IconDashboard, IconReport, IconDesign, IconImage } from '../ui/Icons';
 
@@ -43,7 +43,7 @@ function readProfileFilters(): ProfileFilterSnapshot {
   }
 }
 
-function formatAppliedFilters(raw: string | null): string | null {
+function formatAppliedFilters(raw: string | null, translate: (key: string) => string): string | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -51,10 +51,10 @@ function formatAppliedFilters(raw: string | null): string | null {
     const push = (label: string, value: unknown) => {
       if (Array.isArray(value) && value.length > 0) parts.push(`${label}: ${value.join(', ')}`);
     };
-    push('Sectores', parsed.sectors);
-    push('Secciones', parsed.sections);
-    push('Niveles', parsed.levels);
-    push('Bancos', parsed.selected_bench_numbers);
+    push(translate('export.applied_sectors'), parsed.sectors);
+    push(translate('export.applied_sections'), parsed.sections);
+    push(translate('export.applied_levels'), parsed.levels);
+    push(translate('export.applied_benches'), parsed.selected_bench_numbers);
     return parts.length > 0 ? parts.join(' · ') : null;
   } catch {
     return null;
@@ -64,6 +64,9 @@ function formatAppliedFilters(raw: string | null): string | null {
 export function ExportPanel() {
   const { t } = useTranslation();
   const sessionFilters = useSession((s) => s.filters);
+  const { designMeshId, topoMeshId } = useSession();
+  const hasVirtualDemoMesh = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
+  const exportsBlocked = hasVirtualDemoMesh;
   const exportExcel = useExportExcel();
   const exportWord = useExportWord();
   const exportPdf = useExportPdf();
@@ -76,7 +79,8 @@ export function ExportPanel() {
     operation: '',
     phase: '',
   });
-  const [appliedNote, setAppliedNote] = useState<string | null>(null);
+  const [appliedFiltersRaw, setAppliedFiltersRaw] = useState<string | null>(null);
+  const appliedNote = formatAppliedFilters(appliedFiltersRaw, (key) => t(key));
 
   const handleFieldChange = (field: keyof ExportForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -98,10 +102,11 @@ export function ExportPanel() {
   };
 
   const runExport = async (run: () => Promise<ExportResult | void>) => {
+    if (exportsBlocked) return;
     try {
       const result = await run();
       if (result && typeof result === 'object' && 'appliedFilters' in result) {
-        setAppliedNote(formatAppliedFilters(result.appliedFilters));
+        setAppliedFiltersRaw(result.appliedFilters);
       }
     } catch {
       // Failures surface through each mutation's isError state below.
@@ -138,38 +143,49 @@ export function ExportPanel() {
           label={t('export.excel')}
           icon={<IconDashboard className="w-6 h-6" />}
           loading={exportExcel.isPending}
-          disabled={isAnyExporting}
+          disabled={isAnyExporting || exportsBlocked}
           onClick={() => void runExport(() => exportExcel.mutateAsync(baseParams))}
         />
         <ExportButton
           label={t('export.word')}
           icon={<IconReport className="w-6 h-6" />}
           loading={exportWord.isPending}
-          disabled={isAnyExporting}
+          disabled={isAnyExporting || exportsBlocked}
           onClick={() => void runExport(() => exportWord.mutateAsync(baseParams))}
         />
         <ExportButton
           label={t('export.pdf')}
           icon={<IconReport className="w-6 h-6" />}
           loading={exportPdf.isPending}
-          disabled={isAnyExporting}
+          disabled={isAnyExporting || exportsBlocked}
           onClick={() => void runExport(() => exportPdf.mutateAsync(baseParams))}
         />
         <ExportButton
           label={t('export.dxf')}
           icon={<IconDesign className="w-6 h-6" />}
           loading={exportDxf.isPending}
-          disabled={isAnyExporting}
-          onClick={() => exportDxf.mutate()}
+          disabled={isAnyExporting || exportsBlocked}
+          onClick={() => { if (!exportsBlocked) exportDxf.mutate(); }}
         />
         <ExportButton
           label={t('export.images')}
           icon={<IconImage className="w-6 h-6" />}
           loading={exportImages.isPending}
-          disabled={isAnyExporting}
-          onClick={() => exportImages.mutate()}
+          disabled={isAnyExporting || exportsBlocked}
+          onClick={() => { if (!exportsBlocked) exportImages.mutate(); }}
         />
       </div>
+
+      {exportsBlocked && (
+        <div
+          data-testid="export-demo-notice"
+          role="status"
+          className="text-xs leading-relaxed rounded-lg px-3 py-2"
+          style={{ color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface-sunken)' }}
+        >
+          {t('export.demo_unavailable')}
+        </div>
+      )}
 
       <div
         data-testid="export-filter-summary"
@@ -193,7 +209,7 @@ export function ExportPanel() {
           className="text-[11px] leading-relaxed px-1"
           style={{ color: 'var(--color-text-muted)' }}
         >
-          Filtros aplicados: {appliedNote}
+          {t('export.applied_filters_prefix')} {appliedNote}
         </div>
       )}
 

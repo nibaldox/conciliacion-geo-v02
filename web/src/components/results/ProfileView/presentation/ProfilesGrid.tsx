@@ -30,6 +30,8 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
   const gridColor = isDark ? '#1e293b' : '#e2e8f0';
   const designColor = readThemeColor('--color-mine-blue', '#7693b7');
   const topoColor = readThemeColor('--color-mine-green', '#4ade80');
+  const tickColor = readThemeColor('--color-text-secondary', isDark ? '#bfccd9' : '#4b5563');
+  const tickFont = { size: 10, color: tickColor };
 
   const plotData: Data[] = [];
   if (profile) {
@@ -65,14 +67,14 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
       showgrid: true,
       gridcolor: gridColor,
       zeroline: false,
-      tickfont: { size: 7, color: isDark ? '#64748b' : '#94a3b8' },
+      tickfont: tickFont,
       showticklabels: true,
     },
     yaxis: {
       showgrid: true,
       gridcolor: gridColor,
       zeroline: false,
-      tickfont: { size: 7, color: isDark ? '#64748b' : '#94a3b8' },
+      tickfont: tickFont,
       showticklabels: true,
       scaleanchor: 'x',
       scaleratio: 1,
@@ -94,6 +96,7 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
     >
       <button
         type="button"
+        aria-pressed={isSelected}
         onClick={onSelect}
         className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
@@ -109,9 +112,9 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
           </span>
           {section.sector && (
             <span
-              className="text-[10px] font-mono px-1.5 py-0.5 rounded"
+              className="text-xs font-mono px-1.5 py-0.5 rounded"
               style={{
-                color: 'var(--color-text-muted)',
+                color: 'var(--color-text-secondary)',
                 backgroundColor: 'var(--color-surface-muted)',
               }}
             >
@@ -211,14 +214,13 @@ export function ProfilesGrid({ onSectionSelect }: ProfilesGridProps) {
 
   return (
     <div
-      className="grid gap-3"
-      style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}
+      className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
     >
       {sections.map((sec) => (
         <MiniCard
           key={sec.id}
           section={sec}
-          isSelected={selectedSection === sec.name}
+          isSelected={selectedSection === sec.id}
           onSelect={() => handleSelect(sec)}
         />
       ))}

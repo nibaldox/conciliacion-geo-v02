@@ -157,6 +157,34 @@ def _report_filters(filters: ExportFilters) -> ReportFilters:
     )
 
 
+def _load_report_depth_extractions(
+    session_id: str, sections: List[Dict[str, Any]]
+) -> Dict[tuple[str, str], List[Any]]:
+    """Load unfiltered topo benches where section identity is unambiguous."""
+    name_counts: Dict[str, int] = {}
+    for section in sections:
+        name = str(section.get("name", ""))
+        name_counts[name] = name_counts.get(name, 0) + 1
+
+    extractions: Dict[tuple[str, str], List[Any]] = {}
+    for section in sections:
+        name = str(section.get("name", ""))
+        sector = section.get("sector")
+        sector_key = str(sector).strip() if sector is not None else ""
+        if name_counts[name] != 1 or not sector_key:
+            continue
+        extraction = db.get_extraction(session_id, name, "topo")
+        if not extraction:
+            continue
+        cached_sector = extraction.get("sector")
+        if cached_sector and str(cached_sector).strip() != sector_key:
+            continue
+        extractions[(name, sector_key)] = [
+            _dict_to_bench(bench) for bench in extraction.get("benches", [])
+        ]
+    return extractions
+
+
 def _report_meta(
     session_id: str,
     project: Optional[str],
@@ -455,6 +483,7 @@ def _build_word_payload_sync(
         section_geometry=all_data,
         plan_inputs=plan_inputs,
         blast=_blast_payload(settings, export_filters),
+        depth_extractions=_load_report_depth_extractions(session_id, sections_raw),
     )
 
     if build_word_report is not None:
@@ -818,6 +847,7 @@ def _build_pdf_payload_sync(
         section_geometry=all_data,
         plan_inputs=plan_inputs,
         blast=_blast_payload(settings, export_filters),
+        depth_extractions=_load_report_depth_extractions(session_id, sections_raw),
     )
 
     if build_pdf_report is not None:
@@ -912,6 +942,7 @@ def _build_blast_diagnostics_payload_sync(session_id: str) -> str:
         "processing_summary": settings.get("processing_summary") or {},
         "geometry_configuration": settings.get("geometry_configuration") or {},
         "spatial_diagnostics": settings.get("spatial_diagnostics") or {},
+        "design_surface": settings.get("design_surface") or settings.get("blast_upload_meta", {}).get("design_surface"),
     }
     tmp = tempfile.NamedTemporaryFile(
         prefix=f"blast_diag_{session_id}_",
@@ -920,6 +951,18 @@ def _build_blast_diagnostics_payload_sync(session_id: str) -> str:
     )
     tmp.close()
     export_processing_diagnostics_excel(payload, tmp.name)
+    surface = payload.get("design_surface")
+    if surface:
+        from openpyxl import load_workbook
+        workbook = load_workbook(tmp.name)
+        sheet = workbook.create_sheet("Superficie_Diseno")
+        for key, value in surface.items():
+            if isinstance(value, dict):
+                for subkey, subvalue in value.items():
+                    sheet.append([f"{key}.{subkey}", subvalue])
+            else:
+                sheet.append([key, value])
+        workbook.save(tmp.name)
     return tmp.name
 
 

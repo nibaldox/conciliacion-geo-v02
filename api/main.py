@@ -18,7 +18,7 @@ from api._async_db import run_db
 from api.middleware import install_health_endpoints, install_middleware
 from api.middleware_auth import install_api_key_auth
 from api.middleware_ratelimit import install_rate_limiter
-from api.routers import ai, blast, mapping, meshes, sections, process, export, settings, simulations
+from api.routers import ai, blast, mapping, meshes, sections, process, export, settings, simulations, session
 from core.config import DEFAULTS, DEPLOY
 
 logger = logging.getLogger(__name__)
@@ -201,7 +201,11 @@ app.add_middleware(
         "Origin",
         "Referer",
     ],
-    expose_headers=["X-Session-ID", "x-session-id"],
+    expose_headers=[
+        "X-Session-ID",
+        "Content-Disposition",
+        "X-Export-Filters-Applied",
+    ],
 )
 
 
@@ -242,6 +246,7 @@ app.include_router(settings.router, prefix="/api/v1")
 app.include_router(mapping.router, prefix="/api/v1")
 app.include_router(ai.router, prefix="/api/v1")
 app.include_router(simulations.router, prefix="/api/v1")
+app.include_router(session.router, prefix="/api/v1")
 
 
 # ---------------------------------------------------------------------------

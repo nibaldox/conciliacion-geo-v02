@@ -29,6 +29,7 @@ import type {
   BlastDamageModelResponse,
   BlastUploadResponse,
   BlastHolesResponse,
+  BlastSessionSummaryResponse,
   AIGenerateRequest,
   AIResponseChunk,
   AIUsageMetrics,
@@ -581,6 +582,10 @@ export interface BlastGeometryForm {
     | 'COUNTERCLOCKWISE_FROM_EAST';
   azimuth_unit: 'DEGREES' | 'RADIANS';
   bench_height_m?: number;
+  collar_elevation_source?: 'design_surface';
+  spatial_reference_confirmed?: boolean;
+  column_map?: Record<string, string | null>;
+  sheet_name?: string;
 }
 
 /**
@@ -636,6 +641,8 @@ export function buildBlastUploadFormData(
   const form = new FormData();
   form.append('file', file);
   form.append('session_id', sessionId);
+  if (geometry.column_map) form.append('column_map', JSON.stringify(geometry.column_map));
+  if (geometry.sheet_name) form.append('sheet_name', geometry.sheet_name);
   form.append('geometry_configuration_version', geometry.geometry_configuration_version);
   form.append('geometry_user_confirmed', String(geometry.geometry_user_confirmed));
   form.append('inclination_source_column', geometry.inclination_source_column);
@@ -649,26 +656,62 @@ export function buildBlastUploadFormData(
   if (geometry.bench_height_m != null) {
     form.append('bench_height_m', String(geometry.bench_height_m));
   }
+  if (geometry.collar_elevation_source) {
+    form.append('collar_elevation_source', geometry.collar_elevation_source);
+  }
+  if (geometry.spatial_reference_confirmed != null) {
+    form.append('spatial_reference_confirmed', String(geometry.spatial_reference_confirmed));
+  }
   return form;
 }
 
 export function useUploadBlastCsv() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
       sessionId,
       file,
       geometry,
+      onUploadProgress,
     }: {
       sessionId: string;
       file: File;
       geometry: BlastGeometryForm;
+      onUploadProgress?: (progress: number | null) => void;
     }) => {
       const form = buildBlastUploadFormData(sessionId, file, geometry);
       const { data } = await client.post<BlastUploadResponse>('/blast/upload', form, {
+        params: { compact: true },
         headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (event) => {
+          const total = event.total;
+          onUploadProgress?.(total && total > 0 ? Math.min(100, Math.floor((event.loaded / total) * 100)) : null);
+        },
       });
       return data;
     },
+    onSuccess: async () => {
+      useSession.getState().setSelectedBlastHoleRowId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['blast-holes-3d'] }),
+        queryClient.invalidateQueries({ queryKey: ['blast-holes-by-session'] }),
+        queryClient.invalidateQueries({ queryKey: ['blast-summary'] }),
+        queryClient.invalidateQueries({ queryKey: ['blast-holes'] }),
+      ]);
+    },
+  });
+}
+
+export function useBlastSessionSummary(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['blast-summary', sessionId],
+    queryFn: async () => {
+      const { data } = await client.get<BlastSessionSummaryResponse>(
+        `/blast/${sessionId}/summary`,
+      );
+      return data;
+    },
+    enabled: !!sessionId,
   });
 }
 
@@ -706,10 +749,10 @@ export function useBlastHolesBySession(sessionId: string | null, sectionName?: s
  * bundle has no blast data, so we never hit the (non-existent on
  * GitHub Pages) backend. Mirrors the `useBlastHoles` demo guard.
  */
-export function useBlastCorrelation() {
+export function useBlastCorrelation(surveyDate?: string) {
   const { demoMode, demoData, designMeshId } = useSession();
   return useQuery<BlastCorrelationResponse>({
-    queryKey: ['blast-correlation', demoMode, designMeshId],
+    queryKey: ['blast-correlation', demoMode, designMeshId, surveyDate ?? null],
     queryFn: async () => {
       if (demoMode && demoData && isDemoMeshId(designMeshId)) {
         return {
@@ -721,7 +764,7 @@ export function useBlastCorrelation() {
         } satisfies BlastCorrelationResponse;
       }
       return client
-        .get<BlastCorrelationResponse>('/process/blast-correlation')
+        .get<BlastCorrelationResponse>('/process/blast-correlation', surveyDate ? { params: { survey_date: surveyDate } } : undefined)
         .then((r) => r.data);
     },
   });
@@ -738,10 +781,10 @@ export function useBlastCorrelation() {
  * (the demo bundle has no blast data, and the backend is not reachable on
  * GitHub Pages).
  */
-export function useBlastDamageModel() {
+export function useBlastDamageModel(surveyDate?: string) {
   const { demoMode, demoData, designMeshId } = useSession();
   return useQuery<BlastDamageModelResponse>({
-    queryKey: ['blast-damage-model', demoMode, designMeshId],
+    queryKey: ['blast-damage-model', demoMode, designMeshId, surveyDate ?? null],
     queryFn: async () => {
       if (demoMode && demoData && isDemoMeshId(designMeshId)) {
         return {
@@ -752,7 +795,7 @@ export function useBlastDamageModel() {
         } satisfies BlastDamageModelResponse;
       }
       return client
-        .get<BlastDamageModelResponse>('/process/blast-correlation/damage-model')
+        .get<BlastDamageModelResponse>('/process/blast-correlation/damage-model', surveyDate ? { params: { survey_date: surveyDate } } : undefined)
         .then((r) => r.data);
     },
   });

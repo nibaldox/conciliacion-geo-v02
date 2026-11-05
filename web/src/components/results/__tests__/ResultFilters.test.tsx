@@ -4,12 +4,12 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import i18n from '../../../i18n';
 import { ResultFilters } from '../ResultFilters';
-import { EMPTY_RESULT_FILTERS, type ResultFilterState } from '../resultFilters';
+import { EMPTY_RESULT_FILTERS, type ResultFilterState } from '../resultFilters.utils';
 import type { ComparisonResult } from '../../../api/types';
 
 beforeAll(async () => {
   i18n.addResourceBundle('es', 'translation', {
-    results: { filters: { level: 'Cota', no_sector: '(sin sector)' } },
+    results: { filters: { level: 'Cota', no_sector: '(sin sector)', active_label: 'Filtros activos en este panel:', reset_help: 'Restablece sector, sección y cota; conserva el filtro de banco.' } },
     table: { col_level: 'Nivel', col_delta_crest: 'Δ Cresta', col_delta_toe: 'Δ Pata' },
   }, true, true);
   await i18n.changeLanguage('es');
@@ -68,6 +68,17 @@ describe('ResultFilters', () => {
     expect(checkboxValues(dimensionRoot('level'))).toEqual(['2945', '2960']);
   });
 
+  it('expone una lista nativa de checkboxes con nombres accesibles, sin roles de listbox', async () => {
+    const user = userEvent.setup();
+    render(<ControlledResultFilters />);
+    await user.click(dimensionRoot('sector').querySelector('summary')!);
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    expect(dimensionRoot('sector').querySelector('ul')).toHaveRole('list');
+    expect(screen.getByRole('checkbox', { name: 'Norte' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Sur' })).toBeInTheDocument();
+  });
+
   it('cambia una dimensión vía onChange preservando el resto del estado', async () => {
     const user = userEvent.setup();
     const initial: ResultFilterState = { sector: [], section: ['S01'], level: ['2960'], bench: [2] };
@@ -78,6 +89,18 @@ describe('ResultFilters', () => {
     expect(summary).toHaveTextContent('Norte');
     expect(dimensionRoot('section').querySelector('summary')).toHaveTextContent('S01');
     expect(dimensionRoot('level').querySelector('summary')).toHaveTextContent('2960');
+  });
+
+  it('explica los valores activos y el alcance del botón restablecer', () => {
+    const initial: ResultFilterState = { sector: [''], section: ['S02'], level: ['2945'], bench: [2] };
+    render(<ControlledResultFilters initial={initial} />);
+    const activeSummary = screen.getByText(/Filtros activos en este panel:/).parentElement!;
+    expect(activeSummary).toHaveTextContent('Sector: (sin sector)');
+    expect(activeSummary).toHaveTextContent('Sección: S02');
+    expect(activeSummary).toHaveTextContent('Cota: 2945');
+    expect(screen.getByRole('button', { name: 'Restablecer' })).toHaveAccessibleDescription(
+      'Restablece sector, sección y cota; conserva el filtro de banco.',
+    );
   });
 
   it('acumula selección OR dentro de una dimensión y deselecciona al repetir', async () => {
@@ -92,6 +115,19 @@ describe('ResultFilters', () => {
     await user.click(screen.getByRole('checkbox', { name: 'Sur' }));
     summary = dimensionRoot('sector').querySelector('summary')!;
     expect(summary).toHaveTextContent('Norte');
+  });
+
+  it('cierra con Escape y devuelve el foco al control desplegable', async () => {
+    const user = userEvent.setup();
+    render(<ControlledResultFilters />);
+    const details = dimensionRoot('sector').querySelector('details')!;
+    const summary = details.querySelector('summary')!;
+    await user.click(summary);
+    await user.click(screen.getByRole('checkbox', { name: 'Norte' }));
+    expect(details).toHaveProperty('open', true);
+    await user.keyboard('{Escape}');
+    expect(details).toHaveProperty('open', false);
+    expect(summary).toHaveFocus();
   });
 
   it('reinicia sector/sección/cota con el botón restablecer conservando el filtro de banco', async () => {

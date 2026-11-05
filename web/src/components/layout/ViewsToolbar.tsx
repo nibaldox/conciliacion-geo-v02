@@ -29,6 +29,7 @@ export function ViewsToolbar({ compact = false, onNavigate }: ViewsToolbarProps)
           onClick={() => { setActiveView(key); onNavigate?.(); }}
           aria-label={t(label)}
           aria-pressed={activeView === key}
+          aria-current={activeView === key ? 'page' : undefined}
           title={t(text)}
           className={['flex items-center gap-3 rounded-lg py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent', compact ? 'justify-center px-2' : 'px-3 text-left', activeView === key ? 'bg-accent-bg text-accent-bright' : 'text-text-secondary hover:bg-surface-muted hover:text-text-primary'].join(' ')}
         >

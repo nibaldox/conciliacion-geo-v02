@@ -404,6 +404,8 @@ export interface ReferenceLineResponse {
 }
 
 export interface BlastHoleOnProfile {
+  row_id?: string | null;
+  profile_point_kind?: 'projected_collar' | 'intersection' | null;
   hole_id: string;
   distance: number;
   elevation: number;
@@ -449,12 +451,24 @@ export interface BlastCorrelationRow {
   rock_density_used: number;
 }
 
+export interface BlastTemporalFilter {
+  enabled: boolean;
+  survey_date: string | null;
+  effective_cutoff_date: string | null;
+  buffer_days: number;
+  policy: string;
+  included: number;
+  excluded: number;
+  missing: number;
+}
+
 export interface BlastCorrelationResponse {
   rows: BlastCorrelationRow[];
   tolerance: number | null;
   n_sections: number;
   carga?: number[];
   descarga?: number[];
+  temporal_filter?: BlastTemporalFilter;
 }
 
 // Blast PF↔damage regression model
@@ -490,6 +504,7 @@ export interface BlastDamageModelResponse {
   fit: BlastDamageModelFit | null;
   x_metric: string;
   y_metric: string;
+  temporal_filter?: BlastTemporalFilter;
 }
 
 // Blast-hole upload summary
@@ -553,12 +568,23 @@ export interface BlastUploadResponse {
   // Structured processing output (integración §3.6).
   data_warnings: string;
   processing_summary: Record<string, unknown>;
-  accepted_rows: Record<string, unknown>[];
+  accepted_rows?: Record<string, unknown>[];
   rejected_rows: RejectedRow[];
   event_warnings: Record<string, unknown>[];
   blocking_errors: BlockingError[];
   geometry_configuration: GeometryConfiguration;
   spatial_diagnostics: Record<string, unknown>;
+  design_surface?: {
+    mode: 'sample_design' | string;
+    mesh_id: string | null;
+    mesh_sha256: string | null;
+    spatial_reference_confirmed: boolean;
+    unit: 'm' | string;
+    method: string;
+    rows: number;
+    coverage: number;
+    counts: { sampled: number; outside: number; ambiguous: number; invalid: number };
+  } | null;
 }
 
 export interface BlastHoleSummary {
@@ -575,6 +601,10 @@ export interface BlastHoleSummary {
 export interface BlastHolesResponse {
   session_id: string;
   holes: BlastHoleSummary[];
+}
+
+export interface BlastSessionSummaryResponse {
+  n_holes: number;
 }
 
 // AI reporter (core/ai_v2)

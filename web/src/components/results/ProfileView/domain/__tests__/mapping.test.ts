@@ -208,15 +208,61 @@ describe('toBench', () => {
     expect(bench.matched).toBe(false);
   });
 
-  it('returns the worst of three statuses when comparison is given', () => {
+  it('classifies the global bench score while preserving individual parameter statuses', () => {
     const cmp = makeComparison({
       height_status: 'CUMPLE',
       angle_status: 'FUERA DE TOLERANCIA',
       berm_status: 'CUMPLE',
     });
     const bench = toBench(rawBench, cmp);
-    expect(bench.status).toBe('FUERA');
+    expect(bench.status).toBe('CUMPLE');
+    expect(bench.benchScore).toBe(90);
+    expect([bench.heightStatus, bench.angleStatus, bench.bermStatus]).toEqual([
+      'CUMPLE', 'FUERA', 'CUMPLE',
+    ]);
     expect(bench.matched).toBe(true);
+  });
+
+  it.each([
+    [70, 'CUMPLE'],
+    [69.99, 'NO_CUMPLE'],
+  ] as const)('uses global score %s to classify the bank', (score, expected) => {
+    const bench = toBench(rawBench, makeComparison({ bench_score: score }));
+    expect(bench.status).toBe(expected);
+  });
+
+  it('returns UNKNOWN for an incomplete score when individual statuses are also incomplete', () => {
+    const bench = toBench(rawBench, makeComparison({
+      bench_score: null,
+      height_status: '-',
+      angle_status: 'CUMPLE',
+      berm_status: '-',
+    }));
+    expect(bench.status).toBe('UNKNOWN');
+    expect([bench.heightStatus, bench.angleStatus, bench.bermStatus]).toEqual([
+      'UNKNOWN', 'CUMPLE', 'UNKNOWN',
+    ]);
+  });
+
+  it('does not infer a global score from incomplete individual statuses', () => {
+    const bench = toBench(rawBench, makeComparison({
+      bench_score: null,
+      height_status: 'CUMPLE',
+      angle_status: '-',
+      berm_status: 'CUMPLE',
+    }));
+    expect(bench.status).toBe('UNKNOWN');
+  });
+
+  it('does not infer a MATCH score from structural comparison states', () => {
+    const bench = toBench(rawBench, makeComparison({
+      bench_score: null,
+      height_status: 'NO CONSTRUIDO',
+      angle_status: 'CUMPLE',
+      berm_status: 'CUMPLE',
+    }));
+    expect(bench.status).toBe('UNKNOWN');
+    expect(bench.heightStatus).toBe('NO_CUMPLE');
   });
 
   it('preserves all numeric fields unchanged', () => {
@@ -426,7 +472,7 @@ describe('toBenches', () => {
 // ─── toProfileViewModel ─────────────────────────────────────
 
 describe('toProfileViewModel', () => {
-  it('preserves design identities, backend tolerance tiers, and missing banks without including extras', () => {
+  it('classifies each bank by global score and retains missing banks without including extras', () => {
     const statuses = toDesignBenchStatuses([
       makeComparison({ bench_num: 4, bench_num_topo: 2, level: '2932', height_status: 'FUERA DE TOLERANCIA' }),
       makeComparison({ bench_num: 5, type: 'MISSING', bench_num_topo: null, level: '2917', height_status: 'NO CONSTRUIDO', angle_status: '-', berm_status: 'FALTA BANCO' }),
@@ -436,7 +482,7 @@ describe('toProfileViewModel', () => {
     ], 'S-001');
 
     expect(statuses).toEqual([
-      { sectionName: 'S-001', designBenchNumber: 4, designElevation: 2932, status: 'FUERA', hasTopo: true },
+      { sectionName: 'S-001', designBenchNumber: 4, designElevation: 2932, status: 'CUMPLE', hasTopo: true },
       { sectionName: 'S-001', designBenchNumber: 5, designElevation: 2917, status: 'NO_CUMPLE', hasTopo: false },
       { sectionName: 'S-001', designBenchNumber: 6, designElevation: 4040, status: 'UNKNOWN', hasTopo: true },
     ]);

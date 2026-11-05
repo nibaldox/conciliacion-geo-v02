@@ -23,6 +23,7 @@ function completeContract() {
   select('incl-unit', 'DEGREES');
   select('az-convention', 'CLOCKWISE_FROM_NORTH');
   select('az-unit', 'RADIANS');
+  fireEvent.click(screen.getByTestId('spatial-reference-confirmed'));
   fireEvent.click(screen.getByTestId('geometry-confirmed'));
 }
 
@@ -51,7 +52,7 @@ describe('BlastUploader with production hook', () => {
       response: {
         status: 422,
         data: {
-          accepted_rows: [],
+          n_rows_loaded: 0,
           rejected_rows: [{
             hole_id: 'BAD-1',
             source_row_index: 0,
@@ -79,6 +80,9 @@ describe('BlastUploader with production hook', () => {
     fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    const uploadForm = post.mock.calls[0][1] as FormData;
+    expect(uploadForm.get('collar_elevation_source')).toBe('design_surface');
+    expect(uploadForm.get('spatial_reference_confirmed')).toBe('true');
     await waitFor(() => expect(screen.getByTestId('rejected-rows')).toHaveTextContent('INVALID_X'));
     expect(screen.getByTestId('blocking-errors')).toHaveTextContent('NO_ACCEPTED_ROWS');
     expect(screen.getByTestId('event-warnings')).toHaveTextContent('Advertencias: 1');

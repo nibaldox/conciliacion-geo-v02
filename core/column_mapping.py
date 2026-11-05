@@ -219,6 +219,8 @@ def validate_mapping(mapping: dict[str, str | None]) -> list[str]:
 def apply_mapping(
     df: pd.DataFrame,
     mapping: dict[str, str | None],
+    *,
+    drop_missing_required: bool = True,
 ) -> pd.DataFrame:
     """
     Apply a validated column mapping to a DataFrame.
@@ -238,7 +240,15 @@ def apply_mapping(
         if source is not None and source in df.columns:
             rename_map[source] = canonical
 
-    df_out = df.rename(columns=rename_map).copy()
+    df_out = df.copy()
+    mapped_sources = set(rename_map)
+    for source, canonical in rename_map.items():
+        if canonical in df_out.columns and canonical != source and canonical not in mapped_sources:
+            backup = f"source__unmapped_{canonical}"
+            while backup in df_out.columns:
+                backup = f"_{backup}"
+            df_out = df_out.rename(columns={canonical: backup})
+    df_out = df_out.rename(columns=rename_map)
 
     # Type coercion based on canonical dtype
     for fdef in CANONICAL_FIELDS:
@@ -253,7 +263,7 @@ def apply_mapping(
 
     # Drop rows missing required fields
     required_present = [c for c in REQUIRED_FIELDS if c in df_out.columns]
-    if required_present:
+    if required_present and drop_missing_required:
         df_out = df_out.dropna(subset=required_present)
 
     return df_out

@@ -22,14 +22,28 @@ describe('ViewsToolbar', () => {
     await user.keyboard('{Enter}');
     expect(useSession.getState().activeWorkspaceView).toBe('profiles');
     expect(profiles).toHaveAttribute('aria-pressed', 'true');
+    expect(profiles).toHaveAttribute('aria-current', 'page');
     expect(onNavigate).toHaveBeenCalledOnce();
+  });
+
+  it('shows translated view names when the sidebar is expanded', () => {
+    render(<I18nextProvider i18n={i18n}><ViewsToolbar /></I18nextProvider>);
+    expect(screen.getByText('Perfiles')).toBeVisible();
+    expect(screen.getByText('Vista 3D')).toBeVisible();
+    expect(screen.getByText('Resumen')).toBeVisible();
+    expect(screen.getByText('Tronadura')).toBeVisible();
+    expect(screen.getByText('Exportar')).toBeVisible();
   });
 
   it('keeps every view accessible when the sidebar is collapsed', async () => {
     const user = userEvent.setup();
     render(<I18nextProvider i18n={i18n}><ViewsToolbar compact /></I18nextProvider>);
     expect(screen.getAllByRole('button')).toHaveLength(5);
-    await user.click(screen.getByRole('button', { name: 'Dashboard' }));
+    const dashboard = screen.getByRole('button', { name: 'Dashboard' });
+    expect(dashboard).toHaveAttribute('title', 'Resumen');
+    expect(dashboard).toHaveClass('focus-visible:ring-2');
+    await user.click(dashboard);
     expect(useSession.getState().activeWorkspaceView).toBe('dashboard');
+    expect(dashboard).toHaveAttribute('aria-current', 'page');
   });
 });

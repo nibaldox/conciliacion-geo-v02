@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from datetime import timedelta
 from core.config import DEFAULTS
+from core.design_surface_sampling import DesignSurfaceSample
 from core.geom_utils import find_df_column
 from core.geometry_conventions import (
     AzimuthConvention,
@@ -35,6 +36,24 @@ COLS_DROP = [
     'id_rajo', 'id_malla_opit', 'numero',
     'camion', 'holes_dateUpdated', 'mes_tronadura',
 ]
+
+_EVENT_LEVEL_RECORD_COLUMNS = frozenset({
+    "processing_rows_received",
+    "processing_rows_accepted",
+    "processing_rows_rejected",
+    "processing_rejected_ids",
+    "processing_rejected_reasons",
+    "voronoi_method",
+    "voronoi_validation_messages",
+    "assigned_area_m2",
+    "area_residual_m2",
+    "area_residual_pct",
+    "voronoi_conservation_ok",
+    "outside_domain_hole_count",
+    "outside_domain_hole_ids",
+    "outside_domain_assigned_area_m2",
+    "invalid_coordinate_hole_count",
+})
 
 # Legacy alias for the configured default bench height (H-06): the
 # productive paths resolve the height from the event or the visible
@@ -77,7 +96,7 @@ _CANONICAL_COLUMN_ALIASES: dict[str, list[str]] = {
 }
 
 
-def _resolve_column_aliases(df_work: pd.DataFrame) -> dict[str, str | None]:
+def _resolve_column_aliases(df_work: pd.DataFrame, *, require_z: bool = True) -> dict[str, str | None]:
     """Return {canonical: original_column_name | None} for each known field.
 
     ``find_df_column`` raises when no alias is found unless
@@ -87,7 +106,7 @@ def _resolve_column_aliases(df_work: pd.DataFrame) -> dict[str, str | None]:
     out: dict[str, str | None] = {}
     _REQUIRED_CANONICAL = {"X", "Y", "Z_collar", "Incl", "Az", "Len"}
     for canonical, aliases in _CANONICAL_COLUMN_ALIASES.items():
-        required = canonical in _REQUIRED_CANONICAL
+        required = canonical in _REQUIRED_CANONICAL and (canonical != "Z_collar" or require_z)
         # raise_error=True means "raise if no match". Required fields
         # should raise, optional ones should return None silently.
         out[canonical] = find_df_column(
@@ -110,11 +129,12 @@ def _rename_to_canonical(
     rename_map: dict[str, str] = {
         resolved["X"]: "X",
         resolved["Y"]: "Y",
-        resolved["Z_collar"]: "Z_collar",
         resolved["Incl"]: "Incl",
         resolved["Az"]: "Az",
         resolved["Len"]: "Len",
     }
+    if resolved.get("Z_collar"):
+        rename_map[resolved["Z_collar"]] = "Z_collar"
     for canonical in _CANONICAL_COLUMN_ALIASES:
         if canonical in rename_map:
             continue
@@ -241,6 +261,17 @@ def _collect_rejected_rows(
         for idx in df_work.index[vals.isna()]:
             if col == "Incl" and idx in incl_oob:
                 continue  # already flagged as INCL_OUT_OF_RANGE below
+            if col == "Z_collar" and "surface_sample_status" in df_work.columns:
+                sample_status = str(df_work.loc[idx, "surface_sample_status"])
+                if sample_status != "sampled":
+                    _add(
+                        idx, "superficie_diseno", None,
+                        error_code=f"DESIGN_SURFACE_{sample_status.upper()}",
+                        reason=f"Cota de diseño no resuelta: {df_work.loc[idx, 'surface_sample_reason']}",
+                        affected="collar, toe, geometría dependiente",
+                        action="Revise la cobertura, coordenadas y geometría de la superficie de diseño.",
+                    )
+                    continue
             orig = df_work.loc[idx, col]
             _add(
                 idx, _source_col(col), orig,
@@ -389,6 +420,7 @@ def procesar_pozos(
     *,
     bench_height_m: float | None = None,
     z_collar_semantic: str | None = None,
+    preserve_invalid_mapped_rows: bool = False,
     incl_convention: InclinationConvention | str | None = None,
     az_convention: AzimuthConvention | str = AzimuthConvention.CLOCKWISE_FROM_NORTH,
     incl_sign_convention: SignConvention | str = SignConvention.ABSOLUTE_VALUE,
@@ -398,6 +430,9 @@ def procesar_pozos(
     geometry_configuration: GeometryConfiguration | None = None,
     return_rejections: bool = False,
     return_result: bool = False,
+    design_surface_samples: tuple[DesignSurfaceSample, ...] | None = None,
+    design_surface_mesh_id: str | None = None,
+    design_surface_sha256: str | None = None,
 ):
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
@@ -506,9 +541,13 @@ def procesar_pozos(
         incl_src = column_map.get("Incl")
         az_src = column_map.get("Az")
         from core.column_mapping import apply_mapping
-        df_work = apply_mapping(df_work, column_map)
+        df_work = apply_mapping(
+            df_work,
+            column_map,
+            drop_missing_required=not preserve_invalid_mapped_rows,
+        )
     else:
-        resolved = _resolve_column_aliases(df_work)
+        resolved = _resolve_column_aliases(df_work, require_z=design_surface_samples is None)
         z_src = resolved.get("Z_collar")
         incl_src = resolved.get("Incl")
         az_src = resolved.get("Az")
@@ -545,6 +584,25 @@ def procesar_pozos(
     # Trazabilidad pozos→bancos en conciliación geométrica:
     if "uniqid" not in df_work.columns:
         df_work["uniqid"] = (df_work.index + 1).astype(str)
+
+    if design_surface_samples is not None:
+        if len(design_surface_samples) != len(df_work) or not design_surface_mesh_id or not design_surface_sha256:
+            raise ValueError("design surface samples require a matching row count and mesh provenance")
+        if any(
+            sample.status not in ("sampled", "outside", "ambiguous", "invalid")
+            or (sample.status == "sampled" and (sample.elevation_m is None or not np.isfinite(sample.elevation_m)))
+            or (sample.status != "sampled" and sample.elevation_m is not None)
+            for sample in design_surface_samples
+        ):
+            raise ValueError("invalid design surface sample")
+        df_work["Z_collar"] = [sample.elevation_m if sample.status == "sampled" else np.nan for sample in design_surface_samples]
+        df_work["surface_sample_status"] = [sample.status for sample in design_surface_samples]
+        df_work["surface_sample_reason"] = [sample.reason for sample in design_surface_samples]
+        df_work["surface_sample_method"] = [sample.method for sample in design_surface_samples]
+        df_work["surface_sample_mesh_id"] = design_surface_mesh_id
+        df_work["surface_sample_mesh_sha256"] = design_surface_sha256
+        df_work["surface_sample_unit"] = "m"
+        df_work["surface_sample_assumption"] = "coordenadas y datum compartidos; cota de diseño estimada, no medida"
 
     _coerce_typed_columns(df_work)
 
@@ -701,7 +759,7 @@ def procesar_pozos(
     # Cierre final §2.1: the transformation NEVER applies an unconfirmed
     # height — no automatic 15 m. Without a confirmed height the collar
     # elevation is left untransformed and dependent geometry is blocked.
-    semantic = _resolve_z_collar_semantic(z_src, z_collar_semantic)
+    semantic = "collar_elevation" if design_surface_samples is not None else _resolve_z_collar_semantic(z_src, z_collar_semantic)
     _Z_TRANSFORM_BLOCKED = False
     if semantic == "bench_elevation":
         bh_from_col = (
@@ -749,7 +807,7 @@ def procesar_pozos(
         else:
             df_work["Z_collar_semantic"] = "bench_elevation_untransformed"
     else:
-        df_work["Z_collar_semantic"] = "collar_elevation"
+        df_work["Z_collar_semantic"] = "design_surface_estimate" if design_surface_samples is not None else "collar_elevation"
 
     # Auditoría §3.4 + remediación 3.2/4.2: structured per-row rejections
     # captured BEFORE dropna(). The legacy scalar summary is still written
@@ -827,6 +885,7 @@ def _df_to_accepted_records(df_work: pd.DataFrame) -> list[dict]:
     if df_work is None or df_work.empty:
         return []
     import math
+    from datetime import date, datetime
     from core.column_utils import KILOS_CANDIDATES, first_present_column
 
     _LENGTH_CANDIDATES_LOCAL = ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
@@ -864,11 +923,25 @@ def _df_to_accepted_records(df_work: pd.DataFrame) -> list[dict]:
     descarga_series = _descarga_series(df_work)
 
     out: list[dict] = []
-    for idx, row in df_work.iterrows():
+    record_columns = [
+        col for col in df_work.columns if col not in _EVENT_LEVEL_RECORD_COLUMNS
+    ]
+    record_frame = df_work[record_columns]
+    for idx, values in zip(record_frame.index, record_frame.to_numpy()):
         record: dict = {}
-        for col in df_work.columns:
-            value = row[col]
-            if isinstance(value, (np.integer,)):
+        for col, value in zip(record_columns, values):
+            if value is pd.NaT or value is pd.NA:
+                value = None
+            elif isinstance(value, (date, datetime, np.datetime64)):
+                if pd.isna(value):
+                    value = None
+                elif isinstance(value, np.datetime64):
+                    value = pd.Timestamp(value).isoformat()
+                else:
+                    value = value.isoformat()
+            elif isinstance(value, (np.bool_,)):
+                value = bool(value)
+            elif isinstance(value, (np.integer,)):
                 value = int(value)
             elif isinstance(value, (np.floating,)):
                 f = float(value)
@@ -953,6 +1026,9 @@ def _collect_spatial_diagnostics(df_work: pd.DataFrame) -> dict:
         return {}
     diag: dict = {}
     for key in (
+        "voronoi_method",
+        "voronoi_validation_messages",
+        "assigned_area_m2",
         "area_influence_m2",
         "area_status",
         "collar_domain_status",
@@ -960,6 +1036,10 @@ def _collect_spatial_diagnostics(df_work: pd.DataFrame) -> dict:
         "voronoi_conservation_ok",
         "area_residual_m2",
         "area_residual_pct",
+        "outside_domain_hole_count",
+        "outside_domain_hole_ids",
+        "outside_domain_assigned_area_m2",
+        "invalid_coordinate_hole_count",
         "clip_warning",
         "domain_error_code",
         "domain_validation_reason",
@@ -968,6 +1048,8 @@ def _collect_spatial_diagnostics(df_work: pd.DataFrame) -> dict:
             series = df_work[key].dropna()
             if not series.empty:
                 value = series.iloc[0]
+                if value == "":
+                    continue
                 diag[key] = value.item() if isinstance(value, np.generic) else value
     row_fields = (
         "area_influence_m2",
