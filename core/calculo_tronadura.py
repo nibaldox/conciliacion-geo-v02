@@ -70,6 +70,7 @@ BENCH_HEIGHT = DEFAULTS.blast_default_bench_height
 _Z_BENCH_ALIASES = {"nombre_banco", "banco", "banco_cota", "cota_banco", "bench", "bench_elev"}
 _Z_COLLAR_ALIASES = {"cota_collar", "collar_elev", "z_collar", "rl_collar", "collar_z", "z_collar_real", "cota_collar_real"}
 _Z_AMBIGUOUS_ALIASES = {"z", "elevation", "elev", "cota", "altura", "nivel", "rango"}
+_Z_SEMANTIC_VALUES = ("bench_elevation", "collar_elevation")
 
 
 _CANONICAL_COLUMN_ALIASES: dict[str, list[str]] = {
@@ -339,15 +340,19 @@ def _resolve_z_collar_semantic(source_col: str | None, explicit: str | None) -> 
     """
     if explicit is not None:
         if explicit not in ("bench_elevation", "collar_elevation"):
-            raise ValueError(
+            raise GeometryConfigurationError(
                 f"z_collar_semantic inválido: {explicit!r}. Use 'bench_elevation' "
-                "o 'collar_elevation'."
+                "o 'collar_elevation'.",
+                error_code="Z_COLLAR_SEMANTIC_INVALID",
+                details={"source_column": source_col, "invalid_value": explicit, "allowed_values": list(_Z_SEMANTIC_VALUES)},
             )
         return explicit
     if source_col is None:
-        raise ValueError(
+        raise GeometryConfigurationError(
             "No se pudo determinar la semántica de la columna de elevación: "
-            "no hay columna fuente. Especifique z_collar_semantic."
+            "no hay columna fuente. Especifique z_collar_semantic.",
+            error_code="Z_COLLAR_SEMANTIC_REQUIRED",
+            details={"source_column": None, "allowed_values": list(_Z_SEMANTIC_VALUES)},
         )
     key = source_col.strip().lower()
     if key in _Z_BENCH_ALIASES:
@@ -355,16 +360,20 @@ def _resolve_z_collar_semantic(source_col: str | None, explicit: str | None) -> 
     if key in _Z_COLLAR_ALIASES:
         return "collar_elevation"
     if key in _Z_AMBIGUOUS_ALIASES:
-        raise ValueError(
+        raise GeometryConfigurationError(
             f"La columna de elevación '{source_col}' es ambigua (puede ser cota "
             "de banco, piso o diseño): no se determina su semántica y no se "
             "convierte a collar automáticamente (H-07). Especifique "
-            "z_collar_semantic='bench_elevation' o 'collar_elevation'."
+            "z_collar_semantic='bench_elevation' o 'collar_elevation'.",
+            error_code="Z_COLLAR_SEMANTIC_REQUIRED",
+            details={"source_column": source_col, "allowed_values": list(_Z_SEMANTIC_VALUES)},
         )
-    raise ValueError(
+    raise GeometryConfigurationError(
         f"No se pudo determinar la semántica de la columna de elevación "
         f"'{source_col}': no sé si es cota de banco o cota real de collar. "
-        "Especifique z_collar_semantic='bench_elevation' o 'collar_elevation'."
+        "Especifique z_collar_semantic='bench_elevation' o 'collar_elevation'.",
+        error_code="Z_COLLAR_SEMANTIC_REQUIRED",
+        details={"source_column": source_col, "allowed_values": list(_Z_SEMANTIC_VALUES)},
     )
 
 

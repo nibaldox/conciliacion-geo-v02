@@ -54,6 +54,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     # Defaults — override at runtime
     CONCILIACION_DATA_DIR=/app/data \
     CONCILIACION_LOG_LEVEL=INFO \
+    # Cap glibc malloc arenas: the blast endpoints parse ~79 MB and build
+    # thousands of models per request, and the default per-thread arenas
+    # fragment the heap (~40% larger peak measured). Set here, not in code.
+    MALLOC_ARENA_MAX=2 \
     # matplotlib tries to create ~/.config/matplotlib on import, but the
     # conciliacion user has no home dir (--no-create-home). Point it at a
     # writable cache under /tmp to avoid the "Permission denied" fallback

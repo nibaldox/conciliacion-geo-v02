@@ -18,6 +18,7 @@ vi.mock('./components/lazy', () => ({
   LazyResultsTable: () => <div data-testid="results-table" />,
   LazyDashboard: () => <div data-testid="dashboard" />,
   LazyBlastCorrelation: () => <div data-testid="blast" />,
+  LazyBlastWorkspace: () => <div data-testid="blast-workspace" />,
   LazyAIReporter: () => <div data-testid="ai-reporter" />,
   LazyProfileView: () => <div data-testid="profile" />,
   LazyProfilesGrid: () => <div data-testid="profiles-grid" />,
@@ -86,5 +87,18 @@ describe('App export workspace demo routing', () => {
 
     expect(await screen.findByTestId('export-panel')).toBeInTheDocument();
     expect(screen.queryByTestId('ai-reporter')).not.toBeInTheDocument();
+  });
+  it('mounts BlastWorkspace instead of BlastCorrelation for the blast view', async () => {
+    useSession.setState({
+      activeWorkspaceView: 'blast',
+      demoMode: false,
+      designMeshId: 'real-design-id',
+      topoMeshId: 'real-topo-id',
+    });
+
+    renderApp();
+
+    expect(await screen.findByTestId('blast-workspace')).toBeInTheDocument();
+    expect(screen.queryByTestId('blast')).not.toBeInTheDocument();
   });
 });

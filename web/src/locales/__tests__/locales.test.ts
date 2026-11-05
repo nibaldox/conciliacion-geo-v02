@@ -104,6 +104,7 @@ describe('Mission Control redesign i18n keys', () => {
     'blast.holeFilters.provenance.outside',
     'blast.holeFilters.provenance.ambiguous',
     'blast.holeFilters.provenance.invalid',
+    'blast.holeFilters.unavailableFiltersCleared',
   ];
 
   for (const key of REQUIRED) {
@@ -112,6 +113,72 @@ describe('Mission Control redesign i18n keys', () => {
     });
     it(`en.json has "${key}"`, () => {
       expect(enKeys.has(key), `Missing in en.json: ${key}`).toBe(true);
+    });
+  }
+});
+
+describe('Blast workspace i18n keys (T08)', () => {
+  const REQUIRED = [
+    'blast.colors.legendAbove',
+    'blast.colors.legendBelow',
+    'blast.colors.legendMissingCount',
+    'blast.colors.legendNoNumeric',
+    'blast.colors.legendObserved',
+    'blast.colors.legendRepeat',
+    'blast.colors.legendSaturated',
+    'blast.colors.legendSingle',
+    'blast.colors.legendSource',
+    'blast.colors.legendUnit',
+    'blast.colors.manualApply',
+    'blast.colors.manualInvalid',
+    'blast.colors.manualMax',
+    'blast.colors.manualMin',
+    'blast.colors.manualNeedsValues',
+    'blast.colors.manualRange',
+    'blast.colors.noCategories',
+    'blast.colors.rangeData',
+    'blast.colors.rangeLegacy',
+    'blast.colors.rangeManual',
+    'blast.colors.rangeMode',
+    'blast.colors.variable.powderFactorGeometry',
+    'blast.colors.target',
+    'blast.spatialRevisionMissing',
+    'blast.colors.targetBoth',
+    'blast.colors.targetCollars',
+    'blast.colors.targetTrajectories',
+    'blast.holeFilters.advanced',
+    'blast.viewPanel.title',
+    'blast.viewPanel.show',
+    'blast.viewPanel.hide',
+    'blast.viewPanel.layers',
+    'blast.viewPanel.fitView',
+    'blast.viewPanel.visibleCount',
+    'blast.viewPanel.legendHelp',
+    'blast.workspace.tabsLabel',
+    'blast.workspace.explore',
+    'blast.workspace.analysis',
+    'blast.workspace.simulation',
+    'blast.workspace.data',
+    'blast.workspace.noHoles',
+    'viewer.advanced_controls',
+  ];
+
+  function valueAt(obj: unknown, path: string): unknown {
+    return path.split('.').reduce<unknown>(
+      (acc, part) =>
+        acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[part] : undefined,
+      obj,
+    );
+  }
+
+  for (const key of REQUIRED) {
+    it(`es.json has non-empty "${key}"`, () => {
+      const v = valueAt(es, key);
+      expect(typeof v === 'string' && v.trim().length > 0, `Missing or empty in es.json: ${key}`).toBe(true);
+    });
+    it(`en.json has non-empty "${key}"`, () => {
+      const v = valueAt(en, key);
+      expect(typeof v === 'string' && v.trim().length > 0, `Missing or empty in en.json: ${key}`).toBe(true);
     });
   }
 });

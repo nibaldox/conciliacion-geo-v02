@@ -26,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 import api.database as db
 import api.schemas as schemas
+from api._async_db import run_blast_limited
 from api.blast_identity import blast_hole_id, blast_row_ids
 from core import (
     load_mesh,
@@ -1132,7 +1133,7 @@ async def get_blast_holes(
         session_id = await _run_in_executor(
             db.get_or_create_session, request.state.session_id
         )
-        return await _run_in_executor(
+        return await run_blast_limited(
             _project_blast_holes_sync,
             session_id,
             section_id,
@@ -1393,7 +1394,7 @@ async def get_blast_correlation(
         session_id = await _run_in_executor(
             db.get_or_create_session, request.state.session_id
         )
-        return await _run_in_executor(
+        return await run_blast_limited(
             _build_blast_correlation_sync, session_id, tolerance, survey_date
         )
     except HTTPException:
@@ -1517,7 +1518,7 @@ async def get_blast_correlation_damage_model(
         session_id = await _run_in_executor(
             db.get_or_create_session, request.state.session_id
         )
-        return await _run_in_executor(
+        return await run_blast_limited(
             _build_damage_model_sync, session_id, tolerance, survey_date
         )
     except HTTPException:

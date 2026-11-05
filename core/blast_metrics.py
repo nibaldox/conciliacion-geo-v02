@@ -566,7 +566,7 @@ def compute_influence_area_report(
     ``domain_area_m2`` / ``clip_warning``.
     """
     n = len(df)
-    report = df.copy()
+    report = df.drop(columns=["domain_area_m2", "clip_warning"], errors="ignore")
     report["area_m2"] = np.nan
     report["area_status"] = "invalid"
     report["collar_domain_status"] = "INSIDE"

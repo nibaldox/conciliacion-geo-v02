@@ -1,5 +1,86 @@
 # Continuidad para agentes de codificación
 
+## Continuación — 5 de noviembre de 2026: memoria de la API
+
+Estado: **medición cerrada** de las tres correcciones de memoria de la API (P1 caché por bytes, P2 caché de settings, P3 semáforo de `/blast/*`). Trabajo **sin commit ni push**; rama `codex/continuidad-tronadura-20261104`. No valida rendimiento con archivos reales de operación.
+
+- **Síntoma**: las instancias QA morían por OOM del cgroup de 3 GB a las **08:24**, **10:23** y **10:32** (en la última, anon-rss 3.136 MB) con tráfico normal del frontend; en el OOM de las 10:32 la medición no había enviado ni una petición a esa instancia (todo su tráfico iba a la 8013). A las **12:10** hubo además un OOM **global del sistema operativo** que se llevó por delante la API QA (8012) y Vite (5174), con otras aplicaciones del usuario consumiendo memoria: ese evento no es atribuible solo a la API y no se usó como evidencia de las causas.
+- **Causas medidas** (`data/qa-memory-20261105/INFORME-MEMORIA.md`; instancia aislada en 8013 con `MemoryMax=3G`, `MemorySwapMax=0`, un cliente secuencial y proceso reiniciado por escenario; sesión de QA con topo de 1.865.152 caras / 933.943 vértices y blob `sessions.settings` de 79,2 MB):
+  1. `get_settings` no cacheaba y re-parseaba los 79,2 MB en **cada** petición de `/blast/*` (≈240 MB transitorios por petición; `/summary`, que devuelve 4 números, llegaba a 556 MB de pico), multiplicado por los hilos del `ThreadPoolExecutor` por defecto.
+  2. `get_trimesh_by_id` usaba `lru_cache(maxsize=8)`: cada topo retenida cuesta ≈196 MB y `del` + `gc` no la libera (hasta ≈1,57 GB).
+  3. Las LRU de `api/routers/meshes.py` estaban acotadas **por número de entradas, no por bytes**: la primera decimación deja ≈571 MB de memoria nativa no reclamable (`fast_simplification`/`scipy`) y los payloads pesan 90–370 MB por clave.
+  4. `MALLOC_ARENA_MAX` sin fijar: ≈40 % del crecimiento de `/blast/*` era fragmentación de arenas glibc (medido en 30 llamadas: +163 MB con el valor por defecto frente a +102 MB con 2).
+- **Correcciones aplicadas**:
+  - **P1 — caché por bytes** (`api/byte_cache.py`): presupuesto único de 512 MiB (`CONCILIACION_MESH_CACHE_MB`, default 512, valores inválidos caen al default) con contabilidad de tamaño por entrada y evicción LRU, compartido por los payloads de `vertices`, `roi`, `contours`, `breaklines` y `horizontal-deviation`.
+  - **P2 — caché de settings** (`api/database.py`): caché de 3 sesiones con token `sessions.settings_version` (columna aditiva migrada en `init_db`, incrementada en el mismo `UPDATE` de `save_settings`), copia defensiva superficial al devolver y `get_trimesh_by_id` con `maxsize=4` (≈784 MB de techo en vez de ≈1,57 GB).
+  - **P3 — concurrencia y arenas**: `blast_concurrency_limit()` + `run_blast_limited` (`api/_async_db.py`) con semáforo (default 2, `CONCILIACION_BLAST_CONCURRENCY`) alrededor de los cálculos pesados de `/blast/*`, y `MALLOC_ARENA_MAX=2` fijado en `Dockerfile-api`, `render.yaml`, `dev.sh` y `electron/lib/spawn-sidecar.js` (nunca leído desde Python).
+- **Antes → después** (`data/qa-memory-20261105/after/INFORME-DESPUES.md`, mismo corpus, scope systemd propio por escenario):
+
+| Escenario | Antes (pico RSS) | Después (pico RSS) |
+|---|---|---|
+| `/blast/holes/3d` ×30 | 617 MB, crecimiento sostenido | **565 MB**, pendiente plana |
+| `/blast/holes/3d?section_id=0..15` | 2.082 MB | **568 MB** |
+| `/process/blast-correlation` ×5 | 618 MB (+32,8 MB/llamada) | **526 MB** (+0,75 MB/llamada) |
+| `/process/blast-correlation/damage-model` ×5 | 620 MB | **531 MB** |
+| `/blast/{sid}/summary` ×5 | 556 MB | **530 MB**; 0,28 s la 1ª, 0,00 s las siguientes |
+| `vertices` / `contours` / `roi` | 1.372 / 1.357 / 1.461 MB | 1.377 / 1.395 / 1.396 MB (sin cambio) |
+
+  Los endpoints `/blast/*` **ahora se estabilizan** (antes no): lo que baja es el pico y la pendiente, no siempre el RSS final — la retención única del árbol parseado (≈156–210 MB) sustituye a un transitorio por petición que además se multiplicaba por hilo. Los picos de `vertices`/`contours`/`roi` no bajan porque están dominados por la primera decimación, no por el payload cacheado.
+- **Prueba de resistencia**: 4 clientes concurrentes, 605 s, **490 peticiones, 0 errores**, proceso vivo y `/health` 200, pico **1.664 MB de 3.072 (54 %)**, pendiente de los últimos 5 min **−22,4 MB/min** ⇒ **PASS** (criterio: vivo y pendiente < 5 MB/min).
+- **Respuestas idénticas frío/caliente**: byte a byte en `/blast/holes/3d?section_id=0` (8,7 MB), `/process/blast-correlation` (335 KB) y `vertices?step=8000` (1,97 MB); `distinct=1` en las 5 repeticiones de cada uno.
+- **Coste asumido**: latencia bajo concurrencia. Con 4 clientes, `holes/3d` pasa de p50 0,35 s a **4,4 s** (p95 6,6 s) y `blast-correlation` a p50 8,2 s / p95 12,8 s. Las peticiones hacen cola; no fallan.
+- **Invariantes que hay que mantener**: toda escritura de settings debe pasar por `save_settings` (un `UPDATE sessions SET settings` directo o un proceso con código anterior no incrementa `settings_version` y deja caché obsoleta hasta reinicio o `db.clear_settings_cache()`); `get_settings` devuelve copia **superficial** —se copian el nivel superior y las ramas `process`/`tolerances`/`blast`, pero las listas de pozos (`blast_holes`, `accepted_rows`, `rejected_rows`) se comparten: **nunca mutar registros de pozos in situ**; y las cachés de mallas se acotan por bytes, no por entradas.
+- **Limitaciones (no resueltas)**:
+  - El churn nativo de la decimación (~12 MB por `step` distinto) **no tiene techo**: con 24 `step` el crecimiento es lineal hasta 1.280 MB y el presupuesto de 512 MiB no llega a saturarse. No añadir `step` arbitrarios desde el frontend.
+  - `data_revision` (`api/routers/blast.py`) recalculaba `json.dumps` + SHA-256 de los 11.184 pozos en cada petición de `/holes/3d` (+1,2 MB/llamada). **P4 cerrada**: digest cacheado (LRU 8) por `(DB_PATH, session_id, settings_version)`, versión leída antes y revalidada después de `get_settings`; digest idéntico al legado sobre la copia real (0,20 s → 0,00001 s en acierto). Gates `tests/api` + `tests/test_blast*.py`: 692 passed / 2 skipped (repetido por el coordinador). Falta repetir la prueba de resistencia con P4.
+  - La carga de archivos de pozos no pasa por el semáforo de `/blast/*`.
+  - La causa de fondo sigue en pie: los pozos viven dentro del blob `sessions.settings`. La salida real es migrarlos a una tabla propia; trabajo **pendiente de planificar**.
+
+## Continuación — 5 de noviembre de 2026: colores de pozos y espacio de trabajo de Tronadura
+
+Estado: **cierre técnico** de la entrega de colores y espacio de trabajo de Tronadura, con gates integrados verdes y verificación en navegador sobre una copia aislada de 11.184 pozos. El resto del trabajo sigue **sin commit** (ver incidente). No es validación operacional de CRS/datum.
+
+- **Problema del usuario y causas demostradas**: la asignación de colores no funcionaba y los controles estaban mal ubicados. Causas verificadas: el material de collares usaba `vertexColors` sin atributo `color` en la geometría (render negro); las trayectorias se coloreaban solo por categoría; el factor de carga quedaba saturado en una escala fija de 0–200 g/t (6.613 de 11.184 pozos por encima); existían dos visores incoherentes; y el visor quedaba enterrado bajo la tabla de 96 secciones.
+- **Render**: material instanciado corregido sin crear una esfera por pozo; halo de selección independiente que no sustituye el color del dato; destino del color collares, trayectorias o ambos, con fallback visual explícito cuando falta el mapeo.
+- **Escalas**: rango observado, fijo heredado (0–1000 kg para carga y 0–200 g/t para PF) y manual con validación; conteos de valores bajo/sobre el rango y sin dato; PF de influencia y PF geométrico (`pf_g_per_ton`) separados, sin fallback silencioso entre ellos; categorías estables al filtrar (dominio de la fuente completa); aviso de repetición de colores con total de categorías y colores distintos.
+- **Estado compartido**: store `web/src/stores/blastView.ts` con contexto `[sesión, mallas, data_revision]`; la confirmación espacial no se transfiere a otro contexto y se restaura al volver a la misma clave; visibilidad de pozos local en la Vista 3D general. `data_revision` es un campo aditivo de `GET /api/v1/blast/holes/3d` (hash determinista de los registros persistidos; el GET no escribe en la BD).
+- **Espacio de trabajo**: pestañas Explorar, Análisis, Simulación y Datos; con pozos existentes abre Explorar; panel acoplado y no superpuesto, barra de capas y franja de leyenda; Análisis reutiliza `BlastCorrelation` sin importador ni visor alternativo. La Vista 3D general conserva sus funciones.
+- **Gates finales** (T14-final, `data/qa-blast-workspace-20261105/T14-final/`): backend **2.807 aprobadas, 10 omitidas, 12 advertencias** (`--ignore=tests/test_openblast.py --skip-electron --benchmark-skip-slow`, `MemoryMax=6G` sin swap); frontend **1.178/1.178 en 100 archivos** con dominio ProfileView al 100 % (exit 0); ESLint sin errores (una advertencia de variable no usada en el spec E2E); build PWA con 30 entradas; Playwright GPU **4/4** (requiere `BLAST_COLORS_CHROME_PATH=/usr/sbin/google-chrome-stable`, configuración `web/playwright.blast-colors.config.ts` y Vite en 5173).
+- **Verificación en navegador con la copia de 11.184 pozos**: T13b dio 10/12 PASS y 2 FAIL (aviso con `{{colors}}` sin sustituir y advertencia de `key` de React); T13c los corrigió: aviso «73 categorías y 10 colores» sin placeholder, sin advertencias de `key`, leyenda estable (0/29 muestras con texto de ayuda), 0 errores de consola y 0 respuestas HTTP ≥ 400. Los colores cambian por paleta y destino, el filtro pasa de 11.184 a 390 visibles sin alterar la escala global, el estado se conserva al volver de Perfiles, y pestañas y móvil 390 funcionan sin desbordamiento. Medidas T13a: canvas de 716×431 a 1366×768 (antes 0) y de 308×360 a 390 px.
+- **Proceso, con honestidad**: las pruebas de T11a y del halo de T12 se escribieron junto con la implementación (la sensibilidad de T12 se observó a posteriori), no como RED previo. Las dos revisiones adversariales dieron REQUEST_CHANGES y sus hallazgos se arbitraron y corrigieron (T14-fix-A/B).
+- **INCIDENTE de publicación**: un subagente publicó sin autorización el commit `370c76f` (`web/src/stores/blastView.ts` y su test) en `origin/codex/continuidad-tronadura-20261104`, pese a la prohibición explícita. No se revirtió; el resto del trabajo sigue sin commit. Pendiente decisión del usuario.
+- **Limitaciones**: la confirmación espacial en QA se marcó solo como hipótesis y no valida CRS/datum/unidades; la franja de leyenda cubre ~49 px del visor en escritorio (aceptado: no tapa el panel); la copia de QA no tiene columna de banco, así que el filtro Banco solo ofrece «Sin dato»; un surrogate suelto en `hole_id` persistido aún provoca 500 en `api/blast_identity.py` y en la serialización JSON (solo alcanzable con BD manipulada; la carga CSV decodifica estricto); la validación operacional de la entrega 1 (20.939 pozos, CRS) sigue pendiente.
+- **Servicios QA**: API `http://127.0.0.1:8012` (datos de la copia en `data/qa-blast-workspace-20261105/runtime`) y Vite `http://127.0.0.1:5174/conciliacion-geo-v02/`. Los IDs de proceso son históricos: verificar propiedad y estado antes de cualquier acción.
+
+## Continuación — 5 de noviembre de 2026: cierre técnico de entrega 1 de tronadura (validación operacional pendiente)
+
+Estado: **cierre técnico** de la entrega 1 (entrada y contexto temporal) según gates de esta sesión, sobre datos sintéticos y aislados. **No es validación operacional**: no hay validación con archivos reales, ni CRS/datum confirmados, ni rendimiento medido con el archivo de 20.939 pozos. Cambios sin commit ni push; rama `codex/continuidad-tronadura-20261104`, HEAD `3b0d897`.
+
+- **Funcional**: la fuente única de mapeo es `columnMap` (`web/src/components/results/BlastUploader.tsx`) y los encabezados son literales; confirmaciones y reset asíncrono bloquean con estado pendiente; textos ES/EN de confianza. Fecha de origen (`source`) y formato ISO/DMY/MDY explícitos, separados de los 20 canónicos. DMY/MDY sin hora se documentan como formato fecha-sin-hora; ISO con hora y offset se soporta y conserva la fecha calendario sin conversión a UTC. Procedencia `VALID/MISSING/INVALID` con advertencias. Legacy Streamlit intacto.
+- **Voronoi**: dominio persistido `null` devuelve no-500 sin inventar 0; conservación de área preservada. Z desconocida (semántica no resuelta) devuelve 422 estructurado sin adivinar. La declaración semántica personalizada de Z **sigue sin exponerse en la UI** (limitación conservada).
+- **PDF**: los dos casos de aserción de portabilidad quedaron resueltos solo en tests de lectura de orden de texto; el generador PDF no cambió.
+- **Revisión independiente**: UI + D1 + cierre ISO, dictamen APPROVE. El último ajuste CSS (diagnóstico JSON móvil, 59 px → 0, solo clases) fue revisado por el coordinador y en navegador.
+
+Gates ejecutados tras el último ajuste CSS, que sustituyen a los de frontend anteriores (logs en `data/qa-tronadura-20261105/`, carpeta ignorada por Git):
+
+| Gate | Resultado | Log |
+|---|---|---|
+| Backend final (`backend-final-offset.xml`; comandos `--ignore=tests/test_openblast.py --skip-electron --benchmark-skip-slow`) | 2795 aprobadas, 10 omitidas, 12 advertencias; total 2805; Python 3.14.6; `MemoryMax=6G` sin swap. `offset` es sufijo del log del correctivo ISO, no un flag de pytest | `backend-final-offset.log/.xml` |
+| Baseline backend 3G | OOM; no es resultado válido | — |
+| Frontend completo con cobertura | 962 pruebas en 94 archivos aprobadas; dominio ProfileView 100 % (226/226 sentencias, 261/261 ramas, 54/54 funciones, 194/194 líneas); Node 22.23.0 | `frontend-final-responsive.log/.xml` |
+| ESLint | Sin errores | `frontend-lint-responsive.log` |
+| Build PWA | Aprobado (29 entradas precache) | `frontend-build-responsive.log` |
+| Browser QA sintético (componente real aislado + hook + API real) | `es-desktop` y `en-mobile390`: 22/22 cada uno (44/44 en total); POST 200 con 30 filas sintéticas; GET 3D devuelve 30 fechas (2026-05-03); 0 errores de página; check `no_horizontal_overflow` aprobado en ambos casos; base de producto sin cambios (`productDbUntouched`) | `browser-date-coordinator-final.log` + `date-browser-artifacts/browser-date-smoke-summary.json` |
+| Smoke básico de navegador | 26 comprobaciones aprobadas | — |
+
+**Revalidación tras el último ajuste CSS** (`frontend-final-responsive.log/.xml`, `frontend-build-responsive.log`, `frontend-lint-responsive.log`): suite 962/962 en 94 archivos, build PWA (29 entradas precache) y ESLint aprobados. Las líneas «Upload failed» del log son el caso de prueba de límite de tamaño (260 MiB > 250 MiB), no fallos.
+
+**Límites y pendiente de validación operacional**:
+- No se localizaron los archivos reales de noviembre (CSV de 20.939 filas, `f12b`, TOPO). Hay dos STL locales en `data-input/`; no se ha comprobado que correspondan a los insumos de noviembre.
+- Pendiente: validación real de CRS/datum y rendimiento con 20.939 pozos; Playwright completa; apertura 3D completa con datos reales.
+- Entregas 2 a 6 del plan no iniciadas.
+- API local en 8000 (`CONCILIACION_DATA_DIR=data/qa-tronadura-20261105/runtime`) y Vite en 5173 (`http://127.0.0.1:5173/conciliacion-geo-v02/`) se usaron bajo datos de QA. Los identificadores `proc_4dfacf1a10be` y `proc_975e8c775532` son solo evidencia histórica: verificar propiedad y estado antes de cualquier acción. Los IDs de esta sesión no constituyen autorización para trabajo futuro.
+
 ## Continuación — 3 de noviembre de 2026: carga CSV de tronadura
 
 - El HTTP 500 informado al cargar se produjo por combinar inclinación `FROM_VERTICAL` con signo `NEGATIVE_IS_DOWNWARD_DIP`. El contrato ahora rechaza esa combinación antes del cálculo y el formulario la explica; no se infiere la convención física. Los campos de columnas de inclinación y azimut usan selectores de los encabezados CSV, con fallback manual si no se pueden leer y bloqueo ante una selección que no existe en el archivo actual.

@@ -134,6 +134,23 @@ def _text(pdf_bytes):
     raise RuntimeError("neither pdftotext nor pypdf is available")
 
 
+def _semantic_text(pdf_bytes):
+    """Reading-order text with whitespace collapsed; for wording checks, not layout checks.
+
+    ``pdftotext -layout`` interleaves neighbouring table cells inside a sentence and
+    breaks long phrases across lines, so sentence assertions compare reading order.
+    """
+    if PDFTOTEXT:
+        proc = subprocess.run(
+            [PDFTOTEXT, "-", "-"],
+            input=pdf_bytes,
+            capture_output=True,
+            check=True,
+        )
+        return " ".join(proc.stdout.decode("utf-8", errors="replace").split())
+    return " ".join(_text(pdf_bytes).split())
+
+
 def _pages(pdf_bytes):
     return [page for page in _text(pdf_bytes).split("\f") if page.strip()]
 
@@ -354,10 +371,17 @@ def test_design_surface_collar_elevation_is_labeled_as_estimated():
             "tolerance": {"neg": 1.0, "pos": 1.0},
         },
     )
-    text = _text(build_pdf_report(data).getvalue())
+    text = _semantic_text(build_pdf_report(data).getvalue())
     assert "Advertencia sobre la cota" in text
     assert "estimada desde la superficie de diseño" in text
     assert "no es una medición de terreno" in text
+
+
+@requires_pdf_text
+def test_collar_estimate_warning_is_absent_without_design_surface_provenance():
+    text = _semantic_text(build_pdf_report(_sample_data()).getvalue())
+    assert "Advertencia sobre la cota" not in text
+    assert "no es una medición de terreno" not in text
 
 
 def test_pdf_blast_rows_include_estimated_collar_warning_when_provenance_is_present():
@@ -632,10 +656,24 @@ def test_ambiguous_section_sector_warning_is_visible_in_the_pdf():
     ]
     data = build_report_data(rows, SETTINGS, ReportFilters(), META)
 
-    text = _text(build_pdf_report(data).getvalue())
+    text = _semantic_text(build_pdf_report(data).getvalue())
 
     assert "estos nombres aparecen asociados a más de una identidad de sector" in text
     assert "no se pueden atribuir a un sector de forma inequívoca" in text
+
+
+@requires_pdf_text
+def test_ambiguous_section_sector_warning_is_absent_for_unambiguous_section():
+    rows = [
+        _comparison(section="S-01", sector="A", bench=1),
+        _comparison(section="S-01", sector="A", bench=2),
+    ]
+    data = build_report_data(rows, SETTINGS, ReportFilters(), META)
+
+    text = _semantic_text(build_pdf_report(data).getvalue())
+
+    assert "más de una identidad de sector" not in text
+    assert "no se pueden atribuir a un sector de forma inequívoca" not in text
 
 
 @requires_pdf_text

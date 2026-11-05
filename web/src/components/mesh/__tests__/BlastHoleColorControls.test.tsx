@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BlastHole3DRecord } from '../BlastHoleFilters';
 import { BlastHoleColorControls } from '../BlastHoleColorControls';
 import type { BlastHoleColorMapping } from '../blastHoleColors';
+import type { BlastViewColorConfig } from '../../../stores/blastView';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string; [key: string]: unknown }) => {
@@ -35,7 +36,7 @@ describe('BlastHoleColorControls', () => {
     const controlsGrid = container.querySelector('section > div');
     const paletteLabel = screen.getByLabelText('Escala de color').closest('label');
 
-    expect(controlsGrid?.getAttribute('style')).toContain('repeat(auto-fit, minmax(min(100%, 200px), 1fr))');
+    expect(controlsGrid?.getAttribute('style')).toContain('repeat(auto-fit, minmax(min(100%, 140px), 1fr))');
     expect(controlsGrid?.className).not.toMatch(/sm:grid-cols/);
     expect(paletteLabel?.className).not.toContain('sm:col-span-2');
   });
@@ -65,11 +66,11 @@ describe('BlastHoleColorControls', () => {
     expect(screen.getByLabelText('Escala de color')).toBeDisabled();
     fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'grid' } });
     await waitFor(() => expect(onColorsChange).toHaveBeenLastCalledWith(expect.objectContaining({
-      colorsByRowId: new Map([['two', '#636EFA']]),
+      colorsByRowId: new Map([['two', '#EF553B']]),
     }), 'category'));
     expect(onColorsChange.mock.lastCall?.[0].legend).toMatchObject({
       kind: 'category',
-      entries: [{ label: 'Malla B', color: '#636EFA' }],
+      entries: [{ label: 'Malla A', color: '#636EFA' }, { label: 'Malla B', color: '#EF553B' }],
     });
 
     rerender(<BlastHoleColorControls records={records} filteredRecords={[records[0]]} onColorsChange={onColorsChange} />);
@@ -109,7 +110,7 @@ describe('BlastHoleColorControls', () => {
     await waitFor(() => expect(onColorsChange.mock.lastCall?.[0].legend).toMatchObject({ kind: 'variable', min: 100, max: 900 }));
 
     rerender(<BlastHoleColorControls records={records} filteredRecords={[records[1]]} onColorsChange={onColorsChange} />);
-    await waitFor(() => expect(onColorsChange.mock.lastCall?.[0].legend).toMatchObject({ kind: 'variable', min: 900, max: 900 }));
+    await waitFor(() => expect(onColorsChange.mock.lastCall?.[0].legend).toMatchObject({ kind: 'variable', min: 100, max: 900 }));
 
     fireEvent.change(screen.getByLabelText('Variable'), { target: { value: 'charge' } });
     await waitFor(() => expect(onColorsChange.mock.lastCall?.[0].legend).toMatchObject({ kind: 'variable', min: 0, max: 1000 }));
@@ -121,7 +122,7 @@ describe('BlastHoleColorControls', () => {
 
     expect(screen.getByLabelText('Variable')).toHaveValue('powderFactor');
     expect(Array.from(screen.getByLabelText('Variable').querySelectorAll('option')).map((option) => option.value)).toEqual([
-      'powderFactor', 'diameter', 'collarElevation',
+      'powderFactor', 'powderFactorGeometry', 'diameter', 'collarElevation',
     ]);
   });
 
@@ -189,5 +190,150 @@ describe('BlastHoleColorControls', () => {
     render(<Parent />);
     await waitFor(() => expect(screen.getByTestId('parent-updates')).toHaveTextContent('1'));
     expect(callbackCalls).toBe(1);
+  });
+});
+
+describe('BlastHoleColorControls controlled config', () => {
+  const records = [
+    hole('low', { Kilos_Cargados_real: 100 }, [0, 0, 100]),
+    hole('high', { Kilos_Cargados_real: 900 }, [0, 0, 900]),
+  ];
+
+  it('reports config patches through onConfigChange and renders from the controlled config', () => {
+    const onConfigChange = vi.fn();
+    const { rerender } = render(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={vi.fn()}
+      config={{ kind: 'variable', variable: 'charge', category: 'grid', palette: 'Turbo', rangeMode: 'data' }}
+      onConfigChange={onConfigChange}
+    />);
+    fireEvent.change(screen.getByLabelText('Escala de color'), { target: { value: 'Viridis' } });
+    expect(onConfigChange).toHaveBeenLastCalledWith({ palette: 'Viridis' });
+    expect(screen.getByLabelText('Escala de color')).toHaveValue('Turbo');
+
+    rerender(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={vi.fn()}
+      config={{ kind: 'variable', variable: 'charge', category: 'grid', palette: 'Viridis', rangeMode: 'data' }}
+      onConfigChange={onConfigChange}
+    />);
+    expect(screen.getByLabelText('Escala de color')).toHaveValue('Viridis');
+  });
+
+  it('keeps manual draft local and publishes only a valid finite min<max pair', () => {
+    const onConfigChange = vi.fn();
+    function Parent() {
+      const [config, setConfig] = useState<BlastViewColorConfig>({ kind: 'variable', variable: 'collarElevation', category: 'grid', palette: 'Turbo', rangeMode: 'data' });
+      return <BlastHoleColorControls records={records} filteredRecords={records} onColorsChange={vi.fn()} config={config}
+        onConfigChange={(patch) => { onConfigChange(patch); setConfig((current) => ({ ...current, ...patch })); }} />;
+    }
+    render(<Parent />);
+    fireEvent.change(screen.getByLabelText('Rango'), { target: { value: 'manual' } });
+    expect(onConfigChange).toHaveBeenLastCalledWith({ rangeMode: 'manual', rangeMin: 100, rangeMax: 900 });
+    fireEvent.change(screen.getByLabelText('Mínimo'), { target: { value: '500' } });
+    fireEvent.change(screen.getByLabelText('Máximo'), { target: { value: '200' } });
+    expect(screen.getByRole('button', { name: 'Aplicar rango' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Se mantiene la última escala válida');
+    expect(onConfigChange).toHaveBeenCalledTimes(1);
+    fireEvent.change(screen.getByLabelText('Máximo'), { target: { value: '1000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aplicar rango' }));
+    expect(onConfigChange).toHaveBeenLastCalledWith({ rangeMode: 'manual', rangeMin: 500, rangeMax: 1000 });
+  });
+
+  it('keeps the last valid mapping while an invalid manual range is edited', async () => {
+    const onColorsChange = vi.fn();
+    const { rerender } = render(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={onColorsChange}
+      config={{ kind: 'variable', variable: 'collarElevation', category: 'grid', palette: 'Turbo', rangeMode: 'manual', rangeMin: 0, rangeMax: 1000 }}
+      onConfigChange={vi.fn()}
+    />);
+    await waitFor(() => expect(onColorsChange.mock.lastCall?.[0].legend).toMatchObject({ min: 0, max: 1000 }));
+    const calls = onColorsChange.mock.calls.length;
+    rerender(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={onColorsChange}
+      config={{ kind: 'variable', variable: 'collarElevation', category: 'grid', palette: 'Turbo', rangeMode: 'manual', rangeMin: 900, rangeMax: 100 }}
+      onConfigChange={vi.fn()}
+    />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(onColorsChange.mock.calls.length).toBe(calls);
+  });
+
+  it('hides the internal legend when showLegend is false without removing controls', () => {
+    const onColorsChange = vi.fn();
+    render(<BlastHoleColorControls records={records} filteredRecords={records} onColorsChange={onColorsChange} showLegend={false} />);
+    expect(screen.queryByLabelText('Escala de valores')).toBeNull();
+    expect(screen.getByLabelText('Variable')).toBeInTheDocument();
+    expect(onColorsChange).toHaveBeenCalled();
+  });
+});
+
+describe('BlastHoleColorControls manual range scope', () => {
+  const records = [
+    hole('low', { Kilos_Cargados_real: 100, Nombre_Malla_Original: 'Malla A' }, [0, 0, 1000]),
+    hole('high', { Kilos_Cargados_real: 900, Nombre_Malla_Original: 'Malla B' }, [0, 0, 1200]),
+  ];
+
+  it('controlled: changing variable while manual publishes data range and clears manual limits', () => {
+    const onConfigChange = vi.fn();
+    render(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={vi.fn()}
+      config={{ kind: 'variable', variable: 'charge', category: 'grid', palette: 'Turbo', rangeMode: 'manual', rangeMin: 100, rangeMax: 900 }}
+      onConfigChange={onConfigChange}
+    />);
+    fireEvent.change(screen.getByLabelText('Variable'), { target: { value: 'collarElevation' } });
+    expect(onConfigChange).toHaveBeenLastCalledWith({ kind: 'variable', variable: 'collarElevation', rangeMode: 'data', rangeMin: undefined, rangeMax: undefined });
+  });
+
+  it('controlled: changing kind while manual publishes data range and clears manual limits', () => {
+    const onConfigChange = vi.fn();
+    render(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={vi.fn()}
+      config={{ kind: 'variable', variable: 'charge', category: 'grid', palette: 'Turbo', rangeMode: 'manual', rangeMin: 100, rangeMax: 900 }}
+      onConfigChange={onConfigChange}
+    />);
+    fireEvent.change(screen.getByLabelText('Colorear por'), { target: { value: 'category' } });
+    expect(onConfigChange).toHaveBeenLastCalledWith({ kind: 'category', rangeMode: 'data', rangeMin: undefined, rangeMax: undefined });
+  });
+
+  it('uncontrolled: changing variable from manual resets to data range and the legend uses the new variable extent', async () => {
+    const onColorsChange = vi.fn();
+    render(<BlastHoleColorControls records={records} filteredRecords={records} onColorsChange={onColorsChange} />);
+    fireEvent.change(screen.getByLabelText('Rango'), { target: { value: 'manual' } });
+    expect(screen.getByLabelText('Mínimo')).toHaveValue(100);
+    fireEvent.change(screen.getByLabelText('Variable'), { target: { value: 'collarElevation' } });
+    expect(screen.getByLabelText('Rango')).toHaveValue('data');
+    expect(screen.queryByLabelText('Mínimo')).toBeNull();
+    await waitFor(() => expect(onColorsChange.mock.lastCall?.[0].legend).toMatchObject({ kind: 'variable', min: 1000, max: 1200 }));
+  });
+
+  it('legend source label follows the legend that is still shown while the current manual range is invalid', () => {
+    const { rerender } = render(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={vi.fn()}
+      config={{ kind: 'variable', variable: 'charge', category: 'grid', palette: 'Turbo', rangeMode: 'data' }}
+      onConfigChange={vi.fn()}
+    />);
+    expect(screen.getByText(/^Fuente: .+ · Kilos_Cargados_real$/)).toBeInTheDocument();
+    rerender(<BlastHoleColorControls
+      records={records}
+      filteredRecords={records}
+      onColorsChange={vi.fn()}
+      config={{ kind: 'variable', variable: 'collarElevation', category: 'grid', palette: 'Turbo', rangeMode: 'manual', rangeMin: 900, rangeMax: 100 }}
+      onConfigChange={vi.fn()}
+    />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('Fuente: Carga Explosiva (Kg) · Kilos_Cargados_real')).toBeInTheDocument();
+    expect(screen.queryByText(/^Fuente: Cota Collar/)).toBeNull();
   });
 });

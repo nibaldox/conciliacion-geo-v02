@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Html, OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
@@ -30,7 +30,9 @@ import { BlastHoleFilters, type BlastHole3DRecord } from './BlastHoleFilters';
 import { useBlastHoles3D } from './useBlastHoles3D';
 import { getSectionExtent } from './sectionExtent';
 import { BlastHoleColorControls } from './BlastHoleColorControls';
+import { BlastHoleColorLegendView } from './BlastHoleColorLegend';
 import type { BlastHoleColorLegend, BlastHoleColorMapping } from './blastHoleColors';
+import { createBlastViewContextKey, useBlastView, type BlastColorTarget } from '../../stores/blastView';
 
 const DESIGN_HEX = '#7693b7'; // steel blue
 const TOPO_HEX = '#cccccc';   // grey
@@ -646,7 +648,13 @@ function Scene({
 
 // ─── Main Exported Component (3D Viewport) ─────────────────────
 
-export function Mesh3DViewer() {
+export type Mesh3DViewerMode = 'general' | 'blast';
+
+export interface Mesh3DViewerProps {
+  mode?: Mesh3DViewerMode;
+}
+
+export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
   const isDark = useTheme((s) => s.isDark);
   const sceneColors = useMemo(() => ({
     background: readThemeColor('--color-viewer-bg', '#111111'),
@@ -677,17 +685,40 @@ export function Mesh3DViewer() {
     sections: true,
   });
   const [showHorizontalDeviation, setShowHorizontalDeviation] = useState(false);
-  const [showBlastHoles, setShowBlastHoles] = useState(false);
-  const [confirmedBlastSpatialKey, setConfirmedBlastSpatialKey] = useState<string | null>(null);
+  const storeShowBlastHoles = useBlastView((s) => s.showBlastHoles);
+  const setStoreShowBlastHoles = useBlastView((s) => s.setShowBlastHoles);
+  const [generalShowBlastHoles, setGeneralShowBlastHoles] = useState(false);
+  const blastFilters = useBlastView((s) => s.filters);
+  const setBlastFilters = useBlastView((s) => s.setFilters);
+  const blastColorConfig = useBlastView((s) => s.colorConfig);
+  const setBlastColorConfig = useBlastView((s) => s.setColorConfig);
+  const blastColorTarget = useBlastView((s) => s.colorTarget);
+  const setBlastColorTarget = useBlastView((s) => s.setColorTarget);
+  const activateBlastContext = useBlastView((s) => s.activateContext);
+  const confirmedBlastSpatialContext = useBlastView((s) => s.confirmedSpatialContext);
+  const confirmBlastSpatialContext = useBlastView((s) => s.confirmSpatial);
+  const clearBlastSpatialConfirmation = useBlastView((s) => s.clearSpatialConfirmation);
+  const isBlastMode = mode === 'blast';
+  const showBlastHoles = isBlastMode ? storeShowBlastHoles : generalShowBlastHoles;
+  const setShowBlastHoles = useCallback((value: boolean) => {
+    if (isBlastMode) setStoreShowBlastHoles(value);
+    else setGeneralShowBlastHoles(value);
+  }, [isBlastMode, setStoreShowBlastHoles]);
+  useEffect(() => {
+    if (isBlastMode) setStoreShowBlastHoles(true);
+  }, [isBlastMode, setStoreShowBlastHoles]);
   const [holeCorridor, setHoleCorridor] = useState(10);
   const [filteredHoles, setFilteredHoles] = useState<{ source: unknown; holes: BlastHole3DRecord[] }>({ source: null, holes: [] });
   const [holeColorState, setHoleColorState] = useState<{ source: readonly BlastHole3DRecord[]; mapping: BlastHoleColorMapping; kind: BlastHoleColorLegend['kind'] } | null>(null);
+  const [holeLegendState, setHoleLegendState] = useState<{ data: ReturnType<typeof useBlastHoles3D>['data']; mapping: BlastHoleColorMapping } | null>(null);
   const [sectorOverride, setSectorOverride] = useState<string | null>(null);
   const [benchNum, setBenchNum] = useState<number | null>(null);
   const [longitudinalStep, setLongitudinalStep] = useState(2);
   const [verticalStep, setVerticalStep] = useState(1);
   const [controlsSize, setControlsSize] = useState({ width: 320, height: 480 });
   const controlsResizeStart = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const blastPanelId = useId();
+  const [blastPanelOpen, setBlastPanelOpen] = useState(readBlastPanelDefaultOpen);
 
   const beginControlsResize = (event: React.PointerEvent<HTMLButtonElement>) => {
     controlsResizeStart.current = { x: event.clientX, y: event.clientY, ...controlsSize };
@@ -717,15 +748,21 @@ export function Mesh3DViewer() {
   const activeSectionIndex = activeSection && sections ? sections.indexOf(activeSection) : -1;
   const holesQuery = useBlastHoles3D(showBlastHoles && !hasDemoMeshes, activeSectionIndex < 0 ? null : activeSectionIndex,
     activeSection ? JSON.stringify([activeSection.origin, activeSection.azimuth, activeSection.length, activeSection.length_up, activeSection.length_down]) : '');
-  const blastSpatialKey = JSON.stringify([designMeshId, topoMeshId, holesQuery.data?.session_id ?? null]);
-  const confirmBlastSpatialReference = confirmedBlastSpatialKey === blastSpatialKey;
+  const blastContextKey = createBlastViewContextKey(holesQuery.data?.session_id ?? null, designMeshId, topoMeshId, holesQuery.data?.data_revision);
+  const confirmBlastSpatialReference = blastContextKey !== null && confirmedBlastSpatialContext === blastContextKey;
+  useEffect(() => {
+    if (useBlastView.getState().contextKey === blastContextKey) return;
+    activateBlastContext(blastContextKey);
+    setSelectedHoleKey(null);
+  }, [blastContextKey, activateBlastContext, setSelectedHoleKey]);
   const updateVisibleHoles = useCallback((holes: BlastHole3DRecord[], corridor: number) => {
     setFilteredHoles({ source: holesQuery.data, holes });
     setHoleCorridor(corridor);
   }, [holesQuery.data]);
   const updateHoleColors = useCallback((mapping: BlastHoleColorMapping, kind: BlastHoleColorLegend['kind']) => {
     setHoleColorState({ source: filteredHoles.holes, mapping, kind });
-  }, [filteredHoles.holes]);
+    setHoleLegendState({ data: holesQuery.data, mapping });
+  }, [filteredHoles.holes, holesQuery.data]);
   const sectionSector = activeSection?.sector.trim() ?? null;
   const selectedSector = sectorOverride !== null && sectorOptions.includes(sectorOverride)
     ? sectorOverride
@@ -751,6 +788,7 @@ export function Mesh3DViewer() {
     return calculateBounds(topoVerts, designVerts);
   }, [topoVerts, designVerts]);
   const holeCenter = useMemo(() => [bounds.centerX, bounds.centerY, bounds.centerZ] as const, [bounds.centerX, bounds.centerY, bounds.centerZ]);
+  const hasHoleColorMapping = holeColorState?.source === filteredHoles.holes;
   const sceneHoles = useMemo(() => (filteredHoles.source === holesQuery.data ? filteredHoles.holes : []).map((hole) => ({
     key: hole.row_id,
     collar: hole.collar?.length === 3 ? hole.collar as [number, number, number] : null,
@@ -773,266 +811,357 @@ export function Mesh3DViewer() {
     );
   }
 
-  return (
-    <div data-slot="mesh-3d-viewer" className="h-full min-h-0 w-full relative rounded-xl overflow-hidden" style={{ border: '1px solid var(--color-border)' }}>
-      {isLoading ? (
-        <div className="flex items-center justify-center h-full min-h-0" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
-          <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
-            <div className="animate-spin text-2xl">⏳</div>
-            <p className="text-sm">{t('step1.view3d_loading_verts')}</p>
+  const mutedStyle = { color: 'var(--color-text-muted)' };
+  const borderStyle = { borderColor: 'var(--color-border)' };
+  const blastVisibleCount = filteredHoles.source === holesQuery.data ? filteredHoles.holes.length : 0;
+  const blastTotalCount = holesQuery.data?.holes.length ?? 0;
+  const legendMapping = holeLegendState && holeLegendState.data === holesQuery.data ? holeLegendState.mapping : null;
+
+  const renderLayerToggles = () => (
+    <>
+      <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
+        <input
+          type="checkbox"
+          checked={layers.topo}
+          onChange={(e) => setLayers(prev => ({ ...prev, topo: e.target.checked }))}
+          className="rounded border-border bg-surface-muted text-gray-500 focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
+        />
+        <span style={{ color: sceneColors.topo }}>●</span>
+        <span>{t('viewer.layer_topo', { defaultValue: 'Topografía Real' })}</span>
+      </label>
+      <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
+        <input
+          type="checkbox"
+          checked={layers.designContours}
+          onChange={(e) => setLayers(prev => ({ ...prev, designContours: e.target.checked }))}
+          className="rounded border-border bg-surface-muted text-mine-blue focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
+        />
+        <span style={{ color: DESIGN_HEX }}>●</span>
+        <span>{t('viewer.layer_design', { defaultValue: 'Curvas de Diseño' })}</span>
+      </label>
+      <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
+        <input
+          type="checkbox"
+          checked={layers.sections}
+          onChange={(e) => setLayers(prev => ({ ...prev, sections: e.target.checked }))}
+          className="rounded border-border bg-surface-muted text-red-500 focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
+        />
+        <span style={{ color: SECTION_HEX }}>●</span>
+        <span>{t('viewer.layer_sections', { defaultValue: 'Líneas de Sección' })}</span>
+      </label>
+    </>
+  );
+
+  const renderBlastHolesToggle = () => (
+    <label className="flex items-center gap-2 cursor-pointer">
+      <input data-testid="blast-holes-toggle" type="checkbox" checked={showBlastHoles} disabled={hasDemoMeshes}
+        onChange={(event) => setShowBlastHoles(event.target.checked)} />
+      <span>{t('blast.layer')}</span>
+    </label>
+  );
+
+  const renderBlastSpatialBlock = () => showBlastHoles && !hasDemoMeshes && (
+    <div className={isBlastMode ? 'flex flex-col gap-3' : undefined}>
+      <label className="flex items-start gap-2">
+        <input type="checkbox" checked={confirmBlastSpatialReference} disabled={blastContextKey === null}
+          onChange={(event) => {
+            if (event.target.checked && blastContextKey !== null) confirmBlastSpatialContext(blastContextKey);
+            else clearBlastSpatialConfirmation();
+          }} />
+        <span>{t('blast.confirmSpatial3d')}</span>
+      </label>
+      {holesQuery.data && blastContextKey === null && (
+        <p role="status">{t('blast.spatialRevisionMissing', { defaultValue: 'Esta fuente de pozos no tiene revisión verificable; no se puede confirmar la referencia espacial.' })}</p>
+      )}
+      {holesQuery.isLoading && <p>{t('blast.layerLoading')}</p>}
+      {holesQuery.isError && <p role="alert">{t('blast.layerError')}</p>}
+      {holesQuery.data && confirmBlastSpatialReference && <>
+        <label className="flex flex-col gap-1">
+          <span>{t('blast.sectionSelect')}</span>
+          <select value={activeSection?.id ?? ''} onChange={(event) => setSelectedSection(event.target.value || null)}
+            className="w-full rounded border px-1.5 py-1" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
+            <option value="">{t('blast.sectionNone')}</option>
+            {(sections ?? []).map((section) => <option key={section.id} value={section.id}>{section.sector ? `${section.sector} · ` : ''}{section.name}</option>)}
+          </select>
+        </label>
+        <p>{t('blast.rejected', { count: holesQuery.data.summary.rejected })}</p>
+        <p>{t(isBlastMode ? 'blast.viewPanel.legendHelp' : 'blast.legend')}</p>
+        <BlastHoleFilters holes={holesQuery.data.holes} hasSection={activeSectionIndex >= 0} value={blastFilters} onChange={setBlastFilters} onFilteredChange={updateVisibleHoles} compact={isBlastMode} />
+        <BlastHoleColorControls records={holesQuery.data.holes} filteredRecords={filteredHoles.source === holesQuery.data ? filteredHoles.holes : EMPTY_BLAST_HOLES} onColorsChange={updateHoleColors} config={blastColorConfig} onConfigChange={setBlastColorConfig} showLegend={!isBlastMode} />
+        <label className="flex flex-col gap-1 text-xs">
+          <span>{t('blast.colors.target')}</span>
+          <select value={blastColorTarget} disabled={!hasHoleColorMapping} onChange={(event) => setBlastColorTarget(event.target.value as BlastColorTarget)}
+            className="min-h-11 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-sm disabled:opacity-60">
+            <option value="both">{t('blast.colors.targetBoth')}</option>
+            <option value="collars">{t('blast.colors.targetCollars')}</option>
+            <option value="trajectories">{t('blast.colors.targetTrajectories')}</option>
+          </select>
+        </label>
+        {selectedHole && <div className="rounded border p-2" style={{ borderColor: 'var(--color-border)' }}>
+          <strong>{t('blast.selection')}: {selectedHole.hole_id}</strong>
+          <p>{t('blast.collar')}: {selectedHole.collar?.join(', ') ?? t('blast.noData')}</p>
+          <p>{t('blast.toe')}: {selectedHole.toe?.join(', ') ?? t('blast.noData')}</p>
+          {selectedHole.provenance.z_collar_semantic === 'design_surface_estimate' && <p>{t('blast.estimated')}</p>}
+          {selectedHoleRelation && <p>{t('blast.relation')}: {t(`blast.holeFilters.relation.${selectedHoleRelation}`)}</p>}
+          {selectedHole.section_distance_m != null && <p>{t('blast.distance')}: {selectedHole.section_distance_m.toFixed(2)} m</p>}
+        </div>}
+      </>}
+    </div>
+  );
+
+  const renderHorizontalDeviationControls = () => (
+    <div className="mt-1 border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
+      <label className={`flex items-center gap-2 ${canRequestMap ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
+        <input
+          data-testid="horizontal-deviation-toggle"
+          type="checkbox"
+          checked={showHorizontalDeviation}
+          disabled={!canRequestMap}
+          onChange={(event) => setShowHorizontalDeviation(event.target.checked)}
+          className="h-5 w-5 rounded border-border bg-surface-muted text-accent focus:ring-0 focus:ring-offset-0"
+        />
+        <span className="font-semibold">{t('viewer.horizontal_map')}</span>
+      </label>
+      {!canRequestMap && (
+        <p className="mt-1 text-xs leading-snug" style={mutedStyle}>
+          {hasDemoMeshes
+            ? t('viewer.horizontal_demo')
+            : !designMeshId || !topoMeshId
+              ? t('viewer.horizontal_no_meshes')
+              : t('viewer.horizontal_no_sections')}
+        </p>
+      )}
+      {showHorizontalDeviation && canRequestMap && (
+        <div className="mt-2 flex flex-col gap-2">
+          <FieldLabel label={t('viewer.horizontal_sector')}>
+            <select
+              data-testid="horizontal-deviation-sector"
+              value={selectedSector ?? ''}
+              onChange={(event) => {
+                setSectorOverride(event.target.value);
+                setBenchNum(null);
+              }}
+              className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
+            >
+              {sectorOptions.map((sector) => <option key={sector} value={sector}>{sector || t('viewer.horizontal_unnamed_sector')}</option>)}
+            </select>
+          </FieldLabel>
+          <FieldLabel label={t('viewer.horizontal_bench')}>
+            <select
+              data-testid="horizontal-deviation-bench"
+              value={selectedBenchNum == null ? '' : String(selectedBenchNum)}
+              onChange={(event) => setBenchNum(event.target.value ? Number(event.target.value) : null)}
+              className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
+            >
+              <option value="">{t('viewer.horizontal_all_benches')}</option>
+              {designBenchNumbers.map((number) => <option key={number} value={number}>{number}</option>)}
+            </select>
+          </FieldLabel>
+          <div className="grid grid-cols-2 gap-2">
+            <FieldLabel label={t('viewer.horizontal_longitudinal_step')}>
+              <input
+                data-testid="horizontal-deviation-longitudinal-step"
+                type="number"
+                min={1}
+                max={20}
+                step={1}
+                value={longitudinalStep}
+                onChange={(event) => setLongitudinalStep(clampStep(event.target.value, 1, 20, 2))}
+                className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
+              />
+            </FieldLabel>
+            <FieldLabel label={t('viewer.horizontal_vertical_step')}>
+              <input
+                data-testid="horizontal-deviation-vertical-step"
+                type="number"
+                min={0.5}
+                max={5}
+                step={0.5}
+                value={verticalStep}
+                onChange={(event) => setVerticalStep(clampStep(event.target.value, 0.5, 5, 1))}
+                className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
+              />
+            </FieldLabel>
           </div>
-        </div>
-      ) : (
-        <>
-          {/* Floating Layer Selector */}
-          <div
-            data-testid="mesh-layer-panel"
-            role="group"
-            aria-label={t('viewer.layers', { defaultValue: 'Capas visibles' })}
-            className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20 overflow-auto p-3 rounded-lg bg-surface-raised flex flex-col gap-3 border text-xs sm:text-sm select-none"
-            style={{
-              width: controlsSize.width,
-              height: controlsSize.height,
-              minWidth: 280,
-              minHeight: 280,
-              maxWidth: 'calc(100% - 1rem)',
-              maxHeight: 'calc(100% - 1rem)',
-              borderColor: 'var(--color-border-strong)',
-              boxShadow: 'var(--shadow-glow-accent)',
-            }}
-          >
-            <button type="button" aria-label={t('viewer.panel_resize_corner', { defaultValue: 'Cambiar ancho y alto del panel' })} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" title={t('viewer.panel_resize_hint', { defaultValue: 'Arrastra la esquina para ajustar' })} onPointerDown={beginControlsResize} onPointerMove={moveControlsResize} onPointerUp={() => { controlsResizeStart.current = null; }} onPointerCancel={() => { controlsResizeStart.current = null; }} onKeyDown={(event) => {
-              if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
-              event.preventDefault();
-              const step = event.shiftKey ? 40 : 16;
-              const maxWidth = Math.max(280, Math.min(640, (event.currentTarget.parentElement?.parentElement?.clientWidth ?? window.innerWidth) - 16));
-              const maxHeight = Math.max(280, Math.min(900, (event.currentTarget.parentElement?.parentElement?.clientHeight ?? window.innerHeight) - 16));
-              setControlsSize((size) => ({ width: Math.max(280, Math.min(maxWidth, size.width + (event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0))), height: Math.max(280, Math.min(maxHeight, size.height + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0))) }));
-            }} className="absolute bottom-0 left-0 z-10 flex h-11 w-11 cursor-sw-resize touch-none items-end justify-start p-1 text-text-muted hover:text-accent focus-visible:outline focus-visible:outline-2" aria-describedby="mesh-panel-resize-hint"><svg aria-hidden="true" viewBox="0 0 18 18" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 15 15 3M8 15 15 8M13 15l2-2" /></svg></button>
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
-              <span className="font-semibold uppercase tracking-wider text-accent-bright">
-                {t('viewer.layers', { defaultValue: 'CAPAS VISIBLES' })}
-              </span>
-              <span id="mesh-panel-resize-hint" className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{t('viewer.panel_resize_hint', { defaultValue: 'Arrastra una esquina para ajustar' })}</span>
+          {mapQuery.isFetching && <p style={mutedStyle}>{t('viewer.horizontal_loading')}</p>}
+          {mapQuery.isError && (
+            <div role="alert" className="flex flex-col gap-1 rounded border p-2" style={{ borderColor: 'var(--status-nok-border)', color: 'var(--status-nok-text)' }}>
+              <span>{t('viewer.horizontal_error')}{mapError ? `: ${t(mapError.key, mapError.options)}` : ''}</span>
+              <button type="button" className="self-start underline" onClick={() => void mapQuery.refetch()}>
+                {t('viewer.horizontal_retry')}
+              </button>
             </div>
-            <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
-              <input
-                type="checkbox"
-                checked={layers.topo}
-                onChange={(e) => setLayers(prev => ({ ...prev, topo: e.target.checked }))}
-                className="rounded border-border bg-surface-muted text-gray-500 focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
-              />
-              <span style={{ color: sceneColors.topo }}>●</span>
-              <span>{t('viewer.layer_topo', { defaultValue: 'Topografía Real' })}</span>
-            </label>
-            <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
-              <input
-                type="checkbox"
-                checked={layers.designContours}
-                onChange={(e) => setLayers(prev => ({ ...prev, designContours: e.target.checked }))}
-                className="rounded border-border bg-surface-muted text-mine-blue focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
-              />
-              <span style={{ color: DESIGN_HEX }}>●</span>
-              <span>{t('viewer.layer_design', { defaultValue: 'Curvas de Diseño' })}</span>
-            </label>
-            <label className="flex min-h-11 items-center gap-3 cursor-pointer hover:text-accent-bright transition-colors">
-              <input
-                type="checkbox"
-                checked={layers.sections}
-                onChange={(e) => setLayers(prev => ({ ...prev, sections: e.target.checked }))}
-                className="rounded border-border bg-surface-muted text-red-500 focus:ring-0 focus:ring-offset-0 w-5 h-5 cursor-pointer animate-none"
-              />
-              <span style={{ color: SECTION_HEX }}>●</span>
-              <span>{t('viewer.layer_sections', { defaultValue: 'Líneas de Sección' })}</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input data-testid="blast-holes-toggle" type="checkbox" checked={showBlastHoles} disabled={hasDemoMeshes}
-                onChange={(event) => setShowBlastHoles(event.target.checked)} />
-              <span>{t('blast.layer')}</span>
-            </label>
-            {showBlastHoles && !hasDemoMeshes && (
-              <div>
-                <label className="flex items-start gap-2">
-                  <input type="checkbox" checked={confirmBlastSpatialReference} disabled={!holesQuery.data}
-                    onChange={(event) => setConfirmedBlastSpatialKey(event.target.checked ? blastSpatialKey : null)} />
-                  <span>{t('blast.confirmSpatial3d')}</span>
-                </label>
-                {holesQuery.isLoading && <p>{t('blast.layerLoading')}</p>}
-                {holesQuery.isError && <p role="alert">{t('blast.layerError')}</p>}
-                {holesQuery.data && confirmBlastSpatialReference && <>
-                  <label className="flex flex-col gap-1">
-                    <span>{t('blast.sectionSelect')}</span>
-                    <select value={activeSection?.id ?? ''} onChange={(event) => setSelectedSection(event.target.value || null)}
-                      className="w-full rounded border px-1.5 py-1" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}>
-                      <option value="">{t('blast.sectionNone')}</option>
-                      {(sections ?? []).map((section) => <option key={section.id} value={section.id}>{section.sector ? `${section.sector} · ` : ''}{section.name}</option>)}
-                    </select>
-                  </label>
-                  <p>{t('blast.rejected', { count: holesQuery.data.summary.rejected })}</p>
-                  <p>{t('blast.legend')}</p>
-                  <BlastHoleFilters holes={holesQuery.data.holes} hasSection={activeSectionIndex >= 0} onFilteredChange={updateVisibleHoles} />
-                  <BlastHoleColorControls records={holesQuery.data.holes} filteredRecords={filteredHoles.source === holesQuery.data ? filteredHoles.holes : EMPTY_BLAST_HOLES} onColorsChange={updateHoleColors} />
-                  {selectedHole && <div className="rounded border p-2" style={{ borderColor: 'var(--color-border)' }}>
-                    <strong>{t('blast.selection')}: {selectedHole.hole_id}</strong>
-                    <p>{t('blast.collar')}: {selectedHole.collar?.join(', ') ?? t('blast.noData')}</p>
-                    <p>{t('blast.toe')}: {selectedHole.toe?.join(', ') ?? t('blast.noData')}</p>
-                    {selectedHole.provenance.z_collar_semantic === 'design_surface_estimate' && <p>{t('blast.estimated')}</p>}
-                    {selectedHoleRelation && <p>{t('blast.relation')}: {t(`blast.holeFilters.relation.${selectedHoleRelation}`)}</p>}
-                    {selectedHole.section_distance_m != null && <p>{t('blast.distance')}: {selectedHole.section_distance_m.toFixed(2)} m</p>}
-                  </div>}
-                </>}
-              </div>
-            )}
-            <div className="mt-1 border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
-              <label className={`flex items-center gap-2 ${canRequestMap ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}>
-                <input
-                  data-testid="horizontal-deviation-toggle"
-                  type="checkbox"
-                  checked={showHorizontalDeviation}
-                  disabled={!canRequestMap}
-                  onChange={(event) => setShowHorizontalDeviation(event.target.checked)}
-                  className="h-5 w-5 rounded border-border bg-surface-muted text-accent focus:ring-0 focus:ring-offset-0"
-                />
-                <span className="font-semibold">{t('viewer.horizontal_map')}</span>
-              </label>
-              {!canRequestMap && (
-                <p className="mt-1 text-xs leading-snug" style={{ color: 'var(--color-text-muted)' }}>
-                  {hasDemoMeshes
-                    ? t('viewer.horizontal_demo')
-                    : !designMeshId || !topoMeshId
-                      ? t('viewer.horizontal_no_meshes')
-                      : t('viewer.horizontal_no_sections')}
+          )}
+          {mapQuery.data && (
+            <>
+              <HorizontalDeviationOverview summary={mapQuery.data.summary} compact />
+              <HorizontalDeviationLegend compact />
+              <p className="text-xs leading-snug" style={mutedStyle}>
+                {t('horizontalDeviation.method_caption')} · {t('horizontalDeviation.interpolated_caption')}
+              </p>
+              {mapQuery.data.effective_resolution && (
+                <p className="text-xs leading-snug" style={mutedStyle}>
+                  {t('horizontalDeviation.effective_resolution', {
+                    longitudinal: formatEffectiveStep(mapQuery.data.effective_resolution.longitudinal_step_min, mapQuery.data.effective_resolution.longitudinal_step_max),
+                    vertical: formatEffectiveStep(mapQuery.data.effective_resolution.vertical_step_min, mapQuery.data.effective_resolution.vertical_step_max),
+                  })}
                 </p>
               )}
-              {showHorizontalDeviation && canRequestMap && (
-                <div className="mt-2 flex flex-col gap-2">
-                  <FieldLabel label={t('viewer.horizontal_sector')}>
-                    <select
-                      data-testid="horizontal-deviation-sector"
-                      value={selectedSector ?? ''}
-                      onChange={(event) => {
-                        setSectorOverride(event.target.value);
-                        setBenchNum(null);
-                      }}
-                      className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
-                      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
-                    >
-                      {sectorOptions.map((sector) => <option key={sector} value={sector}>{sector || t('viewer.horizontal_unnamed_sector')}</option>)}
-                    </select>
-                  </FieldLabel>
-                  <FieldLabel label={t('viewer.horizontal_bench')}>
-                    <select
-                      data-testid="horizontal-deviation-bench"
-                      value={selectedBenchNum == null ? '' : String(selectedBenchNum)}
-                      onChange={(event) => setBenchNum(event.target.value ? Number(event.target.value) : null)}
-                      className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
-                      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
-                    >
-                      <option value="">{t('viewer.horizontal_all_benches')}</option>
-                      {designBenchNumbers.map((number) => <option key={number} value={number}>{number}</option>)}
-                    </select>
-                  </FieldLabel>
-                  <div className="grid grid-cols-2 gap-2">
-                    <FieldLabel label={t('viewer.horizontal_longitudinal_step')}>
-                      <input
-                        data-testid="horizontal-deviation-longitudinal-step"
-                        type="number"
-                        min={1}
-                        max={20}
-                        step={1}
-                        value={longitudinalStep}
-                        onChange={(event) => setLongitudinalStep(clampStep(event.target.value, 1, 20, 2))}
-                        className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
-                      />
-                    </FieldLabel>
-                    <FieldLabel label={t('viewer.horizontal_vertical_step')}>
-                      <input
-                        data-testid="horizontal-deviation-vertical-step"
-                        type="number"
-                        min={0.5}
-                        max={5}
-                        step={0.5}
-                        value={verticalStep}
-                        onChange={(event) => setVerticalStep(clampStep(event.target.value, 0.5, 5, 1))}
-                        className="min-h-10 w-full rounded border px-2 py-1.5 text-sm"
-                        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
-                      />
-                    </FieldLabel>
-                  </div>
-                  {mapQuery.isFetching && <p style={{ color: 'var(--color-text-muted)' }}>{t('viewer.horizontal_loading')}</p>}
-                  {mapQuery.isError && (
-                    <div role="alert" className="flex flex-col gap-1 rounded border p-2" style={{ borderColor: 'var(--status-nok-border)', color: 'var(--status-nok-text)' }}>
-                      <span>{t('viewer.horizontal_error')}{mapError ? `: ${t(mapError.key, mapError.options)}` : ''}</span>
-                      <button type="button" className="self-start underline" onClick={() => void mapQuery.refetch()}>
-                        {t('viewer.horizontal_retry')}
-                      </button>
-                    </div>
-                  )}
-                  {mapQuery.data && (
-                    <>
-                      <HorizontalDeviationOverview summary={mapQuery.data.summary} compact />
-                      <HorizontalDeviationLegend compact />
-                      <p className="text-xs leading-snug" style={{ color: 'var(--color-text-muted)' }}>
-                        {t('horizontalDeviation.method_caption')} · {t('horizontalDeviation.interpolated_caption')}
-                      </p>
-                      {mapQuery.data.effective_resolution && (
-                        <p className="text-xs leading-snug" style={{ color: 'var(--color-text-muted)' }}>
-                          {t('horizontalDeviation.effective_resolution', {
-                            longitudinal: formatEffectiveStep(mapQuery.data.effective_resolution.longitudinal_step_min, mapQuery.data.effective_resolution.longitudinal_step_max),
-                            vertical: formatEffectiveStep(mapQuery.data.effective_resolution.vertical_step_min, mapQuery.data.effective_resolution.vertical_step_max),
-                          })}
-                        </p>
-                      )}
-                      {mapQuery.data.summary.measured === 0 && (
-                        <p style={{ color: 'var(--color-text-muted)' }}>{t('viewer.horizontal_empty')}</p>
-                      )}
-                      {mapQuery.data.warnings.slice(0, 3).map((warning, index) => (
-                        <p key={`${index}-${warning}`} className="leading-snug" style={{ color: 'var(--color-text-muted)' }}>
-                          {t(horizontalDeviationWarning(warning).key, horizontalDeviationWarning(warning).options)}
-                        </p>
-                      ))}
-                    </>
-                  )}
-                </div>
+              {mapQuery.data.summary.measured === 0 && (
+                <p style={mutedStyle}>{t('viewer.horizontal_empty')}</p>
               )}
-            </div>
-          </div>
-
-          {/* R3F WebGL Canvas */}
-          <div className="absolute inset-0">
-            <Canvas
-              camera={{ fov: 50, near: 1, far: 50000 }}
-              gl={{ antialias: true, preserveDrawingBuffer: true }}
-            >
-              <CameraController maxDim={bounds.maxDim} />
-              <OrbitControls makeDefault />
-              <Scene
-                colors={sceneColors}
-                topoVerts={topoVerts}
-                horizontalDeviation={mapQuery.data}
-                showHorizontalDeviation={showHorizontalDeviation && canRequestMap && !!mapQuery.data}
-                designContours={designContours}
-                sections={sections}
-                selectedSection={selectedSection}
-                bounds={bounds}
-                layers={layers}
-              />
-              {showBlastHoles && confirmBlastSpatialReference && holesQuery.data && <BlastHolesLayer holes={sceneHoles} center={holeCenter} selectedKey={selectedHoleKey} onSelect={setSelectedHoleKey} colorTrajectories={holeColorState?.source === filteredHoles.holes && holeColorState.kind === 'category'} trajectoryColor="#969696" />}
-              <GizmoHelper alignment="bottom-left" margin={[60, 60]}>
-                <GizmoViewport
-                  axisColors={['#ff3653', '#0adb21', '#2c8fdf']}
-                  labelColor={readThemeColor('--color-text-primary', 'white')}
-                  labels={['E', 'Z', 'N']}
-                />
-              </GizmoHelper>
-            </Canvas>
-          </div>
-        </>
+              {mapQuery.data.warnings.slice(0, 3).map((warning, index) => (
+                <p key={`${index}-${warning}`} className="leading-snug" style={mutedStyle}>
+                  {t(horizontalDeviationWarning(warning).key, horizontalDeviationWarning(warning).options)}
+                </p>
+              ))}
+            </>
+          )}
+        </div>
       )}
     </div>
   );
+
+  const canvasNode = (
+    <Canvas
+      camera={{ fov: 50, near: 1, far: 50000 }}
+      gl={{ antialias: true, preserveDrawingBuffer: true }}
+    >
+      <CameraController maxDim={bounds.maxDim} />
+      <OrbitControls makeDefault />
+      <Scene
+        colors={sceneColors}
+        topoVerts={topoVerts}
+        horizontalDeviation={mapQuery.data}
+        showHorizontalDeviation={showHorizontalDeviation && canRequestMap && !!mapQuery.data}
+        designContours={designContours}
+        sections={sections}
+        selectedSection={selectedSection}
+        bounds={bounds}
+        layers={layers}
+      />
+      {showBlastHoles && confirmBlastSpatialReference && holesQuery.data && <BlastHolesLayer holes={sceneHoles} center={holeCenter} selectedKey={selectedHoleKey} onSelect={setSelectedHoleKey} colorTrajectories={hasHoleColorMapping && blastColorTarget !== 'collars'} colorCollars={blastColorTarget !== 'trajectories'} trajectoryColor="#969696" />}
+      <GizmoHelper alignment="bottom-left" margin={[60, 60]}>
+        <GizmoViewport
+          axisColors={['#ff3653', '#0adb21', '#2c8fdf']}
+          labelColor={readThemeColor('--color-text-primary', 'white')}
+          labels={['E', 'Z', 'N']}
+        />
+      </GizmoHelper>
+    </Canvas>
+  );
+
+  const loadingNode = (
+    <div className="flex items-center justify-center h-full min-h-0" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
+      <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="animate-spin text-2xl">⏳</div>
+        <p className="text-sm">{t('step1.view3d_loading_verts')}</p>
+      </div>
+    </div>
+  );
+
+  const generalBody = (
+    <>
+      <div
+        data-testid="mesh-layer-panel"
+        role="group"
+        aria-label={t('viewer.layers', { defaultValue: 'Capas visibles' })}
+        className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20 overflow-auto p-3 rounded-lg bg-surface-raised flex flex-col gap-3 border text-xs sm:text-sm select-none"
+        style={{
+          width: controlsSize.width,
+          height: controlsSize.height,
+          minWidth: 280,
+          minHeight: 280,
+          maxWidth: 'calc(100% - 1rem)',
+          maxHeight: 'calc(100% - 1rem)',
+          borderColor: 'var(--color-border-strong)',
+          boxShadow: 'var(--shadow-glow-accent)',
+        }}
+      >
+        <button type="button" aria-label={t('viewer.panel_resize_corner', { defaultValue: 'Cambiar ancho y alto del panel' })} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" title={t('viewer.panel_resize_hint', { defaultValue: 'Arrastra la esquina para ajustar' })} onPointerDown={beginControlsResize} onPointerMove={moveControlsResize} onPointerUp={() => { controlsResizeStart.current = null; }} onPointerCancel={() => { controlsResizeStart.current = null; }} onKeyDown={(event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+          event.preventDefault();
+          const step = event.shiftKey ? 40 : 16;
+          const maxWidth = Math.max(280, Math.min(640, (event.currentTarget.parentElement?.parentElement?.clientWidth ?? window.innerWidth) - 16));
+          const maxHeight = Math.max(280, Math.min(900, (event.currentTarget.parentElement?.parentElement?.clientHeight ?? window.innerHeight) - 16));
+          setControlsSize((size) => ({ width: Math.max(280, Math.min(maxWidth, size.width + (event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0))), height: Math.max(280, Math.min(maxHeight, size.height + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0))) }));
+        }} className="absolute bottom-0 left-0 z-10 flex h-11 w-11 cursor-sw-resize touch-none items-end justify-start p-1 text-text-muted hover:text-accent focus-visible:outline focus-visible:outline-2" aria-describedby="mesh-panel-resize-hint"><svg aria-hidden="true" viewBox="0 0 18 18" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 15 15 3M8 15 15 8M13 15l2-2" /></svg></button>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+          <span className="font-semibold uppercase tracking-wider text-accent-bright">
+            {t('viewer.layers', { defaultValue: 'CAPAS VISIBLES' })}
+          </span>
+          <span id="mesh-panel-resize-hint" className="text-xs" style={mutedStyle}>{t('viewer.panel_resize_hint', { defaultValue: 'Arrastra una esquina para ajustar' })}</span>
+        </div>
+        {renderLayerToggles()}
+        {renderBlastHolesToggle()}
+        {renderBlastSpatialBlock()}
+        {renderHorizontalDeviationControls()}
+      </div>
+      <div className="absolute inset-0">{canvasNode}</div>
+    </>
+  );
+
+  const blastBody = (
+    <>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div data-testid="blast-view-toolbar" role="toolbar" aria-label={t('blast.viewPanel.layers')} className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-3 py-1 text-xs" style={borderStyle}>
+          <span className="font-semibold uppercase tracking-wider text-accent-bright">{t('blast.viewPanel.title')}</span>
+          {renderLayerToggles()}
+          {renderBlastHolesToggle()}
+          {showBlastHoles && !hasDemoMeshes && holesQuery.data && (
+            <span style={mutedStyle}>{t('blast.viewPanel.visibleCount', { visible: blastVisibleCount, total: blastTotalCount })}</span>
+          )}
+          <button type="button" aria-expanded={blastPanelOpen} aria-controls={blastPanelId} onClick={() => setBlastPanelOpen((open) => !open)}
+            className="ml-auto min-h-11 rounded border px-3 text-xs" style={borderStyle}>
+            {t(blastPanelOpen ? 'blast.viewPanel.hide' : 'blast.viewPanel.show')}
+          </button>
+        </div>
+        <div className="relative min-h-[360px] min-w-0 flex-1 md:min-h-[420px]">
+          <div className="absolute inset-0">{canvasNode}</div>
+        </div>
+        <div data-testid="blast-legend-strip" className="max-h-[30vh] shrink-0 overflow-y-auto border-t bg-surface-raised px-3 py-2 text-xs md:absolute md:bottom-0 md:left-0 md:right-[340px] md:z-10" style={borderStyle}>
+          {legendMapping ? <BlastHoleColorLegendView legend={legendMapping.legend} /> : <p style={mutedStyle}>{t('blast.viewPanel.legendHelp')}</p>}
+        </div>
+      </div>
+      <aside
+        id={blastPanelId}
+        data-testid="blast-view-panel"
+        hidden={!blastPanelOpen}
+        className={`${blastPanelOpen ? 'flex' : 'hidden'} max-h-[45vh] w-full shrink-0 flex-col gap-3 overflow-y-auto border-t bg-surface-raised p-3 text-xs md:max-h-none md:w-[340px] md:border-l md:border-t-0`}
+        style={borderStyle}
+      >
+        {renderBlastSpatialBlock()}
+        <details className="rounded border p-2" style={borderStyle}>
+          <summary className="cursor-pointer font-semibold">{t('viewer.advanced_controls', { defaultValue: 'Más controles de vista' })}</summary>
+          {renderHorizontalDeviationControls()}
+        </details>
+      </aside>
+    </>
+  );
+
+  return (
+    <div
+      data-slot="mesh-3d-viewer"
+      data-mode={isBlastMode ? 'blast' : undefined}
+      className={isBlastMode
+        ? 'flex h-full min-h-0 w-full flex-col rounded-xl md:relative md:flex-row'
+        : 'h-full min-h-0 w-full relative rounded-xl overflow-hidden'}
+      style={{ border: '1px solid var(--color-border)' }}
+    >
+      {isLoading ? loadingNode : isBlastMode ? blastBody : generalBody}
+    </div>
+  );
 }
+
+function readBlastPanelDefaultOpen(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return true;
+  return window.matchMedia('(min-width: 768px)').matches;
+}
+
 
 function createPointGeometry(point: RenderPoint3D | null): THREE.BufferGeometry | null {
   if (point === null || !point.every((value) => Number.isFinite(value))) {

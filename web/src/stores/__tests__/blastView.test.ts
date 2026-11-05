@@ -189,7 +189,7 @@ describe('spatial confirmation is not transferable', () => {
 });
 
 describe('null context does not break queries or visibility', () => {
-  it('clears authorization but keeps showBlastHoles and workspaceTab', () => {
+  it('keeps the confirmation and preferences when the context goes null', () => {
     const store = useBlastView.getState();
     store.activateContext(key1);
     store.confirmSpatial(key1);
@@ -198,9 +198,64 @@ describe('null context does not break queries or visibility', () => {
     expect(store.activateContext(null)).toBe(true);
     const state = useBlastView.getState();
     expect(state.contextKey).toBeNull();
-    expect(state.confirmedSpatialContext).toBeNull();
+    expect(state.confirmedSpatialContext).toBe(key1);
     expect(state.showBlastHoles).toBe(true);
     expect(state.workspaceTab).toBe('analysis');
+  });
+
+  it('never authorizes while the context is null', () => {
+    const store = useBlastView.getState();
+    store.activateContext(key1);
+    store.confirmSpatial(key1);
+    store.activateContext(null);
+    expect(useBlastView.getState().confirmSpatial(key1)).toBe(false);
+    expect(useBlastView.getState().confirmSpatial(key2)).toBe(false);
+    expect(useBlastView.getState().confirmSpatial(null)).toBe(false);
+  });
+
+  it('restores the same context after a null blip without resetting filters or colours', () => {
+    const store = useBlastView.getState();
+    store.activateContext(key1);
+    store.setFilters({ query: 'x' });
+    store.setColorConfig({ variable: 'depth' });
+    store.activateContext(null);
+    expect(store.activateContext(key1)).toBe(true);
+    const state = useBlastView.getState();
+    expect(state.contextKey).toBe(key1);
+    expect(state.filters.query).toBe('x');
+    expect(state.colorConfig.variable).toBe('depth');
+  });
+
+  it('keeps the confirmation across a null blip for the same context', () => {
+    const store = useBlastView.getState();
+    store.activateContext(key1);
+    store.confirmSpatial(key1);
+    store.activateContext(null);
+    store.activateContext(key1);
+    expect(useBlastView.getState().confirmedSpatialContext).toBe(key1);
+    expect(useBlastView.getState().confirmSpatial(key1)).toBe(true);
+  });
+
+  it('resets when a different context follows a null blip', () => {
+    const store = useBlastView.getState();
+    store.activateContext(key1);
+    store.setFilters({ query: 'x' });
+    store.confirmSpatial(key1);
+    store.activateContext(null);
+    store.activateContext(key2);
+    const state = useBlastView.getState();
+    expect(state.contextKey).toBe(key2);
+    expect(state.filters.query).toBe('');
+    expect(state.confirmedSpatialContext).toBeNull();
+  });
+
+  it('resets when the context changes back to a key that is not the last non-null one', () => {
+    const store = useBlastView.getState();
+    store.activateContext(key1);
+    store.setFilters({ query: 'x' });
+    store.activateContext(key2);
+    store.activateContext(key1);
+    expect(useBlastView.getState().filters.query).toBe('');
   });
 });
 
@@ -248,6 +303,19 @@ describe('color configuration validation', () => {
     const before = useBlastView.getState().colorConfig;
     expect(useBlastView.getState().setColorConfig({ rangeMin: 10 })).toBe(false);
     expect(useBlastView.getState().colorConfig).toBe(before);
+  });
+
+  it('rejects an unknown palette, variable or category without changing the stored config', () => {
+    const before = useBlastView.getState().colorConfig;
+    expect(useBlastView.getState().setColorConfig({ palette: 'Nope' as never })).toBe(false);
+    expect(useBlastView.getState().setColorConfig({ variable: 'bogus' as never })).toBe(false);
+    expect(useBlastView.getState().setColorConfig({ category: 'nope' as never })).toBe(false);
+    expect(useBlastView.getState().colorConfig).toBe(before);
+  });
+
+  it('accepts a valid palette, variable and category', () => {
+    expect(useBlastView.getState().setColorConfig({ palette: 'Viridis', variable: 'depth', category: 'phase' })).toBe(true);
+    expect(useBlastView.getState().colorConfig).toMatchObject({ palette: 'Viridis', variable: 'depth', category: 'phase' });
   });
 
   it('rejects an invalid colour target or workspace tab', () => {

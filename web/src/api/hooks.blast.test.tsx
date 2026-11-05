@@ -44,6 +44,24 @@ describe('blast analysis context', () => {
     expect(JSON.parse(String(form.get('column_map')))).toEqual({ X: 'Este real', Y: 'Norte real' });
     expect(form.get('sheet_name')).toBe('Pozos 2026');
   });
+
+  it('serializes the explicit date source and format as top-level multipart fields outside column_map', () => {
+    const form = buildBlastUploadFormData('session', new File([''], 'pozos.csv'), {
+      ...geometry,
+      column_map: { X: 'Este real' },
+      date_source_column: 'Fecha tronadura ',
+      date_format: 'DMY',
+    });
+    expect(form.get('date_source_column')).toBe('Fecha tronadura ');
+    expect(form.get('date_format')).toBe('DMY');
+    expect(JSON.parse(String(form.get('column_map')))).toEqual({ X: 'Este real' });
+  });
+
+  it('omits date fields from multipart when no date source is selected', () => {
+    const form = buildBlastUploadFormData('session', new File([''], 'pozos.csv'), { ...geometry, date_format: 'ISO' });
+    expect(form.has('date_source_column')).toBe(false);
+    expect(form.has('date_format')).toBe(false);
+  });
 });
 
 function wrapper(queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } })) {

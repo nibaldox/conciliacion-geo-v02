@@ -430,6 +430,7 @@ class BlastHoles3DResponse(BaseModel):
     session_id: str
     section_id: Optional[int] = None
     corridor_m: Optional[float] = None
+    data_revision: Optional[str] = None
     holes: List[BlastHole3D] = Field(default_factory=list)
     rejected_rows: List[Dict[str, Any]] = Field(default_factory=list)
     summary: BlastHoles3DSummary

@@ -8,7 +8,8 @@ Performance: every handler is ``async def`` and off-loads DB round-trips
 (``api.database`` is synchronous SQLite) to the default executor via
 :func:`api._async_db.run_db`. The cached heavy helpers (``_get_decimated_*``,
 ``_get_contours_*``, ``_get_breaklines_*``) stay synchronous so tests can still
-call ``.cache_clear()`` on them, but the handler awaits them through
+call ``.cache_clear()`` on them (they are memoised by :mod:`api.byte_cache`
+under a shared byte budget), but the handler awaits them through
 ``run_db`` so trimesh decimation / sectioning / breakline extraction never
 blocks the event loop.
 """
@@ -16,7 +17,6 @@ blocks the event loop.
 import asyncio
 import os
 import tempfile
-import functools
 import json
 import math
 from pathlib import Path
@@ -30,6 +30,7 @@ import api.database as db
 import api.dxf_uploads as dxf_uploads
 from api.schemas import DxfImportConfirmation
 from api._async_db import run_db
+from api.byte_cache import mesh_cache
 from core import (
     HorizontalFaceGeometry,
     SectionLine,
@@ -706,7 +707,7 @@ def _build_horizontal_deviation_payload(
     }
 
 
-@functools.lru_cache(maxsize=2)
+@mesh_cache
 def _build_horizontal_deviation_cached(
     topo_id: str,
     design_mesh_id: str,
@@ -923,7 +924,7 @@ async def mesh_info(request: Request, mesh_id: str):
     }
 
 
-@functools.lru_cache(maxsize=16)
+@mesh_cache
 def _get_decimated_vertices_cached(mesh_id: str, step: int) -> dict:
     tmesh = db.get_trimesh_by_id(mesh_id)
 
@@ -992,7 +993,7 @@ def _crop_mesh_to_xy_bounds(
     )
 
 
-@functools.lru_cache(maxsize=2)
+@mesh_cache
 def _get_roi_vertices_cached(
     session_id: str,
     mesh_id: str,
@@ -1015,7 +1016,7 @@ def _get_roi_vertices_cached(
     return _vertices_payload(cropped)
 
 
-@functools.lru_cache(maxsize=16)
+@mesh_cache
 def _get_contours_cached(mesh_id: str, interval: float, grid_size: int) -> dict:
     tmesh = db.get_trimesh_by_id(mesh_id)
     z_min, z_max = tmesh.bounds[0][2], tmesh.bounds[1][2]
@@ -1231,7 +1232,7 @@ async def mesh_contours(
         raise HTTPException(404, str(exc))
 
 
-@functools.lru_cache(maxsize=16)
+@mesh_cache
 def _get_breaklines_cached(mesh_id: str, angle_threshold: float) -> dict:
     from core.breaklines import extract_breaklines
     tmesh = db.get_trimesh_by_id(mesh_id)

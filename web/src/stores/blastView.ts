@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import type { BlastHoleFilterState } from '../components/mesh/BlastHoleFilters';
-import type { BlastHoleCategory, BlastHoleColorScale, BlastHoleRangeMode, BlastHoleVariable } from '../components/mesh/blastHoleColors';
+import {
+  BLAST_HOLE_CATEGORY_OPTIONS,
+  BLAST_HOLE_VARIABLE_OPTIONS,
+  COLOR_SCALE_NAMES,
+  type BlastHoleCategory,
+  type BlastHoleColorScale,
+  type BlastHoleRangeMode,
+  type BlastHoleVariable,
+} from '../components/mesh/blastHoleColors';
 
 export interface BlastViewColorConfig {
   kind: 'variable' | 'category';
@@ -19,10 +27,13 @@ const WORKSPACE_TABS: readonly BlastWorkspaceTab[] = ['explore', 'analysis', 'si
 const COLOR_TARGETS: readonly BlastColorTarget[] = ['both', 'collars', 'trajectories'];
 const RANGE_MODES: readonly BlastHoleRangeMode[] = ['legacy', 'data', 'manual'];
 const COLOR_KINDS: readonly BlastViewColorConfig['kind'][] = ['variable', 'category'];
+const VARIABLE_VALUES: readonly BlastHoleVariable[] = BLAST_HOLE_VARIABLE_OPTIONS.map(({ value }) => value);
+const CATEGORY_VALUES: readonly BlastHoleCategory[] = BLAST_HOLE_CATEGORY_OPTIONS.map(({ value }) => value);
 const REVISION_PATTERN = /^[0-9a-f]{64}$/;
 
 interface BlastViewState {
   contextKey: string | null;
+  lastContextKey: string | null;
   filters: BlastHoleFilterState;
   colorConfig: BlastViewColorConfig;
   colorTarget: BlastColorTarget;
@@ -45,6 +56,7 @@ interface BlastViewState {
 type PresentationFields = Pick<
   BlastViewState,
   | 'contextKey'
+  | 'lastContextKey'
   | 'filters'
   | 'colorConfig'
   | 'colorTarget'
@@ -89,6 +101,7 @@ function defaultColorConfig(): BlastViewColorConfig {
 function defaultPresentation(): PresentationFields {
   return {
     contextKey: null,
+    lastContextKey: null,
     filters: defaultFilters(),
     colorConfig: defaultColorConfig(),
     colorTarget: 'both',
@@ -153,18 +166,21 @@ export const useBlastView = create<BlastViewState>()((set, get) => ({
   ...defaultPresentation(),
 
   activateContext: (contextKey) => {
+    const current = get();
     if (contextKey === null) {
-      const current = get();
-      if (current.contextKey === null && current.confirmedSpatialContext === null) return true;
-      set({ contextKey: null, confirmedSpatialContext: null });
+      if (current.contextKey !== null) set({ contextKey: null });
       return true;
     }
     if (!isValidContextKey(contextKey)) return false;
-    const current = get();
     if (current.contextKey === contextKey) return true;
+    if (current.lastContextKey === contextKey) {
+      set({ contextKey });
+      return true;
+    }
     const reset = defaultPresentation();
     set({
       contextKey,
+      lastContextKey: contextKey,
       confirmedSpatialContext: null,
       filters: reset.filters,
       colorConfig: { ...reset.colorConfig, palette: current.colorConfig.palette },
@@ -183,6 +199,8 @@ export const useBlastView = create<BlastViewState>()((set, get) => ({
     if (!patchChanges(current.colorConfig, partial)) return true;
     const next = { ...current.colorConfig, ...partial };
     if (!COLOR_KINDS.includes(next.kind) || !RANGE_MODES.includes(next.rangeMode)) return false;
+    if (!COLOR_SCALE_NAMES.includes(next.palette) || !VARIABLE_VALUES.includes(next.variable)) return false;
+    if (!CATEGORY_VALUES.includes(next.category)) return false;
     if (next.rangeMode === 'manual' && !isFiniteRange(next.rangeMin, next.rangeMax)) return false;
     set({ colorConfig: next });
     return true;

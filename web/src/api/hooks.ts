@@ -586,6 +586,8 @@ export interface BlastGeometryForm {
   spatial_reference_confirmed?: boolean;
   column_map?: Record<string, string | null>;
   sheet_name?: string;
+  date_source_column?: string;
+  date_format?: 'ISO' | 'DMY' | 'MDY';
 }
 
 /**
@@ -643,6 +645,10 @@ export function buildBlastUploadFormData(
   form.append('session_id', sessionId);
   if (geometry.column_map) form.append('column_map', JSON.stringify(geometry.column_map));
   if (geometry.sheet_name) form.append('sheet_name', geometry.sheet_name);
+  if (geometry.date_source_column) {
+    form.append('date_source_column', geometry.date_source_column);
+    if (geometry.date_format) form.append('date_format', geometry.date_format);
+  }
   form.append('geometry_configuration_version', geometry.geometry_configuration_version);
   form.append('geometry_user_confirmed', String(geometry.geometry_user_confirmed));
   form.append('inclination_source_column', geometry.inclination_source_column);

@@ -5,13 +5,14 @@ import type { ReactNode } from 'react';
 import type { ContourData } from '../../../api/types';
 import type { CurveAnchor } from '../../sections/curveSelectionState';
 import { useSession } from '../../../stores/session';
+import { useBlastView } from '../../../stores/blastView';
 import { Mesh3DViewer } from '../Mesh3DViewer';
 import { curveContextsEqual, resolveCurveContextAction } from '../curveContextSync';
 
 let contourData: ContourData | undefined;
 let sectionData: Array<{ id: string; name: string; origin: [number, number]; azimuth: number; length: number; sector: string }> = [];
 let blastHolesData: {
-  session_id: string; section_id: number | null; corridor_m: number | null;
+  session_id: string; section_id: number | null; corridor_m: number | null; data_revision?: string | null;
   holes: Array<{ row_id: string; hole_id: string; collar: number[] | null; toe: number[] | null; geometry_status: string; provenance: Record<string, unknown>; attributes: Record<string, unknown>; section_relation: string | null; section_distance_m: number | null }>;
   summary: { total_loaded: number; drawable: number; complete_geometry: number; collar_only: number; without_geometry: number; rejected: number };
 } | undefined;
@@ -117,11 +118,13 @@ beforeEach(() => {
   blastHolesData = undefined;
   blastHoleHookCalls.length = 0;
   useSession.getState().reset();
+  useBlastView.getState().reset();
 });
 
 afterEach(() => {
   cleanup();
   useSession.getState().reset();
+  useBlastView.getState().reset();
 });
 
 describe('Mesh3DViewer · contexto de geometría de curvas', () => {
@@ -155,7 +158,7 @@ describe('Mesh3DViewer · contexto de geometría de curvas', () => {
       { id: 'section-b', name: 'S-B', origin: [5, 6], azimuth: 90, length: 30, sector: 'Sur' },
     ];
     blastHolesData = {
-      session_id: 'session-test', section_id: null, corridor_m: null,
+      session_id: 'session-test', section_id: null, corridor_m: null, data_revision: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       holes: [
         { row_id: 'row-1', hole_id: 'H-1', collar: [101, 202, 303], toe: [104, 205, 293], geometry_status: 'complete', provenance: {}, attributes: {}, section_relation: 'exact_intersection', section_distance_m: 0 },
         { row_id: 'row-2', hole_id: 'H-2', collar: [111, 212, 313], toe: null, geometry_status: 'collar_only', provenance: {}, attributes: {}, section_relation: null, section_distance_m: null },
@@ -182,7 +185,7 @@ describe('Mesh3DViewer · contexto de geometría de curvas', () => {
 
     fireEvent.change(screen.getByLabelText('blast.holeFilters.id'), { target: { value: 'H-2' } });
     expect(JSON.parse(screen.getByTestId('blast-layer').getAttribute('data-holes')!)).toEqual([
-      { key: 'row-2', collar: [111, 212, 313], toe: null, color: '#a4fc3b' },
+      { key: 'row-2', collar: [111, 212, 313], toe: null, color: '#7a0402' },
     ]);
     fireEvent.change(screen.getByLabelText('blast.holeFilters.id'), { target: { value: '' } });
 
@@ -198,7 +201,7 @@ describe('Mesh3DViewer · contexto de geometría de curvas', () => {
 
   it('integra color por variable y categoría con filtros, escala, selección y tamaño del panel', () => {
     blastHolesData = {
-      session_id: 'session-color-test', section_id: null, corridor_m: null,
+      session_id: 'session-color-test', section_id: null, corridor_m: null, data_revision: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       holes: [
         { row_id: 'row-1', hole_id: 'H-1', collar: [1, 2, 101], toe: [1, 2, 91], geometry_status: 'complete', provenance: {}, attributes: { Banco_Original: 'B1', Kilos_Cargados_real: 100 }, section_relation: null, section_distance_m: null },
         { row_id: 'row-2', hole_id: 'H-2', collar: [3, 4, 303], toe: [3, 4, 293], geometry_status: 'complete', provenance: {}, attributes: { Banco_Original: 'B2', Kilos_Cargados_real: 300 }, section_relation: null, section_distance_m: null },

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BlastHoleFilters, filterBlastHoles, type BlastHole3DRecord, type BlastHoleFilterState } from '../BlastHoleFilters';
 
@@ -16,6 +17,7 @@ vi.mock('react-i18next', () => ({
         'blast.holeFilters.collarProvenanceLabel': 'Procedencia de cota',
         'blast.holeFilters.surfaceSampleStatusLabel': 'Estado de muestreo de superficie',
         'blast.holeFilters.section': 'Sección',
+        'blast.holeFilters.advanced': 'Filtros avanzados',
         'blast.holeFilters.corridor': 'Corredor',
         'blast.holeFilters.grid': 'Malla (Grid)',
         'blast.holeFilters.polygon': 'Polígono',
@@ -293,5 +295,94 @@ describe('BlastHoleFilters', () => {
       [second], 10, expect.objectContaining({ total: 1, visible: 1 }),
     ));
     expect((screen.getByLabelText('Buscar ID') as HTMLInputElement).value).toBe('P-02');
+  });
+});
+
+describe('BlastHoleFilters controlled and compact modes', () => {
+  function ControlledHarness({ holes, initial }: { holes: BlastHole3DRecord[]; initial: BlastHoleFilterState }) {
+    const [value, setValue] = useState(initial);
+    const [show, setShow] = useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setShow((current) => !current)}>toggle</button>
+        {show && <BlastHoleFilters holes={holes} value={value} onChange={setValue} />}
+        <output data-testid="state">{value.query}</output>
+      </>
+    );
+  }
+
+  it('treats value as source of truth and emits onChange without updating locally', () => {
+    const onChange = vi.fn();
+    const holes = [makeHole(), makeHole({ row_id: 'row-2', hole_id: 'P-02' })];
+    const { rerender } = render(<BlastHoleFilters holes={holes} value={base} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Buscar ID'), { target: { value: 'P-02' } });
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ query: 'P-02' }));
+    expect((screen.getByLabelText('Buscar ID') as HTMLInputElement).value).toBe('');
+    rerender(<BlastHoleFilters holes={holes} value={{ ...base, query: 'P-02' }} onChange={onChange} />);
+    expect((screen.getByLabelText('Buscar ID') as HTMLInputElement).value).toBe('P-02');
+  });
+
+  it('keeps controlled filters across remounts when the parent owns the state', () => {
+    render(<ControlledHarness holes={[makeHole()]} initial={base} />);
+    fireEvent.change(screen.getByLabelText('Buscar ID'), { target: { value: 'P-01' } });
+    expect(screen.getByTestId('state').textContent).toBe('P-01');
+    fireEvent.click(screen.getByText('toggle'));
+    fireEvent.click(screen.getByText('toggle'));
+    expect((screen.getByLabelText('Buscar ID') as HTMLInputElement).value).toBe('P-01');
+  });
+
+  it('clears unavailable controlled values through onChange once without looping', async () => {
+    const onChange = vi.fn();
+    const withGrid = { ...base, grid: ['Malla 1'], bench: '3150' };
+    const { rerender } = render(<BlastHoleFilters holes={[makeHole({ attributes: { Nombre_Malla_Original: 'Malla 1', bench_num: '3150' } })]} value={withGrid} onChange={onChange} />);
+    rerender(<BlastHoleFilters holes={[makeHole({ attributes: { bench_num: '3150' } })]} value={withGrid} onChange={onChange} />);
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ grid: [], bench: '3150' })));
+    expect(onChange.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  it('compact mode keeps ID, bench and grid visible and moves other filters into an accessible details panel', () => {
+    const { container } = render(<BlastHoleFilters compact holes={[makeHole({ attributes: {
+      Nombre_Malla_Original: 'Malla 1', holes_polygon: 'Polígono A', Banco_Original: '3150', Nombre_Fase: 'Fase Norte', Len: 12, Kilos_Cargados_real: 400, bench_num: '3150',
+    } })]} />);
+    expect(screen.getByLabelText('Buscar ID').closest('details')).toBeNull();
+    expect(screen.getByLabelText('Buscar opciones: Malla (Grid)').closest('details')).toBeNull();
+    expect(screen.getByLabelText('Banco').closest('details')).toBeNull();
+    const details = container.querySelector('details');
+    expect(details).toBeTruthy();
+    expect(details?.querySelector('summary')).toHaveTextContent('Filtros avanzados');
+    for (const label of ['Buscar opciones: Polígono', 'Buscar opciones: Fase', 'Buscar opciones: Banco de tronadura',
+      'Profundidad (m): Mínimo', 'Explosivo (kg): Máximo', 'Procedencia de cota', 'Estado de muestreo de superficie',
+      'Presencia de fecha', 'Corredor', 'Sección']) {
+      expect(screen.getByLabelText(label).closest('details')).toBe(details);
+    }
+    expect(screen.getByLabelText('Geometría').closest('details')).toBe(details);
+    expect(screen.getByLabelText('Sección')).toBeTruthy();
+  });
+
+  it('compact mode renders advanced controls without React key warnings', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      render(<BlastHoleFilters compact holes={[makeHole({ attributes: {
+        Nombre_Malla_Original: 'Malla 1', holes_polygon: 'Polígono A', Banco_Original: '3150', Nombre_Fase: 'Fase Norte', Len: 12, Kilos_Cargados_real: 400, bench_num: '3150',
+      } })]} />);
+      const keyWarnings = consoleError.mock.calls.filter((args) => String(args[0] ?? '').includes('unique "key"'));
+      expect(keyWarnings).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('compact mode renders all filters without removing any control from the DOM', () => {
+    const { container: full } = render(<BlastHoleFilters holes={[makeHole()]} />);
+    const fullCount = full.querySelectorAll('input, select').length;
+    const { container: compact } = render(<BlastHoleFilters compact holes={[makeHole()]} />);
+    expect(compact.querySelectorAll('input, select').length).toBe(fullCount);
+  });
+
+  it('default mode keeps the uncontrolled behavior and no details panel', () => {
+    const { container } = render(<BlastHoleFilters holes={[makeHole()]} />);
+    expect(container.querySelector('details')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Buscar ID'), { target: { value: 'P-01' } });
+    expect((screen.getByLabelText('Buscar ID') as HTMLInputElement).value).toBe('P-01');
   });
 });

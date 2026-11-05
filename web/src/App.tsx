@@ -15,7 +15,7 @@ import {
   LazyMesh3DViewer,
   LazyResultsTable,
   LazyDashboard,
-  LazyBlastCorrelation,
+  LazyBlastWorkspace,
   LazyAIReporter,
   LazyProfileView,
   LazyProfilesGrid,
@@ -200,10 +200,8 @@ function WorkspaceRouter() {
       );
     case 'blast':
       return (
-        <div className="h-full flex flex-col gap-6 overflow-y-auto pr-1">
-          <div className="shrink-0">
-            <LazyBlastCorrelation />
-          </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <LazyBlastWorkspace />
         </div>
       );
     case 'export-ai':

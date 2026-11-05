@@ -15,6 +15,7 @@ import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { useBlastSettings } from './useBlastSettings';
 import { BlastTemporalFilter } from './BlastTemporalFilter';
 import { DEMO_MESH_IDS, useSession } from '../../stores/session';
+import { useBlastView } from '../../stores/blastView';
 // Re-exports below kept for backwards-compat with existing tests:
 //   - damage test suite imports `buildDamageTraces` / `DAMAGE_MODEL_MIN_SAMPLES`
 //     (canonical home: PowderFactorDamagePanel.tsx)
@@ -111,12 +112,21 @@ export function buildOverlayHistogram(
  * the `blast` block and the `['blast-correlation', ...]` query is
  * invalidated so the table refetches with the new ρ.
  */
-export function BlastCorrelation() {
+export interface BlastCorrelationProps {
+  presentation?: 'legacy' | 'analysis';
+}
+
+export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationProps = {}) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { designMeshId, topoMeshId } = useSession();
   const hasVirtualMesh = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
-  const [surveyDate, setSurveyDate] = useState('');
+  const isAnalysis = presentation === 'analysis';
+  const [localSurveyDate, setLocalSurveyDate] = useState('');
+  const storeSurveyDate = useBlastView((s) => s.surveyDate);
+  const setStoreSurveyDate = useBlastView((s) => s.setSurveyDate);
+  const surveyDate = isAnalysis ? storeSurveyDate : localSurveyDate;
+  const setSurveyDate = isAnalysis ? setStoreSurveyDate : setLocalSurveyDate;
   const { data, isLoading, error } = useBlastCorrelation(surveyDate || undefined);
   const temporalControl = <BlastTemporalFilter surveyDate={surveyDate} onApply={setSurveyDate} metadata={data?.temporal_filter} />;
   const refreshAnalysis = () => Promise.all([
@@ -176,11 +186,13 @@ export function BlastCorrelation() {
                   'Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.',
               })}
         </p>
-        <div className="w-full max-w-md">
-          <BlastUploader
-            onUploaded={refreshAnalysis}
-          />
-        </div>
+        {!isAnalysis && (
+          <div className="w-full max-w-md">
+            <BlastUploader
+              onUploaded={refreshAnalysis}
+            />
+          </div>
+        )}
       </div></div>
     );
   }
@@ -188,9 +200,11 @@ export function BlastCorrelation() {
   return (
     <div className="space-y-4">
       {temporalControl}
-      <BlastUploader
-        onUploaded={refreshAnalysis}
-      />
+      {!isAnalysis && (
+        <BlastUploader
+          onUploaded={refreshAnalysis}
+        />
+      )}
       <BlastDensityControl />
       {/* Summary header */}
       <div
@@ -226,30 +240,34 @@ export function BlastCorrelation() {
       {/* G18 visual: histogram overlay of charge vs discharge */}
       <BlastHistogramChart carga={carga} descarga={descarga} />
 
-      {/* G11 phase 3: 3D viewer of blast holes */}
-      <Suspense
-        fallback={
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            {t('common.loading', { defaultValue: 'Cargando…' })}
-          </p>
-        }
-      >
-        <BlastHoles3DViewer sessionId={getSessionId()} />
-      </Suspense>
+      {!isAnalysis && (
+        <>
+          {/* G11 phase 3: 3D viewer of blast holes */}
+          <Suspense
+            fallback={
+              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                {t('common.loading', { defaultValue: 'Cargando…' })}
+              </p>
+            }
+          >
+            <BlastHoles3DViewer sessionId={getSessionId()} />
+          </Suspense>
 
-      {/* Phase 2: energy simulation panel (voxel-based, conservative model) */}
-      <Suspense
-        fallback={
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            {t('common.loading', { defaultValue: 'Cargando…' })}
-          </p>
-        }
-      >
-        <BlastSimulationPanel
-          sessionId={getSessionId()}
-          geometryConfigurationVersion={GEOMETRY_CONFIGURATION_VERSION}
-        />
-      </Suspense>
+          {/* Phase 2: energy simulation panel (voxel-based, conservative model) */}
+          <Suspense
+            fallback={
+              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                {t('common.loading', { defaultValue: 'Cargando…' })}
+              </p>
+            }
+          >
+            <BlastSimulationPanel
+              sessionId={getSessionId()}
+              geometryConfigurationVersion={GEOMETRY_CONFIGURATION_VERSION}
+            />
+          </Suspense>
+        </>
+      )}
     </div>
   );
 }
