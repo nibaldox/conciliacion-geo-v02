@@ -578,7 +578,7 @@ export function buildHorizontalDeviationSampleAnnotations(
       arrowhead: 0,
       arrowwidth: 1,
       arrowcolor: getHorizontalDeviationColor(sample.category),
-      bgcolor: readThemeColor('--color-surface-raised', '#19232d'),
+      bgcolor: readThemeColor('--color-surface-raised', '#0e1217'),
       bordercolor: readThemeColor('--color-border', '#2d3b49'),
       borderwidth: 1,
       borderpad: 3,

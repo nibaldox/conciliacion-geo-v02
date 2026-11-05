@@ -5,7 +5,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import client from './client';
 import { useProcess, useProfile } from './hooks';
-import { useSession } from '../stores/session';
+import { DEMO_MESH_IDS, useSession, type DemoData } from '../stores/session';
 
 function createWrapper(queryClient: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -63,6 +63,65 @@ describe('profile query freshness across surface changes', () => {
     });
     await waitFor(() => expect(get.mock.calls.length).toBeGreaterThan(profileFetchesBeforeProcessing));
 
+    queryClient.clear();
+  });
+});
+
+describe('demo profile resolution', () => {
+  const demoSection = (name: string) => ({
+    section_name: name,
+    sector: 'Norte',
+    origin: [0, 0],
+    azimuth: 90,
+    design_profile: { distances: [0, 10], elevations: [100, 90] },
+    topo_profile: { distances: [0, 10], elevations: [100, 91] },
+    reconciled_topo: { distances: [0, 10], elevations: [100, 91] },
+    benches_topo: [],
+  });
+
+  afterEach(() => {
+    useSession.getState().reset();
+    vi.restoreAllMocks();
+  });
+
+  function setupDemo() {
+    useSession.setState({
+      demoMode: true,
+      designMeshId: DEMO_MESH_IDS.design,
+      topoMeshId: DEMO_MESH_IDS.topo,
+      demoData: { sections: [demoSection('DEMO-S01'), demoSection('DEMO-S02')] } as unknown as DemoData,
+    });
+    return vi.spyOn(client, 'get');
+  }
+
+  it('resolves a demo profile by section name', async () => {
+    const get = setupDemo();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useProfile('DEMO-S02'), { wrapper: createWrapper(queryClient) });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.section_name).toBe('DEMO-S02');
+    expect(get).not.toHaveBeenCalled();
+    queryClient.clear();
+  });
+
+  it('falls back to the numeric index used by demo section ids', async () => {
+    setupDemo();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useProfile('1'), { wrapper: createWrapper(queryClient) });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data?.section_name).toBe('DEMO-S02');
+    queryClient.clear();
+  });
+
+  it('reports an unknown demo section', async () => {
+    setupDemo();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useProfile('DEMO-S99'), { wrapper: createWrapper(queryClient) });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toBe('Demo section DEMO-S99 not found');
     queryClient.clear();
   });
 });

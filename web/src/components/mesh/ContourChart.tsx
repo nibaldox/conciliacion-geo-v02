@@ -16,6 +16,7 @@ import { Line } from 'react-chartjs-2';
 import { useMeshContours, useSections, useReferenceLines } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import { useTheme } from '../../stores/theme';
+import { readThemeColor } from '../../utils/theme';
 import { ReferenceLinesOverlay, buildReferenceLineDatasets } from './ReferenceLinesOverlay';
 
 Chart.register(CategoryScale, LinearScale, LineElement, PointElement, Title, Tooltip, Legend);
@@ -202,10 +203,10 @@ export function ContourChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: isDark ? '#1f1f1f' : '#fff',
-          titleColor: isDark ? '#e5e5e5' : '#111',
-          bodyColor: isDark ? '#a3a3a3' : '#374151',
-          borderColor: isDark ? '#2e2e2e' : '#e5e7eb',
+          backgroundColor: readThemeColor('--color-surface-raised', isDark ? '#0e1217' : '#f6f7f9'),
+          titleColor: readThemeColor('--color-text-primary', isDark ? '#e6e9ee' : '#1f2933'),
+          bodyColor: readThemeColor('--color-text-secondary', isDark ? '#b3bcc8' : '#46525f'),
+          borderColor: readThemeColor('--color-border', isDark ? '#1f262f' : '#d3d9e0'),
           borderWidth: 1,
           callbacks: {
             title: (items: TooltipItem<'line'>[]) => {

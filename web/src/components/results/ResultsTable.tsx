@@ -16,7 +16,6 @@ import {
   formatMeters,
   formatDegrees,
   formatDeviation,
-  getStatusClass,
   getMatchClass,
 } from '../../utils/format';
 import type { ComparisonResult, MatchType } from '../../api/types';
@@ -28,11 +27,30 @@ interface ResultsTableProps {
   ResultFiltersComponent?: React.ComponentType<{ results: ComparisonResult[]; filters: ResultFilterState; onChange: (filters: ResultFilterState) => void }>;
 }
 
+const ID_COLUMNS = new Set(['section', 'sector', 'level', 'bench_num', 'type']);
+
+function statusTextColor(status: string): string | undefined {
+  const s = (status ?? '').toUpperCase();
+  if (s === 'CUMPLE') return 'var(--status-ok-text)';
+  if (s.includes('FUERA')) return 'var(--status-warn-text)';
+  if (s.includes('NO CUMPLE')) return 'var(--status-nok-text)';
+  return undefined;
+}
+
+function StatusValue({ status, children }: { status: string; children: React.ReactNode }) {
+  const color = statusTextColor(status);
+  return (
+    <span className="font-medium" style={color ? { color } : undefined}>
+      {children}
+    </span>
+  );
+}
+
 function MatchBadge({ type, t }: { type: MatchType; t: (k: string) => string }) {
   const cls = getMatchClass(type);
   const key = `table.status_${type.toLowerCase()}`;
   return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
       {t(key)}
     </span>
   );
@@ -128,7 +146,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_delta_crest', { defaultValue: 'Δ Cresta' }),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+          <span>{formatDeviation(getValue<number | null>())}</span>
         ),
       },
       {
@@ -136,7 +154,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_delta_toe', { defaultValue: 'Δ Pata' }),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+          <span>{formatDeviation(getValue<number | null>())}</span>
         ),
       },
       // Height group
@@ -145,7 +163,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_height_design'),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+          <span>{formatMeters(getValue<number | null>())}</span>
         ),
       },
       {
@@ -153,9 +171,9 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_height_real'),
         size: 90,
         cell: ({ row, getValue }) => (
-          <span className={`inline-block px-2 py-0.5 rounded font-mono text-xs font-semibold ${getStatusClass(row.original.height_status)}`}>
+          <StatusValue status={row.original.height_status}>
             {formatMeters(getValue<number | null>())}
-          </span>
+          </StatusValue>
         ),
       },
       {
@@ -163,7 +181,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_height_dev'),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+          <span>{formatDeviation(getValue<number | null>())}</span>
         ),
       },
       // Angle group
@@ -172,7 +190,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_angle_design'),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatDegrees(getValue<number | null>())}</span>
+          <span>{formatDegrees(getValue<number | null>())}</span>
         ),
       },
       {
@@ -180,9 +198,9 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_angle_real'),
         size: 90,
         cell: ({ row, getValue }) => (
-          <span className={`inline-block px-2 py-0.5 rounded font-mono text-xs font-semibold ${getStatusClass(row.original.angle_status)}`}>
+          <StatusValue status={row.original.angle_status}>
             {formatDegrees(getValue<number | null>())}
-          </span>
+          </StatusValue>
         ),
       },
       {
@@ -190,7 +208,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_angle_dev'),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatDeviation(getValue<number | null>())}</span>
+          <span>{formatDeviation(getValue<number | null>())}</span>
         ),
       },
       // Berm group
@@ -199,7 +217,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_berm_design'),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+          <span>{formatMeters(getValue<number | null>())}</span>
         ),
       },
       {
@@ -207,9 +225,9 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_berm_real'),
         size: 90,
         cell: ({ row, getValue }) => (
-          <span className={`inline-block px-2 py-0.5 rounded font-mono text-xs font-semibold ${getStatusClass(row.original.berm_status)}`}>
+          <StatusValue status={row.original.berm_status}>
             {formatMeters(getValue<number | null>())}
-          </span>
+          </StatusValue>
         ),
       },
       {
@@ -217,7 +235,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_berm_min'),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+          <span>{formatMeters(getValue<number | null>())}</span>
         ),
       },
       {
@@ -225,7 +243,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_spill', { defaultValue: 'B. Derrame (m)' }),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+          <span>{formatMeters(getValue<number | null>())}</span>
         ),
       },
       {
@@ -233,7 +251,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_berm_effective', { defaultValue: 'B. Efectiva (m)' }),
         size: 90,
         cell: ({ getValue }) => (
-          <span className="font-mono text-xs">{formatMeters(getValue<number | null>())}</span>
+          <span>{formatMeters(getValue<number | null>())}</span>
         ),
       },
     ],
@@ -267,7 +285,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-64 text-sm" style={{ color: '#ef4444' }}>
+      <div className="flex items-center justify-center h-64 text-sm" style={{ color: 'var(--status-nok-text)' }}>
         {t('table.loading_error')}
       </div>
     );
@@ -283,34 +301,33 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 text-sm">
-        <label htmlFor="results-order" style={{ color: 'var(--color-text-secondary)' }}>
+      <div className="flex items-center gap-2 text-xs">
+        <label htmlFor="results-order" className="text-text-muted">
           {t('table.order_label', { defaultValue: 'Orden' })}
         </label>
         <select
           id="results-order"
           value={orderMode}
           onChange={(e) => setOrderMode(e.target.value as OrderMode)}
-          className="px-2 py-1 rounded"
-          style={{ border: '1px solid var(--color-border)', backgroundColor: 'var(--color-surface)', color: 'var(--color-text-primary)' }}
+          className="h-8 rounded-md border border-border bg-surface-sunken px-2 text-xs text-text-primary"
         >
           <option value="section">{t('table.order_by_section', { defaultValue: 'Por Sección' })}</option>
           <option value="level">{t('table.order_by_level', { defaultValue: 'Por Nivel' })}</option>
         </select>
       </div>
-      <div className="overflow-x-auto rounded-lg shadow-sm" style={{ border: '1px solid var(--color-border)' }}>
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full text-sm">
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id} style={{ backgroundColor: 'var(--color-surface-muted)', borderBottom: '2px solid var(--color-border)' }}>
+              <tr key={headerGroup.id} className="border-b border-border">
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap cursor-pointer select-none"
-                    style={{ width: header.getSize(), color: 'var(--color-text-secondary)' }}
+                    className={`cursor-pointer select-none whitespace-nowrap px-3 py-2 text-xs font-medium text-text-muted hover:text-text-primary ${ID_COLUMNS.has(header.column.id) ? 'text-left' : 'text-right'}`}
+                    style={{ width: header.getSize() }}
                     onClick={header.column.getToggleSortingHandler()}
                   >
-                    <div className="flex items-center gap-1">
+                    <div className={`flex items-center gap-1 ${ID_COLUMNS.has(header.column.id) ? '' : 'justify-end'}`}>
                       {flexRender(header.column.columnDef.header, header.getContext())}
                       {{
                         asc: ' ↑',
@@ -323,20 +340,12 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
             ))}
           </thead>
           <tbody>
-            {table.getRowModel().rows.map((row, i) => (
-              <tr
-                key={row.id}
-                className="transition-colors"
-                style={{
-                  backgroundColor: i % 2 === 0 ? 'var(--color-surface)' : 'var(--color-surface-muted)',
-                  borderBottom: '1px solid var(--color-border)',
-                }}
-              >
+            {table.getRowModel().rows.map((row) => (
+              <tr key={row.id} className="border-b border-border last:border-b-0 hover:bg-surface-muted">
                 {row.getVisibleCells().map((cell) => (
                   <td
                     key={cell.id}
-                    className="px-3 py-2 whitespace-nowrap"
-                    style={{ color: 'var(--color-text-primary)' }}
+                    className={`whitespace-nowrap px-3 py-1.5 text-text-primary ${ID_COLUMNS.has(cell.column.id) ? 'text-left' : 'text-right tabular-nums'}`}
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </td>
@@ -348,7 +357,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
       </div>
 
       {/* Pagination controls */}
-      <div className="flex items-center justify-between text-sm px-1" style={{ color: 'var(--color-text-muted)' }}>
+      <div className="flex items-center justify-between px-1 text-xs text-text-muted">
         <div className="flex items-center gap-2">
           <span>
             {t('table.page_info', {
@@ -356,39 +365,35 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
               total: table.getPageCount(),
             })}
           </span>
-          <span style={{ color: 'var(--color-border-strong)' }}>|</span>
+          <span aria-hidden="true">·</span>
           <span>{t('table.n_results', { count: filteredData.length })}</span>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => table.setPageIndex(0)}
             disabled={!table.getCanPreviousPage()}
-            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+            className="rounded-md border border-border px-2 py-0.5 text-xs text-text-secondary transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             «
           </button>
           <button
             onClick={() => table.previousPage()}
             disabled={!table.getCanPreviousPage()}
-            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+            className="rounded-md border border-border px-2 py-0.5 text-xs text-text-secondary transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             ‹
           </button>
           <button
             onClick={() => table.nextPage()}
             disabled={!table.getCanNextPage()}
-            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+            className="rounded-md border border-border px-2 py-0.5 text-xs text-text-secondary transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             ›
           </button>
           <button
             onClick={() => table.setPageIndex(table.getPageCount() - 1)}
             disabled={!table.getCanNextPage()}
-            className="px-2 py-1 rounded text-xs disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-            style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-secondary)' }}
+            className="rounded-md border border-border px-2 py-0.5 text-xs text-text-secondary transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             »
           </button>

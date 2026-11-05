@@ -103,10 +103,10 @@ describe('BenchTable', () => {
 
     expect(row?.querySelector('[data-status="NO_CUMPLE"]')).toBeInTheDocument();
     expect(cells).toHaveLength(10);
-    expect(cells?.[3]?.querySelector('.badge-ok')).toHaveTextContent('15.0');
-    expect(cells?.[5]?.querySelector('.badge-warn')).toHaveTextContent('65°');
-    expect(cells?.[7]?.querySelector('.badge-ok')).toHaveTextContent('8.0');
-    expect(cells?.[9]).toHaveTextContent('90');
+    expect(cells?.[3]?.querySelector('[data-value-status="CUMPLE"]')).toHaveTextContent('15.0');
+    expect(cells?.[5]?.querySelector('[data-value-status="FUERA"]')).toHaveTextContent('65°');
+    expect(cells?.[7]?.querySelector('[data-value-status="CUMPLE"]')).toHaveTextContent('8.0');
+    expect(cells?.[9]?.querySelector('[data-value-status="CUMPLE"]')).toHaveTextContent('90');
     expect(row?.querySelector('[data-slot="status-pill"]')).not.toBeInTheDocument();
   });
 

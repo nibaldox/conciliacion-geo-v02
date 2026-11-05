@@ -10,7 +10,7 @@ export function SectionSelector() {
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-3">
-      <label htmlFor="profile-section-select" className="text-sm font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
+      <label htmlFor="profile-section-select" className="whitespace-nowrap text-xs text-text-muted">
         {t('step4.select_section_label')}
       </label>
       <select
@@ -18,8 +18,7 @@ export function SectionSelector() {
         value={selectedSection ?? ''}
         onChange={(e) => setSelectedSection(e.target.value || null)}
         disabled={isLoading}
-        className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm outline-none"
-        style={{ border: '1px solid var(--color-border)', color: 'var(--color-text-primary)', backgroundColor: 'var(--color-surface)' }}
+        className="h-8 min-w-0 flex-1 rounded-md border border-border bg-surface px-2.5 text-sm text-text-primary outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
       >
         <option value="">{t('step4.section_select_default')}</option>
         {sections?.map((s) => (

@@ -441,8 +441,8 @@ function profileQueryOptions(sectionId: string | null, state: ReturnType<typeof 
       // design mesh is a demo mesh, otherwise always hit the backend so
       // profiles the user just generated become visible.
       if (demoMode && demoData && isDemoMeshId(designMeshId) && sectionId !== null) {
-        const idx = parseInt(sectionId, 10);
-        const sec = demoData.sections[idx];
+        const sec = demoData.sections.find((section) => section.section_name === sectionId)
+          ?? (/^\d+$/.test(sectionId) ? demoData.sections[Number(sectionId)] : undefined);
         if (!sec) throw new Error(`Demo section ${sectionId} not found`);
         return {
           section_name: sec.section_name,

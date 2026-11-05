@@ -36,18 +36,12 @@ export function AIResultPanel({
     <>
       {errorState && (
         <div
-          className="rounded-xl shadow-sm p-4"
-          style={{
-            backgroundColor: 'var(--color-surface)',
-            border: '1px solid var(--color-border)',
-          }}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1"
           role="alert"
           data-testid="ai-reporter-error"
         >
-          <p
-            className="text-xs"
-            style={{ color: 'var(--color-text-primary)' }}
-          >
+          <p className="flex items-center gap-2 text-xs text-text-primary">
+            <span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--status-nok-text)]" />
             {errorState.kind === 'rate_limited' && countdown > 0
               ? t('ai_reporter.error.rate_limited', { seconds: countdown })
               : errorState.kind === 'network'
@@ -60,8 +54,7 @@ export function AIResultPanel({
             <button
               type="button"
               onClick={onRetry}
-              className="mt-2 text-xs underline"
-              style={{ color: 'var(--color-accent)' }}
+              className="text-xs text-accent-bright underline underline-offset-2"
             >
               {t('common.retry')}
             </button>
@@ -105,30 +98,26 @@ function ResultCard({
 
   return (
     <div
-      className="rounded-xl shadow-sm p-5 space-y-3"
-      style={{
-        backgroundColor: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-      }}
+      className="flex flex-col gap-3 rounded-lg border border-border p-4 sm:p-5"
       data-testid="ai-reporter-result"
     >
-      <div className="flex items-center justify-between gap-3">
-        <h5
-          className="text-sm font-semibold"
-          style={{ color: 'var(--color-text-primary)' }}
-        >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h4 className="ui-section-title">
           {t('ai_reporter.report.title')}
-        </h5>
+        </h4>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {report.cached && (
-            <span
-              className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full"
-              style={{
-                backgroundColor: 'var(--color-accent-soft)',
-                color: 'var(--color-text-muted)',
-              }}
-            >
+            <span className="ui-chip">
               {t('ai_reporter.report.cached_badge')}
+            </span>
+          )}
+          {copied && (
+            <span
+              className="text-xs text-text-muted"
+              role="status"
+              data-testid="ai-reporter-copied"
+            >
+              {t('ai_reporter.report.copied', { defaultValue: 'Copiado' })}
             </span>
           )}
           <Button
@@ -174,30 +163,19 @@ function ResultCard({
             hr: () => <hr className="my-5" style={{ borderColor: 'var(--color-border)' }} />,
             pre: ({ children }) => <pre className="my-4 overflow-x-auto rounded-lg border p-4 text-xs leading-5" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-sunken)', color: 'var(--color-text-primary)' }}>{children}</pre>,
             code: ({ children, className }) => <code className={className ? 'font-mono' : 'rounded px-1.5 py-0.5 font-mono text-[0.9em]'} style={{ backgroundColor: className ? undefined : 'var(--color-surface-sunken)', color: 'var(--color-text-primary)' }}>{children}</code>,
-            table: ({ children }) => <div className="my-4 max-w-full overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--color-border)' }}><table className="w-full min-w-[32rem] border-collapse text-left text-sm">{children}</table></div>,
-            thead: ({ children }) => <thead style={{ backgroundColor: 'var(--color-surface-raised)' }}>{children}</thead>,
-            th: ({ children, style }) => <th className="border-b px-3 py-2 font-semibold" style={{ borderColor: 'var(--color-border)', textAlign: style?.textAlign }}>{children}</th>,
-            td: ({ children, style }) => <td className="border-b px-3 py-2 align-top" style={{ borderColor: 'var(--color-border)', textAlign: style?.textAlign }}>{children}</td>,
+            table: ({ children }) => <div className="my-4 max-w-full overflow-x-auto"><table className="w-full min-w-[32rem] border-collapse text-left text-sm">{children}</table></div>,
+            thead: ({ children }) => <thead>{children}</thead>,
+            th: ({ children, style }) => <th className="border-b px-3 py-2 text-xs font-medium text-text-muted" style={{ borderColor: 'var(--color-border)', textAlign: style?.textAlign }}>{children}</th>,
+            td: ({ children, style }) => <td className="border-b px-3 py-2 align-top tabular-nums" style={{ borderColor: 'var(--color-border)', textAlign: style?.textAlign }}>{children}</td>,
           }}
         >
           {report.content}
         </ReactMarkdown>
       </div>
 
-      {copied && (
-        <p
-          className="text-[10px]"
-          style={{ color: 'var(--color-text-muted)' }}
-          data-testid="ai-reporter-copied"
-        >
-          ✓
-        </p>
-      )}
-
       {usage && (
         <div
-          className="flex items-center flex-wrap gap-2 text-[11px]"
-          style={{ color: 'var(--color-text-secondary)' }}
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-3 text-xs tabular-nums text-text-muted"
           data-testid="ai-reporter-usage"
         >
           <span>
@@ -220,13 +198,7 @@ function ResultCard({
             </span>
           )}
           {usage.is_synthetic && (
-            <span
-              className="px-1.5 py-0.5 rounded-full text-[10px]"
-              style={{
-                backgroundColor: 'var(--color-accent-soft)',
-                color: 'var(--color-text-muted)',
-              }}
-            >
+            <span className="ui-chip !py-0">
               {t('ai_reporter.report.estimated_badge')}
             </span>
           )}

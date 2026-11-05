@@ -493,7 +493,8 @@ async function bootCurveSelectionFixture(page: Page) {
 
   await expect(page.locator(canvasSelector)).toBeVisible({ timeout: 30000 });
 
-  await page.locator('[aria-controls="project-panel-secciones"]').click();
+  const sectionsStep = page.locator('#workflow-step-sections');
+  if (await sectionsStep.getAttribute('aria-expanded') !== 'true') await sectionsStep.click();
   await expect(page.locator('[data-slot="section-curve-form"]')).toBeVisible({ timeout: 15000 });
 
   const firstSnapshot = await waitForSelection(page, (snapshot) => snapshot.curveSelection.context !== null, 'context ready');

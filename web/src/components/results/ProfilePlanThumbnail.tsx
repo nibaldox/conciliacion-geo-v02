@@ -26,9 +26,9 @@ export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ section
   const raster = useMemo(() => vertices && projection ? createSurfaceRaster(vertices, projection) : '', [vertices, projection]);
   const loading = isLoading || profiles.some((profile) => profile.isLoading);
   return (
-    <section data-slot="profile-plan-thumbnail" data-active-section={sectionId} className="min-w-0 rounded-xl border border-border bg-surface-raised p-3 space-y-2">
-      {showTitle && <h3 className="text-xs font-semibold">{t('profile_plan.title')}</h3>}
-      {loading ? <Spinner /> : error || !projection || !raster ? <p className="text-xs text-text-muted">{t('plan_view.unavailable')}</p> : (
+    <section data-slot="profile-plan-thumbnail" data-active-section={sectionId} className={showTitle ? 'min-w-0 space-y-2 rounded-lg border border-border bg-surface-raised p-3' : 'min-w-0 space-y-2'}>
+      {showTitle && <h3 className="text-sm font-medium text-text-primary">{t('profile_plan.title')}</h3>}
+      {loading ? <div className="flex aspect-[10/9] w-full items-center justify-center rounded-md bg-surface-sunken text-text-muted"><Spinner size="sm" /></div> : error || !projection || !raster ? <div className="flex aspect-[10/9] w-full items-center justify-center rounded-md bg-surface-sunken px-4 text-center text-xs text-text-muted">{t('plan_view.unavailable')}</div> : (
         <svg viewBox="0 0 1000 900" className="aspect-[10/9] w-full rounded-md bg-surface-sunken" role="img" aria-label={t('profile_plan.active', { name: active?.name })}>
           <image href={raster} width="1000" height="900" />
           {[...lines].sort((a, b) => Number(a.section.id === sectionId) - Number(b.section.id === sectionId)).map(({ section, points }) => (
@@ -42,8 +42,8 @@ export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ section
           <text x="930" y="35" textAnchor="middle" fill="var(--color-text-secondary)" fontSize="40">N</text>
         </svg>
       )}
-      <p className="text-xs text-accent-bright">{t('profile_plan.active', { name: active?.name ?? '—' })}</p>
-      <p className="text-xs text-text-muted">{t('profile_plan.neighbours')}</p>
+      <p className="truncate text-xs text-text-secondary">{t('profile_plan.active', { name: active?.name ?? '—' })}</p>
+      <p className="truncate text-xs text-text-muted">{t('profile_plan.neighbours')}</p>
     </section>
   );
 });

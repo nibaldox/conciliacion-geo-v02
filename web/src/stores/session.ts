@@ -65,9 +65,12 @@ export interface DemoData {
     delta_toe: number | null;
   }>;
 }
+export type WorkflowStepKey = 'surfaces' | 'sections' | 'parameters' | 'process';
+
 interface SessionState {
   // Wizard navigation
   currentStep: number;
+  openWorkflowStep: WorkflowStepKey | null;
 
   // Workspace views and layout state
   activeWorkspaceView: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai';
@@ -102,6 +105,7 @@ interface SessionState {
 
   // Actions
   setStep: (step: number) => void;
+  setOpenWorkflowStep: (step: WorkflowStepKey | null) => void;
   nextStep: () => void;
   prevStep: () => void;
   setActiveWorkspaceView: (view: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai') => void;
@@ -121,6 +125,7 @@ interface SessionState {
 
 const initialState = {
   currentStep: 1,
+  openWorkflowStep: 'surfaces' as WorkflowStepKey | null,
   activeWorkspaceView: '3d' as const,
   sidebarCollapsed: false,
   mapClickHandler: null,
@@ -147,6 +152,7 @@ export const useSession = create<SessionState>((set, get) => ({
   ...initialState,
 
   setStep: (step) => set({ currentStep: step }),
+  setOpenWorkflowStep: (step) => set({ openWorkflowStep: step }),
   nextStep: () => set((s) => ({ currentStep: Math.min(s.currentStep + 1, 4) })),
   prevStep: () => set((s) => ({ currentStep: Math.max(s.currentStep - 1, 1) })),
   setActiveWorkspaceView: (view) => set({ activeWorkspaceView: view }),

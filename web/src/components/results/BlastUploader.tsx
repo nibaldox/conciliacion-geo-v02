@@ -12,9 +12,20 @@ import type { BlastUploadResponse, BlockingError, RejectedRow } from '../../api/
 import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { Button } from '../ui/Button';
 import { PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
+import { BlastInfoTip } from './blastLayout';
 
 export interface BlastUploaderProps {
   onUploaded?: (response: BlastUploadResponse) => void;
+  collapsible?: boolean;
+}
+
+function StatusLine({ tone, children, ...rest }: { tone: 'nok' | 'warn'; children: React.ReactNode } & React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className="flex items-start gap-2 text-xs text-text-secondary" {...rest}>
+      <span aria-hidden="true" className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: `var(--status-${tone}-text)` }} />
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
 }
 
 const INCL_CONVENTIONS = ['FROM_VERTICAL', 'DIP_FROM_HORIZONTAL'] as const;
@@ -162,7 +173,7 @@ function buildGeometry(state: GeometryState): BlastGeometryForm | null {
   };
 }
 
-export function BlastUploader({ onUploaded }: BlastUploaderProps) {
+export function BlastUploader({ onUploaded, collapsible = false }: BlastUploaderProps) {
   const { t } = useTranslation();
   const { designMeshId, topoMeshId } = useSession();
   const hasVirtualMesh = (
@@ -228,8 +239,8 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
 
   if (hasVirtualMesh) {
     return (
-      <section className="flex flex-col gap-3 rounded-lg border p-4 text-left" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-muted)' }} data-testid="blast-uploader">
-        <h3 className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+      <section className="flex flex-col gap-2 rounded-lg border border-border p-4 text-left" data-testid="blast-uploader">
+        <h3 className="ui-section-title">
           {t('blast.upload_title')}
         </h3>
         <p className="text-xs leading-relaxed text-text-muted" role="status" data-testid="blast-demo-notice">
@@ -285,35 +296,27 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
     }
   };
 
-  return (
-    <section
-      className="flex flex-col gap-3 rounded-lg border p-4 text-left"
-      style={{
-        borderColor: 'var(--color-border)',
-        backgroundColor: 'var(--color-surface-muted)',
-      }}
-      data-testid="blast-uploader"
-    >
-      <h3
-        className="text-sm font-semibold"
-        style={{ color: 'var(--color-text-secondary)' }}
-      >
-        {t('blast.upload_title')}
-      </h3>
+  const title = (
+    <span className="flex items-center gap-2">
+      <span className="ui-section-title">{t('blast.upload_title')}</span>
+      <BlastInfoTip>{t('blast.upload_steps')}</BlastInfoTip>
+    </span>
+  );
 
+  const body = (
+    <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" variant="secondary" onClick={() => fileInputRef.current?.click()} disabled={upload.isPending} data-testid="blast-file-picker">{t('blast.choose_csv')}</Button>
-        {filename && <span className="min-w-0 break-all text-xs text-text-secondary">{t('blast.file_selected', { filename })}</span>}
+        {filename && <span className="min-w-0 break-all font-mono text-xs text-text-secondary">{t('blast.file_selected', { filename })}</span>}
       </div>
       <input ref={fileInputRef} type="file" accept=".csv,text/csv" data-testid="blast-file-input" onChange={handleFileChange} disabled={upload.isPending} className="hidden" />
-      {fileError && <p role="alert" className="text-xs text-mine-red">{fileError}</p>}
-      <p className="text-xs text-text-muted">{t('blast.upload_steps')}</p>
+      {fileError && <StatusLine tone="nok" role="alert">{fileError}</StatusLine>}
 
-      <details ref={contractRef} className="text-xs" data-testid="geometry-contract-form">
-        <summary className="cursor-pointer font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+      <details ref={contractRef} className="group text-xs" data-testid="geometry-contract-form">
+        <summary className="cursor-pointer text-xs font-medium text-text-secondary hover:text-text-primary">
           {t('blast.geometry_contract', { defaultValue: 'Contrato geométrico (obligatorio)' })}
         </summary>
-        <div className="mt-2 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid grid-cols-1 gap-3 text-text-muted sm:grid-cols-2">
           <label className="flex flex-col gap-1">
             <span>{t('blast.incl_source_col', { defaultValue: 'Columna fuente de inclinación' })}</span>
             {sourceColumns.length > 0 ? (
@@ -327,12 +330,12 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             )}
           </label>
           {sourceColumns.length > 0 && state.inclinationSourceColumn && !sourceColumns.includes(state.inclinationSourceColumn) && (
-            <p className="col-span-2 text-xs text-text-muted" role="status">{t('blast.source_column_missing', { column: state.inclinationSourceColumn, defaultValue: 'La columna «{{column}}» no está en el encabezado del archivo seleccionado. Elija una columna disponible.' })}</p>
+            <p className="sm:col-span-2 text-xs text-text-muted" role="status">{t('blast.source_column_missing', { column: state.inclinationSourceColumn, defaultValue: 'La columna «{{column}}» no está en el encabezado del archivo seleccionado. Elija una columna disponible.' })}</p>
           )}
           {state.inclinationConvention === 'FROM_VERTICAL' && state.inclinationSignConvention === 'NEGATIVE_IS_DOWNWARD_DIP' && (
-            <p className="col-span-2 rounded-md border p-2 text-xs" role="alert" style={{ borderColor: 'var(--color-status-error)', color: 'var(--color-status-error)' }}>
+            <StatusLine tone="nok" className="flex items-start gap-2 text-xs text-text-secondary sm:col-span-2" role="alert">
               {t('blast.inclination_convention_sign_incompatible', { defaultValue: 'La convención desde la vertical no es compatible con la regla «negativo indica buzamiento descendente». Seleccione buzamiento desde la horizontal o una política de signo compatible.' })}
-            </p>
+            </StatusLine>
           )}
           <label className="flex flex-col gap-1">
             <span>{t('blast.az_source_col', { defaultValue: 'Columna fuente de azimut' })}</span>
@@ -347,7 +350,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             )}
           </label>
           {sourceColumns.length > 0 && state.azimuthSourceColumn && !sourceColumns.includes(state.azimuthSourceColumn) && (
-            <p className="col-span-2 text-xs text-text-muted" role="status">{t('blast.source_column_missing', { column: state.azimuthSourceColumn, defaultValue: 'La columna «{{column}}» no está en el encabezado del archivo seleccionado. Elija una columna disponible.' })}</p>
+            <p className="sm:col-span-2 text-xs text-text-muted" role="status">{t('blast.source_column_missing', { column: state.azimuthSourceColumn, defaultValue: 'La columna «{{column}}» no está en el encabezado del archivo seleccionado. Elija una columna disponible.' })}</p>
           )}
           <label className="flex flex-col gap-1">
             <span>{t('blast.incl_convention', { defaultValue: 'Convención de inclinación' })}</span>
@@ -378,7 +381,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             </select>
           </label>
           {state.inclinationSignConvention === 'SOURCE_DEFINED' && (
-            <label className="flex flex-col gap-1 col-span-2">
+            <label className="flex flex-col gap-1 sm:col-span-2">
               <span>{t('blast.source_rule', { defaultValue: 'Regla (obligatoria para SOURCE_DEFINED)' })}</span>
               <select
                 value={state.inclinationSourceRule}
@@ -421,7 +424,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 col-span-2">
+          <label className="flex flex-col gap-1 sm:col-span-2">
             <span>{t('blast.az_convention', { defaultValue: 'Convención de azimut' })}</span>
             <select
               value={state.azimuthConvention}
@@ -435,7 +438,7 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 col-span-2">
+          <label className="flex flex-col gap-1 sm:col-span-2">
             <span>{t('blast.collar_elevation_source', { defaultValue: 'Fuente de cota de collar' })}</span>
             <select
               value={state.collarElevationSource}
@@ -448,20 +451,20 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
             </select>
           </label>
           {state.collarElevationSource === 'bench_height' ? (
-            <label className="flex flex-col gap-1 col-span-2">
+            <label className="flex flex-col gap-1 sm:col-span-2">
               <span>{t('blast.bench_height', { defaultValue: 'Altura de banco (m)' })}</span>
               <input type="number" min="0" step="0.1" value={state.benchHeightM} onChange={(e) => update('benchHeightM', e.target.value)} data-testid="bench-height" className={PROJECT_INPUT_CLASS} />
             </label>
           ) : (
-            <div className="col-span-2 flex flex-col gap-2 rounded-md border p-2" style={{ borderColor: 'var(--color-border)' }} data-testid="design-surface-elevation">
+            <div className="flex flex-col gap-2 rounded-md border border-border p-3 sm:col-span-2" data-testid="design-surface-elevation">
               <p>{t('blast.design_surface_help', { defaultValue: 'La cota del collar se estimará desde la superficie de diseño. El factor de carga volumétrico puede quedar indisponible o ser aproximado; no se infiere la altura real del banco.' })}</p>
-              <label className="flex items-start gap-2">
+              <label className="flex items-start gap-2 text-text-secondary">
                 <input type="checkbox" checked={state.spatialReferenceConfirmed} onChange={(e) => update('spatialReferenceConfirmed', e.target.checked)} data-testid="spatial-reference-confirmed" />
                 <span>{t('blast.spatial_reference_confirm', { defaultValue: 'Confirmo que coordenadas, CRS, unidades y datum de la CSV son compatibles con la superficie de diseño.' })}</span>
               </label>
             </div>
           )}
-          <label className="col-span-2 flex items-center gap-2 mt-1" data-testid="confirm-row">
+          <label className="mt-1 flex items-center gap-2 text-text-secondary sm:col-span-2" data-testid="confirm-row">
             <input
               type="checkbox"
               checked={state.confirmed}
@@ -478,61 +481,63 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
         </div>
       </details>
 
-      <Button type="button" size="sm" onClick={handleUpload} disabled={!canSubmit} loading={upload.isPending} data-testid="blast-upload-submit">
-        {t('blast.submit_csv')}
-      </Button>
-      {!sessionId && (
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          {t('blast.upload_no_session', { defaultValue: 'Inicie una sesión para cargar pozos.' })}
-        </p>
-      )}
-      {sessionId && !geometry && (
-        <p className="text-xs" role="alert" style={{ color: 'var(--color-status-error, #ef4444)' }}>
-          {t('blast.contract_required', {
-            defaultValue:
-              'Complete y confirme el contrato geométrico antes de cargar el CSV.',
-          })}
-        </p>
-      )}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" size="sm" onClick={handleUpload} disabled={!canSubmit} loading={upload.isPending} data-testid="blast-upload-submit">
+          {t('blast.submit_csv')}
+        </Button>
+        {!sessionId && (
+          <p className="text-xs text-text-muted">
+            {t('blast.upload_no_session', { defaultValue: 'Inicie una sesión para cargar pozos.' })}
+          </p>
+        )}
+        {sessionId && !geometry && (
+          <p className="text-xs text-text-muted" role="alert">
+            {t('blast.contract_required', {
+              defaultValue:
+                'Complete y confirme el contrato geométrico antes de cargar el CSV.',
+            })}
+          </p>
+        )}
+      </div>
       {(upload.isPending || uploadPhase !== null) && (
-        <div className="space-y-1" role="status" aria-live="polite" data-testid="blast-upload-progress">
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="flex flex-col gap-1" role="status" aria-live="polite" data-testid="blast-upload-progress">
+          <p className="text-xs text-text-muted">
             {uploadPhase === 'processing'
               ? t('blast.processing_geometry')
               : t('blast.transferring_file')}
           </p>
           {uploadPhase !== 'processing' && uploadProgress != null && (
             <div className="flex items-center gap-2">
-              <progress className="h-2 w-full" max={100} value={uploadProgress} aria-label={t('blast.transfer_progress')} />
-              <span className="shrink-0 text-xs" style={{ color: 'var(--color-text-muted)' }}>{uploadProgress}%</span>
+              <progress className="h-1.5 w-full accent-[var(--color-accent)]" max={100} value={uploadProgress} aria-label={t('blast.transfer_progress')} />
+              <span className="shrink-0 text-xs tabular-nums text-text-muted">{uploadProgress}%</span>
             </div>
           )}
         </div>
       )}
       {upload.isError && (
-        <div className="text-xs" role="alert" data-testid="upload-error" style={{ color: 'var(--color-status-error, #ef4444)' }}>
+        <StatusLine tone="nok" role="alert" data-testid="upload-error">
           {t('blast.upload_error', { error: String(upload.error) })}
-        </div>
+        </StatusLine>
       )}
       {blockingErrors.length > 0 && (
-        <div className="text-xs" data-testid="blocking-errors" style={{ color: 'var(--color-status-error, #ef4444)' }}>
-          <strong>{t('blast.blocking_errors', { defaultValue: 'Errores bloqueantes:' })}</strong>
+        <StatusLine tone="nok" data-testid="blocking-errors">
+          <p className="font-medium text-text-primary">{t('blast.blocking_errors', { defaultValue: 'Errores bloqueantes:' })}</p>
           <ul className="ml-4 list-disc">
             {blockingErrors.map((err, idx) => (
               <li key={idx}>
-                <code>{err.error_code}</code>: {err.message}
+                <code className="font-mono">{err.error_code}</code>: {err.message}
               </li>
             ))}
           </ul>
-        </div>
+        </StatusLine>
       )}
       {rejectedRows.length > 0 && (
-        <div className="text-xs" data-testid="rejected-rows" style={{ color: 'var(--color-status-warning, #b45309)' }}>
-          <strong>{t('blast.rejected_rows', { defaultValue: 'Filas rechazadas:' })}</strong>
+        <StatusLine tone="warn" data-testid="rejected-rows">
+          <p className="font-medium text-text-primary">{t('blast.rejected_rows', { defaultValue: 'Filas rechazadas:' })}</p>
           <ul className="ml-4 list-disc">
             {rejectedRows.slice(0, 10).map((r, idx) => (
               <li key={idx}>
-                <code>{r.error_code}</code> ({r.source_column} fila {r.source_row_index}):{' '}
+                <code className="font-mono">{r.error_code}</code> ({r.source_column} fila {r.source_row_index}):{' '}
                 {r.rejection_reason}
               </li>
             ))}
@@ -540,65 +545,104 @@ export function BlastUploader({ onUploaded }: BlastUploaderProps) {
               <li>… +{rejectedRows.length - 10} más</li>
             )}
           </ul>
-        </div>
+        </StatusLine>
       )}
       {diagnostics && (
-        <div className="grid gap-2 text-xs" data-testid="processing-diagnostics">
-          <div data-testid="accepted-rows">{t('blast.accepted_rows_label')}: {diagnostics.accepted_rows?.length ?? 0}</div>
-          <div data-testid="event-warnings">{t('blast.event_warnings_label')}: {diagnostics.event_warnings?.length ?? 0}</div>
+        <div className="flex flex-col gap-2 text-xs text-text-secondary" data-testid="processing-diagnostics">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 tabular-nums">
+            <div data-testid="accepted-rows">{t('blast.accepted_rows_label')}: {diagnostics.accepted_rows?.length ?? 0}</div>
+            <div data-testid="event-warnings">{t('blast.event_warnings_label')}: {diagnostics.event_warnings?.length ?? 0}</div>
+          </div>
           {eventWarningMessages.length > 0 && (
             <ul aria-label={t('blast.event_warnings_label')} aria-live="polite" className="ml-4 list-disc" data-testid="event-warning-messages">
               {eventWarningMessages.map((message, index) => <li key={index}>{message}</li>)}
             </ul>
           )}
-          <div>
-            <strong>{t('blast.processing_summary_label')}</strong>
-            <pre data-testid="processing-summary">{JSON.stringify(diagnostics.processing_summary ?? {}, null, 2)}</pre>
-          </div>
-          <div>
-            <strong>{t('blast.geometry_configuration_label')}</strong>
-            <pre data-testid="geometry-configuration">{JSON.stringify(diagnostics.geometry_configuration ?? {}, null, 2)}</pre>
-          </div>
-          <div>
-            <strong>{t('blast.spatial_diagnostics_label')}</strong>
-            <pre data-testid="spatial-diagnostics">{JSON.stringify(diagnostics.spatial_diagnostics ?? {}, null, 2)}</pre>
-          </div>
+          <details className="text-text-muted">
+            <summary className="cursor-pointer text-xs font-medium text-text-secondary hover:text-text-primary">
+              {t('blast.technical_diagnostics', { defaultValue: 'Diagnóstico técnico' })}
+            </summary>
+            <div className="mt-2 flex flex-col gap-2">
+              <div>
+                <p className="font-medium text-text-secondary">{t('blast.processing_summary_label')}</p>
+                <pre className="overflow-x-auto font-mono text-[11px]" data-testid="processing-summary">{JSON.stringify(diagnostics.processing_summary ?? {}, null, 2)}</pre>
+              </div>
+              <div>
+                <p className="font-medium text-text-secondary">{t('blast.geometry_configuration_label')}</p>
+                <pre className="overflow-x-auto font-mono text-[11px]" data-testid="geometry-configuration">{JSON.stringify(diagnostics.geometry_configuration ?? {}, null, 2)}</pre>
+              </div>
+              <div>
+                <p className="font-medium text-text-secondary">{t('blast.spatial_diagnostics_label')}</p>
+                <pre className="overflow-x-auto font-mono text-[11px]" data-testid="spatial-diagnostics">{JSON.stringify(diagnostics.spatial_diagnostics ?? {}, null, 2)}</pre>
+              </div>
+            </div>
+          </details>
         </div>
       )}
       {upload.isSuccess && upload.data && (
-        <div data-testid="blast-upload-summary">
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="flex flex-col gap-1 text-xs text-text-secondary" data-testid="blast-upload-summary">
+          <p>
             {t('blast.upload_summary', { n: upload.data.n_holes, skipped: upload.data.n_rows_skipped })}
           </p>
           {upload.data.carga_mean != null && (
-            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            <p className="tabular-nums">
               {t('blast.carga_mean', { value: upload.data.carga_mean.toFixed(2) })}
             </p>
           )}
           {upload.data.descarga_mean != null && (
-            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            <p className="tabular-nums">
               {t('blast.descarga_mean', { value: upload.data.descarga_mean.toFixed(2) })}
             </p>
           )}
           {upload.data.design_surface && (
-            <div className="mt-2 rounded-md border p-2 text-xs" style={{ borderColor: 'var(--color-border)' }} data-testid="design-surface-sampling-summary">
-              <strong>{t('blast.design_surface_sampling_title')}</strong>
+            <div className="mt-1 flex flex-col gap-1" data-testid="design-surface-sampling-summary">
+              <p className="font-medium text-text-primary">{t('blast.design_surface_sampling_title')}</p>
               <p>{t('blast.design_surface_sampling_coverage', { coverage: (upload.data.design_surface.coverage * 100).toFixed(1), rows: upload.data.design_surface.rows })}</p>
-              <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1">
-                <div><dt className="inline">{t('blast.design_surface_sampled')}: </dt><dd className="inline" data-testid="design-surface-sampled">{upload.data.design_surface.counts.sampled}</dd></div>
-                <div><dt className="inline">{t('blast.design_surface_outside')}: </dt><dd className="inline" data-testid="design-surface-outside">{upload.data.design_surface.counts.outside}</dd></div>
-                <div><dt className="inline">{t('blast.design_surface_ambiguous')}: </dt><dd className="inline" data-testid="design-surface-ambiguous">{upload.data.design_surface.counts.ambiguous}</dd></div>
-                <div><dt className="inline">{t('blast.design_surface_invalid')}: </dt><dd className="inline" data-testid="design-surface-invalid">{upload.data.design_surface.counts.invalid}</dd></div>
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 tabular-nums">
+                <div><dt className="inline text-text-muted">{t('blast.design_surface_sampled')}: </dt><dd className="inline" data-testid="design-surface-sampled">{upload.data.design_surface.counts.sampled}</dd></div>
+                <div><dt className="inline text-text-muted">{t('blast.design_surface_outside')}: </dt><dd className="inline" data-testid="design-surface-outside">{upload.data.design_surface.counts.outside}</dd></div>
+                <div><dt className="inline text-text-muted">{t('blast.design_surface_ambiguous')}: </dt><dd className="inline" data-testid="design-surface-ambiguous">{upload.data.design_surface.counts.ambiguous}</dd></div>
+                <div><dt className="inline text-text-muted">{t('blast.design_surface_invalid')}: </dt><dd className="inline" data-testid="design-surface-invalid">{upload.data.design_surface.counts.invalid}</dd></div>
               </dl>
             </div>
           )}
         </div>
       )}
-      {holes.data && (
-        <p className="text-xs" data-testid="blast-hole-count" style={{ color: 'var(--color-text-muted)' }}>
-          {t('blast.persisted_count', { n: holes.data.holes.length })}
-        </p>
-      )}
+    </div>
+  );
+
+  const persistedCount = holes.data ? (
+    <p className="text-xs tabular-nums text-text-muted" data-testid="blast-hole-count">
+      {t('blast.persisted_count', { n: holes.data.holes.length })}
+    </p>
+  ) : null;
+
+  if (collapsible) {
+    return (
+      <section className="rounded-lg border border-border text-left" data-testid="blast-uploader" data-collapsible="true">
+        <details className="group">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2">
+              <svg aria-hidden="true" viewBox="0 0 12 12" className="h-3 w-3 text-text-muted transition-transform group-open:rotate-90" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M4.5 2.5 8 6l-3.5 3.5" />
+              </svg>
+              {title}
+            </span>
+            {persistedCount}
+          </summary>
+          <div className="border-t border-border px-4 py-4">{body}</div>
+        </details>
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border border-border p-4 text-left" data-testid="blast-uploader">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <h3 className="flex items-center gap-2">{title}</h3>
+        {persistedCount}
+      </div>
+      {body}
     </section>
   );
 }

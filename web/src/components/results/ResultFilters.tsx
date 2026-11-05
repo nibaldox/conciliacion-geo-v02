@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ComparisonResult } from '../../api/types';
-import { Button } from '../ui/Button';
 import {
   toggleDimensionValue,
   uniqueLevelOptions,
@@ -59,26 +58,25 @@ function DimensionSelect({ dimension, label, options, selected, onToggle }: Dime
   const valueId = `result-filters-${dimension}-value`;
 
   return (
-    <div ref={rootRef} data-dimension={dimension} className="relative z-10 w-40">
-      <p id={labelId} className="mb-1 text-xs font-semibold text-text-secondary">{label}</p>
+    <div ref={rootRef} data-dimension={dimension} className="relative z-10 flex items-center gap-1.5">
+      <p id={labelId} className="text-xs text-text-muted">{label}</p>
       <div role="group" aria-labelledby={labelId}>
         <details className="relative">
           <summary
             aria-labelledby={`${labelId} ${valueId}`}
-            className="flex h-9 cursor-pointer list-none items-center justify-between gap-2 rounded-md bg-surface-sunken px-3 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            style={{ border: '1px solid var(--color-border)' }}
+            className="flex h-8 w-32 cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-border bg-surface-sunken px-2.5 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <span id={valueId} className="truncate">{summary}</span>
-            <span aria-hidden="true" className="text-xs text-text-muted">▾</span>
+            <span aria-hidden="true" className="text-text-muted">▾</span>
           </summary>
           <ul
-            className="absolute left-0 top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg bg-surface-raised p-1 shadow-lg"
+            className="absolute left-0 top-full z-20 mt-1 max-h-48 w-56 overflow-y-auto rounded-lg border border-border bg-surface-raised p-1 shadow-lg"
           >
             {options.map((option) => {
               const isSelected = selected.includes(option.value);
               return (
                 <li key={option.value}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface-muted">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface-muted">
                     <input
                       type="checkbox"
                       value={option.value}
@@ -129,7 +127,7 @@ export function ResultFilters({ results, filters, onChange }: {
   ];
 
   return (
-    <section data-slot="result-filters" aria-label={t('results.filters.group_label', { defaultValue: 'Filtros de resultados' })} className="flex flex-wrap items-end gap-3 rounded-xl bg-surface-raised p-4">
+    <section data-slot="result-filters" aria-label={t('results.filters.group_label', { defaultValue: 'Filtros de resultados' })} className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <DimensionSelect
         dimension="sector"
         label={sectorLabel}
@@ -151,26 +149,27 @@ export function ResultFilters({ results, filters, onChange }: {
         selected={filters.level}
         onToggle={toggleLevel}
       />
-      <div className="flex flex-col gap-1">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={noDimensionSelected}
-          aria-describedby="result-filters-reset-help"
-          onClick={() => onChange({ ...filters, sector: [], section: [], level: [] })}
-        >
-          {t('dashboard.bench_filter.reset')}
-        </Button>
-        <p id="result-filters-reset-help" className="max-w-52 text-xs text-text-secondary">
-          {t('results.filters.reset_help', { defaultValue: 'Restablece sector, sección y cota; conserva el filtro de banco.' })}
-        </p>
-      </div>
-      {activeFilters.length > 0 && (
-        <p className="min-w-0 basis-full break-words text-xs text-text-secondary" aria-live="polite">
-          <span className="font-semibold">{t('results.filters.active_label', { defaultValue: 'Filtros activos en este panel:' })}</span>{' '}
-          {activeFilters.join(' · ')}
-        </p>
-      )}
+      <button
+        type="button"
+        disabled={noDimensionSelected}
+        aria-describedby="result-filters-reset-help"
+        title={t('results.filters.reset_help', { defaultValue: 'Restablece sector, sección y cota; conserva el filtro de banco.' })}
+        onClick={() => onChange({ ...filters, sector: [], section: [], level: [] })}
+        className="text-xs text-text-muted underline-offset-2 hover:text-text-primary hover:underline disabled:invisible"
+      >
+        {t('dashboard.bench_filter.reset')}
+      </button>
+      <p id="result-filters-reset-help" className="sr-only">
+        {t('results.filters.reset_help', { defaultValue: 'Restablece sector, sección y cota; conserva el filtro de banco.' })}
+      </p>
+      <p className="sr-only" aria-live="polite">
+        {activeFilters.length > 0 && (
+          <>
+            <span>{t('results.filters.active_label', { defaultValue: 'Filtros activos en este panel:' })}</span>{' '}
+            {activeFilters.join(' · ')}
+          </>
+        )}
+      </p>
     </section>
   );
 }

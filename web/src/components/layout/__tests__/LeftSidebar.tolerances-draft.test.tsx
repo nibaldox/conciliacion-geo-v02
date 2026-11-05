@@ -16,6 +16,7 @@ vi.mock('../../../api/hooks', () => {
   return {
     useSettings: () => ({ data: SETTINGS }),
     useProcessStatus: () => ({ data: undefined }),
+    useSections: () => ({ data: [] }),
     useUpdateSettings: () => ({ mutate: updateSpy, isPending: false }),
     useUploadMesh: mutationStub,
     useDeleteMesh: mutationStub,
@@ -33,7 +34,6 @@ vi.mock('../../sections/SectionFileUpload', () => ({ SectionFileUpload: () => <d
 vi.mock('../../sections/SectionList', () => ({ SectionList: () => <div /> }));
 vi.mock('../../analysis/ProcessButton', () => ({ ProcessButton: () => <div /> }));
 vi.mock('../../analysis/ProcessProgress', () => ({ ProcessProgress: () => <div /> }));
-vi.mock('../ViewsToolbar', () => ({ ViewsToolbar: () => <div /> }));
 vi.mock('../LanguageToggle', () => ({ LanguageToggle: () => <div /> }));
 
 const TOLERANCES: Tolerances = {
@@ -58,12 +58,14 @@ void i18n.init({ lng: 'es', resources: { es: { translation: es } }, initAsync: f
 const keyPathI18n = createInstance();
 void keyPathI18n.init({
   lng: 'es',
-  resources: { es: { translation: { sidebar: {
-    expand: 'LABEL_EXPAND', collapse: 'LABEL_COLLAPSE', mallas: 'LABEL_MALLAS',
-    secciones: 'LABEL_SECCIONES', tolerancias: 'LABEL_TOLERANCIAS',
-    procesamiento: 'LABEL_PROCESAMIENTO',
-    no_surfaces_for_sections: 'LABEL_NO_SURFACES',
-  } } } },
+  resources: { es: { translation: {
+    sidebar: { expand: 'LABEL_EXPAND', collapse: 'LABEL_COLLAPSE' },
+    ux: {
+      step_surfaces: 'LABEL_SURFACES', step_sections: 'LABEL_SECTIONS',
+      step_parameters: 'LABEL_PARAMETERS', step_process: 'LABEL_PROCESS',
+      locked_hint: 'LABEL_LOCKED',
+    },
+  } } },
   initAsync: false,
 });
 
@@ -91,7 +93,7 @@ function renderSidebarWithKeyPathResources() {
 }
 
 async function openTolerances(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: /Parámetros/ }));
+  await user.click(screen.getByRole('button', { name: /^[0-9]?Parámetros/ }));
   return {
     neg: screen.getByLabelText(BENCH_NEG) as HTMLInputElement,
     pos: screen.getByLabelText(BENCH_POS) as HTMLInputElement,
@@ -117,6 +119,8 @@ describe('LeftSidebar — edición rápida de tolerancias (draft + debounce)', (
 
   beforeEach(() => {
     updateSpy.mockClear();
+    useSession.getState().reset();
+    useSession.setState({ designMeshId: 'design-1', topoMeshId: 'topo-1' });
   });
 
   it('mantiene ambos valores tecleados: dos ediciones antes del debounce preservan neg y pos', async () => {
@@ -206,46 +210,46 @@ describe('LeftSidebar — definición de secciones por curvas', () => {
     useSession.getState().reset();
   });
 
-  it('mantiene los destinos aria-controls y el foco al alternar un acordeón por teclado', async () => {
+  it('mantiene aria-controls y el foco al alternar un paso por teclado', async () => {
     const user = userEvent.setup();
     renderSidebar();
 
-    const accordionButtons = screen.getAllByRole('button').filter((button) => button.hasAttribute('aria-controls'));
-    expect(accordionButtons).toHaveLength(4);
-    for (const button of accordionButtons) {
-      expect(document.getElementById(button.getAttribute('aria-controls') ?? '')).toBeInTheDocument();
+    const stepButtons = screen.getAllByRole('button').filter((button) => button.hasAttribute('aria-controls'));
+    expect(stepButtons).toHaveLength(4);
+    for (const button of stepButtons) {
       expect(button).toHaveAttribute('type', 'button');
     }
 
-    const surfacesButton = screen.getByRole('button', { name: 'Superficies' });
-    const controlledPanel = document.getElementById(surfacesButton.getAttribute('aria-controls') ?? '');
+    const surfacesButton = screen.getByRole('button', { name: /^[0-9]?Superficies/ });
+    const panelId = surfacesButton.getAttribute('aria-controls') ?? '';
     expect(surfacesButton).toHaveAttribute('aria-expanded', 'true');
-    expect(controlledPanel).toBeVisible();
+    expect(document.getElementById(panelId)).toBeVisible();
 
     await user.click(surfacesButton);
     expect(surfacesButton).toHaveAttribute('aria-expanded', 'false');
-    expect(document.getElementById(surfacesButton.getAttribute('aria-controls') ?? '')).toBe(controlledPanel);
-    expect(controlledPanel).not.toBeVisible();
+    expect(document.getElementById(panelId)).toBeNull();
     expect(document.activeElement).toBe(surfacesButton);
 
     await user.keyboard('{Enter}');
     expect(surfacesButton).toHaveAttribute('aria-expanded', 'true');
-    expect(controlledPanel).toBeVisible();
+    expect(document.getElementById(panelId)).toBeVisible();
     expect(document.activeElement).toBe(surfacesButton);
   });
 
-  it('resuelve etiquetas compactas y el estado sin superficies desde las claves del sidebar', async () => {
+  it('resuelve etiquetas compactas desde las claves del flujo y expande sin abrir pasos bloqueados', async () => {
     const user = userEvent.setup();
     useSession.setState({ sidebarCollapsed: true });
     renderSidebarWithKeyPathResources();
 
     expect(screen.getByRole('button', { name: 'LABEL_EXPAND' })).toBeInTheDocument();
-    for (const label of ['LABEL_MALLAS', 'LABEL_SECCIONES', 'LABEL_TOLERANCIAS', 'LABEL_PROCESAMIENTO']) {
+    for (const label of ['LABEL_SURFACES', 'LABEL_SECTIONS', 'LABEL_PARAMETERS', 'LABEL_PROCESS']) {
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
     }
-    await user.click(screen.getByRole('button', { name: 'LABEL_EXPAND' }));
-    await user.click(screen.getByRole('button', { name: 'workspace.sections' }));
-    expect(screen.getByText('LABEL_NO_SURFACES')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'LABEL_SECTIONS' })).toHaveAttribute('title', 'LABEL_SECTIONS — LABEL_LOCKED');
+    await user.click(screen.getByRole('button', { name: 'LABEL_SECTIONS' }));
+    expect(useSession.getState().sidebarCollapsed).toBe(false);
+    expect(useSession.getState().openWorkflowStep).toBe('surfaces');
+    expect(screen.getByRole('button', { name: /^[0-9]?LABEL_SECTIONS/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'LABEL_COLLAPSE' })).toBeInTheDocument();
   });
 
@@ -261,7 +265,7 @@ describe('LeftSidebar — definición de secciones por curvas', () => {
     renderSidebar();
     useSession.getState().setActiveWorkspaceView('dashboard');
 
-    await user.click(screen.getByRole('button', { name: 'Secciones' }));
+    await user.click(screen.getByRole('button', { name: /^[0-9]?Secciones/ }));
 
     expect(useSession.getState().activeWorkspaceView).toBe('3d');
     expect(useSession.getState().curveSelection).toBe(selection);

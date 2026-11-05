@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import i18n from '../../../i18n';
 import { buildHistogram, Dashboard, filterByBench } from '../Dashboard';
 import type { ComparisonResult } from '../../../api/types';
@@ -80,6 +80,29 @@ beforeAll(async () => {
   await i18n.changeLanguage('es');
 });
 
+const HISTOGRAM_SEGMENTS = ['Altura', 'Ángulo', 'Cresta', 'Pata', 'Berma'];
+
+function histogramGroup(): HTMLElement {
+  return screen.getByRole('group', { name: 'Variable del histograma' });
+}
+
+function selectHistogram(label: string): void {
+  const button = [...histogramGroup().querySelectorAll('button')].find((node) => node.textContent === label);
+  if (!button) throw new Error(`missing segment ${label}`);
+  fireEvent.click(button);
+}
+
+function collectHistogramBands(): number[][] {
+  const bands: number[][] = [];
+  for (const label of HISTOGRAM_SEGMENTS) {
+    selectHistogram(label);
+    const plots = plotData();
+    const histogram = plots[plots.length - 1]!;
+    for (const shape of histogram.layout.shapes ?? []) bands.push([shape.x0, shape.x1]);
+  }
+  return bands;
+}
+
 function plotData(): { data: unknown; layout: { shapes?: { x0: number; x1: number }[] } }[] {
   return screen
     .getAllByTestId('plot')
@@ -142,6 +165,17 @@ describe('Dashboard filtros compartidos', () => {
     expect(screen.getByTestId('design-achievement-panel')).toBeTruthy();
   });
 
+  it('usa tokens de tema en lugar de colores hex fijos en los gráficos', () => {
+    mocks.rows = [makeRow({ sector: 'Norte' }), makeRow({ sector: 'Sur', height_status: 'NO CUMPLE', angle_status: 'NO CUMPLE', berm_status: 'NO CUMPLE' })];
+    mocks.tolerances = null;
+    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+    render(<Dashboard />);
+    const serialized = screen.getAllByTestId('plot').map((node) => `${node.getAttribute('data-data')}${node.getAttribute('data-layout')}`).join('');
+    expect(serialized).not.toMatch(/#[0-9a-fA-F]{6}/);
+    expect(serialized).toContain('var(--status-ok-text)');
+    expect(serialized).toContain('var(--status-nok-text)');
+  });
+
   it('explica que la combinación de filtros activa no tiene resultados', () => {
     mocks.rows = [makeRow()];
     mocks.tolerances = null;
@@ -154,8 +188,8 @@ describe('Dashboard filtros compartidos', () => {
   });
 });
 
-describe('Dashboard cinco histogramas con tolerancias vigentes', () => {
-  it('renderiza cinco secciones de histograma', () => {
+describe('Dashboard distribución de desviaciones con selector', () => {
+  it('agrupa los cinco histogramas en una sección con selector y un solo gráfico', () => {
     mocks.rows = [makeRow()];
     mocks.tolerances = {
       bench_height: { neg: 0.7, pos: 1.3 },
@@ -165,9 +199,18 @@ describe('Dashboard cinco histogramas con tolerancias vigentes', () => {
     };
     mocks.filters = { sector: [], section: [], level: [], bench: [] };
     render(<Dashboard />);
+    expect(screen.getByText('Distribución de desviaciones')).toBeTruthy();
+    const segments = [...histogramGroup().querySelectorAll('button')].map((node) => node.textContent);
+    expect(segments).toEqual(HISTOGRAM_SEGMENTS);
+    const plotCount = screen.getAllByTestId('plot').length;
     expect(screen.getAllByText('Desviación de Altura (m)').length).toBe(1);
+    selectHistogram('Pata');
     expect(screen.getAllByText('Desviación de Pata (m)').length).toBe(1);
+    expect(screen.queryByText('Desviación de Altura (m)')).toBeNull();
+    selectHistogram('Berma');
     expect(screen.getAllByText('Ancho de berma (m)').length).toBe(1);
+    expect(screen.getAllByTestId('plot').length).toBe(plotCount);
+    expect(histogramGroup().querySelector('[aria-pressed="true"]')?.textContent).toBe('Berma');
   });
 
   it('usa bandas asimétricas de tolerancia y mínimo de berma', () => {
@@ -182,8 +225,7 @@ describe('Dashboard cinco histogramas con tolerancias vigentes', () => {
     };
     mocks.filters = { sector: [], section: [], level: [], bench: [] };
     render(<Dashboard />);
-    const plots = plotData();
-    const bands = plots.flatMap((p) => p.layout.shapes ?? []).map((s) => [s.x0, s.x1]);
+    const bands = collectHistogramBands();
     expect(bands.some(([x0, x1]) => x0 === -0.7 && x1 === 1.3)).toBe(true);
     expect(bands.some(([x0, x1]) => x0 === -0.9 && x1 === 1.1)).toBe(true);
     const bermBand = bands.find(([x0]) => x0 === 5.5);
@@ -196,8 +238,7 @@ describe('Dashboard cinco histogramas con tolerancias vigentes', () => {
     mocks.tolerances = null;
     mocks.filters = { sector: [], section: [], level: [], bench: [] };
     render(<Dashboard />);
-    const plots = plotData();
-    const bands = plots.flatMap((p) => p.layout.shapes ?? []).map((s) => [s.x0, s.x1]);
+    const bands = collectHistogramBands();
     expect(bands.some(([x0, x1]) => x0 === -1 && x1 === 1.5)).toBe(true);
     expect(bands.some(([x0, x1]) => x0 === 6 && x1 > 6)).toBe(true);
   });

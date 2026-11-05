@@ -101,33 +101,16 @@ function elementCard(
   const denom = key === 'crest' ? summary.crest_denom : key === 'toe' ? summary.toe_denom : summary.berm_denom;
   const delta = key === 'crest' ? summary.delta_crest_mean : key === 'toe' ? summary.delta_toe_mean : null;
   return (
-    <div
-      key={key}
-      style={{
-        border: '1px solid var(--color-border, currentColor)',
-        borderRadius: 6,
-        padding: 'var(--space-2, 0.5rem)',
-        background: 'var(--color-surface-muted, transparent)',
-        minWidth: 0,
-      }}
-    >
-      <h4 style={{ margin: '0 0 0.25rem', fontSize: '0.9rem' }}>{tx(key)}</h4>
-      <p style={{ margin: 0, fontSize: '1.35rem', fontWeight: 600 }}>{fmtPercent(pct, lang)}</p>
-      {pct == null ? (
-        <p style={{ margin: 0, color: 'var(--color-text-dim, inherit)' }}>
-          <small>{tx('noData')}</small>
-        </p>
-      ) : null}
-      <p style={{ margin: '0.25rem 0 0', color: 'var(--color-text-dim, inherit)' }}>
-        <small>
-          {cumple} / {denom}
-        </small>
+    <div key={key} className="min-w-0 space-y-0.5 border-l border-border pl-3">
+      <h4 className="m-0 text-xs font-normal text-text-muted">{tx(key)}</h4>
+      <p className="m-0 text-xl font-semibold tabular-nums text-text-primary">{fmtPercent(pct, lang)}</p>
+      {pct == null ? <p className="m-0 text-xs text-text-muted">{tx('noData')}</p> : null}
+      <p className="m-0 text-xs tabular-nums text-text-muted">
+        {cumple} / {denom}
       </p>
       {delta != null ? (
-        <p style={{ margin: '0.25rem 0 0', color: 'var(--color-text-dim, inherit)' }}>
-          <small>
-            {tx('meanCorrection')}: {fmtSignedMeters(delta, unit, lang)}
-          </small>
+        <p className="m-0 text-xs tabular-nums text-text-muted">
+          {tx('meanCorrection')}: {fmtSignedMeters(delta, unit, lang)}
         </p>
       ) : null}
     </div>
@@ -148,7 +131,7 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
 
   if (isDemo) {
     return (
-      <section role="status" style={{ padding: 'var(--space-2, 0.5rem)' }}>
+      <section role="status" className="rounded-lg border border-border p-4 text-sm text-text-muted">
         {tx('demoUnavailable')}
       </section>
     );
@@ -160,91 +143,81 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
 
   return (
     <section
+      data-slot="design-achievement"
       aria-labelledby="design-achievement-title"
       aria-busy={isPending || (isFetching && !data) || undefined}
-      style={{ padding: 'var(--space-2, 0.5rem)', minWidth: 0 }}
+      className="min-w-0 space-y-4 rounded-lg border border-border bg-surface-raised p-4 text-sm"
     >
-      <h3 id="design-achievement-title" style={{ margin: '0 0 0.5rem' }}>
+      <h3 id="design-achievement-title" className="ui-section-title m-0">
         {tx('title')}
       </h3>
 
-      {isPending ? <p role="status">{tx('loading')}</p> : null}
+      {isPending ? <p role="status" className="m-0 text-text-muted">{tx('loading')}</p> : null}
 
       {!isPending && isError ? (
-        <div role="alert" style={{ padding: 'var(--space-2, 0.5rem)' }}>
-          <p style={{ margin: '0 0 0.5rem' }}>
+        <div role="alert" className="space-y-2">
+          <p className="m-0" style={{ color: 'var(--status-nok-text)' }}>
             {tx('loadError')}
             {error instanceof Error && error.message ? `: ${error.message}` : ''}
           </p>
-          <button type="button" onClick={refetch}>
+          <button
+            type="button"
+            onClick={refetch}
+            className="rounded-md border border-border px-2.5 py-1 text-xs text-text-primary hover:bg-surface-muted"
+          >
             {tx('retry')}
           </button>
         </div>
       ) : null}
 
       {!isPending && !isError && data && isNoData ? (
-        <div role="status" style={{ margin: '0 0 0.5rem' }}>
-          <p style={{ margin: 0 }}>{tx('noData')}</p>
-          <p style={{ margin: '0.25rem 0 0' }}>
-            <small>
-              {fmtNumber(data.n_total_rows, lang)} {tx('rowsTotal')} ·{' '}
-              {data.summary.n_evaluable} / {data.summary.n_total} {tx('evaluableCounts')}
-            </small>
+        <div role="status" className="space-y-1">
+          <p className="m-0 text-text-secondary">{tx('noData')}</p>
+          <p className="m-0 text-xs tabular-nums text-text-muted">
+            {fmtNumber(data.n_total_rows, lang)} {tx('rowsTotal')} ·{' '}
+            {data.summary.n_evaluable} / {data.summary.n_total} {tx('evaluableCounts')}
           </p>
         </div>
       ) : null}
 
       {!isPending && !isError && data && !isNoData ? (
         <>
-          <dl style={{ margin: '0 0 0.5rem' }}>
-            <div style={{ margin: 0 }}>
-              <dt style={{ fontWeight: 600 }}>{tx('globalScore')}</dt>
-              <dd style={{ margin: 0 }}>
-                {data.summary.global_score == null
-                  ? '—'
-                  : fmtNumber(data.summary.global_score, lang)}{' '}
-                <small style={{ color: 'var(--color-text-dim, inherit)' }}>{tx('scoreScale')}</small>
-              </dd>
-              {data.summary.global_score == null ? (
-                <dd style={{ margin: 0, color: 'var(--color-text-dim, inherit)' }}>
-                  <small>{tx('noData')}</small>
+          <div className="flex flex-wrap items-end gap-x-10 gap-y-4">
+            <dl className="m-0">
+              <div className="flex items-baseline gap-2">
+                <dt className="order-last text-xs text-text-muted">{tx('globalScore')}</dt>
+                <dd className="m-0 text-3xl font-semibold leading-none tabular-nums text-text-primary">
+                  {data.summary.global_score == null
+                    ? '—'
+                    : fmtNumber(data.summary.global_score, lang)}{' '}
+                  <small className="text-xs font-normal text-text-muted">{tx('scoreScale')}</small>
                 </dd>
-              ) : null}
-              <dd style={{ margin: 0 }}>
-                <small>
+                {data.summary.global_score == null ? (
+                  <dd className="m-0 text-xs text-text-muted">{tx('noData')}</dd>
+                ) : null}
+                <dd className="m-0 text-xs tabular-nums text-text-muted">
                   {data.summary.n_evaluable} / {data.summary.n_total} {tx('evaluableCounts')}
-                </small>
-              </dd>
+                </dd>
+              </div>
+            </dl>
+            <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
+              {ELEMENTS.map((el) => elementCard(el, data.summary, tx, unit, lang))}
             </div>
-          </dl>
-          <p style={{ margin: '0 0 0.5rem' }}>
-            <small>{tx('weights')}</small>
-          </p>
-          <p style={{ margin: '0 0 0.5rem', color: 'var(--color-text-dim, inherit)' }}>
-            <small>{tx('weighingNote')}</small>
-          </p>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-              gap: 'var(--space-2, 0.5rem)',
-              margin: '0 0 0.75rem',
-            }}
-          >
-            {ELEMENTS.map((el) => elementCard(el, data.summary, tx, unit, lang))}
           </div>
 
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <caption
-              style={{
-                textAlign: 'left',
-                captionSide: 'top',
-                color: 'var(--color-text-dim, inherit)',
-                padding: '0.25rem 0',
-              }}
-            >
-              <small>
+          <details className="text-xs text-text-muted">
+            <summary className="cursor-pointer select-none text-text-secondary hover:text-text-primary">
+              {t('dashboard.kpi.how_calculated', { defaultValue: '¿Cómo se calcula?' })}
+            </summary>
+            <div className="mt-2 space-y-1">
+              <p className="m-0">{tx('weights')}</p>
+              <p className="m-0">{tx('weighingNote')}</p>
+            </div>
+          </details>
+
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <caption className="pb-2 text-left text-xs text-text-muted" style={{ captionSide: 'top' }}>
                 {tx('tolerances')}{' '}
                 {data.tolerances.neg === data.tolerances.pos
                   ? `±${fmtNumber(Math.abs(data.tolerances.pos), lang)} ${unit}`
@@ -256,60 +229,50 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
                 {tx(
                   data.tolerances_source === 'session' ? 'tolSourceSession' : 'tolSourceCoreDefault',
                 )}
-              </small>
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col" style={{ textAlign: 'left' }}>
-                  {tx('sector')}
-                </th>
-                <th scope="col" style={{ textAlign: 'right' }}>
-                  {tx('nEvaluable')}
-                </th>
-                <th scope="col" style={{ textAlign: 'right' }}>
-                  {tx('achievement')}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.sectors.map((row) => (
-                <tr key={row.sector}>
-                  <th scope="row" style={{ textAlign: 'left', fontWeight: 500 }}>
-                    {row.sector === '' ? tx('noSector') : row.sector}
+              </caption>
+              <thead>
+                <tr className="border-b border-border text-xs text-text-muted">
+                  <th scope="col" className="py-2 pr-4 text-left font-medium">
+                    {tx('sector')}
                   </th>
-                  <td style={{ textAlign: 'right' }}>{row.n_evaluable}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    {row.global_score == null ? '—' : fmtNumber(row.global_score, lang)}
-                  </td>
+                  <th scope="col" className="py-2 pr-4 text-right font-medium">
+                    {tx('nEvaluable')}
+                  </th>
+                  <th scope="col" className="py-2 text-right font-medium">
+                    {tx('achievement')}
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.sectors.map((row) => (
+                  <tr key={row.sector} className="border-b border-border last:border-b-0">
+                    <th scope="row" className="py-2 pr-4 text-left font-medium text-text-primary">
+                      {row.sector === '' ? tx('noSector') : row.sector}
+                    </th>
+                    <td className="py-2 pr-4 text-right tabular-nums text-text-secondary">{row.n_evaluable}</td>
+                    <td className="py-2 text-right tabular-nums text-text-secondary">
+                      {row.global_score == null ? '—' : fmtNumber(row.global_score, lang)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       ) : null}
 
       {data && data.warnings.length > 0 ? (
-        <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
+        <ul className="m-0 space-y-0.5 pl-5 text-xs text-text-secondary">
           {data.warnings.map((warning, i) => (
-            <li key={i}>
-              <small>{tw(warning)}</small>
-            </li>
+            <li key={i}>{tw(warning)}</li>
           ))}
         </ul>
       ) : null}
 
       {data && provenance ? (
-        <p
-          style={{
-            margin: '0.5rem 0 0',
-            color: 'var(--color-text-dim, inherit)',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          <small>
-            {tx('provenanceSource')}: {translateProvenanceSource(provenance.source, lang)} ·{' '}
-            {provenance.status === 'no_data' ? tx('statusNoData') : tx('statusComputed')}
-          </small>
+        <p className="m-0 text-xs text-text-muted [overflow-wrap:anywhere]">
+          {tx('provenanceSource')}: {translateProvenanceSource(provenance.source, lang)} ·{' '}
+          {provenance.status === 'no_data' ? tx('statusNoData') : tx('statusComputed')}
         </p>
       ) : null}
     </section>

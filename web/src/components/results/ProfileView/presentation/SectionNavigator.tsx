@@ -125,18 +125,13 @@ function CompactButton({
       data-direction={direction}
       data-testid={`nav-${direction}`}
       className={[
-        'inline-flex items-center justify-center w-7 h-7 rounded-md text-sm font-semibold',
-        'transition-all duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
+        'inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-sm text-text-secondary',
+        'transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         disabled
           ? 'opacity-30 cursor-not-allowed'
-          : 'cursor-pointer hover:opacity-80 hover:scale-105',
+          : 'cursor-pointer hover:bg-surface-muted hover:text-text-primary',
       ].join(' ')}
-      style={{
-        color: 'var(--color-text-primary)',
-        backgroundColor: 'var(--color-surface-muted)',
-        border: '1px solid var(--color-border)',
-      }}
     >
       {direction === 'prev' ? '‹' : '›'}
     </button>

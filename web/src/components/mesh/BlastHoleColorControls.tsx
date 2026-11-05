@@ -63,21 +63,21 @@ export function BlastHoleColorControls({ records, filteredRecords, onColorsChang
   };
 
   return (
-    <section className="space-y-3 rounded-lg border border-[var(--color-border)] p-3" aria-label={t('blast.colors.title', { defaultValue: 'Colores de pozos' })}>
+    <section className="flex min-w-0 flex-col gap-2 border-t border-border pt-2" aria-label={t('blast.colors.title', { defaultValue: 'Colores de pozos' })}>
       <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))' }}>
-        <label className="flex flex-col gap-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.colors.mode', { defaultValue: 'Colorear por' })}</span>
           <select
             aria-label={t('blast.colors.mode', { defaultValue: 'Colorear por' })}
             value={kind}
             onChange={(event) => setManualKind(event.target.value as 'variable' | 'category')}
-            className="min-h-11 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-sm"
+            className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary"
           >
             <option value="variable">{t('blast.colors.modeVariable', { defaultValue: 'Variable' })}</option>
             <option value="category" disabled={availableCategories.length === 0}>{t('blast.colors.modeCategory', { defaultValue: 'Categoría' })}</option>
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{kind === 'variable'
             ? t('blast.colors.variableLabel', { defaultValue: 'Variable' })
             : t('blast.colors.categoryLabel', { defaultValue: 'Categoría' })}</span>
@@ -92,7 +92,7 @@ export function BlastHoleColorControls({ records, filteredRecords, onColorsChang
               if (kind === 'variable') setVariable(event.target.value as BlastHoleVariable);
               else setCategory(event.target.value as BlastHoleCategory);
             }}
-            className="min-h-11 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-sm"
+            className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary"
           >
             {kind === 'variable'
               ? availableVariables.length > 0
@@ -103,20 +103,20 @@ export function BlastHoleColorControls({ records, filteredRecords, onColorsChang
                 : <option value="">{t('blast.colors.noCategories', { defaultValue: 'No hay categorías disponibles' })}</option>}
           </select>
         </label>
-        {kind === 'variable' && availableVariables.length === 0 && <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        {kind === 'variable' && availableVariables.length === 0 && <p className="text-xs text-text-muted">
           {t('blast.colors.noVariables', { defaultValue: 'No hay variables con datos disponibles' })}
         </p>}
-        {kind === 'category' && availableCategories.length === 0 && <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        {kind === 'category' && availableCategories.length === 0 && <p className="text-xs text-text-muted">
           {t('blast.colors.noCategories', { defaultValue: 'No hay categorías disponibles' })}
         </p>}
-        <label className="flex flex-col gap-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.colors.palette', { defaultValue: 'Escala de color' })}</span>
           <select
             aria-label={t('blast.colors.palette', { defaultValue: 'Escala de color' })}
             value={palette}
             disabled={kind === 'category'}
             onChange={(event) => setPalette(event.target.value as BlastHoleColorScale)}
-            className="min-h-11 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-sm disabled:opacity-60"
+            className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary disabled:opacity-60"
           >
             {COLOR_SCALE_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
@@ -124,7 +124,7 @@ export function BlastHoleColorControls({ records, filteredRecords, onColorsChang
       </div>
       <BlastHoleColorLegendView legend={mapping.legend} t={t} />
       {kind === 'variable' && (activeVariable === 'charge' || activeVariable === 'powderFactor') && (
-        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <p className="text-xs text-text-muted">
           {t('blast.colors.fixedRange', { min: 0, max: activeVariable === 'charge' ? 1000 : 200, defaultValue: 'La escala es fija ({{min}}–{{max}}); los valores fuera del rango usan el color extremo.' })}
         </p>
       )}
@@ -140,12 +140,12 @@ function BlastHoleColorLegendView({ legend, t }: {
     const visibleEntries = legend.entries.slice(0, LEGEND_ENTRY_LIMIT);
     return (
       <div aria-label={t('blast.colors.legendDiscrete', { defaultValue: 'Leyenda discreta' })}>
-        <p className="mb-1 text-xs font-medium">{t('blast.colors.legendDiscrete', { defaultValue: 'Leyenda discreta' })}</p>
+        <p className="mb-1 text-xs text-text-muted">{t('blast.colors.legendDiscrete', { defaultValue: 'Leyenda discreta' })}</p>
         <ul className="grid max-h-48 grid-cols-1 gap-x-3 gap-y-1 overflow-y-auto text-xs sm:grid-cols-2">
           {visibleEntries.map((entry) => <LegendEntry key={entry.label} label={entry.label} color={entry.color} />)}
           {legend.missing && <LegendEntry label={legend.missing.label} color={legend.missing.color} />}
         </ul>
-        {legend.entries.length > LEGEND_ENTRY_LIMIT && <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        {legend.entries.length > LEGEND_ENTRY_LIMIT && <p className="mt-1 text-xs text-text-muted">
           {t('blast.colors.legendLimit', { defaultValue: 'Se muestran {{shown}} de {{total}} categorías', shown: LEGEND_ENTRY_LIMIT, total: legend.entries.length })}
         </p>}
       </div>
@@ -154,9 +154,9 @@ function BlastHoleColorLegendView({ legend, t }: {
 
   return (
     <div aria-label={t('blast.colors.legendContinuous', { defaultValue: 'Leyenda continua' })}>
-      <p className="mb-1 text-xs font-medium">{t('blast.colors.legendContinuous', { defaultValue: 'Leyenda continua' })} · {legend.palette}</p>
-      <div className="h-3 rounded" style={{ background: `linear-gradient(to right, ${legend.stops.map((stop) => `${stop.color} ${stop.position * 100}%`).join(', ')})` }} />
-      <div className="flex justify-between gap-2 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="mb-1 text-xs text-text-muted">{t('blast.colors.legendContinuous', { defaultValue: 'Leyenda continua' })} · {legend.palette}</p>
+      <div className="h-2 rounded-full" style={{ background: `linear-gradient(to right, ${legend.stops.map((stop) => `${stop.color} ${stop.position * 100}%`).join(', ')})` }} />
+      <div className="flex justify-between gap-2 text-xs tabular-nums text-text-muted">
         <span>{legend.min === null ? '—' : legend.min}</span>
         <span>{legend.max === null ? '—' : legend.max}</span>
       </div>
@@ -167,7 +167,7 @@ function BlastHoleColorLegendView({ legend, t }: {
 
 function LegendEntry({ label, color }: { label: string; color: string }) {
   return <li className="flex min-w-0 items-center gap-2">
-    <span aria-hidden="true" className="h-3 w-3 shrink-0 rounded-full border border-black/20" style={{ backgroundColor: color }} />
+    <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full border border-border" style={{ backgroundColor: color }} />
     <span className="truncate">{label}</span>
   </li>;
 }

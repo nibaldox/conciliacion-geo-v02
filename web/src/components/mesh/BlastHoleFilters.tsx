@@ -293,12 +293,12 @@ export function BlastHoleFilters<T extends BlastHole3DRecord = BlastHole3DRecord
   };
 
   return (
-    <fieldset className="space-y-3 rounded-lg border border-[var(--color-border)] p-3" aria-label={t('blast.holeFilters.title')}>
-      <legend className="px-1 text-sm font-semibold">{t('blast.holeFilters.title')}</legend>
+    <fieldset className="flex min-w-0 flex-col gap-2 border-t border-border pt-2" aria-label={t('blast.holeFilters.title')}>
+      <legend className="mb-1 text-xs font-medium text-text-primary">{t('blast.holeFilters.title')}</legend>
       <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))' }}>
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.id')}</span>
-          <input className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.query} onChange={(event) => update('query', event.target.value)} />
+          <input className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.query} onChange={(event) => update('query', event.target.value)} />
         </label>
         {categoryAttributeKeys.grid && <SearchMultiSelect label={t('blast.holeFilters.grid', { defaultValue: 'Malla (Grid)' })} options={categoryOptions.grid} selected={filters.grid} onChange={(value) => update('grid', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar mallas' })} />}
         {categoryAttributeKeys.polygon && <SearchMultiSelect label={t('blast.holeFilters.polygon', { defaultValue: 'Polígono' })} options={categoryOptions.polygon} selected={filters.polygon} onChange={(value) => update('polygon', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar polígonos' })} />}
@@ -306,64 +306,69 @@ export function BlastHoleFilters<T extends BlastHole3DRecord = BlastHole3DRecord
         {categoryAttributeKeys.phase && <SearchMultiSelect label={t('blast.holeFilters.phase', { defaultValue: 'Fase' })} options={categoryOptions.phase} selected={filters.phase} onChange={(value) => update('phase', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar fases' })} />}
         {depthAttributeKey && <RangeFilter label={t('blast.holeFilters.depthRange', { defaultValue: 'Profundidad (m)' })} min={filters.depthMin} max={filters.depthMax} extent={depthExtent} minLabel={t('blast.holeFilters.minimum', { defaultValue: 'Mínimo' })} maxLabel={t('blast.holeFilters.maximum', { defaultValue: 'Máximo' })} onMinChange={(value) => update('depthMin', value)} onMaxChange={(value) => update('depthMax', value)} />}
         {chargeAttributeKey && <RangeFilter label={t('blast.holeFilters.chargeRange', { defaultValue: 'Explosivo (kg)' })} min={filters.chargeMin} max={filters.chargeMax} extent={chargeExtent} minLabel={t('blast.holeFilters.minimum', { defaultValue: 'Mínimo' })} maxLabel={t('blast.holeFilters.maximum', { defaultValue: 'Máximo' })} onMinChange={(value) => update('chargeMin', value)} onMaxChange={(value) => update('chargeMax', value)} />}
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.bench')}</span>
-          <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.bench} onChange={(event) => update('bench', event.target.value)}>
+          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.bench} onChange={(event) => update('bench', event.target.value)}>
             <option value="">{t('blast.holeFilters.any')}</option>
             <option value={MISSING_VALUE}>{t('blast.noData')}</option>
             {benches.map((bench) => <option key={bench} value={bench}>{bench}</option>)}
           </select>
         </label>
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.dateEvent')}</span>
-          <select aria-label={t('blast.holeFilters.datePresence', { defaultValue: 'Presencia de fecha' })} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.datePresence ?? ''} onChange={(event) => update('datePresence', event.target.value)}>
+          <select aria-label={t('blast.holeFilters.datePresence', { defaultValue: 'Presencia de fecha' })} className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.datePresence ?? ''} onChange={(event) => update('datePresence', event.target.value)}>
             <option value="">{t('blast.holeFilters.any')}</option>
             <option value={PRESENT_VALUE}>{t('blast.holeFilters.withDate', { defaultValue: 'Con fecha' })}</option>
             <option value={MISSING_VALUE}>{t('blast.noData')}</option>
           </select>
-          <input className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.date} onChange={(event) => update('date', event.target.value)} placeholder={t('blast.holeFilters.datePlaceholder')} />
+          <input className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.date} onChange={(event) => update('date', event.target.value)} placeholder={t('blast.holeFilters.datePlaceholder')} />
         </label>
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.geometry')}</span>
-          <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.geometryStatus} onChange={(event) => update('geometryStatus', event.target.value)}>
+          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.geometryStatus} onChange={(event) => update('geometryStatus', event.target.value)}>
             <option value="">{t('blast.holeFilters.any')}</option>
             {statuses.map((status) => <option key={status} value={status}>{t(`blast.holeFilters.geometryStatus.${status}`, status)}</option>)}
           </select>
         </label>
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.collarProvenanceLabel', { defaultValue: 'Procedencia de cota' })}</span>
-          <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.provenance} onChange={(event) => update('provenance', event.target.value)}>
+          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.provenance} onChange={(event) => update('provenance', event.target.value)}>
             <option value="">{t('blast.holeFilters.any')}</option>
             <option value={MISSING_VALUE}>{t('blast.noData')}</option>
             {provenances.map((status) => <option key={status} value={status}>{PROVENANCE_LABELS[status] ? t(PROVENANCE_LABELS[status]) : status}</option>)}
           </select>
         </label>
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.surfaceSampleStatusLabel', { defaultValue: 'Estado de muestreo de superficie' })}</span>
-          <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.surfaceSampleStatus} onChange={(event) => update('surfaceSampleStatus', event.target.value)}>
+          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.surfaceSampleStatus} onChange={(event) => update('surfaceSampleStatus', event.target.value)}>
             <option value="">{t('blast.holeFilters.any')}</option>
             <option value={MISSING_VALUE}>{t('blast.noData')}</option>
             {surfaceSampleStatuses.map((status) => <option key={status} value={status}>{PROVENANCE_LABELS[status] ? t(PROVENANCE_LABELS[status]) : status}</option>)}
           </select>
         </label>
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.section')}</span>
-          <select disabled={!hasSection} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm disabled:opacity-50" value={filters.sectionRelation} onChange={(event) => update('sectionRelation', event.target.value)}>
+          <select disabled={!hasSection} className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary disabled:opacity-50" value={filters.sectionRelation} onChange={(event) => update('sectionRelation', event.target.value)}>
             <option value="">{t('blast.holeFilters.any')}</option>
             {['exact_intersection', 'near_section', 'outside', 'incomplete'].map((relation) => <option key={relation} value={relation}>{t(`blast.holeFilters.relation.${relation}`)}</option>)}
           </select>
         </label>
-        <label className="space-y-1 text-xs">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
           <span>{t('blast.holeFilters.corridor')}</span>
-          <input disabled={!hasSection} type="number" min="0" step="1" inputMode="decimal" className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm disabled:opacity-50" value={filters.corridorM} onChange={(event) => update('corridorM', Math.max(0, Number(event.target.value) || 0))} />
+          <input disabled={!hasSection} type="number" min="0" step="1" inputMode="decimal" className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary disabled:opacity-50" value={filters.corridorM} onChange={(event) => update('corridorM', Math.max(0, Number(event.target.value) || 0))} />
         </label>
       </div>
-      {!hasSection && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.chooseSection')}</p>}
-      {filtersClearedNotice && <p role="status" className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.unavailableFiltersCleared', { defaultValue: 'Se limpiaron filtros porque sus columnas ya no están disponibles.' })}</p>}
-      {hasSection && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.corridorHelp')}</p>}
-      <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.estimateHelp')}</p>
-      <button type="button" className="min-h-10 rounded border border-[var(--color-border)] px-3 py-2 text-sm" onClick={resetFilters}>{t('blast.holeFilters.clear')}</button>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" aria-live="polite">
+      {!hasSection && <p className="text-xs text-text-muted">{t('blast.holeFilters.chooseSection')}</p>}
+      {filtersClearedNotice && <p role="status" className="text-xs text-text-muted">{t('blast.holeFilters.unavailableFiltersCleared', { defaultValue: 'Se limpiaron filtros porque sus columnas ya no están disponibles.' })}</p>}
+      <details className="text-xs text-text-muted">
+        <summary className="cursor-pointer text-text-secondary hover:text-text-primary">{t('blast.holeFilters.helpSummary', { defaultValue: 'Notas sobre los filtros' })}</summary>
+        <div className="mt-1 flex flex-col gap-1">
+          {hasSection && <p>{t('blast.holeFilters.corridorHelp')}</p>}
+          <p>{t('blast.holeFilters.estimateHelp')}</p>
+        </div>
+      </details>
+      <button type="button" className="self-start rounded-md border border-border px-2.5 py-1 text-xs text-text-secondary hover:border-border-strong hover:text-text-primary" onClick={resetFilters}>{t('blast.holeFilters.clear')}</button>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-text-muted" aria-live="polite">
         <span>{t('blast.holeFilters.countTotal', { count: counts.total })}</span>
         <span>{t('blast.holeFilters.countDrawable', { count: counts.drawable })}</span>
         <span>{t('blast.holeFilters.countVisible', { count: counts.visible })}</span>
@@ -408,16 +413,16 @@ function SearchMultiSelect({
   }, [options, query]);
   const toggle = (option: string) => onChange(selected.includes(option) ? selected.filter((value) => value !== option) : [...selected, option]);
   return (
-    <fieldset className="min-w-0 space-y-1 rounded border border-[var(--color-border)] p-2">
-      <legend className="px-1 text-xs font-medium">{label}</legend>
-      <input aria-label={`${searchLabel}: ${label}`} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchLabel} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" />
-      {selected.length > 0 && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.selectedCount', { count: selected.length, defaultValue: '{{count}} seleccionados' })}</p>}
+    <fieldset className="flex min-w-0 flex-col gap-1">
+      <legend className="mb-1 text-xs text-text-muted">{label}</legend>
+      <input aria-label={`${searchLabel}: ${label}`} type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchLabel} className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" />
+      {selected.length > 0 && <p className="text-xs text-text-muted">{t('blast.holeFilters.selectedCount', { count: selected.length, defaultValue: '{{count}} seleccionados' })}</p>}
       <div className="max-h-24 overflow-y-auto" role="group" aria-label={label}>
-        {visible.map((option) => <label key={option} className="flex min-h-10 items-center gap-2 py-1 text-sm"><input className="h-4 w-4 shrink-0" type="checkbox" checked={selected.includes(option)} onChange={() => toggle(option)} /> <span className="truncate">{option}</span></label>)}
-        {visible.length === 0 && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.noMatches', { defaultValue: 'Sin coincidencias' })}</p>}
-        {visible.length === 100 && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.refineSearch', { defaultValue: 'Refina la búsqueda para ver más opciones.' })}</p>}
+        {visible.map((option) => <label key={option} className="flex min-h-7 items-center gap-2 text-xs text-text-secondary"><input className="h-3.5 w-3.5 shrink-0" type="checkbox" checked={selected.includes(option)} onChange={() => toggle(option)} /> <span className="truncate">{option}</span></label>)}
+        {visible.length === 0 && <p className="text-xs text-text-muted">{t('blast.holeFilters.noMatches', { defaultValue: 'Sin coincidencias' })}</p>}
+        {visible.length === 100 && <p className="text-xs text-text-muted">{t('blast.holeFilters.refineSearch', { defaultValue: 'Refina la búsqueda para ver más opciones.' })}</p>}
       </div>
-      {selected.length > 0 && <button type="button" className="min-h-10 px-1 text-sm underline" onClick={() => onChange([])}>{t('blast.holeFilters.clearCategory', { label: label.toLocaleLowerCase(), defaultValue: 'Limpiar {{label}}' })}</button>}
+      {selected.length > 0 && <button type="button" className="self-start text-xs text-accent-bright underline underline-offset-2" onClick={() => onChange([])}>{t('blast.holeFilters.clearCategory', { label: label.toLocaleLowerCase(), defaultValue: 'Limpiar {{label}}' })}</button>}
     </fieldset>
   );
 }
@@ -436,13 +441,13 @@ function RangeFilter({
 }) {
   const { t } = useTranslation();
   return (
-    <fieldset className="min-w-0 space-y-1 rounded border border-[var(--color-border)] p-2">
-      <legend className="px-1 text-xs font-medium">{label}</legend>
+    <fieldset className="flex min-w-0 flex-col gap-1">
+      <legend className="mb-1 text-xs text-text-muted">{label}</legend>
       <div className="grid grid-cols-2 gap-2">
-        <label className="space-y-1 text-xs"><span>{minLabel}</span><input aria-label={`${label}: ${minLabel}`} type="number" inputMode="decimal" min={extent?.[0]} max={max || extent?.[1]} value={min} onChange={(event) => onMinChange(event.target.value)} className="w-full min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" /></label>
-        <label className="space-y-1 text-xs"><span>{maxLabel}</span><input aria-label={`${label}: ${maxLabel}`} type="number" inputMode="decimal" min={min || extent?.[0]} max={extent?.[1]} value={max} onChange={(event) => onMaxChange(event.target.value)} className="w-full min-w-0 rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" /></label>
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted"><span>{minLabel}</span><input aria-label={`${label}: ${minLabel}`} type="number" inputMode="decimal" min={extent?.[0]} max={max || extent?.[1]} value={min} onChange={(event) => onMinChange(event.target.value)} className="w-full min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" /></label>
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted"><span>{maxLabel}</span><input aria-label={`${label}: ${maxLabel}`} type="number" inputMode="decimal" min={min || extent?.[0]} max={extent?.[1]} value={max} onChange={(event) => onMaxChange(event.target.value)} className="w-full min-w-0 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" /></label>
       </div>
-      {extent && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.dataExtent', { min: extent[0], max: extent[1], defaultValue: 'Datos: {{min}} – {{max}}' })}</p>}
+      {extent && <p className="text-xs text-text-muted">{t('blast.holeFilters.dataExtent', { min: extent[0], max: extent[1], defaultValue: 'Datos: {{min}} – {{max}}' })}</p>}
     </fieldset>
   );
 }

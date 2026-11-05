@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { BenchFilter } from './BenchFilter';
 import { CompliancePlanView } from './CompliancePlanView';
 import { ResultFilters } from './ResultFilters';
@@ -14,28 +14,9 @@ import type { ComparisonResult } from '../../api/types';
 import { BENCH_SCORE_MAX, SCORE_WEIGHTS, compareStatus, resolveBenchScore } from './ProfileView/domain/status';
 import type { BenchStatus } from './ProfileView/domain/types';
 import { toComparisonBenchStatuses } from './ProfileView/domain/mapping';
-
-// ─── Module-level icons (M3: hoisted to avoid per-render allocation) ──
-
-const GlobalIcon = (
-  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <circle cx="12" cy="12" r="10" />
-    <path d="m9 12 2 2 4-4" />
-  </svg>
-);
-
-const ProfilesOkIcon = (
-  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M20 6 9 17l-5-5" />
-  </svg>
-);
-
-const ProfilesNoIcon = (
-  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M18 6 6 18" />
-    <path d="m6 6 12 12" />
-  </svg>
-);
+import { useTheme } from '../../stores/theme';
+import { resolveThemeVariables } from '../../utils/theme';
+import { InfoTip, SegmentedControl, StatusDot, SummaryPanel, statusToneColor, type StatusTone } from './SummaryControls';
 
 // ─── Pure helpers (exported for testing) ─────────────────────
 //
@@ -269,14 +250,14 @@ export function computeSectorCompliance(
     .sort((a, b) => a.sector.localeCompare(b.sector));
 }
 
-/**
- * Colour for a sector compliance percentage. Matches the
- * Streamlit thresholds (green ≥70, orange 50-70, red <50).
- */
+export function complianceTone(pct: number): StatusTone {
+  if (pct >= 70) return 'ok';
+  if (pct >= 50) return 'warn';
+  return 'nok';
+}
+
 export function sectorComplianceColor(pct: number): string {
-  if (pct >= 70) return '#10b981'; // emerald
-  if (pct >= 50) return '#f59e0b'; // amber
-  return '#ef4444';                // red
+  return statusToneColor(complianceTone(pct));
 }
 
 // ─── Deviation histograms ─────────────────────────────────────
@@ -300,12 +281,23 @@ export type HistogramBand =
   | { readonly neg: number; readonly pos: number }
   | { readonly min: number };
 
-const HISTOGRAM_LAYOUT_BASE: Partial<Layout> = {
-  height: 260,
-  margin: { l: 50, r: 20, t: 20, b: 40 },
+const CHART_LAYOUT_BASE: Partial<Layout> = {
   paper_bgcolor: 'rgba(0,0,0,0)',
   plot_bgcolor: 'rgba(0,0,0,0)',
-  font: { color: 'var(--color-text-secondary)' },
+  font: { color: 'var(--color-text-secondary)', size: 11 },
+};
+
+const HISTOGRAM_LAYOUT_BASE: Partial<Layout> = {
+  ...CHART_LAYOUT_BASE,
+  height: 280,
+  margin: { l: 48, r: 16, t: 8, b: 40 },
+  bargap: 0.08,
+};
+
+const TOLERANCE_BAND_STYLE: Partial<Shape> = {
+  fillcolor: 'var(--status-ok-bg)',
+  line: { width: 0 },
+  layer: 'below',
 };
 
 export function buildHistogram(
@@ -324,9 +316,7 @@ export function buildHistogram(
         x1: values.length === 0 ? band.min : Math.max(band.min, ...values),
         y0: 0,
         y1: 1,
-        fillcolor: 'rgba(16, 185, 129, 0.15)',
-        line: { color: 'rgba(16, 185, 129, 0.6)', width: 1 },
-        layer: 'below',
+        ...TOLERANCE_BAND_STYLE,
       }
     : {
         type: 'rect',
@@ -336,9 +326,7 @@ export function buildHistogram(
         x1: band.pos,
         y0: 0,
         y1: 1,
-        fillcolor: 'rgba(16, 185, 129, 0.15)',
-        line: { color: 'rgba(16, 185, 129, 0.6)', width: 1 },
-        layer: 'below',
+        ...TOLERANCE_BAND_STYLE,
       };
   return {
     data: [
@@ -346,14 +334,14 @@ export function buildHistogram(
         type: 'histogram',
         x: [...values],
         nbinsx: 15,
-        marker: { color: '#3b82f6' },
+        marker: { color: 'var(--color-accent)' },
         name: title,
       },
     ] as unknown as Data[],
     layout: {
       ...HISTOGRAM_LAYOUT_BASE,
-      xaxis: { title: { text: xLabel } },
-      yaxis: { title: { text: frequencyLabel } },
+      xaxis: { title: { text: xLabel }, zeroline: false },
+      yaxis: { title: { text: frequencyLabel }, zeroline: false },
       shapes: [shape],
       showlegend: false,
     },
@@ -461,66 +449,112 @@ export function computeStatusCountsBySector(
 
 // ─── UI ──────────────────────────────────────────────────────
 
-interface KPICardProps {
-  title: string;
-  value: string;
-  valueColor: string;
-  pct: number;
-  icon: React.ReactNode;
-  description?: string;
+type HistogramKey = 'height' | 'angle' | 'crest' | 'toe' | 'berm';
+
+const HISTOGRAM_KEYS: readonly HistogramKey[] = ['height', 'angle', 'crest', 'toe', 'berm'];
+
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+function percentOf(part: number, total: number): number {
+  return total === 0 ? 0 : (part / total) * 100;
 }
 
-function KPICard({ title, value, valueColor, pct, icon, description }: KPICardProps) {
-  const safePct = Number.isFinite(pct) ? pct : 0;
+function KpiHeader({ globalScore, counts, t }: { globalScore: number; counts: ProfileComplianceCounts; t: Translate }) {
+  const total = counts.cumple + counts.fuera + counts.noCumple;
+  const counters: { key: string; tone: StatusTone; label: string; value: number }[] = [
+    { key: 'ok', tone: 'ok', label: t('dashboard.kpi.count_ok', { defaultValue: 'Cumple' }), value: counts.cumple },
+    { key: 'warn', tone: 'warn', label: t('dashboard.kpi.count_outside', { defaultValue: 'Fuera de tolerancia' }), value: counts.fuera },
+    { key: 'nok', tone: 'nok', label: t('dashboard.kpi.count_no', { defaultValue: 'No cumple' }), value: counts.noCumple },
+  ];
   return (
-    <dl className="glass-card rounded-xl p-5 flex flex-col gap-4 relative overflow-hidden group">
-      <div
-        className="absolute -right-6 -bottom-6 w-24 h-24 rounded-full blur-2xl opacity-10 group-hover:opacity-20 transition-opacity duration-500 pointer-events-none"
-        style={{ backgroundColor: valueColor }}
-      />
-
-      <div className="flex items-center justify-between">
-        <dt className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-muted)' }}>
-          {title}
-        </dt>
-        <div
-          className="w-9 h-9 rounded-lg flex items-center justify-center transition-transform group-hover:scale-105 duration-300"
-          style={{ backgroundColor: `${valueColor}15`, color: valueColor }}
-        >
-          {icon}
+    <div data-slot="dashboard-kpis" className="flex flex-wrap items-end gap-x-10 gap-y-4">
+      <dl className="m-0">
+        <div className="flex items-baseline gap-2">
+          <dt className="order-last flex items-center gap-1.5 text-xs text-text-muted">
+            {t('dashboard.kpi.global_score')}
+            <InfoTip label={t('dashboard.kpi.how_calculated', { defaultValue: '¿Cómo se calcula?' })}>
+              {t('dashboard.kpi.global_score_help')}
+            </InfoTip>
+          </dt>
+          <dd className="m-0 text-4xl font-semibold leading-none tabular-nums" style={{ color: statusToneColor(complianceTone(globalScore)) }}>
+            {globalScore.toFixed(1)}
+          </dd>
+          <dd className="m-0 text-sm tabular-nums text-text-muted">/100</dd>
         </div>
+      </dl>
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+        <span className="flex items-center gap-1.5 text-xs text-text-muted">
+          {t('dashboard.kpi.profiles_label', { defaultValue: 'Perfiles' })}
+          <InfoTip label={t('dashboard.kpi.how_classified', { defaultValue: '¿Cómo se clasifican los perfiles?' })}>
+            {t('dashboard.kpi.profile_classification_help')}
+          </InfoTip>
+        </span>
+        <dl className="m-0 flex flex-wrap items-baseline gap-x-6 gap-y-2">
+          {counters.map((counter) => (
+            <div key={counter.key} data-tone={counter.tone} className="flex items-baseline gap-2">
+              <dt className="flex items-center gap-1.5 text-sm text-text-secondary">
+                <StatusDot tone={counter.tone} />
+                {counter.label}
+              </dt>
+              <dd className="m-0 text-xl font-semibold tabular-nums text-text-primary">{counter.value}</dd>
+              <dd className="m-0 text-xs tabular-nums text-text-muted">{Math.round(percentOf(counter.value, total))}%</dd>
+            </div>
+          ))}
+        </dl>
       </div>
-
-      <div className="flex flex-col gap-2">
-        <dd className="text-3xl font-extrabold tracking-tight m-0" style={{ color: 'var(--color-text-primary)' }}>
-          {value}
-        </dd>
-        {description && <dd className="text-sm leading-relaxed m-0" style={{ color: 'var(--color-text-secondary)' }}>{description}</dd>}
-
-        <dd className="w-full h-1.5 rounded-full overflow-hidden m-0" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
-          <div
-            className="h-full rounded-full transition-all duration-1000 ease-out"
-            style={{ width: `${Math.round(safePct * 100)}%`, backgroundColor: valueColor }}
-          />
-        </dd>
-      </div>
-    </dl>
+    </div>
   );
 }
 
-/** Threshold colour mapping (green ≥70, orange 50-70, red <50). */
-function getValueColor(pct: number): string {
-  if (pct >= 70) return '#10b981';
-  if (pct >= 50) return '#f59e0b';
-  return '#ef4444';
+function ParameterTable({ breakdown, t }: { breakdown: readonly ParameterBreakdown[]; t: Translate }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-xs text-text-muted">
+            <th scope="col" className="py-2 pr-4 text-left font-medium">{t('dashboard.table.parameter')}</th>
+            <th scope="col" className="py-2 pr-4 text-left font-medium">{t('dashboard.table.pct_ok', { defaultValue: '% cumple' })}</th>
+            <th scope="col" className="py-2 pr-4 text-right font-medium">{t('dashboard.kpi.count_ok', { defaultValue: 'Cumple' })}</th>
+            <th scope="col" className="py-2 pr-4 text-right font-medium">{t('dashboard.kpi.count_no', { defaultValue: 'No cumple' })}</th>
+            <th scope="col" className="py-2 text-right font-medium">{t('dashboard.table.real_avg', { defaultValue: 'Promedio real' })}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {breakdown.map((p) => {
+            const total = p.cumple + p.noCumple;
+            const pct = percentOf(p.cumple, total);
+            const avgReal = p.realCount === 0 ? null : p.realSum / p.realCount;
+            return (
+              <tr key={p.parameter} data-parameter={p.parameter} className="border-b border-border last:border-b-0">
+                <th scope="row" className="py-2 pr-4 text-left font-medium text-text-primary">{parameterLabel(p.parameter, t)}</th>
+                <td className="py-2 pr-4">
+                  <div className="flex items-center gap-3">
+                    <span className="w-14 text-right tabular-nums text-text-primary">{total === 0 ? '—' : `${pct.toFixed(1)}%`}</span>
+                    <span aria-hidden="true" className="h-1.5 w-full max-w-40 overflow-hidden rounded-full bg-surface-muted">
+                      <span className="block h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: statusToneColor(complianceTone(pct)) }} />
+                    </span>
+                  </div>
+                </td>
+                <td data-col="cumple" className="py-2 pr-4 text-right tabular-nums text-text-secondary">{p.cumple}</td>
+                <td data-col="no-cumple" className="py-2 pr-4 text-right tabular-nums text-text-secondary">{p.noCumple}</td>
+                <td className="py-2 text-right tabular-nums text-text-secondary">{avgReal == null ? '—' : formatReal(p.parameter, avgReal)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export function Dashboard() {
   const { t } = useTranslation();
+  const isDark = useTheme((s) => s.isDark);
   const { data: results } = useResults();
   const { data: settings } = useSettings();
   const filters = useSession((s) => s.filters);
   const setFilters = useSession((s) => s.setFilters);
+  const [histogramKey, setHistogramKey] = useState<HistogramKey>('height');
 
   const tolerances = settings?.tolerances ?? DEFAULT_TOLERANCES;
   const heightTol = tolerances.bench_height;
@@ -540,7 +574,6 @@ export function Dashboard() {
     [results],
   );
 
-  // Binary compliance aggregates
   const globalScore = useMemo(
     () => computeGlobalScore(filteredResults),
     [filteredResults],
@@ -548,6 +581,11 @@ export function Dashboard() {
 
   const profileCounts = useMemo(
     () => computeProfileComplianceCounts(filteredResults),
+    [filteredResults],
+  );
+
+  const profileStatuses = useMemo(
+    () => computeProfileStatuses(filteredResults),
     [filteredResults],
   );
 
@@ -561,19 +599,11 @@ export function Dashboard() {
     [filteredResults],
   );
 
-  // Per-deviation histograms
-  const heightDevs = useMemo(
-    () => collectField(filteredResults, 'height_dev'),
-    [filteredResults],
-  );
-  const angleDevs = useMemo(
-    () => collectField(filteredResults, 'angle_dev'),
-    [filteredResults],
-  );
-  const crestDevs = useMemo(
-    () => collectField(filteredResults, 'delta_crest'),
-    [filteredResults],
-  );
+  const heightDevs = useMemo(() => collectField(filteredResults, 'height_dev'), [filteredResults]);
+  const angleDevs = useMemo(() => collectField(filteredResults, 'angle_dev'), [filteredResults]);
+  const crestDevs = useMemo(() => collectField(filteredResults, 'delta_crest'), [filteredResults]);
+  const toeDevs = useMemo(() => collectField(filteredResults, 'delta_toe'), [filteredResults]);
+  const bermWidths = useMemo(() => collectField(filteredResults, 'berm_real'), [filteredResults]);
 
   const totalBenches = filteredResults.length;
   const nSections = new Set(filteredResults.map((row) => row.section)).size;
@@ -583,136 +613,73 @@ export function Dashboard() {
     [],
   );
 
-  // ── Plotly data ──
-  const parameterChartData = useMemo<Data[]>(
-    () => [
-      {
-        type: 'bar',
-        name: t('status.cumple'),
-        x: parameterBreakdown.map((p) => parameterLabel(p.parameter, t)),
-        y: parameterBreakdown.map((p) => p.cumple),
-        marker: { color: '#10b981' },
-      },
-      {
-        type: 'bar',
-        name: t('status.no_cumple'),
-        x: parameterBreakdown.map((p) => parameterLabel(p.parameter, t)),
-        y: parameterBreakdown.map((p) => p.noCumple),
-        marker: { color: '#ef4444' },
-      },
-    ],
-    [parameterBreakdown, t],
-  );
-
-  const parameterLayout = useMemo<Partial<Layout>>(
-    () => ({
-      barmode: 'stack',
-      height: 320,
-      margin: { l: 50, r: 20, t: 20, b: 40 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: { text: t('dashboard.plot.axis.parameter') } },
-      yaxis: { title: { text: t('dashboard.plot.axis.bench_count') } },
-      legend: { orientation: 'h', y: -0.2 },
-    }),
-    [t],
-  );
-
   const sectorChartData = useMemo<Data[]>(() => {
-    const sectors = sectorCompliance.map((s) => s.sector);
-    const colors = sectorCompliance.map((s) => sectorComplianceColor(s.pct));
     const hoverLabel = t('dashboard.plot.hover.compliance_label');
-    return [
+    return resolveThemeVariables([
       {
         type: 'bar',
-        x: sectors,
+        x: sectorCompliance.map((s) => s.sector),
         y: sectorCompliance.map((s) => s.pct),
-        marker: { color: colors },
+        marker: { color: sectorCompliance.map((s) => sectorComplianceColor(s.pct)) },
         text: sectorCompliance.map((s) => `${s.pct.toFixed(1)}%`),
         textposition: 'outside',
+        cliponaxis: false,
         hovertemplate: `<b>%{x}</b><br>${hoverLabel}: %{y:.1f}%<extra></extra>`,
       },
-    ] as unknown as Data[];
-  }, [sectorCompliance, t]);
+    ]) as Data[];
+  }, [sectorCompliance, t, isDark]);
 
   const sectorChartLayout = useMemo<Partial<Layout>>(
     () => ({
-      height: 320,
-      margin: { l: 50, r: 20, t: 20, b: 40 },
-      paper_bgcolor: 'rgba(0,0,0,0)',
-      plot_bgcolor: 'rgba(0,0,0,0)',
-      font: { color: 'var(--color-text-secondary)' },
-      xaxis: { title: { text: t('dashboard.plot.axis.sector') } },
-      yaxis: { title: { text: t('dashboard.plot.axis.pct_compliance') }, range: [0, 105] },
+      ...CHART_LAYOUT_BASE,
+      height: 300,
+      margin: { l: 48, r: 16, t: 16, b: 40 },
+      bargap: 0.35,
+      xaxis: { showgrid: false },
+      yaxis: { title: { text: t('dashboard.plot.axis.pct_compliance') }, range: [0, 110], ticksuffix: '%', zeroline: false },
     }),
     [t],
   );
 
   const frequencyLabel = t('dashboard.plot.axis.frequency');
+  const crestBand = useMemo(
+    () => ({
+      neg: Number(crestTol.neg ?? DEFAULT_TOLERANCES.crest_toe_deviation.neg),
+      pos: Number(crestTol.pos ?? DEFAULT_TOLERANCES.crest_toe_deviation.pos),
+    }),
+    [crestTol],
+  );
 
-  const heightHist = useMemo(
-    () => buildHistogram(
-      heightDevs,
-      t('dashboard.parameter.height'),
-      t('dashboard.plot.axis.delta_height'),
-      { neg: Number(heightTol.neg), pos: Number(heightTol.pos) },
-      frequencyLabel,
-    ),
-    [heightDevs, heightTol, frequencyLabel, t],
+  const activeHistogram = useMemo(() => {
+    switch (histogramKey) {
+      case 'height':
+        return buildHistogram(heightDevs, t('dashboard.parameter.height'), t('dashboard.plot.axis.delta_height'), { neg: Number(heightTol.neg), pos: Number(heightTol.pos) }, frequencyLabel);
+      case 'angle':
+        return buildHistogram(angleDevs, t('dashboard.parameter.angle'), t('dashboard.plot.axis.delta_angle'), { neg: Number(angleTol.neg), pos: Number(angleTol.pos) }, frequencyLabel);
+      case 'crest':
+        return buildHistogram(crestDevs, t('dashboard.plot.axis.delta_crest'), t('dashboard.plot.axis.delta_crest'), crestBand, frequencyLabel);
+      case 'toe':
+        return buildHistogram(toeDevs, t('dashboard.plot.axis.delta_toe', { defaultValue: 'Δ Pata (m)' }), t('dashboard.plot.axis.delta_toe', { defaultValue: 'Δ Pata (m)' }), crestBand, frequencyLabel);
+      case 'berm':
+        return buildHistogram(bermWidths, t('dashboard.plot.axis.berm_width', { defaultValue: 'Ancho de berma real (m)' }), t('dashboard.plot.axis.berm_width', { defaultValue: 'Ancho de berma real (m)' }), { min: Number(bermTol.min) }, frequencyLabel);
+    }
+  }, [histogramKey, heightDevs, angleDevs, crestDevs, toeDevs, bermWidths, heightTol, angleTol, crestBand, bermTol, frequencyLabel, t]);
+
+  const themedHistogramData = useMemo(
+    () => resolveThemeVariables(activeHistogram.data) as Data[],
+    [activeHistogram, isDark],
   );
-  const angleHist = useMemo(
-    () => buildHistogram(
-      angleDevs,
-      t('dashboard.parameter.angle'),
-      t('dashboard.plot.axis.delta_angle'),
-      { neg: Number(angleTol.neg), pos: Number(angleTol.pos) },
-      frequencyLabel,
-    ),
-    [angleDevs, angleTol, frequencyLabel, t],
-  );
-  const crestHist = useMemo(
-    () => buildHistogram(
-      crestDevs,
-      t('dashboard.plot.axis.delta_crest'),
-      t('dashboard.plot.axis.delta_crest'),
-      { neg: Number(crestTol.neg ?? DEFAULT_TOLERANCES.crest_toe_deviation.neg), pos: Number(crestTol.pos ?? DEFAULT_TOLERANCES.crest_toe_deviation.pos) },
-      frequencyLabel,
-    ),
-    [crestDevs, crestTol, frequencyLabel, t],
-  );
-  const toeDevs = useMemo(
-    () => collectField(filteredResults, 'delta_toe'),
-    [filteredResults],
-  );
-  const toeHist = useMemo(
-    () => buildHistogram(
-      toeDevs,
-      t('dashboard.plot.axis.delta_toe', { defaultValue: 'Δ Pata (Δx [m])' }),
-      t('dashboard.plot.axis.delta_toe', { defaultValue: 'Δ Pata (Δx [m])' }),
-      { neg: Number(crestTol.neg ?? DEFAULT_TOLERANCES.crest_toe_deviation.neg), pos: Number(crestTol.pos ?? DEFAULT_TOLERANCES.crest_toe_deviation.pos) },
-      frequencyLabel,
-    ),
-    [toeDevs, crestTol, frequencyLabel, t],
-  );
-  const bermWidths = useMemo(
-    () => collectField(filteredResults, 'berm_real'),
-    [filteredResults],
-  );
-  const bermHist = useMemo(
-    () => buildHistogram(
-      bermWidths,
-      t('dashboard.plot.axis.berm_width', { defaultValue: 'Ancho berma real [m]' }),
-      t('dashboard.plot.axis.berm_width', { defaultValue: 'Ancho berma real [m]' }),
-      { min: Number(bermTol.min) },
-      frequencyLabel,
-    ),
-    [bermWidths, bermTol, frequencyLabel, t],
-  );
+
+  const histogramHasData = activeHistogram.data.some((d) => {
+    const x = (d as { x?: unknown }).x;
+    return Array.isArray(x) && x.length > 0;
+  });
+
+  const histogramOptions = HISTOGRAM_KEYS.map((key) => ({ value: key, label: histogramLabel(key, t) }));
 
   if (!results || results.length === 0) {
     return (
-      <div className="flex items-center justify-center h-48 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+      <div className="flex h-48 items-center justify-center text-sm text-text-muted">
         {t('dashboard.empty_state')}
       </div>
     );
@@ -720,183 +687,67 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Summary text */}
-      <div className="flex items-center justify-between border-b pb-3 shrink-0" style={{ borderColor: 'var(--color-border)' }}>
-        <p className="text-sm font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('dashboard.title')}
-        </p>
-        <span className="text-xs px-2.5 py-1 rounded-full font-semibold" style={{ backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-secondary)' }}>
+      {filteredResults.length > 0 ? (
+        <KpiHeader globalScore={globalScore} counts={profileCounts} t={t} />
+      ) : (
+        <p role="status" className="text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p>
+      )}
+
+      <div data-slot="dashboard-filters" className="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-border py-2">
+        <BenchFilter available={benchNumbers} selected={filters.bench} onChange={(bench) => setFilters({ bench })} />
+        <ResultFilters results={results} filters={filters} onChange={setScenarioFilters} />
+        <span className="ml-auto text-xs tabular-nums text-text-muted">
           {t('dashboard.summary.bench_section', { benches: totalBenches, sections: nSections })}
         </span>
       </div>
 
-      <BenchFilter available={benchNumbers} selected={filters.bench} onChange={(bench) => setFilters({ bench })} />
+      {filteredResults.length > 0 && (
+        <>
+          <SummaryPanel slot="parameter-breakdown" title={t('dashboard.section.parameters', { defaultValue: 'Desglose por parámetro' })}>
+            <ParameterTable breakdown={parameterBreakdown} t={t} />
+          </SummaryPanel>
 
-      <ResultFilters results={results} filters={filters} onChange={setScenarioFilters} />
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            {sectorCompliance.length > 0 && (
+              <SummaryPanel slot="sector-compliance" title={t('dashboard.section.by_sector', { defaultValue: 'Cumplimiento por sector' })}>
+                <Plot data={sectorChartData} layout={sectorChartLayout} config={plotConfig} style={{ width: '100%' }} />
+              </SummaryPanel>
+            )}
+            <CompliancePlanView results={filteredResults} statuses={profileStatuses} />
+          </div>
 
-      {!filteredResults.length ? <p role="status" className="rounded-lg border border-border bg-surface-raised p-4 text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p> : <>
-      {/* Section 1: Global KPI */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <KPICard
-          title={`${t('dashboard.kpi.global_score')} (0–100)`}
-          value={globalScore.toFixed(1)}
-          valueColor={getValueColor(globalScore)}
-          pct={globalScore / 100}
-          icon={GlobalIcon}
-          description={t('dashboard.kpi.global_score_help')}
-        />
-        <KPICard
-          title={t('dashboard.kpi.profiles_ok')}
-          value={String(profileCounts.cumple)}
-          valueColor="#10b981"
-          pct={profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple === 0
-            ? 0
-            : profileCounts.cumple / (profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple)}
-          icon={ProfilesOkIcon}
-        />
-        <KPICard
-          title={t('dashboard.kpi.profiles_outside')}
-          value={String(profileCounts.fuera)}
-          valueColor="#f59e0b"
-          pct={profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple === 0
-            ? 0
-            : profileCounts.fuera / (profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple)}
-          icon={GlobalIcon}
-        />
-        <KPICard
-          title={t('dashboard.kpi.profiles_no')}
-          value={String(profileCounts.noCumple)}
-          valueColor="#ef4444"
-          pct={profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple === 0
-            ? 0
-            : profileCounts.noCumple / (profileCounts.cumple + profileCounts.fuera + profileCounts.noCumple)}
-          icon={ProfilesNoIcon}
-        />
-      </div>
+          <SummaryPanel
+            slot="deviation-distribution"
+            title={t('dashboard.section.deviation_distribution', { defaultValue: 'Distribución de desviaciones' })}
+            actions={(
+              <SegmentedControl
+                label={t('dashboard.histogram.selector', { defaultValue: 'Variable del histograma' })}
+                options={histogramOptions}
+                value={histogramKey}
+                onChange={setHistogramKey}
+              />
+            )}
+          >
+            <p className="text-xs text-text-muted">{histogramTitle(histogramKey, t)}</p>
+            <div className="h-[280px]">
+              {histogramHasData ? (
+                <Plot data={themedHistogramData} layout={activeHistogram.layout} config={plotConfig} style={{ width: '100%' }} />
+              ) : (
+                <p className="flex h-full items-center justify-center text-xs text-text-muted">{t('dashboard.histogram.no_data')}</p>
+              )}
+            </div>
+          </SummaryPanel>
 
-      <p role="note" className="text-sm text-text-secondary">
-        {t('dashboard.kpi.profile_classification_help')}
-      </p>
-
-      {/* Section 2: Parameter breakdown */}
-      <div className="glass-panel rounded-xl p-5 space-y-4">
-        <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('dashboard.section.parameter_breakdown')}
-        </p>
-
-        {parameterBreakdown.some((p) => p.cumple + p.noCumple > 0) && (
-          <Plot
-            data={parameterChartData}
-            layout={parameterLayout}
-            config={plotConfig}
-            style={{ width: '100%' }}
-          />
-        )}
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-left" style={{ color: 'var(--color-text-muted)' }}>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider">{t('dashboard.table.parameter')}</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('dashboard.table.pct_cumple')}</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('status.cumple')}</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('status.no_cumple')}</th>
-                <th className="py-2 pr-4 font-semibold uppercase tracking-wider text-right">{t('dashboard.table.value_avg')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {parameterBreakdown.map((p) => {
-                const total = p.cumple + p.noCumple;
-                const pct = total === 0 ? 0 : (p.cumple / total) * 100;
-                const avgReal = p.realCount === 0 ? null : p.realSum / p.realCount;
-                return (
-                  <tr key={p.parameter} className="border-t" style={{ borderColor: 'var(--color-border)' }}>
-                    <td className="py-2 pr-4 font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                      {parameterLabel(p.parameter, t)}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: getValueColor(pct) }}>
-                      {pct.toFixed(1)}%
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: '#10b981' }}>
-                      {p.cumple}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: '#ef4444' }}>
-                      {p.noCumple}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums" style={{ color: 'var(--color-text-secondary)' }}>
-                      {avgReal == null ? '—' : formatReal(p.parameter, avgReal)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Section 3: Sector compliance */}
-      {sectorCompliance.length > 0 && (
-        <div className="glass-panel rounded-xl p-5 space-y-3">
-          <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('dashboard.section.sector_compliance')}
-          </p>
-          <Plot
-            data={sectorChartData}
-            layout={sectorChartLayout}
-            config={plotConfig}
-            style={{ width: '100%' }}
-          />
-        </div>
+          <DesignAchievementPanel filters={filters} />
+        </>
       )}
-
-      <CompliancePlanView results={filteredResults} statuses={computeProfileStatuses(filteredResults)} />
-
-      {/* Section 4: Deviation histograms with tolerance bands */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <HistogramPanel
-          title={t('dashboard.section.deviation_height')}
-          chart={heightHist}
-          config={plotConfig}
-          emptyText={t('dashboard.histogram.no_data')}
-        />
-        <HistogramPanel
-          title={t('dashboard.section.deviation_angle')}
-          chart={angleHist}
-          config={plotConfig}
-          emptyText={t('dashboard.histogram.no_data')}
-        />
-        <HistogramPanel
-          title={t('dashboard.section.deviation_crest')}
-          chart={crestHist}
-          config={plotConfig}
-          emptyText={t('dashboard.histogram.no_data')}
-        />
-        <HistogramPanel
-          title={t('dashboard.section.deviation_toe', { defaultValue: 'Desviación Δ Pata' })}
-          chart={toeHist}
-          config={plotConfig}
-          emptyText={t('dashboard.histogram.no_data')}
-        />
-        <HistogramPanel
-          title={t('dashboard.section.deviation_berm', { defaultValue: 'Ancho de berma' })}
-          chart={bermHist}
-          config={plotConfig}
-          emptyText={t('dashboard.histogram.no_data')}
-        />
-      </div>
-
-      <DesignAchievementPanel filters={filters} />
-      </>}
     </div>
   );
 }
 
 // ─── Small UI helpers ────────────────────────────────────────
 
-function parameterLabel(
-  p: 'height' | 'angle' | 'berm',
-  t: (key: string) => string,
-): string {
+function parameterLabel(p: 'height' | 'angle' | 'berm', t: Translate): string {
   switch (p) {
     case 'height': return t('dashboard.parameter.height');
     case 'angle':  return t('dashboard.parameter.angle');
@@ -904,41 +755,28 @@ function parameterLabel(
   }
 }
 
+function histogramLabel(key: HistogramKey, t: Translate): string {
+  switch (key) {
+    case 'height': return t('dashboard.parameter.height');
+    case 'angle':  return t('dashboard.parameter.angle');
+    case 'crest':  return t('dashboard.parameter.crest', { defaultValue: 'Cresta' });
+    case 'toe':    return t('dashboard.parameter.toe', { defaultValue: 'Pata' });
+    case 'berm':   return t('dashboard.parameter.berm');
+  }
+}
+
+function histogramTitle(key: HistogramKey, t: Translate): string {
+  switch (key) {
+    case 'height': return t('dashboard.section.deviation_height');
+    case 'angle':  return t('dashboard.section.deviation_angle');
+    case 'crest':  return t('dashboard.section.deviation_crest');
+    case 'toe':    return t('dashboard.section.deviation_toe', { defaultValue: 'Desviación de Pata (m)' });
+    case 'berm':   return t('dashboard.section.deviation_berm', { defaultValue: 'Ancho de berma (m)' });
+  }
+}
+
 function formatReal(p: 'height' | 'angle' | 'berm', v: number): string {
   if (p === 'height') return `${v.toFixed(2)} m`;
   if (p === 'angle')  return `${v.toFixed(1)}°`;
   return `${v.toFixed(2)} m`;
-}
-
-interface HistogramPanelProps {
-  title: string;
-  chart: { data: Data[]; layout: Partial<Layout> };
-  config: Partial<Config>;
-  emptyText: string;
-}
-
-function HistogramPanel({ title, chart, config, emptyText }: HistogramPanelProps) {
-  const hasData = chart.data.some((d) => {
-    const x = (d as { x?: unknown }).x;
-    return Array.isArray(x) && x.length > 0;
-  });
-  return (
-    <div className="glass-panel rounded-xl p-5 space-y-3">
-      <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-        {title}
-      </p>
-      {hasData ? (
-        <Plot
-          data={chart.data}
-          layout={chart.layout}
-          config={config}
-          style={{ width: '100%' }}
-        />
-      ) : (
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          {emptyText}
-        </p>
-      )}
-    </div>
-  );
 }

@@ -66,8 +66,6 @@
     "title": "Cargar Superficies",
     "design": "Diseño",
     "topo": "Topografía",
-    "design_icon": "📐",
-    "topo_icon": "🏔️",
     "drop_hint": "Arrastre o haga clic para seleccionar",
     "file_types": "STL / OBJ / PLY / DXF",
     "uploading": "Subiendo {{label}}…",
@@ -319,7 +317,7 @@
     "error": "Error al cargar los datos de tronadura.",
     "empty_title": "Sin datos de tronadura",
     "empty_desc": "Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.",
-    "summary_title": "Correlación de Tronadura",
+    "summary_title": "Correlación de tronadura",
     "n_sections_one": "{{count}} sección",
     "n_sections_other": "{{count}} secciones",
     "col_section": "Sección",
@@ -440,7 +438,8 @@
         "invalid": "Coordenada inválida"
       },
       "geometryStatus": { "complete": "Completa", "collar_only": "Solo collar", "none": "Sin geometría" },
-      "relation": { "exact_intersection": "Intersecta el plano", "near_section": "Próximo a la sección", "outside": "Fuera del corredor", "incomplete": "Geometría incompleta" }
+      "relation": { "exact_intersection": "Intersecta el plano", "near_section": "Próximo a la sección", "outside": "Fuera del corredor", "incomplete": "Geometría incompleta" },
+      "helpSummary": "Notas sobre los filtros"
     },
     "viewer_no_session": "Sin sesión activa",
     "viewer_loading": "Cargando pozos…",
@@ -600,7 +599,11 @@
       "negative_is_downward_dip": "Negativo indica buzamiento descendente",
       "positive_only": "Solo valores positivos",
       "absolute_value": "Valor absoluto"
-    }
+    },
+    "more_info": "Más información",
+    "table_title": "Factor de carga por sección",
+    "density_section_title": "Parámetros de cálculo",
+    "technical_diagnostics": "Diagnóstico técnico"
   },
   "section_list": {
     "loading": "Cargando secciones...",
@@ -686,7 +689,7 @@
     "error_generic": "No se pudo agregar la sección"
   },
   "export": {
-    "title": "Información del Proyecto",
+    "title": "Información del proyecto",
     "project": "Proyecto",
     "project_placeholder": "Nombre del proyecto",
     "author": "Autor",
@@ -714,7 +717,20 @@
     "applied_levels": "Niveles",
     "applied_benches": "Bancos",
     "blast_tolerance_label": "tolerancia tronadura",
-    "all_benches": "todos los bancos"
+    "all_benches": "todos los bancos",
+    "formats_title": "Exportar resultados",
+    "download": "Exportar",
+    "project_info_hint": "Opcional. Se incluye en los informes exportados.",
+    "format_excel": "Excel",
+    "format_excel_desc": "Resumen, bancos, inter-rampa y dashboard en hojas de cálculo",
+    "format_word": "Word",
+    "format_word_desc": "Informe técnico editable con tablas y gráficos",
+    "format_pdf": "PDF ejecutivo",
+    "format_pdf_desc": "Informe resumido listo para compartir",
+    "format_dxf": "DXF",
+    "format_dxf_desc": "Perfiles y secciones para software CAD",
+    "format_images": "Imágenes",
+    "format_images_desc": "Perfil de cada sección en PNG, comprimido en ZIP"
   },
   "ai": {
     "title": "Configuración del Modelo IA",
@@ -779,10 +795,10 @@
     "design_label": "Diseño",
     "topo_label": "Topografía",
     "tooltip": "Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m",
-    "layers": "Capas Visibles",
-    "layer_topo": "Topografía Real",
-    "layer_design": "Curvas de Diseño",
-    "layer_sections": "Líneas de Sección",
+    "layers": "Capas visibles",
+    "layer_topo": "Topografía real",
+    "layer_design": "Curvas de diseño",
+    "layer_sections": "Líneas de sección",
     "horizontal_map": "Mapa de calor horizontal",
     "horizontal_map_hint": "Colorea la superficie por dH medida entre diseño y topografía.",
     "horizontal_sector": "Sector",
@@ -797,7 +813,8 @@
     "horizontal_loading": "Calculando diferencias horizontales…",
     "horizontal_empty": "Sin celdas comparables para estos filtros.",
     "horizontal_retry": "Reintentar",
-    "horizontal_error": "No se pudo calcular el mapa horizontal"
+    "horizontal_error": "No se pudo calcular el mapa horizontal",
+    "layers_title": "Capas visibles"
   },
   "horizontalDeviation": {
     "legend": "Leyenda de desviación horizontal",
@@ -920,7 +937,6 @@
     "health_ok": "AI service disponible",
     "health_unavailable": "AI service no disponible",
     "health_pending": "Verificando...",
-    "ready_badge": "Listo",
     "form": {
       "provider_label": "Proveedor",
       "model_label": "Modelo",
@@ -966,7 +982,8 @@
       "tps_label": "{{tps}} tok/s",
       "cost_label": "Costo estimado ${{cost}}",
       "cached_badge": "served from cache",
-      "estimated_badge": "estimado"
+      "estimated_badge": "estimado",
+      "copied": "Copiado"
     },
     "health": {
       "ok": "AI service disponible",
@@ -981,13 +998,13 @@
     },
     "header": {
       "eyebrow": "Sección",
-      "last_run": "ÚLTIMO ANÁLISIS · {{ago}}",
-      "floorElev": "Cota Piso",
-      "crestMax": "Cota Cresta",
+      "floorElev": "Cota piso",
+      "crestMax": "Cota cresta",
       "azimuth": "Azimut",
       "sector": "Sector",
       "length": "Longitud",
-      "benches": "Bancos"
+      "benches": "Bancos",
+      "last_run_short": "Último análisis hace {{ago}}"
     },
     "summary": {
       "title": "Cumplimiento de sección",
@@ -1007,7 +1024,12 @@
       "design": "Diseño",
       "status": "Estado",
       "empty": "Selecciona un banco",
-      "hint": "Haz clic en una fila de la tabla o en un marcador del perfil para consultar sus parámetros."
+      "hint": "Haz clic en una fila de la tabla o en un marcador del perfil para consultar sus parámetros.",
+      "cell_bench": "Banco",
+      "cell_height": "Altura",
+      "cell_angle": "Ángulo",
+      "cell_berm": "Berma",
+      "legend": "Valor real arriba · diseño debajo"
     },
     "status": {
       "CUMPLE": "Cumple",
@@ -1129,13 +1151,19 @@
       "no_results": "No hay resultados para los bancos seleccionados. Restablece el filtro para ver todos."
     },
     "kpi": {
-      "global_score": "Score Ponderado Global",
+      "global_score": "Score ponderado global",
       "global_score_help": "Promedio entre perfiles con bancos comparados. Cada perfil promedia sus bancos: berma 60, ángulo 10 y altura 30 puntos.",
       "profile_classification_help": "Cada banco cumple con score ≥70 y no cumple con score <70; el perfil toma el peor estado de sus bancos. Los datos incompletos quedan como UNKNOWN. Las métricas individuales conservan sus estados por tolerancia.",
       "profiles_ok": "Perfiles CUMPLE",
       "profiles_outside": "Perfiles FUERA DE TOLERANCIA",
       "profiles_no": "Perfiles NO CUMPLE",
-      "classification_note": "La clasificación del perfil sigue el peor score de sus bancos (≥70 cumple). Es independiente del Puntaje de Logro Diseño; las métricas individuales se evalúan por tolerancias."
+      "classification_note": "La clasificación del perfil sigue el peor score de sus bancos (≥70 cumple). Es independiente del Puntaje de Logro Diseño; las métricas individuales se evalúan por tolerancias.",
+      "count_ok": "Cumple",
+      "count_outside": "Fuera de tolerancia",
+      "count_no": "No cumple",
+      "profiles_label": "Perfiles",
+      "how_calculated": "¿Cómo se calcula?",
+      "how_classified": "¿Cómo se clasifican los perfiles?"
     },
     "section": {
       "parameter_breakdown": "Desglose por Parámetro (CUMPLE / NO CUMPLE)",
@@ -1144,23 +1172,31 @@
       "deviation_angle": "Desviación de Ángulo (°)",
       "deviation_crest": "Desviación de Cresta (m)",
       "deviation_toe": "Desviación de Pata (m)",
-      "deviation_berm": "Ancho de berma (m)"
+      "deviation_berm": "Ancho de berma (m)",
+      "parameters": "Desglose por parámetro",
+      "by_sector": "Cumplimiento por sector",
+      "deviation_distribution": "Distribución de desviaciones"
     },
     "table": {
       "parameter": "Parámetro",
       "pct_cumple": "% CUMPLE",
-      "value_avg": "Valor Real Prom."
+      "value_avg": "Valor Real Prom.",
+      "pct_ok": "% cumple",
+      "real_avg": "Promedio real"
     },
     "histogram": {
-      "no_data": "Sin datos de desviación"
+      "no_data": "Sin datos de desviación",
+      "selector": "Variable del histograma"
     },
     "parameter": {
       "height": "Altura",
       "angle": "Ángulo",
-      "berm": "Berma"
+      "berm": "Berma",
+      "crest": "Cresta",
+      "toe": "Pata"
     },
     "summary": {
-      "bench_section": "{{benches}} Bancos / {{sections}} Secciones"
+      "bench_section": "{{benches}} bancos · {{sections}} secciones"
     },
     "plot": {
       "axis": {
@@ -1307,5 +1343,48 @@
     "title": "Ubicación en planta",
     "active": "Perfil activo: {{name}}",
     "neighbours": "Azul: perfil activo · gris: perfiles vecinos"
+  },
+  "ux": {
+    "profiles_mode": "Modo de visualización",
+    "step_surfaces": "Superficies",
+    "step_sections": "Secciones",
+    "step_parameters": "Parámetros",
+    "step_process": "Procesar",
+    "workflow": "Flujo de trabajo",
+    "summary_surfaces_none": "Cargue diseño y topografía",
+    "summary_surfaces_partial": "Falta una superficie",
+    "summary_surfaces_done": "Diseño y topografía cargados",
+    "summary_sections_one": "{{count}} sección definida",
+    "summary_sections_other": "{{count}} secciones definidas",
+    "summary_sections_none": "Sin secciones",
+    "summary_parameters": "Tolerancias y umbrales de detección",
+    "summary_process_ready": "Listo para procesar",
+    "summary_process_running": "Procesando…",
+    "summary_process_done": "Análisis completo",
+    "summary_process_blocked": "Complete los pasos anteriores",
+    "locked_hint": "Disponible al completar el paso anterior",
+    "status_empty": "Sin datos",
+    "status_surfaces": "Superficies cargadas",
+    "status_ready": "Listo para procesar",
+    "status_processing": "Procesando",
+    "status_complete": "Análisis completo",
+    "empty_mesh_title": "Comience cargando sus superficies",
+    "empty_mesh_desc": "Necesita la superficie de diseño y la topografía as-built (STL, OBJ o DXF) para comparar.",
+    "empty_mesh_cta": "Cargar superficies",
+    "empty_demo_cta": "Probar con datos demo",
+    "empty_sections_title": "Defina dónde cortar",
+    "empty_sections_desc": "Cree al menos una sección transversal sobre la superficie para extraer bancos y bermas.",
+    "empty_sections_cta": "Definir secciones",
+    "empty_process_title": "Todo listo para conciliar",
+    "empty_process_desc": "Las secciones están definidas. Ejecute el análisis para ver perfiles, cumplimiento y reportes.",
+    "empty_process_cta": "Ir a procesar",
+    "view_locked": "Requiere completar el flujo",
+    "views_nav": "Vistas de análisis",
+    "detail_table": "Tabla detallada de comparación",
+    "shortcut": "Atajo: {{key}}"
+  },
+  "profiles": {
+    "mode_grid": "Grilla",
+    "mode_detail": "Detalle"
   }
 }

@@ -21,9 +21,9 @@
   max-width: 18rem;
   width: max-content;
   pointer-events: none;
-  background-color: var(--color-text-primary, #111827);
-  color: var(--color-surface, #ffffff);
-  border: 1px solid var(--color-border, #e5e7eb);
+  background-color: var(--color-text-primary, #e6e9ee);
+  color: var(--color-surface, #07090c);
+  border: 1px solid var(--color-border, #1f262f);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
   opacity: 0;
   transform: scale(0.96);
@@ -109,7 +109,7 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ── Theme tokens — Mission Control / Dark by default ──────────
- * The new design uses a deep blue-black surface with neon
+ * The new design uses a deep near-black surface with neon
  * status colors. Inter for body, JetBrains Mono / ui-monospace
  * for technical content (coords, IDs, status codes). The
  * monospace stack uses system fonts to avoid the ~200KB web
@@ -131,44 +131,44 @@
   --color-hdev-overbreak-severe: #818cf8;
   --color-hdev-unmeasured: #94a3b8;
 
-  /* Surfaces — deep blue-black, matching GeotRadarSim style */
-  --color-surface: #111820;
-  --color-surface-raised: #19232d;
-  --color-surface-muted: #23313f;
-  --color-surface-sunken: #121c26;
+  /* Surfaces — deep dark, near-black with a faint cool tint */
+  --color-surface: #07090c;
+  --color-surface-raised: #0e1217;
+  --color-surface-muted: #161b22;
+  --color-surface-sunken: #050608;
 
   /* Borders — subtle, using low-opacity white for that HUD look */
-  --color-border: #2d3b49;
-  --color-border-strong: rgba(255, 255, 255, 0.12);
-  --color-border-dashed: rgba(255, 255, 255, 0.20);
+  --color-border: #1f262f;
+  --color-border-strong: rgba(255, 255, 255, 0.08);
+  --color-border-dashed: rgba(255, 255, 255, 0.14);
 
-  /* Text — off-white, matching Outfit family aesthetics */
-  --color-text-primary: #ebedf0;
-  --color-text-secondary: #bfccd9;
-  --color-text-muted: #9baaba;
-  --color-text-dim: #8494a6;
+  /* Text — off-white, every level meets WCAG AA on all dark surfaces */
+  --color-text-primary: #e6e9ee;
+  --color-text-secondary: #b3bcc8;
+  --color-text-muted: #8f9aa8;
+  --color-text-dim: #7d8896;
 
-  /* Accent — technical steel blue/cyan from GeotRadarSim */
-  --color-accent: #2878bd;
+  /* Accent — steel blue, dark enough for white text to meet AA */
+  --color-accent: #2c77c3;
   --color-accent-fg: #ffffff;
-  --color-accent-bright: #6cb8fa;
-  --color-accent-bg: rgba(77, 165, 245, 0.16);
-  --color-viewer-bg: #111111;
+  --color-accent-bright: #6db3f2;
+  --color-accent-bg: rgba(109, 179, 242, 0.12);
+  --color-viewer-bg: #05070a;
   --color-viewer-topo: #cccccc;
-  --color-viewer-grid: #334155;
-  --color-viewer-grid-minor: #1e293b;
+  --color-viewer-grid: #1c2430;
+  --color-viewer-grid-minor: #10161d;
 
   /* Status colors (semi-transparent bg + bright fg) */
-  --status-ok-bg: rgba(57, 171, 96, 0.10);
+  --status-ok-bg: rgba(57, 171, 96, 0.12);
   --status-ok-text: #39ab60;
   --status-ok-border: #39ab60;
-  --status-warn-bg: rgba(230, 143, 25, 0.10);
+  --status-warn-bg: rgba(230, 143, 25, 0.12);
   --status-warn-text: #e68f19;
   --status-warn-border: #e68f19;
-  --status-nok-bg: rgba(232, 49, 73, 0.10);
-  --status-nok-text: #e83149;
+  --status-nok-bg: rgba(232, 49, 73, 0.12);
+  --status-nok-text: #eb485d;
   --status-nok-border: #e83149;
-  --status-extra-bg: rgba(118, 147, 183, 0.10);
+  --status-extra-bg: rgba(118, 147, 183, 0.12);
   --status-extra-text: #92a9c7;
   --status-extra-border: #7693b7;
 
@@ -181,28 +181,40 @@
   --shadow-glow-ok: 0 0 16px rgba(57, 171, 96, 0.20);
   --shadow-glow-warn: 0 0 16px rgba(230, 143, 25, 0.20);
   --shadow-glow-nok: 0 0 16px rgba(232, 49, 73, 0.20);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.6);
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 }
 
-/* ── Light mode (legacy — opt-in via .light class) ───────────── */
+/* ── Light mode (opt-in via .light class) ──────────────────────
+ * Soft light: off-white grey surfaces (no pure white), slate text
+ * instead of near-black, and desaturated status badges.
+ * ──────────────────────────────────────────────────────────── */
 .light {
-  --color-surface: #f1f5f9;
-  --color-surface-raised: #ffffff;
-  --color-surface-muted: #e8eef5;
-  --color-surface-sunken: #f7f9fc;
-  --color-border: #d8e1ec;
-  --color-border-strong: #d1d5db;
-  --color-border-dashed: #9ca3af;
-  --color-text-primary: #111827;
-  --color-text-secondary: #4b5563;
-  --color-text-muted: #64748b;
-  --color-text-dim: #64748b;
-  --color-accent: #2563a6;
-  --color-accent-bright: #1d5b99;
-  --color-accent-bg: rgba(37, 99, 166, 0.08);
-  --color-viewer-bg: #edf2f7;
+  --color-surface: #eceef1;
+  --color-surface-raised: #f6f7f9;
+  --color-surface-muted: #e1e5ea;
+  --color-surface-sunken: #e4e7eb;
+  --color-border: #d3d9e0;
+  --color-border-strong: #c5ccd5;
+  --color-border-dashed: #a3adb9;
+  --color-text-primary: #1f2933;
+  --color-text-secondary: #46525f;
+  --color-text-muted: #5b6673;
+  --color-text-dim: #636e7b;
+  --color-accent: #2f6da8;
+  --color-accent-fg: #ffffff;
+  --color-accent-bright: #275d91;
+  --color-accent-bg: rgba(47, 109, 168, 0.10);
+  --color-viewer-bg: #e6e9ed;
   --color-viewer-topo: #75869a;
-  --color-viewer-grid: #cbd5e1;
-  --color-viewer-grid-minor: #dde5ee;
+  --color-viewer-grid: #cdd4dc;
+  --color-viewer-grid-minor: #dde2e8;
 
   --color-mine-blue: #2F5496;
   --color-mine-green: #0f766e;
@@ -217,21 +229,25 @@
   --color-hdev-overbreak-severe: #1e3a8a;
   --color-hdev-unmeasured: #64748b;
 
-  --status-ok-bg: #ecfdf5;
-  --status-ok-text: #065f46;
-  --status-ok-border: #a7f3d0;
-  --status-warn-bg: #fffbeb;
-  --status-warn-text: #92400e;
-  --status-warn-border: #fde68a;
-  --status-nok-bg: #fef2f2;
-  --status-nok-text: #991b1b;
-  --status-nok-border: #fecaca;
-  --status-missing-bg: #f9fafb;
+  --status-ok-bg: #e3f1e8;
+  --status-ok-text: #1d6b3f;
+  --status-ok-border: #b9dcc6;
+  --status-warn-bg: #f6ecd9;
+  --status-warn-text: #8a5a12;
+  --status-warn-border: #e6cf9f;
+  --status-nok-bg: #f5e1e1;
+  --status-nok-text: #9b2c2c;
+  --status-nok-border: #e5bcbc;
+  --status-missing-bg: #eef0f3;
   --status-missing-text: #4b5563;
-  --status-missing-border: #e5e7eb;
-  --status-extra-bg: #f5f3ff;
-  --status-extra-text: #4c1d95;
-  --status-extra-border: #ddd6fe;
+  --status-missing-border: #d6dbe1;
+  --status-extra-bg: #ebe8f3;
+  --status-extra-text: #4f3f80;
+  --status-extra-border: #d2cbe6;
+
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
 }
 
 /* ── Base styles ─────────────────────────────────────────────── */
@@ -276,19 +292,19 @@ body {
 
 /* ── Glassmorphism and Premium UI utilities ───────────────────── */
 .glass-card {
-  background-color: rgba(255, 255, 255, 0.7);
+  background-color: color-mix(in srgb, var(--color-surface-raised) 70%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(229, 231, 235, 0.6);
+  border: 1px solid var(--color-border);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dark .glass-card {
-  background-color: rgba(23, 23, 23, 0.7);
+  background-color: color-mix(in srgb, var(--color-surface-raised) 70%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(64, 64, 64, 0.4);
+  border: 1px solid var(--color-border);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.35);
 }
 
@@ -304,14 +320,14 @@ body {
 }
 
 .glass-panel {
-  background-color: rgba(255, 255, 255, 0.85);
+  background-color: color-mix(in srgb, var(--color-surface-raised) 85%, transparent);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--color-border);
 }
 
 .dark .glass-panel {
-  background-color: rgba(15, 15, 15, 0.75);
+  background-color: color-mix(in srgb, var(--color-surface-raised) 75%, transparent);
   border-color: var(--color-border);
 }
 
@@ -351,9 +367,6 @@ body {
 @media (max-height: 1000px) {
   .project-sidebar [data-slot="project-heading"] {
     padding-block: 10px;
-  }
-  .project-sidebar [aria-controls^="project-panel-"] {
-    padding-block: 8px;
   }
   .project-sidebar [data-slot="views-toolbar"] {
     display: grid;
@@ -395,28 +408,11 @@ body {
 }
 
 @media (max-height: 1000px) {
-  .project-sidebar [id^="project-panel-"] > div {
-    padding: 4px 8px;
-  }
-  .project-sidebar [id^="project-panel-"] > div > * {
-    margin-block-end: 0;
-  }
-  .project-sidebar [id^="project-panel-"] > div > * + * {
-    margin-block-start: 4px;
-  }
-  .project-sidebar [id^="project-panel-"] > div > .grid > button {
-    height: 28px;
-  }
   .project-sidebar [data-slot="project-controls"] {
     gap: 4px;
   }
   .project-sidebar [data-slot="project-controls"] button {
     min-height: 32px;
-    padding-block: 2px;
-  }
-  .project-sidebar button[aria-controls^="project-panel-"] {
-    height: 28px;
-    min-height: 28px;
     padding-block: 2px;
   }
   .project-sidebar [data-slot="section-curve-form"] > * {
@@ -442,4 +438,52 @@ body {
 }
 .project-sidebar [data-slot="section-curve-form"] > .flex.items-center.gap-2 > button {
   padding-inline: 6px;
+}
+
+.ui-card {
+  background-color: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.ui-section-title {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  text-transform: none;
+}
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+}
+.ui-chip[data-tone="ok"] {
+  background-color: var(--status-ok-bg);
+  color: var(--status-ok-text);
+  border-color: var(--status-ok-border);
+}
+.ui-chip[data-tone="warn"] {
+  background-color: var(--status-warn-bg);
+  color: var(--status-warn-text);
+  border-color: var(--status-warn-border);
+}
+.ui-chip[data-tone="nok"] {
+  background-color: var(--status-nok-bg);
+  color: var(--status-nok-text);
+  border-color: var(--status-nok-border);
+}
+.ui-chip[data-tone="accent"] {
+  background-color: var(--color-accent-bg);
+  color: var(--color-accent-bright);
+  border-color: var(--color-accent);
 }

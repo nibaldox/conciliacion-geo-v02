@@ -5,7 +5,7 @@ import type { ComparisonResult, SectionResponse } from '../../api/types';
 import { useSession } from '../../stores/session';
 import type { BenchStatus } from './ProfileView/domain/types';
 import { Spinner } from '../ui/Spinner';
-import { Button } from '../ui/Button';
+import { InfoTip, SegmentedControl, StatusDot, SummaryPanel } from './SummaryControls';
 import { createPlanProjection, createSurfaceRaster, projectPlanPoint, sectionPlanPoints, planBounds, type Projection } from './planGeometry';
 
 export { createPlanProjection, projectPlanPoint } from './planGeometry';
@@ -49,17 +49,25 @@ export function CompliancePlanView({ results, statuses }: { results: readonly Co
   }
   const loading = isLoading || profiles.some((profile) => profile.isLoading);
   return (
-    <section data-slot="compliance-plan-view" data-extent={projection ? `${projection.xMin},${projection.yMin},${projection.xMax},${projection.yMax}` : undefined} className="rounded-xl border border-border bg-surface-raised p-5 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">{t('plan_view.title')}</h3>
-        <div className="flex gap-1">
-          <Button size="sm" variant={fullSurface ? 'secondary' : 'primary'} aria-pressed={!fullSurface} onClick={() => setFullSurface(false)}>{t('plan_view.evaluated_area')}</Button>
-          <Button size="sm" variant={fullSurface ? 'primary' : 'secondary'} aria-pressed={fullSurface} onClick={() => setFullSurface(true)}>{t('plan_view.full_surface')}</Button>
-        </div>
-      </div>
-      <p className="text-xs text-text-muted">{t('plan_view.description')}</p>
-      {loading ? <Spinner /> : error || !projection || !raster || !lines.length ? <p className="text-sm text-text-muted">{t('plan_view.unavailable')}</p> : (
-        <svg viewBox="0 0 1000 600" role="img" aria-label={t('plan_view.title')} className="w-full rounded-lg bg-surface-sunken" style={{ maxHeight: 620 }}>
+    <SummaryPanel
+      slot="compliance-plan-view"
+      data-extent={projection ? `${projection.xMin},${projection.yMin},${projection.xMax},${projection.yMax}` : undefined}
+      title={t('plan_view.title')}
+      info={<InfoTip label={t('dashboard.kpi.how_calculated', { defaultValue: '¿Cómo se calcula?' })}>{t('plan_view.description')}</InfoTip>}
+      actions={(
+        <SegmentedControl
+          label={t('plan_view.title')}
+          options={[
+            { value: 'evaluated', label: t('plan_view.evaluated_area') },
+            { value: 'full', label: t('plan_view.full_surface') },
+          ]}
+          value={fullSurface ? 'full' : 'evaluated'}
+          onChange={(value) => setFullSurface(value === 'full')}
+        />
+      )}
+    >
+      {loading ? <div className="flex aspect-[5/3] items-center justify-center"><Spinner /></div> : error || !projection || !raster || !lines.length ? <p className="flex aspect-[5/3] items-center justify-center text-sm text-text-muted">{t('plan_view.unavailable')}</p> : (
+        <svg viewBox="0 0 1000 600" role="img" aria-label={t('plan_view.title')} className="w-full rounded-md bg-surface-sunken" style={{ maxHeight: 620 }}>
           <image href={raster} width="1000" height="600" />
           {Array.from({ length: 5 }, (_, index) => {
             const x = projection.xMin + (projection.xMax - projection.xMin) * index / 4;
@@ -76,12 +84,12 @@ export function CompliancePlanView({ results, statuses }: { results: readonly Co
           {lines.map(({ section, points }) => <PlanSection key={section.id} section={section} points={points} projection={projection} status={statuses.get(section.name)} labelPosition={labelPositions.get(section.id)!} />)}
         </svg>
       )}
-      <div className="flex flex-wrap gap-4 text-xs">
-        <span style={{ color: 'var(--status-ok-text)' }}>● {t('plan_view.passing')}</span>
-        <span style={{ color: 'var(--status-warn-text)' }}>● {t('plan_view.outside')}</span>
-        <span style={{ color: 'var(--status-nok-text)' }}>● {t('plan_view.failing')}</span>
-        <span className="text-text-muted">● {t('plan_view.no_score')}</span>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
+        <span className="flex items-center gap-1.5"><StatusDot tone="ok" />{t('plan_view.passing')}</span>
+        <span className="flex items-center gap-1.5"><StatusDot tone="warn" />{t('plan_view.outside')}</span>
+        <span className="flex items-center gap-1.5"><StatusDot tone="nok" />{t('plan_view.failing')}</span>
+        <span className="flex items-center gap-1.5"><StatusDot tone="muted" />{t('plan_view.no_score')}</span>
       </div>
-    </section>
+    </SummaryPanel>
   );
 }

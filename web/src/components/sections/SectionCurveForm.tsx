@@ -269,7 +269,7 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
       {!parametersValid && (
         <p id="curve-params-error" className="text-xs text-mine-red">{t('project_input.curve_params_invalid')}</p>
       )}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" fullWidth className="min-h-8 flex-1" disabled={!isReady || !parametersValid || mutation.isPending} loading={mutation.isPending} onClick={handleGenerate}>
           {t(mutation.isPending ? 'project_input.generating' : 'project_input.generate')}
         </Button>

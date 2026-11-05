@@ -33,7 +33,7 @@ function resolveTokens(): {
     // Mission Control aesthetic that's the default in :root).
     return {
       bg: 'transparent',
-      surface: '#0a0e14',
+      surface: '#07090c',
       textPrimary: '#f5f5f5',
       textMuted: '#6b7280',
       gridLine: 'rgba(255,255,255,0.08)',
@@ -48,7 +48,7 @@ function resolveTokens(): {
     cs.getPropertyValue(name).trim() || fallback;
   return {
     bg: 'transparent',
-    surface: read('--color-surface', '#0a0e14'),
+    surface: read('--color-surface', '#07090c'),
     textPrimary: read('--color-text-primary', '#f5f5f5'),
     textMuted: read('--color-text-muted', '#6b7280'),
     gridLine: read('--color-border', 'rgba(255,255,255,0.08)'),

@@ -1,30 +1,11 @@
-/**
- * BenchTable — sortable table of benches for the current section.
- *
- * Each row = one bench. Columns: #, Elev, Height, Angle, Berm, Floor, Score.
- *
- * Cross-link:
- *  - Hover a row → crossLink.setHovered(benchNumber)
- *  - Click a row → crossLink.setSelected(benchNumber) + scroll into view
- *  - The ProfileChart (from Parada 2) reads crossLink.hovered/.selected
- *    and grows the matching bench marker.
- *
- * Sort: click a column header to cycle asc → desc → none. Default is
- * benchNumber asc. Implementation reuses the useSortedBenches hook
- * from the application layer.
- *
- * Visual: sticky header, subtle row borders, right-aligned tabular
- * numbers, status dot beside the bench number.
- */
-
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Bench, ComparisonBenchStatus } from '../domain/types';
+import type { Bench, BenchStatus, ComparisonBenchStatus } from '../domain/types';
 import type { SortField, SortDirection } from '../domain/sorting';
 import { cycleSort, SORT_FIELDS } from '../domain/sorting';
+import { BENCH_PASSING_SCORE, STATUS_FG_VAR } from '../domain/status';
 import { type UseCrossLinkStateApi, useSortedBenches } from '../application';
 import { StatusDot } from './atoms/StatusDot';
-import { getStatusClass } from '../../../../utils/format';
 
 type TableSortField = Exclude<SortField, 'status'>;
 
@@ -37,12 +18,8 @@ export interface BenchTableProps {
   readonly crossLink: UseCrossLinkStateApi;
   readonly selectedDesignBenchNumbers?: readonly number[];
   readonly comparisonBenchStatuses?: readonly ComparisonBenchStatus[];
-  /** Initial sort (defaults to benchNumber asc). */
   readonly initialField?: TableSortField;
   readonly initialDirection?: SortDirection;
-  /** When the chart emits a click on a bench marker, the parent
-   *  should call this with the bench number so the row scrolls
-   *  into view. We accept it as a ref-like prop. */
   readonly scrollToBenchNumber?: number | null;
 }
 
@@ -73,6 +50,18 @@ const COLUMN_ALIGN: Record<TableSortField, 'left' | 'right'> = {
   bermWidth: 'right',
 };
 
+const HEADER_CLASS = 'sticky top-0 z-[1] whitespace-nowrap border-b border-border bg-surface-raised px-3 py-2 text-xs font-normal';
+const CELL_CLASS = 'px-3 py-1.5 text-right tabular-nums';
+
+function StatusValue({ status, children }: { status: BenchStatus | null; children: ReactNode }) {
+  if (status === null) return <span className="text-text-muted">{children}</span>;
+  return (
+    <span data-value-status={status} className="font-medium" style={{ color: status === 'UNKNOWN' ? undefined : STATUS_FG_VAR[status] }}>
+      {children}
+    </span>
+  );
+}
+
 export function BenchTable({
   benches,
   crossLink,
@@ -86,20 +75,12 @@ export function BenchTable({
   const [sort, setSort] = useState<SortState>({ field: initialField, direction: initialDirection });
   const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
 
-  // Apply sort. We use the hook (memoised) and feed it the live
-  // sort state via the comparator factory.
   const visibleBenches = selectedDesignBenchNumbers.length === 0
     ? benches
     : benches.filter((bench) => bench.designBenchNumber != null && selectedDesignBenchNumbers.includes(bench.designBenchNumber));
-  const sorted = useSortedBenches(
-    visibleBenches,
-    sort.field,
-    sort.direction,
-  );
+  const sorted = useSortedBenches(visibleBenches, sort.field, sort.direction);
   const missingDesignBenches = comparisonBenchStatuses.filter((bench) => !bench.hasTopo && !bench.isAdditional);
 
-  // Scroll a specific row into view when the chart's crossLink
-  // selects a bench.
   useEffect(() => {
     if (scrollToBenchNumber == null) return;
     const row = rowRefs.current.get(scrollToBenchNumber);
@@ -117,13 +98,9 @@ export function BenchTable({
     });
   }, []);
 
-  const headerCell = (field: TableSortField, customLabel?: string) => {
+  const headerCell = (field: TableSortField) => {
     const isActive = sort.field === field;
-    const next = isActive
-      ? sort.direction === 'asc'
-        ? '↓'
-        : '↑'
-      : '↕';
+    const next = isActive ? (sort.direction === 'asc' ? '↓' : '↑') : '↕';
     const ariaSort: 'ascending' | 'descending' | 'none' = isActive
       ? sort.direction === 'asc' ? 'ascending' : 'descending'
       : 'none';
@@ -133,15 +110,11 @@ export function BenchTable({
         scope="col"
         aria-sort={ariaSort}
         className={[
-          'sticky top-0 px-3 py-2 text-xs whitespace-nowrap font-semibold',
-          'select-none cursor-pointer hover:opacity-80',
+          HEADER_CLASS,
+          'cursor-pointer select-none hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+          isActive ? 'text-text-primary' : 'text-text-muted',
           COLUMN_ALIGN[field] === 'right' ? 'text-right' : 'text-left',
         ].join(' ')}
-        style={{
-          backgroundColor: 'var(--color-surface-muted)',
-          color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-          borderBottom: '1px solid var(--color-border)',
-        }}
         onClick={() => handleHeaderClick(field)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -152,18 +125,15 @@ export function BenchTable({
         tabIndex={0}
         data-testid={`sort-header-${field}`}
       >
-        {customLabel ?? t('profileView.table.columns.' + field, { defaultValue: COLUMN_LABELS[field] })} <span className="opacity-50">{next}</span>
+        {t('profileView.table.columns.' + field, { defaultValue: COLUMN_LABELS[field] })}{' '}
+        <span className={isActive ? 'opacity-70' : 'opacity-30'} aria-hidden="true">{next}</span>
       </th>
     );
   };
 
   if (visibleBenches.length === 0) {
     return (
-      <div
-        data-slot="bench-table"
-        className="px-4 py-8 text-center text-sm"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
+      <div data-slot="bench-table" className="px-4 py-8 text-center text-sm text-text-muted">
         {missingDesignBenches.length
           ? t('profileView.table.missing_design', {
               defaultValue: 'Cota base de diseño {{elevation}} m: sin banco topográfico emparejado.',
@@ -175,12 +145,10 @@ export function BenchTable({
   }
 
   return (
-    <div
-      data-slot="bench-table"
-      className="overflow-auto max-h-[440px]"
-    >
+    <div data-slot="bench-table" className="max-h-[440px] overflow-auto">
       {missingDesignBenches.length > 0 && (
-        <p role="status" className="border-b border-border px-4 py-2 text-xs text-status-warn-text">
+        <p role="status" className="flex items-center gap-2 border-b border-border px-4 py-1.5 text-xs text-text-secondary">
+          <span aria-hidden="true" className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: 'var(--status-warn-text)' }} />
           {t('profileView.table.missing_design_many', {
             defaultValue: 'Sin banco topográfico emparejado para cotas de diseño: {{elevations}} m.',
             elevations: missingDesignBenches.map((bench) => bench.designElevation?.toFixed(0) ?? '—').join(', '),
@@ -191,8 +159,8 @@ export function BenchTable({
         <thead>
           <tr>
             {TABLE_SORT_FIELDS.map((f) => headerCell(f))}
-            <th scope="col" className="sticky top-0 px-3 py-2 text-xs whitespace-nowrap font-semibold text-right" style={{ backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)' }}>{t('profileView.table.columns.floor')}</th>
-            <th scope="col" className="sticky top-0 px-3 py-2 text-xs whitespace-nowrap font-semibold text-center" style={{ backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)' }}>{t('profileView.table.columns.score')}</th>
+            <th scope="col" className={`${HEADER_CLASS} text-right text-text-muted`}>{t('profileView.table.columns.floor')}</th>
+            <th scope="col" className={`${HEADER_CLASS} text-right text-text-muted`}>{t('profileView.table.columns.score')}</th>
           </tr>
         </thead>
         <tbody>
@@ -200,8 +168,8 @@ export function BenchTable({
             const isHovered = crossLink.hovered === b.benchNumber;
             const isSelected = crossLink.selected === b.benchNumber;
             const rowClass = [
-              'cursor-pointer transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-              isSelected ? 'bg-accent-bg' : isHovered ? 'bg-[var(--color-surface-muted)]' : '',
+              'cursor-pointer border-t border-border transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+              isSelected ? 'bg-accent-bg' : isHovered ? 'bg-surface-muted' : '',
             ].join(' ');
             return (
               <tr
@@ -211,7 +179,6 @@ export function BenchTable({
                   else rowRefs.current.delete(b.benchNumber);
                 }}
                 className={rowClass}
-                style={{ borderTop: '1px solid var(--color-border)' }}
                 onMouseEnter={() => crossLink.setHovered(b.benchNumber)}
                 onMouseLeave={() => crossLink.setHovered(null)}
                 onClick={() => crossLink.setSelected(b.benchNumber)}
@@ -223,7 +190,7 @@ export function BenchTable({
                 data-hovered={isHovered || undefined}
                 data-selected={isSelected || undefined}
               >
-                <td className="px-3 py-2 text-left">
+                <td className="px-3 py-1.5 text-left">
                   <span className="inline-flex items-center gap-2">
                     <StatusDot status={b.status} title={b.status} />
                     <span className="tabular-nums font-medium">{b.matchType === 'EXTRA'
@@ -231,36 +198,22 @@ export function BenchTable({
                       : b.benchNumber}</span>
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{b.crestElevation.toFixed(1)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{b.designHeight === null ? '—' : b.designHeight.toFixed(1)}</td>
-                <td className="px-3 py-2 text-right">
-                  <span className={`inline-block px-1.5 py-0.5 rounded tabular-nums text-sm font-semibold ${getStatusClass(b.heightStatus)}`}>
-                    {b.height.toFixed(1)}
-                  </span>
+                <td className={CELL_CLASS}>{b.crestElevation.toFixed(1)}</td>
+                <td className={`${CELL_CLASS} text-text-muted`}>{b.designHeight === null ? '—' : b.designHeight.toFixed(1)}</td>
+                <td className={CELL_CLASS}><StatusValue status={b.heightStatus}>{b.height.toFixed(1)}</StatusValue></td>
+                <td className={`${CELL_CLASS} text-text-muted`}>{b.designAngle === null ? '—' : b.designAngle.toFixed(0)}°</td>
+                <td className={CELL_CLASS}><StatusValue status={b.angleStatus}>{b.faceAngle.toFixed(0)}°</StatusValue></td>
+                <td className={`${CELL_CLASS} text-text-muted`}>{b.designBerm === null ? '—' : b.designBerm.toFixed(1)}</td>
+                <td className={CELL_CLASS}>
+                  {b.bermWidth === null
+                    ? <StatusValue status={null}>—</StatusValue>
+                    : <StatusValue status={b.bermStatus}>{b.bermWidth.toFixed(1)}</StatusValue>}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{b.designAngle === null ? '—' : b.designAngle.toFixed(0)}°</td>
-                <td className="px-3 py-2 text-right">
-                  <span className={`inline-block px-1.5 py-0.5 rounded tabular-nums text-sm font-semibold ${getStatusClass(b.angleStatus)}`}>
-                    {b.faceAngle.toFixed(0)}°
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {b.designBerm === null ? '—' : b.designBerm.toFixed(1)}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <span className={`inline-block px-1.5 py-0.5 rounded tabular-nums text-sm font-semibold ${b.bermWidth === null ? '' : getStatusClass(b.bermStatus)}`}>
-                    {b.bermWidth === null ? '—' : b.bermWidth.toFixed(1)}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">
-                  {b.floorElevation != null ? b.floorElevation.toFixed(1) : '—'}
-                </td>
-                <td className="px-3 py-2 text-center">
-                  {b.benchScore != null ? (
-                    <span className={`inline-block px-1.5 py-0.5 rounded tabular-nums text-sm font-semibold ${b.benchScore >= 70 ? 'badge-ok' : 'badge-nok'}`}>
-                      {b.benchScore.toFixed(0)}
-                    </span>
-                  ) : '—'}
+                <td className={CELL_CLASS}>{b.floorElevation != null ? b.floorElevation.toFixed(1) : '—'}</td>
+                <td className={CELL_CLASS}>
+                  {b.benchScore != null
+                    ? <StatusValue status={b.benchScore >= BENCH_PASSING_SCORE ? 'CUMPLE' : 'NO_CUMPLE'}>{b.benchScore.toFixed(0)}</StatusValue>
+                    : '—'}
                 </td>
               </tr>
             );

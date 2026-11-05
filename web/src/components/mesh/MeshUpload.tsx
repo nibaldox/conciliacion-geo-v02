@@ -41,7 +41,6 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
   const { t } = useTranslation();
 
   const label = type === 'design' ? t('step1.design') : t('step1.topo');
-  const borderColor = type === 'design' ? 'blue' : 'green';
 
   const getApiError = useCallback((error: unknown) => {
     if (typeof error === 'object' && error !== null && 'response' in error) {
@@ -183,13 +182,13 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
           </div>
         ) : meshId && meshInfo ? (
           <div className="rounded-lg border border-border bg-surface px-3 py-2">
-            <div className="flex min-w-0 items-center gap-2"><IconMesh className="h-4 w-4 shrink-0 text-mine-green" /><p className="text-sm font-medium">{label}</p></div>
+            <div className="flex min-w-0 items-center gap-2"><span aria-hidden="true" className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--status-ok-text)]" /><p className="text-sm font-medium">{label}</p></div>
             <p className="mt-1 truncate text-xs text-text-secondary" title={meshInfo.filename}>{meshInfo.filename}</p>
             {(dxfImportResult ?? meshInfo.import_report) && <DxfImportSummary report={(dxfImportResult ?? meshInfo.import_report)!} />}
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
               <span className="text-text-muted" title={t('step1.mesh_counts', { vertices: meshInfo.n_vertices, faces: meshInfo.n_faces })}>△ {meshInfo.n_vertices.toLocaleString()} · ◻ {meshInfo.n_faces.toLocaleString()}</span>
               <button type="button" className="text-accent-bright hover:underline" onClick={() => fileInputRef.current?.click()}>{t('step1.replace')}</button>
-              <button type="button" className="text-mine-red hover:underline disabled:opacity-50" onClick={handleRemove} disabled={removeMesh.isPending}>{removeMesh.isPending ? t('step1.removing') : t('common.delete')}</button>
+              <button type="button" className="text-text-muted hover:text-[var(--status-nok-text)] hover:underline disabled:opacity-50" onClick={handleRemove} disabled={removeMesh.isPending}>{removeMesh.isPending ? t('step1.removing') : t('common.delete')}</button>
             </div>
           </div>
         ) : (
@@ -217,18 +216,17 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
     return (
       <><div
         data-slot="mesh-upload-zone"
-        className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-4 transition-colors min-h-[160px]"
-        style={{ borderColor: 'var(--color-border)' }}
+        role="status"
+        className="flex min-h-[160px] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border-dashed p-4"
       >
         {dxfStatus}
-        <div className="animate-spin text-3xl mb-3" style={{ color: 'var(--color-mine-blue)' }}>⏳</div>
-        <p className="text-sm font-medium">{t('step1.uploading', { label })}</p>
-        <p className="text-xs mt-1 opacity-70">
+        <Spinner size="md" />
+        <p className="text-sm font-medium text-text-primary">{t('step1.uploading', { label })}</p>
+        <p className="max-w-full truncate font-mono text-xs text-text-muted">
           {upload.variables?.file.name ?? ''}
         </p>
-        {/* Simple indeterminate progress bar */}
-        <div className="w-full max-w-[200px] h-1.5 rounded-full mt-4 overflow-hidden" style={{ backgroundColor: 'var(--color-surface-muted)' }}>
-          <div className="h-full rounded-full animate-pulse w-2/3" style={{ backgroundColor: 'var(--color-mine-blue)' }} />
+        <div className="h-1 w-full max-w-[200px] overflow-hidden rounded-full bg-surface-muted">
+          <div className="h-full w-2/3 animate-pulse rounded-full bg-accent" />
         </div>
       </div>{dxfDialog}</>
     );
@@ -239,23 +237,20 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
     return (
       <><div
         data-slot="mesh-upload-zone"
-        className="flex flex-col items-center justify-center rounded-xl border-2 border-solid p-4 min-h-[160px]"
-        style={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-mine-green)' }}
+        className="flex min-h-[160px] flex-col items-center justify-center rounded-lg border border-border p-4"
       >
         {dxfStatus}
-        {/* Green check */}
         <ErrorBanner message={uploadError} onDismiss={() => setUploadError(null)} />
-        <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3" style={{ backgroundColor: 'var(--status-ok-bg)' }}>
-          <span className="text-lg font-bold" style={{ color: 'var(--status-ok-text)' }}>&#10003;</span>
-        </div>
-        <p className="text-sm font-semibold" style={{ color: 'var(--color-text-primary)' }}>{label}</p>
-        <p className="text-xs mt-1 truncate max-w-[180px]" style={{ color: 'var(--color-text-muted)' }} title={meshInfo.filename}>
+        <p className="flex items-center gap-2 text-sm font-semibold text-text-primary">
+          <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-[var(--status-ok-text)]" />
+          {label}
+        </p>
+        <p className="mt-1 max-w-[180px] truncate font-mono text-xs text-text-muted" title={meshInfo.filename}>
           {meshInfo.filename}
         </p>
         {(dxfImportResult ?? meshInfo.import_report) && <DxfImportSummary report={(dxfImportResult ?? meshInfo.import_report)!} />}
 
-        {/* Stats */}
-        <div className="flex gap-4 mt-3 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+        <div className="mt-3 flex gap-4 text-xs tabular-nums text-text-muted">
           <span title="Vértices">
             △ {meshInfo.n_vertices.toLocaleString()}
           </span>
@@ -270,20 +265,19 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
           )}
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-3 mt-4">
+        <div className="mt-4 flex gap-3">
           <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="text-xs underline underline-offset-2 focus-visible:outline-none rounded px-2 py-0.5"
-            style={{ color: 'var(--color-mine-blue)' }}
+            className="rounded px-2 py-0.5 text-xs text-accent-bright hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             {t('step1.replace')}
           </button>
           <button
+            type="button"
             onClick={handleRemove}
             disabled={removeMesh.isPending}
-            className="text-xs underline underline-offset-2 focus-visible:outline-none rounded px-2 py-0.5 disabled:opacity-50"
-            style={{ color: 'var(--color-mine-red)' }}
+            className="rounded px-2 py-0.5 text-xs text-text-muted hover:text-[var(--status-nok-text)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50"
           >
             {removeMesh.isPending ? t('step1.removing') : t('common.delete')}
           </button>
@@ -320,22 +314,16 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click();
         }}
-        className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-4 cursor-pointer transition-all min-h-[160px] focus-visible:outline-none"
-        style={isDragging
-          ? { borderColor: 'var(--color-mine-blue)', backgroundColor: 'var(--color-surface-muted)' }
-          : { borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }
-        }
+        className={`flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${isDragging ? 'border-accent bg-accent-bg' : 'border-border-dashed hover:bg-surface-muted'}`}
       >
-      <div className="text-4xl mb-3" style={{ color: borderColor === 'blue' ? 'var(--color-mine-blue)' : 'var(--color-mine-green)' }}>
-        {type === 'design' ? t('step1.design_icon') : t('step1.topo_icon')}
-      </div>
-      <p className="font-medium" style={{ color: isDragging ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
+      <IconMesh aria-hidden="true" className={`mb-2 h-6 w-6 ${type === 'design' ? 'text-mine-blue' : 'text-mine-green'}`} />
+      <p className={`text-sm font-medium ${isDragging ? 'text-text-primary' : 'text-text-secondary'}`}>
         {label}
       </p>
-      <p className="text-xs mt-1" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-xs text-text-muted">
         {t('step1.drop_hint')}
       </p>
-      <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="font-mono text-[11px] text-text-dim">
         {t('step1.file_types')}
       </p>
       <input
