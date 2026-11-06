@@ -28,7 +28,7 @@ streamlit run app.py                                       # legacy UI (do NOT m
 bash dev.sh                                                # API + web in one shell
 
 cd web && npm ci && npm run dev                            # frontend dev :5173
-cd web && npx tsc --noEmit                                 # typecheck
+cd web && npx tsc -b                                       # typecheck (tsc --noEmit en tsconfig raíz no revisa nada)
 cd web && npm run build                                    # tsc + vite build (PWA on)
 VITE_PWA=false npm run build                               # build without service worker (electron bundle) — set env BEFORE the command
 cd web && npm run test                                     # vitest (100% domain coverage required on src/components/results/ProfileView/domain)
@@ -110,7 +110,7 @@ Mounted under `/api/v1/*`. Session via `X-Session-ID` header (auto-generated if 
 
 **`ci.yml`** — on push to main/develop or PR to main — 4 jobs:
 1. **Backend tests**: Python 3.12, `libspatialindex-dev` system dep, `python -m pytest tests/ -v --tb=short --ignore=tests/test_openblast.py` (openblast tests never run in CI) + `python test_pipeline.py`
-2. **Frontend build**: Node 20, `npm ci` → `npx tsc --noEmit` → `npm run build`
+2. **Frontend build**: Node 20, `npm ci` → `npx tsc -b` → `npm run build`
 3. **Docker build** (main only, `needs: [backend-tests, frontend-build]` — sequential, not parallel): builds `Dockerfile-api` + `Dockerfile-web`
 4. **Docker Compose smoke test**: `docker compose up -d`, polls container `conciliacion-geo-v02-api-1` health up to ~60s for `healthy`, then curls `http://localhost:8000/api/v1/health`
 
