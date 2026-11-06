@@ -45,6 +45,8 @@ jobs:
       - name: Install Python deps
         run: |
           pip install -r requirements-api.txt
+          # mesh_handler imports plotly at module load; API requirements omit UI dependencies.
+          pip install plotly
           pip install pyinstaller
 
       - name: Build React

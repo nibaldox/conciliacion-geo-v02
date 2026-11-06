@@ -14,7 +14,7 @@ Stabilization unit C guards (see ``docs/WEB_STABILIZATION.md``):
   ``_MAX_UPLOAD_BYTES``) reflect ``CONCILIACION_MAX_UPLOAD_MB`` in a fresh
   interpreter, with sane-range validation and a 500 MiB default preserved.
 * ``ci.yml`` runs the real TS project typecheck, vitest with coverage over
-  the complete suite — fullstack files included, with Python 3.12 + uv +
+  the complete suite — fullstack files included, with Python 3.14 + uv +
   ``uv.lock`` extras provisioned in the same job — and keeps the build.
 
 The YAML files under test are only inspected through their ``KEY: value``
@@ -225,9 +225,17 @@ def _ci_job_block(job: str) -> str:
 
 
 class TestCiGate:
+    def test_portable_sidecar_installs_plotly_without_streamlit(self):
+        workflow = _read(".github/workflows/build-portable.yml")
+        install_step = workflow.split("- name: Install Python deps", 1)[1].split("- name:", 1)[0]
+        assert re.search(r"(?m)^\s*pip install plotly\s*$", install_step), (
+            "the portable sidecar requires plotly for the mesh_handler import"
+        )
+        assert "streamlit" not in install_step.lower()
+
     def test_ci_runs_real_typecheck_tests_with_coverage_and_build(self):
         ci = _read(".github/workflows/ci.yml")
-        assert re.search(r'node-version:\s*"?22"?', ci), "CI frontend job must stay on Node 22"
+        assert re.search(r'node-version:\s*"?24"?', ci), "CI frontend job must stay on Node 24"
         assert "npx tsc -b" in ci, (
             "CI must run the referenced-project typecheck (tsc -b); plain `tsc --noEmit` "
             "on the solution tsconfig checks nothing"
@@ -261,8 +269,8 @@ class TestCiGate:
 
     def test_ci_frontend_job_provisions_python_uv_and_locked_deps(self):
         block = _ci_job_block("frontend-build")
-        assert re.search(r'python-version:\s*"3\.12"', block), (
-            "the frontend job must provision Python 3.12 for the uv harness"
+        assert re.search(r'python-version:\s*"3\.14"', block), (
+            "the frontend job must provision Python 3.14 for the uv harness"
         )
         assert re.search(r"uses:\s*astral-sh/setup-uv@", block), (
             "the frontend job must install uv (GitHub runners do not ship it)"
@@ -280,7 +288,7 @@ class TestCiGate:
         assert "--extra test" in command, (
             f"provisioning must install the real [test] extra that backs the harness; got {command!r}"
         )
-        assert "--python 3.12" in command, f"provisioning must pin Python 3.12; got {command!r}"
+        assert "--python 3.14" in command, f"provisioning must pin Python 3.14; got {command!r}"
         assert (REPO_ROOT / "uv.lock").is_file(), (
             "uv.lock must be committed: CI provisions from the locked manifest"
         )
@@ -308,7 +316,7 @@ class TestCiGate:
         assert "--exclude" not in doc, "the stabilization doc must not keep the removed exclusion"
         assert "uv.lock" in doc, "the doc must describe lockfile-driven provisioning"
         assert "UV_NO_SYNC" in doc, "the doc must document the sync-freeze prerequisite"
-        assert "3.12" in doc, "the doc must document the pinned Python 3.12 prerequisite"
+        assert "3.14" in doc, "the doc must document the pinned Python 3.14 prerequisite"
 
     def test_deploy_workflow_typecheck_is_real(self):
         deploy = _read(".github/workflows/deploy-frontend.yml")

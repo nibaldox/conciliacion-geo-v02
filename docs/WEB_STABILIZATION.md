@@ -36,13 +36,13 @@ Documento operativo de la unidad C del plan de estabilización web (7 de octubre
 
 El staging de solicitudes, las cachés en memoria y los trabajos de fondo, junto con el SQLite local, son **por proceso**. Con más de un worker, sesiones y cachés se reparten entre procesos y el SQLite compite por el mismo archivo. Por eso `render.yaml` fija `CONCILIACION_WORKERS: "1"` de forma explícita (la errata anterior dejaba el valor `2` en una variable muerta). Subir solo tras migrar esos almacenes a backends compartidos.
 
-## 4. Gate de CI (`ci.yml`, job `frontend-build`, Node 22)
+## 4. Gate de CI (`ci.yml`, job `frontend-build`, Node 24)
 
 Pasos del gate: `npm ci` → `npx tsc -b` → `npm run lint` → `npm run test:coverage` (suite completa, sin exclusiones ni skips) → `npm run build`.
 
 - **Typecheck real**: `tsc -b` comprueba los proyectos referenciados (`tsconfig.app.json` + `tsconfig.node.json`). El anterior `npx tsc --noEmit` sobre el tsconfig de referencias no comprobaba ningún archivo (salía en verde sin analizar el código). Lo mismo aplica al step equivalente de `deploy-frontend.yml`.
 - **Cobertura**: `npm run test:coverage` ejecuta vitest con umbral 100% en `web/src/components/results/ProfileView/domain/**` (configurado en `web/vite.config.ts`).
-- **Prerrequisitos completos en el mismo job** (los jobs de CI no comparten entorno): `actions/setup-python@v5` fija Python 3.12; `astral-sh/setup-uv@v10.2.0` (versión verificada upstream) instala `uv`; `uv sync --locked --extra test --python 3.12` crea el entorno desde `pyproject.toml` + `uv.lock` (`--locked` falla si el lock queda obsoleto) con el extra real `test` que respalda al harness. El job `backend-tests` provisiona lo suyo por pip (`requirements-api.txt` + `.[test]`).
+- **Prerrequisitos completos en el mismo job** (los jobs de CI no comparten entorno): `actions/setup-python@v5` fija Python 3.14; `astral-sh/setup-uv@v10.2.0` (versión verificada upstream) instala `uv`; `uv sync --locked --extra test --python 3.14` crea el entorno desde `pyproject.toml` + `uv.lock` (`--locked` falla si el lock queda obsoleto) con el extra real `test` que respalda al harness. El job `backend-tests` provisiona lo suyo por pip (`requirements-api.txt` + `.[test]`).
 - **Sync congelado en el step de pruebas**: `web/tests/support/integrationHarness.ts` lanza `uv run python` (caché temporal por llamada); el step exporta `UV_NO_SYNC=1` para que el sync implícito de `uv run` no re-resuelva el entorno sin el extra `test` ni elimine dependencias del harness. El subproceso usa el entorno ya provisionado.
 - **Límites local/remoto**: los runners `ubuntu-latest` no traen `uv` preinstalado (verificado en el inventario de la imagen 24.04, 2026-09), de ahí el setup explícito; no se ejecutó el workflow en remoto en esta fase (sin push): validez comprobada localmente (contratos, parseo YAML, `uv lock --check`). Localmente la suite corre con el entorno del desarrollador; para paridad estricta con CI, provisionar con el mismo comando y exportar `UV_NO_SYNC=1`.
 - **Sin secretos en el bundle**: `deploy-frontend.yml` solo pasa valores públicos `VITE_*` al build de Pages (guardado por test); no hay API keys embebidas ni lectura de `.env`.
@@ -65,7 +65,7 @@ npm run build                                                               # bu
 
 Los contratos viven en `tests/test_web_config_contracts.py`; las capturas de import se comprueban en proceso aislado con `tests/support/config_env_probe.py`.
 
-Paridad con CI: `uv sync --locked --extra test --python 3.12` provisiona el entorno del harness; exportar `UV_NO_SYNC=1` antes de `npm run test:coverage` evita que el `uv run` del helper re-resuelva ese entorno.
+Paridad con CI: `uv sync --locked --extra test --python 3.14` provisiona el entorno del harness; exportar `UV_NO_SYNC=1` antes de `npm run test:coverage` evita que el `uv run` del helper re-resuelva ese entorno.
 
 ## 7. Límites de validación de esta unidad
 
