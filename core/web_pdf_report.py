@@ -48,6 +48,7 @@ from core.report_data import ReportData, parse_bench_status
 PAGE_MARGIN = 2 * cm
 PAGE_WIDTH, PAGE_HEIGHT = A4
 CONTENT_WIDTH = PAGE_WIDTH - 2 * PAGE_MARGIN
+CONTENT_HEIGHT = PAGE_HEIGHT - 2 * PAGE_MARGIN
 
 COLOR_NAVY = colors.HexColor("#1F3A5F")
 COLOR_ALT_ROW = colors.HexColor("#F2F4F8")
@@ -999,10 +1000,10 @@ def _plan_sections(data: ReportData) -> tuple:
 def _image(png_bytes: bytes, max_width: float) -> Image:
     reader = ImageReader(io.BytesIO(png_bytes))
     width, height = reader.getSize()
-    ratio = max_width / float(width)
+    ratio = min(max_width / float(width), CONTENT_HEIGHT / float(height))
     return Image(
         io.BytesIO(png_bytes),
-        width=max_width,
+        width=float(width) * ratio,
         height=float(height) * ratio,
         hAlign="CENTER",
     )

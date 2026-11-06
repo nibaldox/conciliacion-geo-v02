@@ -58,6 +58,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet  # noqa: E4
 from reportlab.lib.units import cm, mm  # noqa: E402
 from reportlab.lib.utils import ImageReader  # noqa: E402
 from reportlab.platypus import (  # noqa: E402
+    Frame,
     Image,
     PageBreak,
     Paragraph,
@@ -78,6 +79,9 @@ from core.compliance_status import (
 # ---------------------------------------------------------------------------
 
 PAGE_MARGIN = 2 * cm
+CONTENT_HEIGHT = Frame(
+    0, 0, A4[0] - 2 * PAGE_MARGIN, A4[1] - 2 * PAGE_MARGIN
+)._aH
 
 # Compliance category colours match the donut chart palette so the pie
 # embedded in the PDF and the per-row status badge are visually aligned.
@@ -847,12 +851,12 @@ def _build_pie_section(
         reader = ImageReader(pie_buf)
         iw, ih = reader.getSize()
         max_w = 16.5 * cm
-        ratio = max_w / float(iw)
+        ratio = min(max_w / float(iw), CONTENT_HEIGHT / float(ih))
         display_h = float(ih) * ratio
         story.append(
             Image(
                 io.BytesIO(pie_buf.getvalue()),
-                width=max_w,
+                width=float(iw) * ratio,
                 height=display_h,
                 hAlign="CENTER",
             )
@@ -907,12 +911,12 @@ def _build_plan_section(
         reader = ImageReader(plan_buf)
         iw, ih = reader.getSize()
         max_w = 16.5 * cm
-        ratio = max_w / float(iw)
+        ratio = min(max_w / float(iw), CONTENT_HEIGHT / float(ih))
         display_h = float(ih) * ratio
         story.append(
             Image(
                 io.BytesIO(plan_buf.getvalue()),
-                width=max_w,
+                width=float(iw) * ratio,
                 height=display_h,
                 hAlign="CENTER",
             )

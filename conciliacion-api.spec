@@ -11,6 +11,8 @@ Produces:
 
 import os
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
 
 # Source directories copied into the frozen bundle as-is. PyInstaller's
@@ -20,6 +22,10 @@ datas = [
     ("api", "api"),
     ("web/dist", "web/dist"),
 ]
+datas += collect_data_files("docx")
+# Header/footer templates are opened through docx/parts/../templates.
+datas += collect_data_files("docx.parts", include_py_files=True)
+datas += collect_data_files("reportlab", includes=["fonts/*.ttf"])
 
 # Fixtures used by some frozen test runs / diagnostics.
 if os.path.exists("tests/conftest.py"):

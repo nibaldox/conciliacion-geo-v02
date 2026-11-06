@@ -2,6 +2,11 @@ name: Build portable bundle
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a GitHub Release
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -98,6 +103,7 @@ jobs:
           path: conciliacion-portable-linux.AppImage
 
   release:
+    if: ${{ inputs.release == true }}
     name: Create GitHub Release
     needs: [build]
     runs-on: ubuntu-latest

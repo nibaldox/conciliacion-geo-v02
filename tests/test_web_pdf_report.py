@@ -171,6 +171,52 @@ def sample_pdf():
     return build_pdf_report(_sample_data()).getvalue()
 
 
+def _tall_png():
+    import io
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (800, 2000), "white").save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_tall_image_fits_web_content_frame():
+    image = web_pdf_report._image(_tall_png(), web_pdf_report.CONTENT_WIDTH)
+    assert image.drawWidth <= web_pdf_report.CONTENT_WIDTH
+    assert image.drawHeight <= web_pdf_report.PAGE_HEIGHT - 2 * web_pdf_report.PAGE_MARGIN
+    assert image.drawWidth / image.drawHeight == pytest.approx(800 / 2000)
+
+
+def test_build_report_with_tall_plan(monkeypatch):
+    monkeypatch.setattr(web_pdf_report, "_render_plan", lambda data: _tall_png())
+    assert build_pdf_report(_sample_data()).getvalue().startswith(b"%PDF")
+
+
+@pytest.mark.parametrize("section", ["pie", "plan"])
+def test_legacy_report_tall_images_fit_content_frame(monkeypatch, section):
+    import io
+    from core import pdf_report
+    from core import report_generator
+    from reportlab.platypus import Frame
+
+    if section == "pie":
+        monkeypatch.setattr(pdf_report, "_pie_chart_image_bytes", lambda comparisons: io.BytesIO(_tall_png()))
+    else:
+        monkeypatch.setattr(report_generator, "create_plan_view_image", lambda *args, **kwargs: io.BytesIO(_tall_png()))
+    frame = Frame(0, 0, pdf_report.A4[0] - 2 * pdf_report.PAGE_MARGIN,
+                  pdf_report.A4[1] - 2 * pdf_report.PAGE_MARGIN)
+    story = []
+    styles = pdf_report._build_styles()
+    if section == "pie":
+        pdf_report._build_pie_section(story, [], styles)
+    else:
+        pdf_report._build_plan_section(story, [], [], styles)
+    image = next(item for item in story if isinstance(item, pdf_report.Image))
+    assert image.drawHeight <= frame._aH
+    assert image.drawWidth <= frame._aW
+    assert image.drawWidth / image.drawHeight == pytest.approx(800 / 2000)
+
+
 def test_returns_seekable_pdf_buffer():
     buffer = build_pdf_report(_sample_data())
     assert buffer.seekable()
