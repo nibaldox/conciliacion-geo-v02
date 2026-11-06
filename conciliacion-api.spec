@@ -5,8 +5,9 @@ Build:
     pyinstaller --clean --noconfirm conciliacion-api.spec
 
 Produces:
-    Windows: dist/conciliacion-api.exe
-    Linux:   dist/conciliacion-api
+    Windows: dist/conciliacion-api/conciliacion-api.exe
+    Linux:   dist/conciliacion-api/conciliacion-api
+    Support files: dist/conciliacion-api/_internal/
 """
 
 import os
@@ -132,14 +133,13 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="conciliacion-api",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -148,4 +148,12 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    upx=False,
+    name="conciliacion-api",
 )

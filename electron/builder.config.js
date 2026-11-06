@@ -1,12 +1,11 @@
 const path = require('node:path');
-const { execSync } = require('node:child_process');
 
 /**
  * electron-builder config for the portable bundle.
  *
- * The Python sidecar (built with PyInstaller, see ../../conciliacion-api.spec)
+ * The Python sidecar (built with PyInstaller, see ../conciliacion-api.spec)
  * is expected at:
- *   ../dist/conciliacion-api(.exe)
+ *   ../dist/conciliacion-api/conciliacion-api(.exe) and ../dist/conciliacion-api/_internal/
  *
  * Build:
  *   npm run build:windows  -> ../dist-portable/conciliacion-portable-windows/
@@ -14,11 +13,7 @@ const { execSync } = require('node:child_process');
  */
 
 function getBuildVersion() {
-  try {
-    return execSync('bash ../scripts/version.sh', { cwd: __dirname, encoding: 'utf8' }).trim();
-  } catch {
-    return require('./package.json').version;
-  }
+  return require('./package.json').version;
 }
 
 module.exports = {
@@ -44,11 +39,6 @@ module.exports = {
   ],
 
   extraResources: [
-    {
-      from: path.join(__dirname, '..', 'dist', 'conciliacion-api.exe'),
-      to: 'conciliacion-api.exe',
-      filter: ['**/*'],
-    },
     {
       from: path.join(__dirname, '..', 'dist', 'conciliacion-api'),
       to: 'conciliacion-api',

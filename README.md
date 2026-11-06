@@ -368,7 +368,7 @@ npm --prefix electron ci
 npm --prefix electron run build:windows
 ```
 
-En Bash, definir las mismas variables con `export` y usar `npm --prefix electron run build:linux` para Linux. Estas variables son de compilación; cambiarlas después no modifica los bundles. PyInstaller debe estar instalado para esa fase.
+En Bash, definir las mismas variables con `export` y usar `npm --prefix electron run build:linux` para Linux. Estas variables son de compilación; cambiarlas después no modifica los bundles. PyInstaller debe estar instalado para esa fase. El sidecar se genera en modo onedir, sin UPX: `dist/conciliacion-api/conciliacion-api.exe` en Windows o `dist/conciliacion-api/conciliacion-api` en Linux, junto con `_internal/`. Electron copia la carpeta completa a `resources/conciliacion-api/`.
 
 El sidecar escucha por defecto en `127.0.0.1:57890`; los datos portable quedan en `%APPDATA%/conciliacion` en Windows o `$XDG_DATA_HOME/conciliacion` (fallback `~/.local/share/conciliacion`) en Linux. No incluir bases del usuario en el paquete. [Guía de build](docs/BUILD.md) y [uso portable](docs/PORTABLE.md) contienen contexto histórico: contrastar sus instrucciones con los workflows y configuración actuales.
 

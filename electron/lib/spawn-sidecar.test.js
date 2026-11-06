@@ -17,7 +17,7 @@ const isWindows = process.platform === 'win32';
  */
 function createFakeBinary(resourcesPath, script) {
   const binPath = getSidecarPath(resourcesPath);
-  fs.mkdirSync(resourcesPath, { recursive: true });
+  fs.mkdirSync(path.dirname(binPath), { recursive: true });
   const content = `#!/usr/bin/env node
 ${script}
 `;
@@ -62,8 +62,7 @@ function waitForLogContents(logFile, expected, timeoutMs = 2000) {
 
 test('getSidecarPath returns correct name for current platform', () => {
   const expected = process.platform === 'win32' ? 'conciliacion-api.exe' : 'conciliacion-api';
-  assert.match(getSidecarPath('/fake/resources'), new RegExp(`${expected}$`));
-  assert.ok(getSidecarPath('/fake/resources').endsWith(expected));
+  assert.strictEqual(getSidecarPath('/fake/resources'), path.join('/fake/resources', 'conciliacion-api', expected));
 });
 
 test('spawnSidecar throws SIDECAR_NOT_FOUND when binary does not exist', () => {
