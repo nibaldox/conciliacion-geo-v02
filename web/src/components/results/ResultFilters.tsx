@@ -9,6 +9,25 @@ import {
   type ResultFilterState,
 } from './resultFilters.utils';
 
+export function positionFilterMenu(details: HTMLDetailsElement) {
+  if (!details.open) return;
+  const summary = details.querySelector('summary');
+  const menu = summary?.nextElementSibling as HTMLElement | null;
+  if (!summary || !menu) return;
+  const rect = summary.getBoundingClientRect();
+  menu.style.maxWidth = `${Math.max(0, window.innerWidth - rect.left - 8)}px`;
+  menu.style.maxHeight = '';
+  const naturalLimit = Number.parseFloat(getComputedStyle(menu).maxHeight) || Infinity;
+  menu.style.maxHeight = `${Math.min(naturalLimit, Math.max(0, Math.max(window.innerHeight - rect.bottom - 12, rect.top - 12)))}px`;
+  menu.style.overflowY = 'auto';
+  const menuHeight = menu.getBoundingClientRect().height;
+  const above = rect.bottom + 4 + menuHeight > window.innerHeight - 8 && rect.top > window.innerHeight - rect.bottom;
+  menu.style.top = above ? 'auto' : '100%';
+  menu.style.bottom = above ? '100%' : 'auto';
+  menu.style.marginTop = above ? '0' : '4px';
+  menu.style.marginBottom = above ? '4px' : '0';
+}
+
 interface DimensionOption {
   readonly value: string;
   readonly label: string;
@@ -20,9 +39,10 @@ interface DimensionSelectProps {
   readonly options: readonly DimensionOption[];
   readonly selected: readonly string[];
   readonly onToggle: (value: string) => void;
+  readonly compact: boolean;
 }
 
-function DimensionSelect({ dimension, label, options, selected, onToggle }: DimensionSelectProps) {
+function DimensionSelect({ dimension, label, options, selected, onToggle, compact }: DimensionSelectProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const { t } = useTranslation();
 
@@ -58,10 +78,10 @@ function DimensionSelect({ dimension, label, options, selected, onToggle }: Dime
   const valueId = `result-filters-${dimension}-value`;
 
   return (
-    <div ref={rootRef} data-dimension={dimension} className="relative z-10 flex items-center gap-1.5">
-      <p id={labelId} className="text-xs text-text-muted">{label}</p>
+    <div ref={rootRef} data-dimension={dimension} className={`relative z-10 flex items-center gap-1.5 has-[details[open]]:z-20 ${compact ? 'w-full' : ''}`}>
+      <p id={labelId} className={`shrink-0 whitespace-nowrap text-xs text-text-muted ${compact ? 'w-28' : ''}`}>{label}</p>
       <div role="group" aria-labelledby={labelId}>
-        <details className="relative">
+        <details className="relative" onToggle={(event) => positionFilterMenu(event.currentTarget)}>
           <summary
             aria-labelledby={`${labelId} ${valueId}`}
             className="flex h-8 w-32 cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-border bg-surface-sunken px-2.5 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -97,7 +117,8 @@ function DimensionSelect({ dimension, label, options, selected, onToggle }: Dime
   );
 }
 
-export function ResultFilters({ results, filters, onChange }: {
+export function ResultFilters({ results, filters, onChange, compact = false }: {
+  readonly compact?: boolean;
   readonly results: readonly ComparisonResult[] | null | undefined;
   readonly filters: ResultFilterState;
   readonly onChange: (filters: ResultFilterState) => void;
@@ -127,9 +148,10 @@ export function ResultFilters({ results, filters, onChange }: {
   ];
 
   return (
-    <section data-slot="result-filters" aria-label={t('results.filters.group_label', { defaultValue: 'Filtros de resultados' })} className="flex flex-wrap items-center gap-x-4 gap-y-2">
+    <section data-slot="result-filters" aria-label={t('results.filters.group_label', { defaultValue: 'Filtros de resultados' })} className={compact ? "flex w-full flex-col items-start gap-2" : "flex flex-wrap items-center gap-x-4 gap-y-2"}>
       <DimensionSelect
         dimension="sector"
+        compact={compact}
         label={sectorLabel}
         options={sectorOptions}
         selected={filters.sector}
@@ -137,6 +159,7 @@ export function ResultFilters({ results, filters, onChange }: {
       />
       <DimensionSelect
         dimension="section"
+        compact={compact}
         label={sectionLabel}
         options={sectionOptions}
         selected={filters.section}
@@ -144,6 +167,7 @@ export function ResultFilters({ results, filters, onChange }: {
       />
       <DimensionSelect
         dimension="level"
+        compact={compact}
         label={levelLabel}
         options={levelOptions}
         selected={filters.level}

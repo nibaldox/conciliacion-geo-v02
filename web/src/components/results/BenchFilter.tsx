@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/Button';
 import { PROJECT_INPUT_CLASS } from '../ui/ProjectControls';
 import type { DesignBenchOption } from './Dashboard';
+import { positionFilterMenu } from './ResultFilters';
 import type { TFunction } from 'i18next';
 
 function designElevationLabel(option: DesignBenchOption, t: TFunction): string {
@@ -49,10 +50,10 @@ export function BenchFilter({ available, selected, onChange }: { available: read
   const labels = selected.map((number) => available.find((option) => option.number === number)).filter((option): option is DesignBenchOption => option != null).map(optionLabel);
   const summary = selected.length === 0 ? t('dashboard.bench_filter.all_benches') : labels.length <= 2 ? labels.join(', ') : t('dashboard.bench_filter.selected', { count: labels.length });
   return (
-    <section data-slot="dashboard-bench-filter" className="relative z-10 flex items-center gap-1.5">
-      <p id="bench-filter-label" className="text-xs text-text-muted">{t('dashboard.bench_filter.label')}</p>
-      <details ref={root} className="relative" onToggle={(event) => { if (!event.currentTarget.open) setSearch(''); }}>
-        <summary aria-labelledby="bench-filter-label bench-filter-value" className="flex h-8 w-44 cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-border bg-surface-sunken px-2.5 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+    <section data-slot="dashboard-bench-filter" className="relative z-10 flex flex-wrap items-center gap-1.5 has-[details[open]]:z-20">
+      <p id="bench-filter-label" className="w-28 shrink-0 whitespace-nowrap text-xs text-text-muted">{t('dashboard.bench_filter.label')}</p>
+      <details ref={root} className="relative min-w-0 flex-1" onToggle={(event) => { if (!event.currentTarget.open) setSearch(''); else positionFilterMenu(event.currentTarget); }}>
+        <summary aria-labelledby="bench-filter-label bench-filter-value" className="flex h-8 w-full cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-border bg-surface-sunken px-2.5 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
           <span id="bench-filter-value" className="truncate">{summary}</span><span aria-hidden="true" className="text-text-muted">▾</span>
         </summary>
         <div className="absolute left-0 top-full z-20 mt-1 w-64 space-y-2 rounded-lg border border-border bg-surface-raised p-2 shadow-lg">
@@ -74,7 +75,7 @@ export function BenchFilter({ available, selected, onChange }: { available: read
         type="button"
         disabled={!selected.length}
         onClick={() => onChange([])}
-        className="text-xs text-text-muted underline-offset-2 hover:text-text-primary hover:underline disabled:invisible"
+        className="basis-full text-left text-xs text-text-muted underline-offset-2 hover:text-text-primary hover:underline disabled:invisible"
       >
         {t('dashboard.bench_filter.reset')}
       </button>

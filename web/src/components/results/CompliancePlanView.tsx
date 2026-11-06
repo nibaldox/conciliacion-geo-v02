@@ -2,6 +2,8 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMeshVertices, useSectionProfiles, useSections } from '../../api/hooks';
+import type { GuideCurve } from '../../stores/session';
+import { selectGuideLine } from './planGuideLine';
 import type { ComparisonResult, SectionResponse } from '../../api/types';
 import { useSession } from '../../stores/session';
 import type { BenchStatus } from './ProfileView/domain/types';
@@ -14,6 +16,12 @@ export type { PlanColorBy, PlanStatusKey } from './planColors';
 import { createPlanProjection, createSurfaceRaster, projectPlanPoint, sectionPlanPoints, planBounds, type Projection } from './planGeometry';
 
 export { createPlanProjection, projectPlanPoint } from './planGeometry';
+
+function GuideLine({ guide, projection }: { guide: GuideCurve; projection: Projection }) {
+  const points = selectGuideLine(guide);
+  if (points.length < 2) return null;
+  return <polyline data-guide-line="" points={points.map((point) => projectPlanPoint(...point, projection).join(',')).join(' ')} fill="none" stroke="var(--color-accent-bright)" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" aria-hidden="true" />;
+}
 
 function PlanSection({ section, points, projection, status, labelPosition }: { section: SectionResponse; points: [number, number][]; projection: Projection; status?: BenchStatus; labelPosition: [number, number] }) {
   const { t } = useTranslation();
@@ -67,6 +75,7 @@ export function CompliancePlanView({ results, statuses, variant = 'panel', color
     return () => node.removeEventListener('wheel', handleWheel);
   }, []);
   const topoMeshId = useSession((state) => state.topoMeshId);
+  const guideCurve = useSession((state) => state.guideCurve);
   const { data: vertices, isLoading, error } = useMeshVertices(topoMeshId);
   const { data: sections } = useSections();
   const names = new Set(results.map((row) => row.section));
@@ -137,6 +146,8 @@ export function CompliancePlanView({ results, statuses, variant = 'panel', color
               <polyline points={coordinates} fill="none" stroke="transparent" strokeWidth="14" vectorEffect="non-scaling-stroke" pointerEvents={enabled ? 'stroke' : 'none'} />
             </g>;
           })}
+          {guideCurve && <GuideLine guide={guideCurve} projection={projection} />}
+          {lines.filter(({ section }) => section.name === selectedSection && (visibleStatuses?.has(statuses.get(section.name) ?? 'UNKNOWN') ?? true)).map(({ section, points }) => <polyline key={section.id} data-selected-section-line="" points={points.map((point) => projectPlanPoint(...point, projection).join(',')).join(' ')} fill="none" stroke="var(--color-accent-bright)" strokeWidth="3" strokeDasharray="7 5" vectorEffect="non-scaling-stroke" strokeLinecap="round" pointerEvents="none" aria-hidden="true" />)}
         </svg>
         <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
           <g fill="var(--color-text-primary)" stroke="var(--color-text-primary)" strokeWidth="2" fontSize="16"><text x="40" y="477" stroke="none">N</text><path d="M 45 515 L 45 484 M 38 494 L 45 484 L 52 494" fill="none"/><path d={`M 40 552 v -6 h ${scaleMeters * projection.scale * view.zoom} v 6 M 40 549 h ${scaleMeters * projection.scale * view.zoom}`} fill="none"/><text x="40" y="575" stroke="none">{scaleMeters} m</text></g>

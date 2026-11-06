@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Html, OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
+import { ViewerCameraControls } from './ViewerCameraControls';
+import { cameraView, defaultCameraToggles, toggleCameraOption, isPivotClick, type CameraOption, type CameraView } from './viewerCameraState';
 import { useMeshVertices, useMeshBreaklines, useSections, useResults, useHorizontalDeviationMesh } from '../../api/hooks';
 import { DEMO_MESH_IDS, useSession } from '../../stores/session';
 import type { SectionResponse, VerticesResponse, ContourData, HorizontalDeviationMeshResponse } from '../../api/types';
@@ -29,6 +32,7 @@ import { BlastHolesLayer } from './BlastHolesLayer';
 import { BlastHoleFilters, type BlastHole3DRecord } from './BlastHoleFilters';
 import { useBlastHoles3D } from './useBlastHoles3D';
 import { getSectionExtent } from './sectionExtent';
+import { buildTopoHeightIndex, heightAt } from './topoSurfaceHeight';
 import { BlastHoleColorControls } from './BlastHoleColorControls';
 import { Spinner } from '../ui/Spinner';
 import { BlastHoleColorLegendView } from './BlastHoleColorLegend';
@@ -116,12 +120,16 @@ function CameraController({ maxDim }: { maxDim: number }) {
 interface SceneProps {
   colors: { background: string; topo: string; grid: string; minorGrid: string };
   topoVerts: VerticesResponse | undefined;
+  topoOpacity: number;
   horizontalDeviation: HorizontalDeviationMeshResponse | undefined;
   showHorizontalDeviation: boolean;
   designContours: ContourData | undefined;
   sections: SectionResponse[] | undefined;
   selectedSection: string | null;
   bounds: Bounds3D;
+  showGrid: boolean;
+  pickingPivot: boolean;
+  onPivot: (point: THREE.Vector3) => void;
   layers: {
     topo: boolean;
     designContours: boolean;
@@ -132,12 +140,16 @@ interface SceneProps {
 function Scene({
   colors,
   topoVerts,
+  topoOpacity,
   horizontalDeviation,
   showHorizontalDeviation,
   designContours,
   sections,
   selectedSection,
   bounds,
+  showGrid,
+  pickingPivot,
+  onPivot,
   layers,
 }: SceneProps) {
   const { t } = useTranslation();
@@ -151,6 +163,48 @@ function Scene({
   const topoMeshRef = useRef<THREE.Mesh>(null);
   const deviationMeshRef = useRef<THREE.Mesh>(null);
   const previewRef = useRef<THREE.Points>(null);
+
+  useEffect(() => {
+    if (!pickingPivot) return;
+    const canvas = gl.domElement;
+    const previousCursor = canvas.style.cursor;
+    canvas.style.cursor = 'crosshair';
+    let start: [number, number] | null = null;
+    let dragged = false;
+    const down = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      start = [event.clientX, event.clientY];
+      dragged = false;
+    };
+    const move = (event: PointerEvent) => {
+      if (start && !isPivotClick(start, [event.clientX, event.clientY])) dragged = true;
+    };
+    const up = (event: PointerEvent) => {
+      if (!start || event.button !== 0) return;
+      const click = !dragged && isPivotClick(start, [event.clientX, event.clientY]);
+      start = null;
+      const mesh = topoMeshRef.current;
+      if (!click || !mesh || !layers.topo) return;
+      const rect = canvas.getBoundingClientRect();
+      const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
+      const picker = new THREE.Raycaster();
+      picker.setFromCamera(pointer, camera);
+      const hit = picker.intersectObject(mesh, false)[0];
+      if (hit) onPivot(hit.point);
+    };
+    const cancel = () => { start = null; };
+    canvas.addEventListener('pointerdown', down);
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', cancel);
+    return () => {
+      canvas.style.cursor = previousCursor;
+      canvas.removeEventListener('pointerdown', down);
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', cancel);
+    };
+  }, [camera, gl, layers.topo, onPivot, pickingPivot]);
 
   useFrame(() => {
     if (raycaster.params.Line) {
@@ -430,31 +484,14 @@ function Scene({
   }, [designLinesGeometries]);
 
   // 3. Section Lines Geometries — sampled at topo elevation
+  const topoHeightIndex = useMemo(() => topoVerts ? buildTopoHeightIndex(topoVerts) : null, [topoVerts]);
   const sectionsData = useMemo(() => {
     if (!sections || sections.length === 0) return [];
 
-    // Build a fast elevation lookup from topo vertices (X, Y in world → Z elev)
-    const topoElevation = (wx: number, wy: number): number => {
-      if (!topoVerts || topoVerts.x.length === 0) return 0;
-      let bestDist = Infinity;
-      let bestZ = 0;
-      const n = topoVerts.x.length;
-      // Sample up to 50_000 vertices for speed on large meshes
-      const stride = Math.max(1, Math.floor(n / 50_000));
-      for (let i = 0; i < n; i += stride) {
-        const vx = topoVerts.x[i]!;
-        const vy = topoVerts.y[i]!;
-        const d = (vx - wx) ** 2 + (vy - wy) ** 2;
-        if (d < bestDist) {
-          bestDist = d;
-          bestZ = topoVerts.z[i]!;
-        }
-      }
-      return bestZ;
-    };
+    const topoElevation = (wx: number, wy: number): number => topoHeightIndex ? heightAt(topoHeightIndex, wx, wy) : 0;
 
     // Vertical offset so lines float visibly above the surface
-    const LIFT = bounds.maxDim * 0.004;
+    const LIFT = 0.2;
 
     return sections.map((sec) => {
       const { start, end } = getSectionExtent(sec);
@@ -483,7 +520,7 @@ function Scene({
 
       return { id: sec.id, name: sec.name, line };
     });
-  }, [sections, bounds, topoVerts]);
+  }, [sections, bounds, topoHeightIndex]);
 
   useEffect(() => {
     return () => {
@@ -502,7 +539,7 @@ function Scene({
       <directionalLight position={[-1, 0.4, -0.5]} intensity={0.4} />
       
       {/* Grid helper positioned at the base of our centered mesh */}
-      <gridHelper args={[bounds.maxDim * 3, 50, colors.grid, colors.minorGrid]} position={[0, -bounds.maxDim * 0.1, 0]} />
+      {showGrid && <gridHelper args={[bounds.maxDim * 3, 50, colors.grid, colors.minorGrid]} position={[0, -bounds.maxDim * 0.1, 0]} />}
 
       {/* Real Topography Solid Mesh or Point Cloud */}
       {layers.topo && topoGeometry && (
@@ -513,11 +550,14 @@ function Scene({
               roughness={0.8}
               metalness={0.1}
               side={THREE.DoubleSide}
+              transparent={topoOpacity < 1}
+              opacity={topoOpacity}
+              depthWrite={topoOpacity === 1}
             />
           </mesh>
         ) : (
           <points geometry={topoGeometry}>
-            <pointsMaterial color={colors.topo} size={3} sizeAttenuation={false} transparent opacity={0.8} />
+            <pointsMaterial color={colors.topo} size={3} sizeAttenuation={false} transparent opacity={0.8 * topoOpacity} depthWrite={topoOpacity === 1} />
           </points>
         )
       )}
@@ -647,6 +687,39 @@ function Scene({
   );
 }
 
+function CameraRig({ controls, command, maxDim, showPivot }: {
+  controls: React.RefObject<OrbitControlsImpl | null>;
+  command: React.RefObject<CameraView | null>;
+  maxDim: number;
+  showPivot: boolean;
+}) {
+  const { camera, gl } = useThree();
+  const marker = useRef<THREE.Points>(null);
+  useFrame(() => {
+    const orbit = controls.current;
+    if (!orbit) return;
+    if (command.current) {
+      const view = command.current;
+      const state = cameraView(view, maxDim, orbit.target.toArray() as [number, number, number]);
+      const damping = orbit.enableDamping;
+      orbit.enableDamping = false;
+      orbit.update();
+      orbit.target.set(...state.target);
+      camera.position.set(...state.position);
+      if (view === 'plan') camera.position.z += maxDim * 0.00001;
+      camera.up.set(0, 1, 0);
+      orbit.update();
+      orbit.enableDamping = damping;
+      command.current = null;
+    }
+    if (marker.current) marker.current.position.copy(orbit.target);
+  });
+  return showPivot ? <points ref={marker} name="camera-pivot" renderOrder={1000} frustumCulled={false}>
+    <bufferGeometry><bufferAttribute attach="attributes-position" args={[new Float32Array([0, 0, 0]), 3]} /></bufferGeometry>
+    <shaderMaterial depthTest={false} uniforms={{ pointSize: { value: 14 * (gl.getPixelRatio?.() ?? 1) } }} vertexShader={'uniform float pointSize; void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_PointSize = pointSize; }'} fragmentShader={'void main() { vec2 p = abs(gl_PointCoord - vec2(0.5)); if (p.x > 0.12 && p.y > 0.12) discard; gl_FragColor = vec4(1.0, 0.8, 0.2, 1.0); }'} />
+  </points> : null;
+}
+
 // ─── Main Exported Component (3D Viewport) ─────────────────────
 
 export type Mesh3DViewerMode = 'general' | 'blast';
@@ -657,6 +730,24 @@ export interface Mesh3DViewerProps {
 
 export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
   const isDark = useTheme((s) => s.isDark);
+  const cameraControls = useRef<OrbitControlsImpl | null>(null);
+  const cameraCommand = useRef<CameraView | null>(null);
+  const [cameraToggles, setCameraToggles] = useState(defaultCameraToggles);
+  const [pickingPivot, setPickingPivot] = useState(false);
+  const setCameraPivot = useCallback((point: THREE.Vector3) => {
+    const orbit = cameraControls.current;
+    if (!orbit) return;
+    const damping = orbit.enableDamping;
+    orbit.enableDamping = false;
+    orbit.update();
+    orbit.target.copy(point);
+    orbit.update();
+    orbit.enableDamping = damping;
+    setCameraToggles((state) => ({ ...state, pivot: true }));
+    setPickingPivot(false);
+  }, []);
+  const toggleCamera = (option: CameraOption) => setCameraToggles((state) => toggleCameraOption(state, option));
+  const cameraOverlay = <ViewerCameraControls toggles={cameraToggles} onToggle={toggleCamera} onView={(view) => { cameraCommand.current = view; }} pickingPivot={pickingPivot} onPickPivot={setPickingPivot} />;
   const sceneColors = useMemo(() => ({
     background: readThemeColor('--color-viewer-bg', '#111111'),
     topo: readThemeColor('--color-viewer-topo', TOPO_HEX),
@@ -685,6 +776,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
     designContours: true,
     sections: true,
   });
+  const [topoOpacity, setTopoOpacity] = useState(1);
   const [showHorizontalDeviation, setShowHorizontalDeviation] = useState(false);
   const storeShowBlastHoles = useBlastView((s) => s.showBlastHoles);
   const setStoreShowBlastHoles = useBlastView((s) => s.setShowBlastHoles);
@@ -821,6 +913,12 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
   const renderLayerToggles = () => (
     <>
       <LayerToggle checked={layers.topo} onChange={(checked) => setLayers(prev => ({ ...prev, topo: checked }))} color={sceneColors.topo} label={t('viewer.layer_topo', { defaultValue: 'Topografía real' })} />
+      <label className="flex items-center gap-2">
+        <span>{t('viewer.layer_topo_opacity')}</span>
+        <input type="range" min={0} max={100} step={5} value={topoOpacity * 100}
+          aria-label={t('viewer.layer_topo_opacity')} onChange={(event) => setTopoOpacity(Number(event.target.value) / 100)} />
+        <span>{Math.round(topoOpacity * 100)}%</span>
+      </label>
       <LayerToggle checked={layers.designContours} onChange={(checked) => setLayers(prev => ({ ...prev, designContours: checked }))} color={DESIGN_HEX} label={t('viewer.layer_design', { defaultValue: 'Curvas de diseño' })} />
       <LayerToggle checked={layers.sections} onChange={(checked) => setLayers(prev => ({ ...prev, sections: checked }))} color={SECTION_HEX} label={t('viewer.layer_sections', { defaultValue: 'Líneas de sección' })} />
     </>
@@ -1006,10 +1104,12 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
       <CameraController maxDim={bounds.maxDim} />
-      <OrbitControls makeDefault />
+      <OrbitControls ref={cameraControls} makeDefault />
+      <CameraRig controls={cameraControls} command={cameraCommand} maxDim={bounds.maxDim} showPivot={cameraToggles.pivot} />
       <Scene
         colors={sceneColors}
         topoVerts={topoVerts}
+        topoOpacity={topoOpacity}
         horizontalDeviation={mapQuery.data}
         showHorizontalDeviation={showHorizontalDeviation && canRequestMap && !!mapQuery.data}
         designContours={designContours}
@@ -1017,15 +1117,19 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
         selectedSection={selectedSection}
         bounds={bounds}
         layers={layers}
+        showGrid={cameraToggles.grid}
+        pickingPivot={pickingPivot}
+        onPivot={setCameraPivot}
       />
       {showBlastHoles && confirmBlastSpatialReference && holesQuery.data && <BlastHolesLayer holes={sceneHoles} center={holeCenter} selectedKey={selectedHoleKey} onSelect={setSelectedHoleKey} colorTrajectories={hasHoleColorMapping && blastColorTarget !== 'collars'} colorCollars={blastColorTarget !== 'trajectories'} trajectoryColor="#969696" />}
-      <GizmoHelper alignment="bottom-left" margin={[60, 60]}>
+      {cameraToggles.compass && <GizmoHelper alignment="bottom-left" margin={[60, 60]}>
         <GizmoViewport
           axisColors={['#ff3653', '#0adb21', '#2c8fdf']}
           labelColor={readThemeColor('--color-text-primary', 'white')}
-          labels={['E', 'Z', 'N']}
+          labels={['E', 'Z', 'S']}
         />
-      </GizmoHelper>
+        <Html position={[0, 0, -52]} center style={{ color: 'var(--color-text-primary)', fontWeight: 700, pointerEvents: 'none' }}>N</Html>
+      </GizmoHelper>}
     </Canvas>
   );
 
@@ -1076,6 +1180,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
         {renderHorizontalDeviationControls()}
       </div>
       <div className="absolute inset-0 bg-viewer-bg">{canvasNode}</div>
+      {cameraOverlay}
     </>
   );
 
@@ -1096,6 +1201,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
         </div>
         <div className="relative min-h-[360px] min-w-0 flex-1 md:min-h-[420px]">
           <div className="absolute inset-0 bg-viewer-bg">{canvasNode}</div>
+          {cameraOverlay}
         </div>
         <div data-testid="blast-legend-strip" className="max-h-[30vh] shrink-0 overflow-y-auto border-t bg-surface-raised px-3 py-2 text-xs md:absolute md:bottom-0 md:left-0 md:right-[340px] md:z-10" style={borderStyle}>
           {legendMapping ? <BlastHoleColorLegendView legend={legendMapping.legend} /> : <p style={mutedStyle}>{t('blast.viewPanel.legendHelp')}</p>}

@@ -891,6 +891,7 @@
     "tol_crest_toe": "Desviación cresta-pata (m)"
   },
   "viewer": {
+    "camera": { "title": "Controles de cámara", "reset": "Restablecer", "plan": "Planta", "north": "Norte", "east": "Este", "pivot": "Mostrar pivote", "grid": "Cuadrícula", "compass": "Brújula", "setPivot": "Fijar pivote" },
     "panel_resize_corner": "Cambiar ancho y alto del panel", "panel_resize_hint": "Arrastra la esquina para ajustar",
     "cesium_load_error": "Error al cargar CesiumJS: {{message}}",
     "cesium_init_error": "Error al inicializar CesiumJS: {{message}}",
@@ -904,6 +905,7 @@
     "tooltip": "Este: %{x:.1f}m<br>Norte: %{y:.1f}m<br>Elev: %{text:.1f}m",
     "layers": "Capas visibles",
     "layer_topo": "Topografía real",
+    "layer_topo_opacity": "Opacidad de topografía",
     "layer_design": "Curvas de diseño",
     "layer_sections": "Líneas de sección",
     "horizontal_map": "Mapa de calor horizontal",
@@ -1270,6 +1272,7 @@
       "count": "{{sections}} secciones · {{benches}} bancos"
     },
     "filters": {
+      "label": "Filtros",
       "no_matching_results": "Ningún resultado coincide con la combinación de filtros activa. Ajusta o restablece los filtros de sector, sección, cota o banco."
     },
     "empty_state": "Sin resultados para mostrar. Ejecuta el procesamiento primero.",
@@ -1447,6 +1450,7 @@
     "curve_step1": "Haz clic sobre una línea para elegirla.",
     "curve_step2": "Haz clic de nuevo para marcar el inicio y el fin; pueden quedar dentro de un mismo tramo.",
     "curve_step3": "Revisa el resumen y usa «RESTABLECER SELECCIÓN» o Escape para empezar de nuevo.",
+    "remove_guide": "Quitar línea guía",
     "curve_reset": "RESTABLECER SELECCIÓN",
     "curve_chainage": "Cadenamiento",
     "curve_range_length": "Longitud del tramo",

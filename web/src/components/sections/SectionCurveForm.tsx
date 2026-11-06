@@ -89,6 +89,8 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
   const parametersValid = spacingValue !== null && lengthUpValue !== null && lengthDownValue !== null;
   const curveSelection = useSession((s) => s.curveSelection);
   const dispatchCurveSelection = useSession((s) => s.dispatchCurveSelection);
+  const guideCurve = useSession((s) => s.guideCurve);
+  const setGuideCurve = useSession((s) => s.setGuideCurve);
 
   const snapshot = useMemo(
     () => getCurveGeometrySnapshot(designMeshId, contourData),
@@ -145,6 +147,13 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
       end: curveSelection.end,
     });
   }, [snapshot, selectedCurve, curveSelection.context, curveSelection.start, curveSelection.end]);
+
+  useEffect(() => {
+    if (!snapshot || !selectedCurve || !curveSelection.curveId || !curveSelection.context) return;
+    if (curveSelection.context.designMeshId !== snapshot.context.designMeshId || curveSelection.context.geometryKey !== snapshot.context.geometryKey) return;
+    if (curveSelection.start && curveSelection.end && !range) return;
+    setGuideCurve({ id: curveSelection.curveId, points: range ?? selectedCurve.points });
+  }, [snapshot, selectedCurve, curveSelection.curveId, curveSelection.context, curveSelection.start, curveSelection.end, range, setGuideCurve]);
 
   const handleGenerate = useCallback(() => {
     if (!range || spacingValue === null || lengthUpValue === null || lengthDownValue === null || mutation.isPending) return;
@@ -277,6 +286,7 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
           {t('project_input.curve_reset')}
         </Button>
       </div>
+      {guideCurve && <Button size="sm" variant="secondary" fullWidth onClick={() => { setGuideCurve(null); dispatchCurveSelection({ type: 'cancel' }); }}>{t('project_input.remove_guide')}</Button>}
       {mutation.isError && <p role="alert" className="text-xs text-mine-red">{t('common.error')}: {mutation.error instanceof Error ? mutation.error.message : t('section_form_file.error_generic')}</p>}
       {mutation.isSuccess && <p role="status" className="text-xs text-mine-green">{t('project_input.curve_success')}</p>}
     </div>

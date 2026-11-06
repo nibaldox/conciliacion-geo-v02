@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { BenchFilter } from './BenchFilter';
 import { CompliancePlanView } from './CompliancePlanView';
 import { ResultFilters } from './ResultFilters';
@@ -563,6 +563,43 @@ export function Dashboard() {
   const filters = useSession((s) => s.filters);
   const setFilters = useSession((s) => s.setFilters);
   const [histogramKey, setHistogramKey] = useState<HistogramKey>('height');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [workspaceHeight, setWorkspaceHeight] = useState<number>();
+  const filtersRef = useRef<HTMLDivElement>(null);
+  const dashboardRef = useRef<HTMLDivElement>(null);
+  const activeFilterCount = [filters.bench, filters.sector, filters.section, filters.level].filter((values) => values.length > 0).length;
+
+  useEffect(() => {
+    if (!filtersOpen) return;
+    const outside = (event: PointerEvent) => {
+      if (!filtersRef.current?.contains(event.target as Node)) setFiltersOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setFiltersOpen(false);
+        filtersRef.current?.querySelector('button')?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [filtersOpen]);
+
+  useEffect(() => {
+    const workspace = dashboardRef.current?.closest('.overflow-auto');
+    if (!workspace) return;
+    const update = () => {
+      const style = getComputedStyle(workspace);
+      setWorkspaceHeight(workspace.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, [results]);
 
   const tolerances = settings?.tolerances ?? DEFAULT_TOLERANCES;
   const heightTol = tolerances.bench_height;
@@ -701,29 +738,37 @@ export function Dashboard() {
   }
 
   return (
-    <div className="min-w-0 space-y-6">
-      <div data-slot="dashboard-filters" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border pb-2">
-        <span className="text-xs text-text-muted">{t('dashboard.rail.color_by')}</span>
+    <div ref={dashboardRef} className="flex min-w-0 flex-col gap-6">
+      <div className="flex min-h-0 min-w-0 flex-col xl:h-[var(--workspace-height)]" style={{ '--workspace-height': workspaceHeight == null ? 'auto' : `${workspaceHeight}px` } as CSSProperties}>
+      <div data-slot="dashboard-filters" className="relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border pb-2 xl:flex-nowrap xl:[&_[role=group]]:flex-nowrap">
+        <span className="shrink-0 whitespace-nowrap text-xs text-text-muted">{t('dashboard.rail.color_by')}</span>
         <SegmentedControl label={t('dashboard.rail.color_by')} options={(['status', 'score', 'height', 'angle', 'berm'] as const).map((value) => ({ value, label: t(`dashboard.rail.color_${value}`) }))} value={colorBy} onChange={setColorBy} />
-        <div role="group" aria-label={t('dashboard.rail.filter_status')} className="flex flex-wrap gap-1">
+        <div role="group" aria-label={t('dashboard.rail.filter_status')} className="flex flex-nowrap gap-1">
           {(['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN'] as const).map((status) => <button key={status} type="button" aria-pressed={visibleStatuses.has(status)} className="border border-border px-2 py-1 text-xs aria-pressed:text-text-primary text-text-muted" onClick={() => setVisibleStatuses((current) => { const next = new Set(current); if (next.has(status)) next.delete(status); else next.add(status); return next; })}>{t(`dashboard.rail.status_${status.toLowerCase()}`)}</button>)}
         </div>
-        <BenchFilter available={benchNumbers} selected={filters.bench} onChange={(bench) => setFilters({ bench })} />
-        <ResultFilters results={results} filters={filters} onChange={setScenarioFilters} />
+        <div ref={filtersRef} className="relative">
+          <button type="button" aria-expanded={filtersOpen} aria-controls="dashboard-filter-panel" className="h-8 whitespace-nowrap border border-border px-2 text-xs text-text-primary" onClick={() => setFiltersOpen((open) => !open)}>{t('dashboard.filters.label')}{activeFilterCount > 0 && ` · ${activeFilterCount}`}</button>
+          {filtersOpen && <div id="dashboard-filter-panel" ref={(panel) => { if (panel) { const bounds = panel.closest('main')?.getBoundingClientRect(); const left = Math.max(8, (bounds?.left ?? 0) + 12); const right = Math.min(window.innerWidth - 8, (bounds?.right ?? window.innerWidth) - 12); panel.style.width = `${Math.min(352, right - left)}px`; panel.style.translate = '0 0'; const rect = panel.getBoundingClientRect(); panel.style.translate = `${Math.max(left - rect.left, Math.min(0, right - rect.right))}px 0`; } }} className="absolute right-0 top-full z-30 mt-1 w-[22rem] max-w-[calc(100vw-2rem)] space-y-3 border border-border bg-surface-raised p-3 shadow-lg">
+            <BenchFilter available={benchNumbers} selected={filters.bench} onChange={(bench) => setFilters({ bench })} />
+            <ResultFilters results={results} filters={filters} onChange={setScenarioFilters} compact />
+          </div>}
+        </div>
         <span className="ml-auto text-xs tabular-nums text-text-muted">{t('dashboard.rail.count', { benches: totalBenches, sections: nSections })}</span>
       </div>
-      {filteredResults.length === 0 ? <p role="status" className="text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p> : <>
-        <div className="grid min-w-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
-          <div data-slot="dashboard-plan" className="min-w-0 h-[60vh] min-h-[390px] xl:h-[calc(100vh-350px)] xl:min-h-[400px]">
+      {filteredResults.length === 0 ? <p role="status" className="text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p> :
+        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 pt-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] xl:grid-rows-[minmax(400px,1fr)]">
+          <div data-slot="dashboard-plan" className="min-w-0 h-[60vh] min-h-[390px] xl:h-full xl:min-h-[400px]">
             <CompliancePlanView results={filteredResults} statuses={profileStatuses} variant="hero" colorBy={colorBy} visibleStatuses={visibleStatuses} selectedSection={selectedVisible ? selectedSection : null} onSelectSection={setSelectedSection} />
           </div>
-          <aside data-slot="dashboard-rail" className="min-w-0 px-4 pt-5 [&_[class$=bubble]]:max-w-48! xl:h-[calc(100vh-350px)] xl:min-h-[400px] xl:overflow-y-auto xl:border-l xl:border-border">
+          <aside data-slot="dashboard-rail" className="min-w-0 px-4 pt-5 [&_[class$=bubble]]:max-w-48! xl:min-h-0 xl:overflow-y-auto xl:border-l xl:border-border">
             <KpiHeader globalScore={globalScore} counts={profileCounts} t={t} />
             <ParameterBars rows={filteredResults} />
             <details className="border-t border-border py-4 [&_.overflow-x-auto]:overflow-visible [&_table]:table-fixed [&_table]:text-xs [&_th]:pr-1 [&_td]:pr-1 [&_span[aria-hidden]]:hidden [&_td_span]:w-auto [&_td_div]:gap-0" onToggle={(event) => { if (event.currentTarget.open) event.currentTarget.scrollIntoView?.({ block: 'nearest' }); }}><summary className="cursor-pointer text-sm">{t('dashboard.rail.parameter_detail')}</summary><ParameterTable breakdown={parameterBreakdown} t={t} /></details>
             <SelectedSectionPanel name={selectedVisible ? selectedSection : null} sectionId={selectedVisible ? selectedId : null} rows={filteredResults} statuses={profileStatuses} canOpen={selectedId != null} onClear={() => setSelectedSection(null)} onOpen={() => { if (selectedId != null) { setSelectedProfile(selectedId); setActiveWorkspaceView('profiles'); } }} />
           </aside>
-        </div>
+        </div>}
+      </div>
+      {filteredResults.length > 0 && <>
         <div className="grid min-w-0 gap-6 border-t border-border pt-6 xl:grid-cols-2">
           <SummaryPanel slot="deviation-distribution" title={t('dashboard.section.deviation_distribution')} actions={<SegmentedControl label={t('dashboard.histogram.selector')} options={histogramOptions} value={histogramKey} onChange={setHistogramKey} />}>
             <p className="text-xs text-text-muted">{histogramTitle(histogramKey, t)}</p>

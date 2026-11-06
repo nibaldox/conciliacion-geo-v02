@@ -6,13 +6,36 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 vi.mock('../../../stores/session', () => ({ useSession: (selector: (state: { topoMeshId: string }) => unknown) => selector({ topoMeshId: 'mesh' }) }));
 vi.mock('../../../api/hooks', () => ({
   useMeshVertices: () => ({ data: { x: [0, 100], y: [0, 100], z: [0, 1] } }),
-  useSections: () => ({ data: [{ id: '1', name: 'A', origin: [20, 20], azimuth: 0 }] }),
-  useSectionProfiles: () => [{ data: { topo: { distances: [0, 50], elevations: [1, 2] } } }],
+  useSections: () => ({ data: [{ id: '1', name: 'A', origin: [20, 20], azimuth: 0 }, { id: '2', name: 'B', origin: [60, 20], azimuth: 0 }] }),
+  useSectionProfiles: (ids: string[]) => ids.map(() => ({ data: { topo: { distances: [0, 50], elevations: [1, 2] } } })),
 }));
 vi.mock('../planGeometry', async (importOriginal) => ({ ...await importOriginal<typeof import('../planGeometry')>(), createSurfaceRaster: () => 'raster' }));
 const results = [{ section: 'A', height_status: 'CUMPLE', section_score: 50 }] as ComparisonResult[];
 const statuses = new Map([['A', 'CUMPLE' as const]]);
 describe('hero plan', () => {
+  it('overlays only the selected visible section and tracks selection and zoom', () => {
+    const rows = [...results, { section: 'B', height_status: 'NO_CUMPLE', section_score: 30 } as ComparisonResult];
+    const states = new Map([['A', 'CUMPLE' as const], ['B', 'NO_CUMPLE' as const]]);
+    const props = { variant: 'hero' as const, results: rows, statuses: states };
+    const { container, rerender } = render(<CompliancePlanView {...props} />);
+    const overlay = () => container.querySelector('[data-selected-section-line]');
+    expect(overlay()).toBeNull();
+    rerender(<CompliancePlanView {...props} selectedSection="A" />);
+    expect(overlay()).not.toBeNull();
+    expect(overlay()!.getAttribute('points')).toBe(container.querySelector('[data-section-name="A"] [data-plan-line]')!.getAttribute('points'));
+    expect(overlay()!.getAttribute('stroke')).toBe('var(--color-accent-bright)');
+    expect(overlay()!.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    fireEvent.click(screen.getByRole('button', { name: 'plan_view.zoom_in' }));
+    expect(overlay()!.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    const first = overlay()!.getAttribute('points');
+    rerender(<CompliancePlanView {...props} selectedSection="B" />);
+    expect(overlay()!.getAttribute('points')).not.toBe(first);
+    expect(overlay()!.getAttribute('points')).toBe(container.querySelector('[data-section-name="B"] [data-plan-line]')!.getAttribute('points'));
+    rerender(<CompliancePlanView {...props} selectedSection="B" visibleStatuses={new Set(['CUMPLE'])} />);
+    expect(overlay()).toBeNull();
+    rerender(<CompliancePlanView {...props} selectedSection={null} />);
+    expect(overlay()).toBeNull();
+  });
   it('selects accessibly and clears with Escape or empty space', () => {
     const onSelectSection = vi.fn();
     const { container } = render(<CompliancePlanView variant="hero" results={results} statuses={statuses} selectedSection="A" onSelectSection={onSelectSection} />);

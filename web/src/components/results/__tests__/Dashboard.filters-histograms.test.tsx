@@ -41,7 +41,7 @@ vi.mock('../../../stores/session', () => ({
 }));
 
 vi.mock('../CompliancePlanView', () => ({
-  CompliancePlanView: (props: { variant?: string; colorBy?: string; visibleStatuses?: Set<string>; onSelectSection?: (name: string) => void }) => <button data-testid="plan" data-variant={props.variant} data-color={props.colorBy} data-statuses={[...(props.visibleStatuses ?? [])].join(',')} onClick={() => props.onSelectSection?.('S-001')}>Select plan</button>,
+  CompliancePlanView: (props: { results: ComparisonResult[]; variant?: string; colorBy?: string; visibleStatuses?: Set<string>; onSelectSection?: (name: string) => void }) => <button data-testid="plan" data-rows={props.results.length} data-variant={props.variant} data-color={props.colorBy} data-statuses={[...(props.visibleStatuses ?? [])].join(',')} onClick={() => props.onSelectSection?.('S-001')}>Select plan</button>,
 }));
 
 vi.mock('../DesignAchievementPanel', () => ({
@@ -148,6 +148,59 @@ describe('buildHistogram (bandas de tolerancia)', () => {
     const chart = buildHistogram([0, 2, 0], 't', 'x', { neg: 1, pos: 1 }, 'frecuencia');
     const trace = chart.data[0] as { x: number[] };
     expect(trace.x).toEqual([0, 2, 0]);
+  });
+});
+
+describe('Dashboard filtros compactos', () => {
+  it('ancla cada menú a su selector y mantiene etiquetas sin saltos', () => {
+    mocks.rows = [makeRow()];
+    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+    const { container } = render(<Dashboard />);
+    fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
+    const panel = container.querySelector('#dashboard-filter-panel')!;
+    expect(panel.className).toContain('right-0');
+    for (const details of panel.querySelectorAll('details')) {
+      expect(details.className).toContain('relative');
+      expect(details.querySelector('summary')!.nextElementSibling!.className).toContain('left-0');
+      expect(details.closest('[data-dimension], [data-slot="dashboard-bench-filter"]')!.querySelector('p')!.className).toContain('whitespace-nowrap');
+    }
+    expect(panel.querySelector('[data-slot="dashboard-bench-filter"]')!.className).toContain('flex-wrap');
+  });
+  it('mantiene controles principales visibles y despliega los filtros con contador y Escape', () => {
+    mocks.rows = [makeRow(), makeRow({ bench_num: 2 })];
+    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+    const { container, rerender } = render(<Dashboard />);
+    expect(screen.getByRole('group', { name: 'Colorear por' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Cumple', pressed: true })).toBeVisible();
+    expect(container.querySelector('[data-slot="dashboard-bench-filter"]')).toBeNull();
+    expect(container.querySelector('[data-slot="result-filters"]')).toBeNull();
+    const toggle = screen.getByRole('button', { name: 'Filtros' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelector('[data-slot="dashboard-bench-filter"]')).toBeVisible();
+    expect(container.querySelector('[data-slot="result-filters"]')).toBeVisible();
+    mocks.filters = { sector: ['Norte'], section: [], level: [], bench: [1] };
+    rerender(<Dashboard />);
+    expect(screen.getByRole('button', { name: 'Filtros · 2' })).toBeVisible();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByRole('button', { name: 'Filtros · 2' })).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('[data-slot="result-filters"]')).toBeNull();
+  });
+  it('aplica banco desde el panel a la planta y cierra al pulsar fuera', () => {
+    mocks.rows = [makeRow(), makeRow({ bench_num: 2, level: '3200' })];
+    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+    const { container, rerender } = render(<Dashboard />);
+    expect(screen.getByTestId('plan')).toHaveAttribute('data-rows', '2');
+    fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
+    fireEvent.click(container.querySelector('[data-slot="dashboard-bench-filter"] summary')!);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Cota base de diseño 3150/ }));
+    expect(mocks.filters.bench).toEqual([1]);
+    rerender(<Dashboard />);
+    expect(screen.getByTestId('plan')).toHaveAttribute('data-rows', '1');
+    expect(screen.getByRole('button', { name: 'Filtros · 1' })).toBeVisible();
+    fireEvent.pointerDown(document.body);
+    expect(screen.getByRole('button', { name: 'Filtros · 1' })).toHaveAttribute('aria-expanded', 'false');
   });
 });
 

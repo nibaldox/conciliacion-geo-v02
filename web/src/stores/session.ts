@@ -65,6 +65,8 @@ export interface DemoData {
     delta_toe: number | null;
   }>;
 }
+export interface GuideCurve { id: string; points: readonly (readonly [number, number, number])[] }
+
 export type WorkflowStepKey = 'surfaces' | 'sections' | 'parameters' | 'process';
 
 interface SessionState {
@@ -82,6 +84,7 @@ interface SessionState {
 
   // Curve Selection State
   curveSelection: CurveSelectionState;
+  guideCurve: GuideCurve | null;
 
   // Selections
   selectedSection: string | null;
@@ -116,6 +119,7 @@ interface SessionState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   setMapClickHandler: (handler: ((anchor: CurveAnchor) => void) | null) => void;
   dispatchCurveSelection: (action: CurveSelectionAction) => void;
+  setGuideCurve: (curve: GuideCurve | null) => void;
   setSelectedSection: (id: string | null) => void;
   setSelectedBlastHoleRowId: (rowId: string | null) => void;
   setDesignMeshId: (id: string | null) => void;
@@ -136,6 +140,7 @@ const initialState = {
   sidebarCollapsed: false,
   mapClickHandler: null,
   curveSelection: createCurveSelectionState(null),
+  guideCurve: null as GuideCurve | null,
   selectedSection: null,
   selectedBlastHoleRowId: null,
   designMeshId: null,
@@ -171,6 +176,7 @@ export const useSession = create<SessionState>((set, get) => ({
       const next = reduceCurveSelection(s.curveSelection, action);
       return next === s.curveSelection ? s : { curveSelection: next };
     }),
+  setGuideCurve: (curve) => set({ guideCurve: curve ? { id: curve.id, points: curve.points.map((point) => [...point] as [number, number, number]) } : null }),
   setSelectedSection: (id) => set({ selectedSection: id }),
   setSelectedBlastHoleRowId: (rowId) => set({ selectedBlastHoleRowId: rowId }),
   setDesignMeshId: (id) =>
@@ -194,6 +200,7 @@ export const useSession = create<SessionState>((set, get) => ({
         currentStep: 4,            // skip straight to results
         activeWorkspaceView: 'dashboard',
         curveSelection: createCurveSelectionState(null),
+        guideCurve: null,
         selectedSection: existing.sections[0]?.section_name ?? null,
         selectedBlastHoleRowId: null,
         demoLoading: false,
@@ -219,6 +226,7 @@ export const useSession = create<SessionState>((set, get) => ({
         currentStep: 4,
         activeWorkspaceView: 'dashboard',
         curveSelection: createCurveSelectionState(null),
+        guideCurve: null,
         selectedSection: data.sections[0]?.section_name ?? null,
         selectedBlastHoleRowId: null,
       });
@@ -244,6 +252,7 @@ export const useSession = create<SessionState>((set, get) => ({
       currentStep: 1,
       activeWorkspaceView: '3d',
       curveSelection: createCurveSelectionState(null),
+      guideCurve: null,
     }),
 
   reset: () => set(initialState),

@@ -893,6 +893,7 @@
     "tol_crest_toe": "Crest-toe deviation (m)"
   },
   "viewer": {
+    "camera": { "title": "Camera controls", "reset": "Reset", "plan": "Top", "north": "North", "east": "East", "pivot": "Show pivot", "grid": "Grid", "compass": "Compass", "setPivot": "Set pivot" },
     "panel_resize_corner": "Resize panel width and height", "panel_resize_hint": "Drag the corner to resize",
     "cesium_load_error": "Failed to load CesiumJS: {{message}}",
     "cesium_init_error": "Failed to initialize CesiumJS: {{message}}",
@@ -906,6 +907,7 @@
     "tooltip": "East: %{x:.1f}m<br>North: %{y:.1f}m<br>Elev: %{text:.1f}m",
     "layers": "Visible layers",
     "layer_topo": "Real topography",
+    "layer_topo_opacity": "Topography opacity",
     "layer_design": "Design contours",
     "layer_sections": "Section lines",
     "horizontal_map": "Horizontal heat map",
@@ -1272,6 +1274,7 @@
       "count": "{{sections}} sections · {{benches}} benches"
     },
     "filters": {
+      "label": "Filters",
       "no_matching_results": "No results match the active filter combination. Adjust or reset the sector, section, elevation, or bench filters."
     },
     "empty_state": "No results to show. Run the processing first.",
@@ -1449,6 +1452,7 @@
     "curve_step1": "Click a breakline to choose it.",
     "curve_step2": "Click again to mark the start and the end; both may sit inside one segment.",
     "curve_step3": "Review the summary and use \"RESET SELECTION\" or Escape to start over.",
+    "remove_guide": "Remove guide line",
     "curve_reset": "RESET SELECTION",
     "curve_chainage": "Chainage",
     "curve_range_length": "Range length",

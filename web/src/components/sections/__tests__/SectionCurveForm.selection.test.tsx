@@ -101,6 +101,44 @@ beforeEach(() => {
 });
 
 describe('SectionCurveForm curve selection integration', () => {
+  it('keeps the confirmed range after generation and form unmount, until reset', () => {
+    mocks.breaklines.current = buildContourData();
+    const { click } = mounted();
+    chooseAnchors(click);
+    const guide = { id: '0-0', points: [[20, 0, 1200], [80, 0, 1200]] };
+    expect(useSession.getState().guideCurve).toEqual(guide);
+    fireEvent.click(screen.getByRole('button', { name: 'project_input.generate' }));
+    act(() => (mocks.mutation.mutate.mock.calls[0][1] as { onSuccess: () => void }).onSuccess());
+    expect(useSession.getState().guideCurve).toEqual(guide);
+    cleanup();
+    expect(useSession.getState().guideCurve).toEqual(guide);
+    useSession.getState().reset();
+    expect(useSession.getState().guideCurve).toBeNull();
+  });
+
+  it('removes the guide explicitly without restoring it from the transient selection', () => {
+    mocks.breaklines.current = buildContourData();
+    const { click } = mounted();
+    chooseAnchors(click);
+    fireEvent.click(screen.getByRole('button', { name: 'project_input.remove_guide' }));
+    expect(useSession.getState().guideCurve).toBeNull();
+    expect(useSession.getState().curveSelection.curveId).toBeNull();
+  });
+
+  it('clears the guide when loading an already-cached demo', async () => {
+    useSession.getState().setGuideCurve({ id: 'old', points: [[0, 0, 0], [1, 1, 1]] });
+    useSession.setState({ demoData: { sections: [] } as never });
+    await act(() => useSession.getState().loadDemo());
+    expect(useSession.getState().guideCurve).toBeNull();
+  });
+
+  it('copies guide coordinates rather than sharing the source array', () => {
+    const points: [number, number, number][] = [[0, 0, 1], [1, 1, 1]];
+    useSession.getState().setGuideCurve({ id: 'a', points });
+    points[0][0] = 9;
+    expect(useSession.getState().guideCurve?.points[0][0]).toBe(0);
+  });
+
   it('enables generation from the registered callback and sends the exact XY payload', () => {
     mocks.breaklines.current = buildContourData();
     const { click } = mounted();
