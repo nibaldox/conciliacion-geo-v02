@@ -109,7 +109,7 @@ Mounted under `/api/v1/*`. Session via `X-Session-ID` header (auto-generated if 
 ## CI (`.github/workflows/`)
 
 **`ci.yml`** — on push to main/develop or PR to main — 4 jobs:
-1. **Backend tests**: Python 3.12, `libspatialindex-dev` system dep, `python -m pytest tests/ -v --tb=short --ignore=tests/test_openblast.py` (openblast tests never run in CI) + `python test_pipeline.py`
+1. **Backend tests**: Python 3.14, `libspatialindex-dev` system dep, `python -m pytest tests/ -v --tb=short --ignore=tests/test_openblast.py` (openblast tests never run in CI) + `python test_pipeline.py`
 2. **Frontend build**: Node 20, `npm ci` → `npx tsc -b` → `npm run build`
 3. **Docker build** (main only, `needs: [backend-tests, frontend-build]` — sequential, not parallel): builds `Dockerfile-api` + `Dockerfile-web`
 4. **Docker Compose smoke test**: `docker compose up -d`, polls container `conciliacion-geo-v02-api-1` health up to ~60s for `healthy`, then curls `http://localhost:8000/api/v1/health`
@@ -170,6 +170,6 @@ Key detection defaults: `face_threshold=30°`, `berm_threshold=10°`, `max_berm_
   - **Documented exception (audit H-10)**: `ui/modulo_tronadura/` is the maintainer-approved active Streamlit UI for the drill & blast module (all recent PF/halo/tronadura features ship there at the maintainer's request). Constraint: it must remain an **adapter/presentation layer only** — all domain logic (geometry, physics, powder factor, Voronoi, provenance) lives in `core/`; the module only calls core functions and renders Plotly/Streamlit. New domain logic must never be added inside `ui/`.
 - **Audit contract (Fase 1.1)**: sensitive magnitudes carry `value + unit + status + source + assumptions + warnings` from data read to UI/export (see `explosive_*` provenance columns and `incl_convention_warning`). Invariants enforced by tests: clipped Voronoi area sums ≤ domain; dimensionless fractions are never named kg/m³; unknown explosives never fall back to ANFO; bench height is an event attribute.
 - **Streamlit file watcher**: `fileWatcherType = "poll"` is set in `.streamlit/config.toml` to avoid `inotify` ENOSPC; don't switch to default `auto` on systems with many small files.
-- **Electron portable build requires two steps**: `pyinstaller conciliacion-api.spec` → `electron-builder` in `electron/`. The `VITE_PWA=false` env var is mandatory during the web build step or the SW will break the AppImage.
+- **Electron portable build requires two steps**: `pyinstaller conciliacion-api.spec` → `electron-builder` in `electron/`. The sidecar is onedir without UPX: `dist/conciliacion-api/conciliacion-api(.exe)` plus `_internal/`, copied together to Electron resources. The `VITE_PWA=false` env var is mandatory during the web build step or the SW will break the AppImage.
 - **Test counts shift**: ~1,202 collected (backend, with `--ignore`) / 1,233 with openblast. README.md has a testing table (1,233 backend + 344 frontend) — update it in PRs that add or remove tests.
 - **`openblast` is an optional dependency** — `tests/test_openblast.py` errors at collection if the simulator package isn't installed. Use `--ignore=tests/test_openblast.py` to skip in that case.

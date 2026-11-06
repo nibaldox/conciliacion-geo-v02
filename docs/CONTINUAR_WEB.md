@@ -20,10 +20,10 @@ Prerrequisitos (de `pyproject.toml`, `web/package.json` y CI):
 
 | Componente | Requisito |
 |---|---|
-| Python | 3.12 (el que usa CI); `pyproject.toml` exige >= 3.10 |
-| Node.js | >= 22 (`engines` en `web/package.json`; CI usa Node 22) |
+| Python | 3.14 (el que usa CI); `pyproject.toml` exige >= 3.10 |
+| Node.js | >= 22 (`engines` en `web/package.json`; CI usa Node 24) |
 | npm | incluido con Node (`npm ci` en `web/`) |
-| uv | para el harness de integración fullstack de vitest (CI usa `uv sync --locked --extra test --python 3.12`) |
+| uv | para el harness de integración fullstack de vitest (CI usa `uv sync --locked --extra test --python 3.14`) |
 | libspatialindex | requerido por `rtree`: Linux `apt-get install libspatialindex-dev`, macOS `brew install spatialindex`; en Windows los wheels de rtree suelen incluir la DLL |
 
 ```bash
@@ -51,7 +51,7 @@ Notas de entorno:
 
 - El typecheck real del proyecto es `npx tsc -b` (no `tsc --noEmit`: ese no analizaba ningún archivo). Para paridad con CI, exportar `UV_NO_SYNC=1` antes de `npm run test:coverage`.
 - **pip/uv — no mezclar en el mismo `.venv`**: `uv sync` (y `uv run`) tratan el entorno como gestionado y lo reconcilian con `pyproject.toml` + `uv.lock`, eliminando por defecto paquetes ajenos a esa resolución. Tras los `pip install` del paso 3, **no ejecutar `uv sync`**: puede eliminar dependencias API instaladas vía `requirements-api.txt` que no estén declaradas en `pyproject.toml`. Opción local: quedarse con este entorno pip y correr el harness con `UV_NO_SYNC=1`, sin `uv sync`.
-- **El aprovisionamiento uv-locked es de CI, no de esta guía**: el job de frontend de CI lo hace con `uv sync --locked --extra test --python 3.12` sobre checkout limpio (y congela con `UV_NO_SYNC=1` al correr la suite); no replicarlo tras los `pip install` locales.
+- **El aprovisionamiento uv-locked es de CI, no de esta guía**: el job de frontend de CI lo hace con `uv sync --locked --extra test --python 3.14` sobre checkout limpio (y congela con `UV_NO_SYNC=1` al correr la suite); no replicarlo tras los `pip install` locales.
 - **Aislar datos antes de importar la API**: exportar `CONCILIACION_DATA_DIR` a un directorio nuevo (p. ej. `data/qa-localfecha/`) en la misma shell que lance `uvicorn`; el SQLite se crea ahí. No apuntar a `data/` compartido ni a directorios de logs históricos.
 - **No reutilizar** IDs de sesión, puertos ni PIDs que aparezcan en bitácoras o logs históricos: crear sesión, puerto y procesos nuevos y verificar que el puerto esté libre. Los PID registrados en cualquier bitácora son históricos y no acreditan propiedad.
 - **No repetir búsquedas amplias** por el home o el disco completo (fueron lentas y consumieron presupuesto en la fase previa); en otro PC las rutas difieren. Trabajar siempre dentro del clon.
@@ -84,13 +84,13 @@ Resultados del PC del mantenedor el 7 de octubre de 2026, sobre el árbol exacto
 `python -m pytest tests/ -q --tb=short --ignore=tests/test_openblast.py --skip-electron --benchmark-skip-slow`
 (`--skip-electron` y `--benchmark-skip-slow` son flags reales de `tests/conftest.py`). Skips: 1 benchmark pesado, 5 de sidecar Electron y 2 módulos legacy pre-existentes — por diseño, no fallos. Warnings: deprecaciones pre-existentes de librerías/legacy, ninguna del código estabilizado. Verificación por hash de 29 archivos fuente (incl. workflows, tests y config): 29/29 OK sin deriva durante la validación.
 
-**Frontend (Node 22.23.1):** `tsc -b` exit 0 · eslint exit 0 · vitest **480/480 en 56 archivos** exit 0 · cobertura obligatoria del dominio ProfileView **100%** (statements 194/194, branches 220/220, functions 49/49, lines 171/171) · `npm run build` con PWA exit 0. (Node 26 no es paridad: ese runtime presentaba el problema de binding de storage que el setup de test resuelve; usar Node 22.)
+**Frontend (Node 22.23.1):** `tsc -b` exit 0 · eslint exit 0 · vitest **480/480 en 56 archivos** exit 0 · cobertura obligatoria del dominio ProfileView **100%** (statements 194/194, branches 220/220, functions 49/49, lines 171/171) · `npm run build` con PWA exit 0. (Node 26 no es paridad: ese runtime presentaba el problema de binding de storage que el setup de test resuelve; para paridad con el CI actual usar Node 24.)
 
 **Revisión estática independiente:** **PASS** para ese árbol exacto (verificado por hash), solo lectura. Riesgos no bloqueantes anotados: CI remoto sin ejecutar; notas stale en `README.md`/`docs/HANDOFF.md`; errores de auth llevan CORS solo para orígenes allow-listed (por diseño). No es revisión visual ni corrida remota.
 
 **API (auth y ownership):** preflight estricto `OPTIONS + Origin + Access-Control-Request-Method`; CORS envuelve 401/403/503 para orígenes permitidos; fail-closed 503 si `CONCILIACION_AUTH_REQUIRED` está activo sin key; ownership de mallas verificado antes de caché/lectura/borrado (404 uniforme para ajenas). Corridas focalizadas: 34 auth + 23 ownership + 191 foco + 33 adyacentes, todas pass (incluidas en la suite global).
 
-**CI/configuración:** gate frontend **sin exclusiones** (suite completa + cobertura), provisionado en el mismo job (Python 3.12 + uv + `uv sync --locked --extra test`); `UV_NO_SYNC=1` congela el entorno del harness. Base API `/api/v1` sin duplicación; `render.yaml` con prefijos `CONCILIACION_*` corregidos, un worker documentado y límite de carga 500. **El CI remoto NO se ejecutó** en esa fase (no hubo push): la validez es local (tests de contrato + parseo YAML + `uv lock --check`). Al abrir esta rama, revisar el estado real de los workflows en GitHub si se disparan.
+**CI/configuración de esa fase:** gate frontend **sin exclusiones** (suite completa + cobertura), provisionado en el mismo job (Python 3.12 + uv + `uv sync --locked --extra test`; el CI actual usa Python 3.14); `UV_NO_SYNC=1` congela el entorno del harness. Base API `/api/v1` sin duplicación; `render.yaml` con prefijos `CONCILIACION_*` corregidos, un worker documentado y límite de carga 500. **El CI remoto NO se ejecutó** en esa fase (no hubo push): la validez es local (tests de contrato + parseo YAML + `uv lock --check`). Al abrir esta rama, revisar el estado real de los workflows en GitHub si se disparan.
 
 **Cambios científicos:** ninguno. Lo tocado es auth/ownership (API), configuración de despliegue y build/tests web; `core/` solo `core/config.py` (lectura validada de `CONCILIACION_MAX_UPLOAD_MB`).
 

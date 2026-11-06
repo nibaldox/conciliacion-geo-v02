@@ -170,8 +170,8 @@ def mesh_stl_temp(pit_mesh_design):
 def _sidecar_paths():
     repo = Path(__file__).resolve().parent.parent
     return {
-        "linux": repo / "dist" / "conciliacion-api",
-        "win": repo / "dist" / "conciliacion-api.exe",
+        "linux": repo / "dist" / "conciliacion-api" / "conciliacion-api",
+        "win": repo / "dist" / "conciliacion-api" / "conciliacion-api.exe",
     }
 
 

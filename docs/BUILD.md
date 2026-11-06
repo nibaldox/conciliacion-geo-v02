@@ -234,7 +234,7 @@ The repo has two GitHub Actions workflows:
 
 ### Build (`.github/workflows/build.yml`)
 Runs on every push to main and every PR:
-1. Set up Python 3.14 + Node 22
+1. Set up Python 3.14 + Node 24
 2. Install pyinstaller + project deps
 3. `web/npm ci && npm run build`
 4. `pytest tests/ -q` (backend tests)

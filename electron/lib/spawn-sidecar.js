@@ -5,16 +5,16 @@ const fs = require('node:fs');
 /**
  * Resolve the absolute path of the bundled Python sidecar binary.
  *
- * In a packaged Electron app the binary lives next to the resources
- * directory. In development/tests a custom `resourcesPath` can be passed
- * to point to a temporary directory containing a fake binary.
+ * In a packaged Electron app the binary lives in the conciliacion-api
+ * subdirectory of resources. In development/tests a custom `resourcesPath`
+ * can point to a temporary directory containing a fake binary.
  *
  * @param {string} [resourcesPath=process.resourcesPath]
  * @returns {string}
  */
 function getSidecarPath(resourcesPath = process.resourcesPath) {
   const name = process.platform === 'win32' ? 'conciliacion-api.exe' : 'conciliacion-api';
-  return path.join(resourcesPath, name);
+  return path.join(resourcesPath, 'conciliacion-api', name);
 }
 
 /**

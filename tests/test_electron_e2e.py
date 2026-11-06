@@ -22,8 +22,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-SIDECAR_LINUX = REPO / "dist" / "conciliacion-api"
-SIDECAR_WIN = REPO / "dist" / "conciliacion-api.exe"
+SIDECAR_LINUX = REPO / "dist" / "conciliacion-api" / "conciliacion-api"
+SIDECAR_WIN = REPO / "dist" / "conciliacion-api" / "conciliacion-api.exe"
 WEB_DIST = REPO / "web" / "dist" / "index.html"
 PYINSTALLER_AVAILABLE = shutil.which("pyinstaller") is not None
 
