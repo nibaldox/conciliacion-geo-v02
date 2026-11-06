@@ -7,9 +7,19 @@
  * only file that needs to change.
  */
 
-import { assertNever, type BenchStatus } from './types';
+import { assertNever, type BenchScoreInput, type BenchStatus } from './types';
 
 export type ComplianceStatus = 'CUMPLE' | 'FUERA' | 'NO_CUMPLE' | 'UNKNOWN';
+
+export const BENCH_SCORE_MAX = 100;
+
+export const BENCH_PASSING_SCORE = 70;
+
+export const SCORE_WEIGHTS = {
+  berm: 60,
+  angle: 10,
+  height: 30,
+} as const;
 
 // ─── Backend status strings ──────────────────────────────────
 
@@ -52,9 +62,7 @@ export function parseBenchStatus(raw: string | null | undefined): BenchStatus {
     s === 'FALTA BANCO' ||
     s === 'BANCO ADICIONAL' ||
     s === 'EXTRA'
-  ) {
-    return 'NO_CUMPLE';
-  }
+  ) return 'NO_CUMPLE';
   return 'UNKNOWN';
 }
 
@@ -75,6 +83,50 @@ export function worstOfThree(
     if (rank[s] > rank[worst]) worst = s;
   }
   return worst;
+}
+
+export function isValidBenchScore(score: unknown): score is number {
+  return typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= BENCH_SCORE_MAX;
+}
+
+export function classifyBenchScore(score: number | null | undefined): BenchStatus {
+  if (!isValidBenchScore(score)) return 'UNKNOWN';
+  return score >= BENCH_PASSING_SCORE ? 'CUMPLE' : 'NO_CUMPLE';
+}
+
+export function resolveBenchScore(
+  comparison: BenchScoreInput | null | undefined,
+): number | null {
+  if (comparison == null || comparison.type !== 'MATCH') return null;
+  if (comparison.bench_score !== undefined && comparison.bench_score !== null) {
+    return isValidBenchScore(comparison.bench_score) ? comparison.bench_score : null;
+  }
+  const height = parseMatchScoreStatus(comparison.height_status);
+  const angle = parseMatchScoreStatus(comparison.angle_status);
+  const berm = parseMatchScoreStatus(comparison.berm_status);
+  if (height === 'UNKNOWN' || angle === 'UNKNOWN' || berm === 'UNKNOWN') return null;
+  return (
+    (berm === 'CUMPLE' ? SCORE_WEIGHTS.berm : 0) +
+    (angle === 'CUMPLE' ? SCORE_WEIGHTS.angle : 0) +
+    (height === 'CUMPLE' ? SCORE_WEIGHTS.height : 0)
+  );
+}
+
+function parseMatchScoreStatus(raw: string | null | undefined): BenchStatus {
+  if (raw == null) return 'UNKNOWN';
+  const s = raw.trim().toUpperCase();
+  if (s === 'CUMPLE') return 'CUMPLE';
+  if (s === 'FUERA DE TOLERANCIA' || s === 'FUERA') return 'FUERA';
+  if (s === 'NO CUMPLE') return 'NO_CUMPLE';
+  return 'UNKNOWN';
+}
+
+export function classifyComparisonBenchStatus(
+  comparison: BenchScoreInput | null | undefined,
+): BenchStatus {
+  if (comparison == null) return 'UNKNOWN';
+  if (comparison.type === 'MISSING' || comparison.type === 'EXTRA') return 'NO_CUMPLE';
+  return classifyBenchScore(resolveBenchScore(comparison));
 }
 
 // ─── Severity ordering ──────────────────────────────────────

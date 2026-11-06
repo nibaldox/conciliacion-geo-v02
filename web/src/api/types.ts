@@ -404,6 +404,8 @@ export interface ReferenceLineResponse {
 }
 
 export interface BlastHoleOnProfile {
+  row_id?: string | null;
+  profile_point_kind?: 'projected_collar' | 'intersection' | null;
   hole_id: string;
   distance: number;
   elevation: number;
@@ -559,6 +561,17 @@ export interface BlastUploadResponse {
   blocking_errors: BlockingError[];
   geometry_configuration: GeometryConfiguration;
   spatial_diagnostics: Record<string, unknown>;
+  design_surface?: {
+    mode: 'sample_design' | string;
+    mesh_id: string | null;
+    mesh_sha256: string | null;
+    spatial_reference_confirmed: boolean;
+    unit: 'm' | string;
+    method: string;
+    rows: number;
+    coverage: number;
+    counts: { sampled: number; outside: number; ambiguous: number; invalid: number };
+  } | null;
 }
 
 export interface BlastHoleSummary {

@@ -32,6 +32,12 @@ async function prepare(page: Page) {
   await page.locator('canvas').waitFor();
 }
 
+async function openStep(page: Page, step: 'surfaces' | 'sections' | 'parameters' | 'process') {
+  const button = page.locator(`#workflow-step-${step}`);
+  if (await button.getAttribute('aria-expanded') !== 'true') await button.click();
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+}
+
 async function expectNoScroll(page: Page) {
   expect(await page.locator('[data-slot="project-controls"]').evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1);
 }
@@ -40,10 +46,9 @@ test('all entry stages fit compact windows and remain accessible in both themes'
   await prepare(page);
   for (const size of [{ width: 1366, height: 768 }, { width: 1280, height: 720 }, { width: 1024, height: 640 }]) {
     await page.setViewportSize(size);
-    for (const panel of ['mallas', 'secciones', 'tolerancias', 'procesamiento']) {
-      const button = page.locator(`[aria-controls="project-panel-${panel}"]`);
-      if (await button.getAttribute('aria-expanded') !== 'true') await button.click();
-      if (panel === 'secciones') {
+    for (const panel of ['surfaces', 'sections', 'parameters', 'process'] as const) {
+      await openStep(page, panel);
+      if (panel === 'sections') {
         for (const tab of ['Por curvas', 'Archivo']) {
           await page.getByRole('button', { name: tab, exact: true }).click();
           await expectNoScroll(page);
@@ -52,7 +57,7 @@ test('all entry stages fit compact windows and remain accessible in both themes'
     }
   }
   await page.locator('[data-slot="theme-toggle"]').click();
-  await page.locator('[aria-controls="project-panel-tolerancias"]').click();
+  await openStep(page, 'parameters');
   await expect(page.getByLabel('Paso (m)', { exact: true })).toBeVisible();
   await page.getByText('Ángulos globales', { exact: true }).click();
   await expect(page.getByLabel(/Tolerancia negativa: Ángulo inter-rampa/)).toBeVisible();
@@ -63,7 +68,7 @@ test('all entry stages fit compact windows and remain accessible in both themes'
 test('file selection by keyboard submits the complete section geometry and permits editing', async ({ page }) => {
   await prepare(page);
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.locator('[aria-controls="project-panel-secciones"]').click();
+  await openStep(page, 'sections');
   await page.getByRole('button', { name: 'Archivo', exact: true }).click();
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: 'Seleccionar archivo', exact: true }).focus();
@@ -92,7 +97,7 @@ test('file selection by keyboard submits the complete section geometry and permi
 test('curve selection and settings preserve geometry and tolerance values', async ({ page }) => {
   await prepare(page);
   await page.setViewportSize({ width: 1280, height: 720 });
-  await page.locator('[aria-controls="project-panel-secciones"]').click();
+  await openStep(page, 'sections');
   const anchors = await page.evaluate(async () => {
     const { useSession } = await import('/conciliacion-geo-v02/src/stores/session.ts');
     const { createCurveAnchor } = await import('/conciliacion-geo-v02/src/components/sections/curveAnchorGeometry.ts');
@@ -140,16 +145,16 @@ test('curve selection and settings preserve geometry and tolerance values', asyn
     await expectNoScroll(page);
     await expect(generate).toBeEnabled();
     await expect(reset).toBeVisible();
-    const toggleHeights = await page.locator('[aria-controls^="project-panel-"]').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
+    const toggleHeights = await page.locator('[data-slot="project-controls"] button[aria-controls^="workflow-step-"]').evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().height));
     for (const toggleHeight of toggleHeights) {
-      expect(toggleHeight, `accordion toggle height at ${size.width}x${size.height}`).toBeGreaterThanOrEqual(28);
+      expect(toggleHeight, `step toggle height at ${size.width}x${size.height}`).toBeGreaterThanOrEqual(28);
     }
     for (const action of [generate, reset]) {
       expect(await action.boundingBox(), `generate/reset box present at ${size.width}x${size.height}`).not.toBeNull();
       const box = await action.evaluate((element) => {
         const { top, bottom, left, right, height } = element.getBoundingClientRect();
         const controls = element.closest('[data-slot="project-controls"]')!;
-        const panel = element.closest('[id^="project-panel-"]');
+        const panel = element.closest('[role="region"][id^="workflow-step-"]');
         const clip = controls.getBoundingClientRect();
         const panelClip = panel ? panel.getBoundingClientRect() : clip;
         return {
@@ -181,7 +186,7 @@ test('curve selection and settings preserve geometry and tolerance values', asyn
   expect(generatedBody.points).toHaveLength(3);
   for (const point of generatedBody.points) expect(point).toHaveLength(2);
   expect(generatedBody).toMatchObject({ points: [[700000, 7200000], [700020, 7200010], [700040, 7200020]], spacing: 10, length: 200, length_up: 70, length_down: 130 });
-  await page.locator('[aria-controls="project-panel-tolerancias"]').click();
+  await openStep(page, 'parameters');
   await page.getByLabel('Paso (m)', { exact: true }).fill('0.2');
   const saved = page.waitForRequest((request) => request.url().endsWith('/settings') && request.method() === 'PUT');
   await page.getByRole('button', { name: 'Guardar Parámetros', exact: true }).click();

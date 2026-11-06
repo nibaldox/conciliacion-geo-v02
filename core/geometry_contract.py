@@ -157,6 +157,13 @@ class GeometryConfiguration:
             details["inclination_convention"] = self.inclination_convention
         if self.inclination_sign_convention not in _VALID_INCL_SIGN:
             details["inclination_sign_convention"] = self.inclination_sign_convention
+        elif (
+            self.inclination_sign_convention == "NEGATIVE_IS_DOWNWARD_DIP"
+            and self.inclination_convention == "FROM_VERTICAL"
+        ):
+            details["inclination_sign_convention"] = (
+                "NEGATIVE_IS_DOWNWARD_DIP requires inclination_convention=DIP_FROM_HORIZONTAL"
+            )
         if self.inclination_unit not in _VALID_INCL_UNIT:
             details["inclination_unit"] = self.inclination_unit
         if self.azimuth_convention not in _VALID_AZ_CONVENTIONS:

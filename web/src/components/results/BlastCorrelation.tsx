@@ -13,6 +13,14 @@ import { BlastSectorDensityEditor } from './BlastSectorDensityEditor';
 import { BlastCorrelationTable } from './BlastCorrelationTable';
 import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { useBlastSettings } from './useBlastSettings';
+import { DEMO_MESH_IDS, useSession } from '../../stores/session';
+import { Button } from '../ui/Button';
+import {
+  BlastSectionHeader,
+  BLAST_PLOT_AXIS_BASE,
+  BLAST_PLOT_LAYOUT_BASE,
+  useBlastChartColors,
+} from './blastLayout';
 // Re-exports below kept for backwards-compat with existing tests:
 //   - damage test suite imports `buildDamageTraces` / `DAMAGE_MODEL_MIN_SAMPLES`
 //     (canonical home: PowderFactorDamagePanel.tsx)
@@ -95,23 +103,11 @@ export function buildOverlayHistogram(
 
 // ─── Component ──────────────────────────────────────────────
 
-/**
- * Per-section blast-correlation table.
- *
- * Renders one row per section with powder-factor metrics. The
- * `pf_g_per_ton_avg` (g/ton) column is visually emphasized as the
- * primary KPI. Empty / loading / error states mirror sibling
- * results components.
- *
- * A small controls panel (`BlastDensityControl`) at the top lets the
- * user tune the per-session rock density (ρ, ton/m³) and height
- * fallback (m). On "Aplicar" the values are PUT to `/settings` under
- * the `blast` block and the `['blast-correlation', ...]` query is
- * invalidated so the table refetches with the new ρ.
- */
 export function BlastCorrelation() {
   const { t } = useTranslation();
   const qc = useQueryClient();
+  const { designMeshId, topoMeshId } = useSession();
+  const hasVirtualMesh = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
   const { data, isLoading, error } = useBlastCorrelation();
 
   const rows: BlastCorrelationRow[] = data?.rows ?? [];
@@ -120,10 +116,7 @@ export function BlastCorrelation() {
 
   if (isLoading) {
     return (
-      <div
-        className="flex items-center justify-center h-48 text-sm"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
+      <div className="flex h-48 items-center justify-center text-sm text-text-muted">
         {t('blast.loading', { defaultValue: 'Cargando…' })}
       </div>
     );
@@ -131,104 +124,80 @@ export function BlastCorrelation() {
 
   if (error) {
     return (
-      <div
-        className="flex items-center justify-center h-48 text-sm"
-        style={{ color: 'var(--color-status-error, #ef4444)' }}
-      >
+      <div role="alert" className="flex h-48 items-center justify-center gap-2 text-sm text-text-secondary">
+        <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-[var(--status-nok-text)]" />
         {t('blast.error', { defaultValue: 'Error al cargar datos de tronadura.' })}
       </div>
     );
   }
 
+  const invalidateCorrelation = () => qc.invalidateQueries({ queryKey: ['blast-correlation'] });
+
   if (rows.length === 0) {
     return (
-      <div
-        className="flex flex-col items-center justify-center h-auto min-h-48 gap-3 text-center px-6 py-6"
-      >
-        <div className="text-4xl" aria-hidden="true">⚗️</div>
-        <p
-          className="text-sm font-semibold"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          {t('blast.empty_title', { defaultValue: 'Sin datos de tronadura' })}
-        </p>
-        <p
-          className="text-xs leading-relaxed max-w-md"
-          style={{ color: 'var(--color-text-muted)' }}
-        >
-          {t('blast.empty_desc', {
-            defaultValue:
-              'Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.',
-          })}
-        </p>
-        <div className="w-full max-w-md">
-          <BlastUploader
-            onUploaded={() => qc.invalidateQueries({ queryKey: ['blast-correlation'] })}
-          />
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-6">
+        <div className="flex flex-col gap-1">
+          <h2 className="ui-section-title">
+            {t('blast.empty_title', { defaultValue: 'Sin datos de tronadura' })}
+          </h2>
+          <p className="text-xs leading-relaxed text-text-muted">
+            {hasVirtualMesh
+              ? t('blast.empty_demo_desc', {
+                  defaultValue: 'La demo usa mallas virtuales y no incluye datos de tronadura.',
+                })
+              : t('blast.empty_desc', {
+                  defaultValue:
+                    'Cargue un archivo de pozos/tronadura y ejecute el análisis para ver el factor de carga por sección.',
+                })}
+          </p>
         </div>
+        <BlastUploader onUploaded={invalidateCorrelation} />
       </div>
     );
   }
 
+  const loadingFallback = (
+    <p className="text-sm text-text-muted">
+      {t('common.loading', { defaultValue: 'Cargando…' })}
+    </p>
+  );
+
   return (
-    <div className="space-y-4">
-      <BlastUploader
-        onUploaded={() => qc.invalidateQueries({ queryKey: ['blast-correlation'] })}
+    <div className="flex flex-col gap-6" data-slot="blast-correlation">
+      <BlastSectionHeader
+        as="h2"
+        title={t('blast.summary_title', { defaultValue: 'Correlación de Tronadura' })}
+        aside={
+          <span className="ui-chip tabular-nums">
+            {t('blast.n_sections', {
+              defaultValue: '{{count}} secciones',
+              count: rows.length,
+            })}
+          </span>
+        }
       />
+
+      <BlastUploader collapsible onUploaded={invalidateCorrelation} />
+
       <BlastDensityControl />
-      {/* Summary header */}
-      <div
-        className="flex items-center justify-between border-b pb-3 shrink-0"
-        style={{ borderColor: 'var(--color-border)' }}
-      >
-        <p
-          className="text-sm font-medium"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          {t('blast.summary_title', { defaultValue: 'Correlación de Tronadura' })}
-        </p>
-        <span
-          className="text-xs px-2.5 py-1 rounded-full font-semibold"
-          style={{
-            backgroundColor: 'var(--color-surface-muted)',
-            color: 'var(--color-text-secondary)',
-          }}
-        >
-          {t('blast.n_sections', {
-            defaultValue: '{{count}} secciones',
-            count: rows.length,
-          })}
-        </span>
+
+      <section className="flex flex-col gap-3">
+        <BlastSectionHeader
+          title={t('blast.table_title', { defaultValue: 'Factor de carga por sección' })}
+        />
+        <BlastCorrelationTable rows={rows} />
+      </section>
+
+      <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
+        <PowderFactorDamagePanel />
+        <BlastHistogramChart carga={carga} descarga={descarga} />
       </div>
 
-      {/* Table */}
-      <BlastCorrelationTable rows={rows} />
-
-      {/* G13 visual: PF↔damage scatter with OLS regression overlay */}
-      <PowderFactorDamagePanel />
-
-      {/* G18 visual: histogram overlay of charge vs discharge */}
-      <BlastHistogramChart carga={carga} descarga={descarga} />
-
-      {/* G11 phase 3: 3D viewer of blast holes */}
-      <Suspense
-        fallback={
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            {t('common.loading', { defaultValue: 'Cargando…' })}
-          </p>
-        }
-      >
+      <Suspense fallback={loadingFallback}>
         <BlastHoles3DViewer sessionId={getSessionId()} />
       </Suspense>
 
-      {/* Phase 2: energy simulation panel (voxel-based, conservative model) */}
-      <Suspense
-        fallback={
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            {t('common.loading', { defaultValue: 'Cargando…' })}
-          </p>
-        }
-      >
+      <Suspense fallback={loadingFallback}>
         <BlastSimulationPanel
           sessionId={getSessionId()}
           geometryConfigurationVersion={GEOMETRY_CONFIGURATION_VERSION}
@@ -238,10 +207,9 @@ export function BlastCorrelation() {
   );
 }
 
-// ─── Histogram overlay chart (G18) ──────────────────────────
-
 function BlastHistogramChart({ carga, descarga }: { carga: number[]; descarga: number[] }) {
   const { t } = useTranslation();
+  const colors = useBlastChartColors();
   const hasData = carga.length > 0 || descarga.length > 0;
   if (!hasData) return null;
 
@@ -254,23 +222,20 @@ function BlastHistogramChart({ carga, descarga }: { carga: number[]; descarga: n
   };
 
   return (
-    <div
-      className="glass-panel rounded-xl p-5 space-y-3"
+    <section
+      className="flex min-w-0 flex-col gap-3"
       data-testid="blast-histogram-chart"
     >
-      <p
-        className="text-xs font-bold uppercase tracking-wider"
-        style={{ color: 'var(--color-text-secondary)' }}
-      >
-        {t('blast.histogram_title', { defaultValue: 'Carga vs Descarga' })}
-      </p>
+      <BlastSectionHeader
+        title={t('blast.histogram_title', { defaultValue: 'Carga vs Descarga' })}
+      />
       <Plot
         data={[
           {
             x: carga,
             type: 'histogram',
             name: t('blast.carga', { defaultValue: 'Carga' }),
-            marker: { color: '#3b82f6' },
+            marker: { color: colors.primary },
             opacity: 0.7,
             xbins,
           },
@@ -278,55 +243,37 @@ function BlastHistogramChart({ carga, descarga }: { carga: number[]; descarga: n
             x: descarga,
             type: 'histogram',
             name: t('blast.descarga', { defaultValue: 'Descarga' }),
-            marker: { color: '#ef4444' },
+            marker: { color: colors.secondary },
             opacity: 0.7,
             xbins,
           },
         ] as Data[]}
         layout={{
-          height: 340,
+          ...BLAST_PLOT_LAYOUT_BASE,
+          height: 320,
           barmode: 'overlay',
-          margin: { l: 55, r: 20, t: 24, b: 50 },
-          paper_bgcolor: 'rgba(0,0,0,0)',
-          plot_bgcolor: 'rgba(0,0,0,0)',
-          font: { color: 'var(--color-text-secondary)', size: 11 },
+          margin: { l: 50, r: 12, t: 8, b: 48 },
           xaxis: {
+            ...BLAST_PLOT_AXIS_BASE,
             title: {
               text: t('blast.histogram_x_axis', { defaultValue: 'Carga (kg)' }),
               font: { size: 11 },
             },
-            gridcolor: 'var(--color-border)',
-            zeroline: false,
           },
           yaxis: {
+            ...BLAST_PLOT_AXIS_BASE,
             title: {
               text: t('blast.histogram_y_axis', { defaultValue: 'Frecuencia' }),
               font: { size: 11 },
             },
-            gridcolor: 'var(--color-border)',
-            zeroline: false,
           },
-          legend: { orientation: 'h', y: -0.22, font: { size: 10 } },
         } as Partial<Layout>}
         config={{ displayModeBar: false, responsive: true } as Partial<Config>}
         style={{ width: '100%' }}
       />
-    </div>
+    </section>
   );
 }
-
-// ─── Per-session blast density / height control ─────────────
-//
-// Renders a compact control panel that lets the user override the
-// session's rock density (ρ, ton/m³) and height fallback (m). Both
-// values feed the per-mass powder factor (pf_g_per_ton). On "Aplicar"
-// the values are PUT to /settings under the `blast` block, then the
-// ['blast-correlation', ...] query is invalidated so the table above
-// refetches with the new ρ.
-//
-// All settings state, sync, and save-side-effect wiring is owned by
-// the ``useBlastSettings`` hook so this component stays purely
-// presentational.
 
 export function BlastDensityControl() {
   const { t } = useTranslation();
@@ -345,9 +292,6 @@ export function BlastDensityControl() {
     saveSettings,
   } = useBlastSettings();
 
-  // Distinct sectors present across the session's sections. The editor lists
-  // one ρ input per sector so the user can tune each geotechnical domain.
-  // An empty list (all sections carry sector="") renders a hint instead.
   const sectors = Array.from(
     new Set(
       (sectionsData ?? [])
@@ -356,106 +300,81 @@ export function BlastDensityControl() {
     ),
   ).sort();
 
-  const inputStyle: React.CSSProperties = {
-    backgroundColor: 'var(--color-surface)',
-    borderColor: 'var(--color-border)',
-    color: 'var(--color-text-primary)',
-  };
   const inputCls =
-    'w-24 px-2 py-1 border rounded-md text-xs outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono';
+    'w-24 rounded-md border border-border bg-surface px-2 py-1 text-xs tabular-nums text-text-primary outline-none focus:border-accent';
 
   return (
-    <div
-      className="flex flex-wrap items-end gap-3 rounded-lg border p-3 shrink-0"
-      style={{
-        borderColor: 'var(--color-border)',
-        backgroundColor: 'var(--color-surface-muted)',
-      }}
-    >
-      <div className="flex flex-col gap-1">
-        <label
-          htmlFor="blast-rock-density"
-          className="text-xs font-medium"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          {t('blast.rock_density', { defaultValue: 'Densidad de roca (ton/m³)' })}
-        </label>
-        <input
-          id="blast-rock-density"
-          type="number"
-          inputMode="decimal"
-          step="0.1"
-          min="0"
-          value={density}
-          onChange={(e) => setDensity(Number(e.target.value))}
-          className={inputCls}
-          style={inputStyle}
-          data-testid="blast-rock-density"
-        />
-      </div>
-      <div className="flex flex-col gap-1">
-        <label
-          htmlFor="blast-height-fallback"
-          className="text-xs font-medium"
-          style={{ color: 'var(--color-text-secondary)' }}
-        >
-          {t('blast.height_fallback', { defaultValue: 'Altura fallback (m)' })}
-        </label>
-        <input
-          id="blast-height-fallback"
-          type="number"
-          inputMode="decimal"
-          step="0.5"
-          min="0"
-          value={height}
-          onChange={(e) => setHeight(Number(e.target.value))}
-          className={inputCls}
-          style={inputStyle}
-          data-testid="blast-height-fallback"
-        />
-      </div>
-      <button
-        type="button"
-        onClick={saveSettings}
-        disabled={isPending || invalid}
-        className="px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:opacity-50"
-        style={{
-          backgroundColor: 'var(--color-accent, #f97316)',
-          color: 'white',
-        }}
-        aria-label={t('blast.apply_aria', { defaultValue: 'Aplicar' })}
-        data-testid="blast-apply-btn"
-      >
-        {isPending
-          ? t('common.loading', { defaultValue: 'Cargando…' })
-          : t('blast.apply', { defaultValue: 'Aplicar' })}
-      </button>
-      {isError && (
-        <span
-          className="text-xs"
-          style={{ color: 'var(--color-danger, #ef4444)' }}
-          data-testid="blast-settings-error"
-        >
-          {t('blast.error', { defaultValue: 'Error al cargar los datos' })}
-        </span>
-      )}
-      <p
-        className="text-xs leading-relaxed basis-full"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
-        {t('blast.density_help', {
+    <section className="flex flex-col gap-3" data-slot="blast-density-control">
+      <BlastSectionHeader
+        title={t('blast.density_section_title', { defaultValue: 'Parámetros de cálculo' })}
+        info={t('blast.density_help', {
           defaultValue:
             'Ajusta el factor de carga (g/ton) por sección. Valor por defecto: 2,7 ton/m³.',
         })}
-      </p>
-      {/* Per-sector ρ editor */}
+      />
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <label htmlFor="blast-rock-density" className="text-xs text-text-muted">
+            {t('blast.rock_density', { defaultValue: 'Densidad de roca (ton/m³)' })}
+          </label>
+          <input
+            id="blast-rock-density"
+            type="number"
+            inputMode="decimal"
+            step="0.1"
+            min="0"
+            value={density}
+            onChange={(e) => setDensity(Number(e.target.value))}
+            className={inputCls}
+            data-testid="blast-rock-density"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="blast-height-fallback" className="text-xs text-text-muted">
+            {t('blast.height_fallback', { defaultValue: 'Altura fallback (m)' })}
+          </label>
+          <input
+            id="blast-height-fallback"
+            type="number"
+            inputMode="decimal"
+            step="0.5"
+            min="0"
+            value={height}
+            onChange={(e) => setHeight(Number(e.target.value))}
+            className={inputCls}
+            data-testid="blast-height-fallback"
+          />
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={saveSettings}
+          disabled={isPending || invalid}
+          aria-label={t('blast.apply_aria', { defaultValue: 'Aplicar' })}
+          data-testid="blast-apply-btn"
+        >
+          {isPending
+            ? t('common.loading', { defaultValue: 'Cargando…' })
+            : t('blast.apply', { defaultValue: 'Aplicar' })}
+        </Button>
+        {isError && (
+          <span
+            className="flex items-center gap-1.5 self-center text-xs text-text-secondary"
+            role="alert"
+            data-testid="blast-settings-error"
+          >
+            <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-[var(--status-nok-text)]" />
+            {t('blast.error', { defaultValue: 'Error al cargar los datos' })}
+          </span>
+        )}
+      </div>
       <BlastSectorDensityEditor
         sectors={sectors}
         density={density}
         sectorDensity={sectorDensity}
         setSectorDensity={setSectorDensity}
       />
-    </div>
+    </section>
   );
 }
-

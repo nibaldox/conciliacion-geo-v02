@@ -9,6 +9,7 @@ import {
   STATUS_PRESENTATION_ORDER,
   forEachStatus,
   formatStatus,
+  resolveBenchScore,
 } from '../status';
 import { assertNever } from '../types';
 import type { BenchStatus } from '../types';
@@ -68,6 +69,30 @@ describe('worstOfThree', () => {
 
   it('UNKNOWN is never worse than a real status', () => {
     expect(worstOfThree('UNKNOWN', 'CUMPLE', 'UNKNOWN')).toBe('CUMPLE');
+  });
+});
+
+describe('resolveBenchScore', () => {
+  it('rejects an explicit score outside the valid range', () => {
+    expect(resolveBenchScore({ type: 'MATCH', bench_score: 101 })).toBeNull();
+  });
+
+  it('scores explicit NO CUMPLE statuses as zero points', () => {
+    expect(resolveBenchScore({
+      type: 'MATCH',
+      height_status: 'NO CUMPLE',
+      angle_status: 'NO CUMPLE',
+      berm_status: 'NO CUMPLE',
+    })).toBe(0);
+  });
+
+  it('keeps the fallback score unknown when a MATCH parameter status is null', () => {
+    expect(resolveBenchScore({
+      type: 'MATCH',
+      height_status: null,
+      angle_status: 'CUMPLE',
+      berm_status: 'CUMPLE',
+    })).toBeNull();
   });
 });
 

@@ -66,8 +66,6 @@
     "title": "Load Surfaces",
     "design": "Design",
     "topo": "Topography",
-    "design_icon": "📐",
-    "topo_icon": "🏔️",
     "drop_hint": "Drag or click to select",
     "file_types": "STL / OBJ / PLY / DXF",
     "uploading": "Uploading {{label}}…",
@@ -274,7 +272,10 @@
   "results": {
     "filters": {
       "level": "Level",
-      "no_sector": "(no sector)"
+      "no_sector": "(no sector)",
+      "group_label": "Result filters",
+      "active_label": "Active filters in this panel:",
+      "reset_help": "Resets sector, section, and elevation; keeps the bench filter."
     }
   },
   "designAchievement": {
@@ -318,7 +319,7 @@
     "error": "Failed to load blast data.",
     "empty_title": "No blast data",
     "empty_desc": "Load a wells/blast file and run the analysis to see the powder factor per section.",
-    "summary_title": "Blast Correlation",
+    "summary_title": "Blast correlation",
     "n_sections_one": "{{count}} section",
     "n_sections_other": "{{count}} sections",
     "col_section": "Section",
@@ -352,8 +353,13 @@
     "descarga": "Discharge",
     "no_data": "No histogram data",
     "upload_title": "Upload blast-hole file",
+    "demo_upload_unavailable": "The demo uses virtual meshes and has no blast data. Upload is available in a real session.",
+    "empty_demo_desc": "The demo uses virtual meshes and has no blast data.",
     "file_selected": "Selected file: {{filename}}",
     "uploading": "Processing file...",
+    "transferring_file": "Sending file…",
+    "processing_geometry": "File sent. Analyzing holes and geometry…",
+    "transfer_progress": "File transfer progress",
     "upload_error": "Error uploading file: {{error}}",
     "upload_summary": "{{n}} holes loaded, {{skipped}} rows skipped",
     "accepted_rows_label": "Accepted rows",
@@ -366,6 +372,77 @@
     "persisted_count": "{{n}} holes persisted in session",
     "upload_no_session": "Start a session to upload holes.",
     "viewer_title": "3D Well View",
+    "layer": "Blast holes",
+    "confirmSpatial3d": "I confirm that holes and surfaces share a coordinate system and datum, with coordinates in metres.",
+    "layerLoading": "Loading blast-hole layer…",
+    "layerError": "Could not load the blast-hole layer. Check the API connection.",
+    "rejected": "{{count}} rejected rows without 3D representation",
+    "sectionSelect": "Select section",
+    "sectionNone": "No section selected",
+    "selection": "Selected blast hole",
+    "collar": "Collar",
+    "toe": "Toe",
+    "relation": "Section relation",
+    "distance": "Distance to section (m)",
+    "noData": "No data",
+    "estimated": "Estimated from design surface; not a terrain measurement.",
+    "legend": "Color represents the selected variable or category; a yellow collar identifies the selected hole. A collar without a trajectory has no valid toe.",
+    "colors": {
+      "title": "Blast-hole colors", "mode": "Color by", "modeVariable": "Variable", "modeCategory": "Category",
+      "variableLabel": "Variable", "categoryLabel": "Category", "palette": "Color palette", "missing": "No data", "noVariables": "No variables with data available",
+      "legendDiscrete": "Category legend", "legendContinuous": "Value scale", "legendLimit": "Showing {{shown}} of {{total}} categories", "fixedRange": "The scale is fixed ({{min}}–{{max}}); values outside the range use the endpoint color.",
+      "variable": { "charge": "Explosive charge (kg)", "powderFactor": "Powder factor (g/t)", "collarElevation": "Collar elevation (m)", "hardness": "Hardness", "diameter": "Diameter (mm)", "hardnessIndex": "Hardness index", "penetrationRate": "Penetration rate", "depth": "Depth (m)", "inclination": "Inclination (°)", "attribute": "Numeric attribute" },
+      "category": { "grid": "Blast grids", "polygon": "Blasted polygons", "phase": "Phase", "bench": "Bench" }
+    },
+    "holeFilters": {
+      "title": "Blast-hole filters",
+      "grid": "Blast grid",
+      "polygon": "Polygon",
+      "originalBench": "Blast bench",
+      "phase": "Phase",
+      "searchOptions": "Search options",
+      "depthRange": "Depth (m)",
+      "chargeRange": "Explosive (kg)",
+      "minimum": "Minimum",
+      "maximum": "Maximum",
+      "selectedCount": "{{count}} selected",
+      "noMatches": "No matches",
+      "refineSearch": "Refine your search to see more options.",
+      "clearCategory": "Clear {{label}}",
+      "dataExtent": "Data: {{min}} – {{max}}",
+      "id": "Search ID",
+      "bench": "Bench",
+      "dateEvent": "Date or event",
+      "datePresence": "Date presence", "withDate": "Has date",
+      "datePlaceholder": "Search date or event",
+      "geometry": "Geometry",
+      "provenanceLabel": "Provenance",
+      "collarProvenanceLabel": "Collar provenance", "surfaceSampleStatusLabel": "Surface sampling status",
+      "section": "Section relation",
+      "corridor": "Proximity corridor (m)",
+      "corridorHelp": "Search distance around the section; this is not a compliance tolerance.",
+      "estimateHelp": "Collar elevation may be estimated from the design surface and is not a terrain measurement.",
+      "chooseSection": "Choose a section to filter by relation and corridor.",
+      "clear": "Clear filters",
+      "any": "All",
+      "withData": "Has data",
+      "countTotal": "Loaded: {{count}}",
+      "countDrawable": "Drawable: {{count}}",
+      "countVisible": "Visible with filters: {{count}}",
+      "countExcluded": "Without drawable geometry: {{count}}",
+      "provenance": {
+        "design_surface_estimate": "Elevation estimated from design surface",
+        "bench_elevation": "Elevation derived from bench elevation",
+        "collar_elevation": "Collar elevation",
+        "sampled": "Sampled on surface",
+        "outside": "Outside surface",
+        "ambiguous": "Ambiguous intersection",
+        "invalid": "Invalid coordinate"
+      },
+      "geometryStatus": { "complete": "Complete", "collar_only": "Collar only", "none": "No geometry" },
+      "relation": { "exact_intersection": "Intersects section plane", "near_section": "Near section", "outside": "Outside corridor", "incomplete": "Incomplete geometry" },
+      "helpSummary": "Filter notes"
+    },
     "viewer_no_session": "No active session",
     "viewer_loading": "Loading holes…",
     "viewer_error": "Error loading holes: {{error}}",
@@ -377,13 +454,26 @@
     "geometry_contract": "Geometry configuration (required)",
     "incl_source_col": "Inclination source column",
     "az_source_col": "Azimuth source column",
+    "source_column_missing": "Column “{{column}}” is not in the selected file header. Choose an available column.",
     "incl_convention": "Inclination convention",
     "incl_sign": "Sign policy",
+    "inclination_convention_sign_incompatible": "The from-vertical convention is incompatible with “negative means downward dip.” Choose dip from horizontal or a compatible sign policy.",
     "source_rule": "Rule (required for SOURCE_DEFINED)",
     "incl_unit": "Inclination unit",
     "az_unit": "Azimuth unit",
     "az_convention": "Azimuth convention",
     "bench_height": "Bench height (m)",
+    "collar_elevation_source": "Collar elevation source",
+    "collar_source_height": "Bench height (current mode)",
+    "collar_source_design": "Design surface",
+    "design_surface_help": "Collar elevation will be estimated from the design surface. Volumetric powder factor may be unavailable or approximate; actual bench height is not inferred.",
+    "spatial_reference_confirm": "I confirm that the CSV and design surface share a coordinate system and datum, and that their coordinates are in metres.",
+    "design_surface_sampling_title": "Surface sampling coverage",
+    "design_surface_sampling_coverage": "Elevation sampled for {{coverage}}% of {{rows}} holes.",
+    "design_surface_sampled": "Sampled",
+    "design_surface_outside": "Outside surface",
+    "design_surface_ambiguous": "Ambiguous intersection",
+    "design_surface_invalid": "Invalid coordinate",
     "confirm_geometry": "I have reviewed and confirm the geometry configuration (enables computation).",
     "units_mismatch": "Inclination and azimuth units differ. The current API Form requires them to match; use the common unit.",
     "contract_required": "Review and confirm the geometry configuration before uploading holes.",
@@ -511,7 +601,11 @@
       "negative_is_downward_dip": "Negative means downward dip",
       "positive_only": "Positive values only",
       "absolute_value": "Absolute value"
-    }
+    },
+    "more_info": "More information",
+    "table_title": "Powder factor by section",
+    "density_section_title": "Calculation parameters",
+    "technical_diagnostics": "Technical diagnostics"
   },
   "section_list": {
     "loading": "Loading sections...",
@@ -597,7 +691,7 @@
     "error_generic": "Could not add section"
   },
   "export": {
-    "title": "Project Information",
+    "title": "Project information",
     "project": "Project",
     "project_placeholder": "Project name",
     "author": "Author",
@@ -618,8 +712,27 @@
     "error_dxf": "DXF export failed",
     "error_images": "Images export failed",
     "filter_summary_prefix": "Export reflects current view:",
+    "demo_unavailable": "The demo uses synthetic surfaces and cannot generate exports. Load your own meshes to export results.",
+    "applied_filters_prefix": "Filters applied:",
+    "applied_sectors": "Sectors",
+    "applied_sections": "Sections",
+    "applied_levels": "Levels",
+    "applied_benches": "Benches",
     "blast_tolerance_label": "blast tolerance",
-    "all_benches": "all benches"
+    "all_benches": "all benches",
+    "formats_title": "Export results",
+    "download": "Export",
+    "project_info_hint": "Optional. Included in exported reports.",
+    "format_excel": "Excel",
+    "format_excel_desc": "Summary, benches, inter-ramp and dashboard sheets",
+    "format_word": "Word",
+    "format_word_desc": "Editable technical report with tables and charts",
+    "format_pdf": "Executive PDF",
+    "format_pdf_desc": "Summary report ready to share",
+    "format_dxf": "DXF",
+    "format_dxf_desc": "Profiles and sections for CAD software",
+    "format_images": "Images",
+    "format_images_desc": "Each section profile as PNG, zipped"
   },
   "ai": {
     "title": "AI Model Configuration",
@@ -645,6 +758,13 @@
     "download_filename": "AI_Reconciliation_Report.md"
   },
   "sidebar": {
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar",
+    "mallas": "Surfaces",
+    "secciones": "Sections",
+    "tolerancias": "Parameters",
+    "procesamiento": "Processing",
+    "no_surfaces_for_sections": "Upload surfaces to define sections",
     "title": "Settings",
     "toggle": "Settings",
     "close": "Close",
@@ -666,6 +786,7 @@
     "tol_crest_toe": "Crest-toe deviation (m)"
   },
   "viewer": {
+    "panel_resize_corner": "Resize panel width and height", "panel_resize_hint": "Drag the corner to resize",
     "cesium_load_error": "Failed to load CesiumJS: {{message}}",
     "cesium_init_error": "Failed to initialize CesiumJS: {{message}}",
     "cesium_loading": "Loading CesiumJS (≈4 MB)…",
@@ -676,10 +797,10 @@
     "design_label": "Design",
     "topo_label": "Topography",
     "tooltip": "East: %{x:.1f}m<br>North: %{y:.1f}m<br>Elev: %{text:.1f}m",
-    "layers": "Visible Layers",
-    "layer_topo": "Real Topography",
-    "layer_design": "Design Contours",
-    "layer_sections": "Section Lines",
+    "layers": "Visible layers",
+    "layer_topo": "Real topography",
+    "layer_design": "Design contours",
+    "layer_sections": "Section lines",
     "horizontal_map": "Horizontal heat map",
     "horizontal_map_hint": "Color the surface by measured dH between design and topography.",
     "horizontal_sector": "Sector",
@@ -694,7 +815,8 @@
     "horizontal_loading": "Calculating horizontal deviations…",
     "horizontal_empty": "No comparable cells for these filters.",
     "horizontal_retry": "Retry",
-    "horizontal_error": "Could not calculate the horizontal map"
+    "horizontal_error": "Could not calculate the horizontal map",
+    "layers_title": "Visible layers"
   },
   "horizontalDeviation": {
     "legend": "Horizontal deviation legend",
@@ -782,8 +904,8 @@
     "berm": "Berm width"
   },
   "tooltip": {
-    "face_threshold": "Minimum angle (degrees) for a segment to be classified as a bench face. Default 40°. Lower values detect gentler faces.",
-    "berm_threshold": "Maximum angle (degrees) for a segment to be classified as a berm. Default 20°. Higher values allow steeper berms.",
+    "face_threshold": "Minimum angle (degrees) for a segment to be classified as a bench face. Default 30°. Lower values detect gentler faces.",
+    "berm_threshold": "Maximum angle (degrees) for a segment to be classified as a berm. Default 10°. Higher values allow steeper berms.",
     "simplify_epsilon": "RDP simplification tolerance. Higher = smoother profile. Default 0.1 m.",
     "max_berm_width": "Anti-noise filter: ignore berms wider than this (m). Default 50 m.",
     "tol_bench_height": "Allowed deviation in bench height (m). COMPLIES if |deviation| ≤ tolerance.",
@@ -817,7 +939,6 @@
     "health_ok": "AI service available",
     "health_unavailable": "AI service unavailable",
     "health_pending": "Checking...",
-    "ready_badge": "Ready",
     "form": {
       "provider_label": "Provider",
       "model_label": "Model",
@@ -863,7 +984,8 @@
       "tps_label": "{{tps}} tok/s",
       "cost_label": "Estimated cost ${{cost}}",
       "cached_badge": "served from cache",
-      "estimated_badge": "estimated"
+      "estimated_badge": "estimated",
+      "copied": "Copied"
     },
     "health": {
       "ok": "AI service available",
@@ -872,21 +994,25 @@
     }
   },
   "profileView": {
+    "empty": {
+      "title": "Select a section",
+      "body": "Choose a cross-section from the previous step to view its profile."
+    },
     "header": {
       "eyebrow": "Section",
-      "last_run": "LAST RUN · {{ago}}",
-      "floorElev": "Floor Elev",
-      "crestMax": "Crest Elev",
+      "floorElev": "Floor elev",
+      "crestMax": "Crest elev",
       "azimuth": "Azimuth",
       "sector": "Sector",
       "length": "Length",
-      "benches": "Benches"
+      "benches": "Benches",
+      "last_run_short": "Last analysis {{ago}} ago"
     },
     "summary": {
       "title": "Section compliance",
       "filtered_title": "Selected bench compliance",
       "aria": "Section compliance",
-      "headline": "{{within}} of {{total}} evaluated benches within tolerance",
+      "headline": "{{within}} of {{total}} evaluated benches pass (score ≥70)",
       "no_benches": "No benches",
       "no_evaluated": "{{count}} benches without evaluable data",
       "bar_aria": "Compliance distribution"
@@ -900,7 +1026,12 @@
       "design": "Design",
       "status": "Status",
       "empty": "Select a bench",
-      "hint": "Click a table row or a profile marker to inspect its parameters."
+      "hint": "Click a table row or a profile marker to inspect its parameters.",
+      "cell_bench": "Bench",
+      "cell_height": "Height",
+      "cell_angle": "Angle",
+      "cell_berm": "Berm",
+      "legend": "Actual value above · design below"
     },
     "status": {
       "CUMPLE": "Compliant",
@@ -944,6 +1075,8 @@
       "section_processing_error": "An error occurred while processing the {{surface}} section; its profile is unavailable."
     },
     "filter": {
+      "design_bank_scope_active": "Design bench filter active: {{banks}}. The table and compliance summary use these design benches; the chart and inspector retain all topographic benches.",
+      "clear_design_bench": "Clear bench filter",
       "label": "Show",
       "reconciled": "Reconciled",
       "reconciled_help": "Detected idealized geometry",
@@ -964,6 +1097,14 @@
     "loading": "Loading profile…",
     "error": "Could not load the profile",
     "chart": {
+      "trace": {
+        "design": "Design", "topography": "Topography", "ground": "Ground",
+        "reconciledDesign": "Reconciled design", "reconciledTopography": "Reconciled topography",
+        "debt": "Debt", "overexcavation": "Overexcavation", "spill": "Spill", "benches": "Benches",
+        "blastHoles": "Projected hole collars", "blastHoleIntersections": "Hole-section intersections", "hole": "Hole {{id}}", "burden": "Burden", "spacing": "Spacing",
+        "profilePointKind": "Point type", "projectedCollarKind": "Projected collar", "intersectionKind": "Segment-section intersection",
+        "status": { "compliant": "Compliant", "outside": "Outside tolerance", "noncompliant": "Noncompliant", "unknown": "Unknown" }
+      },
       "elevation": "Elevation (m)",
       "distance": "Distance (m)",
       "hover": {
@@ -989,6 +1130,40 @@
     "resolution_high": "High"
   },
   "dashboard": {
+    "rail": {
+      "profile_preview": "Profile preview", "profile_design": "Design", "profile_topo": "Actual topography",
+      "color_by": "Color by",
+      "color_status": "Status",
+      "color_score": "Score",
+      "color_height": "Height",
+      "color_angle": "Angle",
+      "color_berm": "Berm",
+      "filter_status": "Filter by status",
+      "status_cumple": "Pass",
+      "status_fuera": "Outside",
+      "status_no_cumple": "Fail",
+      "status_unknown": "No data",
+      "parameters": "Compliance by parameter",
+      "denominator": "Percentage of all benches, including other statuses and missing data.",
+      "bar_counts": "Pass: {{ok}}; outside: {{warn}}; fail: {{nok}}; other or no data: {{unknown}}",
+      "selected": "Selected section",
+      "score": "Score",
+      "status": "Status",
+      "height_dev": "Δ height",
+      "angle_dev": "Δ angle",
+      "delta_crest": "Δ crest",
+      "delta_toe": "Δ toe",
+      "bench": "Bench",
+      "elevation": "Elevation",
+      "open_profile": "Open profile",
+      "clear": "Clear selection",
+      "parameter_detail": "Parameter detail",
+      "no_sectors": "No sectors assigned",
+      "count": "{{sections}} sections · {{benches}} benches"
+    },
+    "filters": {
+      "no_matching_results": "No results match the active filter combination. Adjust or reset the sector, section, elevation, or bench filters."
+    },
     "empty_state": "No results to show. Run the processing first.",
     "title": "General Reconciliation Summary",
     "bench_filter": {
@@ -1009,11 +1184,19 @@
       "no_results": "No results match the selected benches. Reset the filter to see all results."
     },
     "kpi": {
-      "global_score": "Global Weighted Score",
+      "global_score": "Global weighted score",
+      "global_score_help": "Average across profiles with matched benches. Each profile averages its benches: berm 60, angle 10, and height 30 points.",
+      "profile_classification_help": "A bench passes at score ≥70 and fails below 70; each profile takes its worst bench status. Incomplete data is UNKNOWN. Individual metrics keep their tolerance statuses.",
       "profiles_ok": "Compliant Profiles",
       "profiles_outside": "Profiles Outside Tolerance",
       "profiles_no": "Non-Compliant Profiles",
-      "classification_note": "Profile classification follows the worst bench tolerance status and is independent of the design achievement score."
+      "classification_note": "Profile classification follows the worst bench score (≥70 passes). It is independent of design achievement; individual metrics are evaluated against tolerances.",
+      "count_ok": "Compliant",
+      "count_outside": "Outside tolerance",
+      "count_no": "Non-compliant",
+      "profiles_label": "Profiles",
+      "how_calculated": "How is it calculated?",
+      "how_classified": "How are profiles classified?"
     },
     "section": {
       "parameter_breakdown": "Parameter Breakdown (COMPLIANT / NON-COMPLIANT)",
@@ -1022,23 +1205,31 @@
       "deviation_angle": "Angle Deviation (°)",
       "deviation_crest": "Crest Deviation (m)",
       "deviation_toe": "Toe Deviation (m)",
-      "deviation_berm": "Berm Width (m)"
+      "deviation_berm": "Berm Width (m)",
+      "parameters": "Breakdown by parameter",
+      "by_sector": "Compliance by sector",
+      "deviation_distribution": "Deviation distribution"
     },
     "table": {
       "parameter": "Parameter",
       "pct_cumple": "% COMPLIANT",
-      "value_avg": "Avg Real Value"
+      "value_avg": "Avg Real Value",
+      "pct_ok": "% compliant",
+      "real_avg": "Actual average"
     },
     "histogram": {
-      "no_data": "No deviation data"
+      "no_data": "No deviation data",
+      "selector": "Histogram variable"
     },
     "parameter": {
       "height": "Height",
       "angle": "Angle",
-      "berm": "Berm"
+      "berm": "Berm",
+      "crest": "Crest",
+      "toe": "Toe"
     },
     "summary": {
-      "bench_section": "{{benches}} Benches / {{sections}} Sections"
+      "bench_section": "{{benches}} benches · {{sections}} sections"
     },
     "plot": {
       "axis": {
@@ -1108,13 +1299,14 @@
     "retryProfile": "Retry profile"
   },
   "workspace": {
+    "curve_view_hint": "The 3D view opens automatically. Choose a curve on the surface to define the section.",
     "project": "Project",
     "analysis": "Analysis",
     "surfaces": "Surfaces",
     "sections": "Sections",
     "profiles": "Profiles",
     "view3d": "3D view",
-    "summary": "Summary",
+    "summary": "Dashboard",
     "blast": "Blasting",
     "export": "Export",
     "curves": "From curves",
@@ -1126,7 +1318,7 @@
   },
   "plan_view": {
     "title": "Compliance plan by profile",
-    "description": "Actual topography in gray. Sections use the worst tolerance status across their matched benches.",
+    "description": "Actual topography in gray. Each bench is classified by score (≥70 passes); the profile uses its worst matched bench status.",
     "no_score": "No evaluable score",
     "unavailable": "No topography is available to draw the plan.",
     "east": "East (m)",
@@ -1135,6 +1327,11 @@
     "outside": "Outside tolerance",
     "failing": "Non-compliant",
     "evaluated_area": "Evaluated area",
+    "score": "Score",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "zoom_reset": "Reset zoom",
+    "color_scale": "Color scale",
     "full_surface": "Full surface"
   },
   "project_input": {
@@ -1184,5 +1381,49 @@
     "title": "Plan location",
     "active": "Active profile: {{name}}",
     "neighbours": "Blue: active profile · gray: neighbouring profiles"
+  },
+  "ux": {
+    "confirm_parameters": "Use these parameters",
+    "profiles_mode": "Display mode",
+    "step_surfaces": "Surfaces",
+    "step_sections": "Sections",
+    "step_parameters": "Parameters",
+    "step_process": "Process",
+    "workflow": "Workflow",
+    "summary_surfaces_none": "Load design and topography",
+    "summary_surfaces_partial": "One surface missing",
+    "summary_surfaces_done": "Design and topography loaded",
+    "summary_sections_one": "{{count}} section defined",
+    "summary_sections_other": "{{count}} sections defined",
+    "summary_sections_none": "No sections yet",
+    "summary_parameters": "Tolerances and detection thresholds",
+    "summary_process_ready": "Ready to process",
+    "summary_process_running": "Processing…",
+    "summary_process_done": "Analysis complete",
+    "summary_process_blocked": "Complete previous steps",
+    "locked_hint": "Available after completing the previous step",
+    "status_empty": "No data",
+    "status_surfaces": "Surfaces loaded",
+    "status_ready": "Ready to process",
+    "status_processing": "Processing",
+    "status_complete": "Analysis complete",
+    "empty_mesh_title": "Start by loading your surfaces",
+    "empty_mesh_desc": "You need the design surface and the as-built topography (STL, OBJ or DXF) to compare.",
+    "empty_mesh_cta": "Load surfaces",
+    "empty_demo_cta": "Try demo data",
+    "empty_sections_title": "Define where to cut",
+    "empty_sections_desc": "Create at least one cross-section on the surface to extract benches and berms.",
+    "empty_sections_cta": "Define sections",
+    "empty_process_title": "Ready to reconcile",
+    "empty_process_desc": "Sections are defined. Run the analysis to see profiles, compliance and reports.",
+    "empty_process_cta": "Go to processing",
+    "view_locked": "Requires completing the workflow",
+    "views_nav": "Analysis views",
+    "detail_table": "Detailed comparison table",
+    "shortcut": "Shortcut: {{key}}"
+  },
+  "profiles": {
+    "mode_grid": "Grid",
+    "mode_detail": "Detail"
   }
 }

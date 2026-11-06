@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import client from './client';
 import { useResults, useSettings } from './hooks';
 import { useSession } from '../stores/session';
-import type { ResultFilterState } from '../components/results/resultFilters';
+import type { ResultFilterState } from '../components/results/resultFilters.utils';
 
 export interface DesignAchievementSummary {
   global_score: number | null;

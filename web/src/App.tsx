@@ -1,14 +1,15 @@
 import { applyTheme } from './utils/theme';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AppLayout } from './components/layout/AppLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { useHotkeys } from './hooks/useHotkeys';
-import { useSession } from './stores/session';
+import { DEMO_MESH_IDS, useSession } from './stores/session';
 import { useTheme } from './stores/theme';
-import { useSections, useProcessStatus } from './api/hooks';
+import { useSections } from './api/hooks';
+import { useWorkflowStatus } from './hooks/useWorkflowStatus';
 
 // Workspace Views
 import {
@@ -21,25 +22,16 @@ import {
   LazyProfilesGrid,
 } from './components/lazy';
 import { SectionSelector } from './components/results/SectionSelector';
-import { IconGrid, IconList } from './components/ui/Icons';
+import { IconGrid, IconList, IconPlay, IconSections, IconUpload } from './components/ui/Icons';
+import { EmptyState, type EmptyStateProps } from './components/ui/EmptyState';
+import { useStartDemo } from './components/demo/TryDemoButton';
 
 import { ExportPanel } from './components/export/ExportPanel';
 
-function WarningState({ icon, title, description }: { icon: string; title: string; description: string }) {
+function WorkspaceEmptyState(props: EmptyStateProps) {
   return (
-    <div className="flex items-center justify-center h-full w-full p-6">
-      <div
-        className="flex flex-col items-center justify-center max-w-md text-center p-8 border border-dashed rounded-2xl"
-        style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-sunken)' }}
-      >
-        <div className="text-5xl mb-4" aria-hidden="true">{icon}</div>
-        <h3 className="text-base font-semibold mb-2 font-mono uppercase tracking-wider" style={{ color: 'var(--color-text-primary)' }}>
-          {title}
-        </h3>
-        <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-muted)' }}>
-          {description}
-        </p>
-      </div>
+    <div className="flex h-full w-full items-center justify-center p-6">
+      <EmptyState {...props} />
     </div>
   );
 }
@@ -49,62 +41,39 @@ function WarningState({ icon, title, description }: { icon: string; title: strin
 function ProfilesWorkspace() {
   const { t } = useTranslation();
   const setSelectedSection = useSession((s) => s.setSelectedSection);
-  const [mode, setMode] = useState<'grid' | 'detail'>('grid');
+  const mode = useSession((s) => s.profilesMode);
+  const setMode = useSession((s) => s.setProfilesMode);
 
-  // When user picks a section from the grid, auto-switch to detail
   const handleGridSelect = (id: string) => {
     setSelectedSection(id);
     setMode('detail');
   };
 
+  const modes = [
+    { key: 'grid', icon: IconGrid, label: t('profiles.mode_grid', { defaultValue: 'Grilla' }) },
+    { key: 'detail', icon: IconList, label: t('profiles.mode_detail', { defaultValue: 'Detalle' }) },
+  ] as const;
 
   return (
     <div className="flex flex-col gap-4 min-h-0">
-      {/* Mode toggle */}
       <div className="shrink-0 flex flex-wrap items-center justify-end gap-2">
         <div className="mr-auto w-full min-w-0 md:w-auto md:min-w-80 md:flex-1 md:max-w-2xl">{mode === 'detail' && <SectionSelector />}</div>
-        <button
-          type="button"
-          onClick={() => setMode('grid')}
-          aria-pressed={mode === 'grid'}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          style={
-            mode === 'grid'
-              ? {
-                  backgroundColor: 'var(--color-accent)',
-                  color: 'var(--color-accent-fg)',
-                  border: '1px solid var(--color-accent-bright)',
-                }
-              : {
-                  backgroundColor: 'var(--color-surface-raised)',
-                  color: 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
-                }
-          }
-        >
-          <IconGrid className="w-3.5 h-3.5" /> {t('profiles.mode_grid', { defaultValue: 'Grilla' })}
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('detail')}
-          aria-pressed={mode === 'detail'}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-          style={
-            mode === 'detail'
-              ? {
-                  backgroundColor: 'var(--color-accent)',
-                  color: 'var(--color-accent-fg)',
-                  border: '1px solid var(--color-accent-bright)',
-                }
-              : {
-                  backgroundColor: 'var(--color-surface-raised)',
-                  color: 'var(--color-text-secondary)',
-                  border: '1px solid var(--color-border)',
-                }
-          }
-        >
-          <IconList className="w-3.5 h-3.5" /> {t('profiles.mode_detail', { defaultValue: 'Detalle' })}
-        </button>
+        <div data-slot="profiles-mode-toggle" role="group" aria-label={t('ux.profiles_mode')} className="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-surface-muted p-0.5">
+          {modes.map(({ key, icon: Icon, label }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setMode(key)}
+              aria-pressed={mode === key}
+              className={[
+                'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                mode === key ? 'bg-surface-raised text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary',
+              ].join(' ')}
+            >
+              <Icon className="h-3.5 w-3.5" aria-hidden="true" /> {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Content */}
@@ -133,48 +102,68 @@ function WorkspaceRouter() {
   const activeWorkspaceView = useSession((s) => s.activeWorkspaceView);
   const designMeshId = useSession((s) => s.designMeshId);
   const topoMeshId = useSession((s) => s.topoMeshId);
+  const isVirtualDemoSession = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
   const { data: sections } = useSections();
-  const { data: status } = useProcessStatus();
+  const { isComplete } = useWorkflowStatus();
+  const wasComplete = useRef(false);
+  const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
+  const setOpenWorkflowStep = useSession((s) => s.setOpenWorkflowStep);
+  const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
+  const demoMode = useSession((s) => s.demoMode);
+  const startDemo = useStartDemo();
   const { t } = useTranslation();
+
+  const openStep = (step: 'surfaces' | 'sections' | 'process') => {
+    setSidebarCollapsed(false);
+    setOpenWorkflowStep(step);
+  };
 
   const bothUploaded = !!designMeshId && !!topoMeshId;
   const hasSections = sections && sections.length > 0;
-  const isComplete = status?.status === 'complete';
+  useEffect(() => {
+    if (isComplete && !wasComplete.current && useSession.getState().activeWorkspaceView === '3d') {
+      setActiveWorkspaceView('dashboard');
+    }
+    wasComplete.current = isComplete;
+  }, [isComplete, setActiveWorkspaceView]);
 
-  // 1. Mesh load prerequisite check
   if (!bothUploaded && activeWorkspaceView !== '3d') {
     return (
-      <WarningState
-        icon="⛰️"
-        title={t('warning.no_mesh_title', { defaultValue: 'Mallas no cargadas' })}
-        description={t('warning.no_mesh_desc', { defaultValue: 'Cargue superficies de diseño (Protocol Alpha) y topografía (Protocol Omega) en el panel lateral para acceder a esta vista.' })}
+      <WorkspaceEmptyState
+        data-slot="empty-no-mesh"
+        icon={<IconUpload className="h-7 w-7" />}
+        title={t('ux.empty_mesh_title')}
+        description={t('ux.empty_mesh_desc')}
+        primaryAction={{ label: t('ux.empty_mesh_cta'), onClick: () => openStep('surfaces') }}
+        secondaryAction={demoMode ? undefined : { label: t('ux.empty_demo_cta'), onClick: () => { void startDemo(); } }}
       />
     );
   }
 
-  // 2. Sections prerequisite check
-  if (bothUploaded && !hasSections && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
+  if (bothUploaded && !hasSections && !(isVirtualDemoSession && activeWorkspaceView === 'export-ai') && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
     return (
-      <WarningState
-        icon="📏"
-        title={t('warning.no_sections_title', { defaultValue: 'Sin Secciones' })}
-        description={t('warning.no_sections_desc', { defaultValue: 'Defina al menos una sección en el panel lateral para iniciar el análisis.' })}
+      <WorkspaceEmptyState
+        data-slot="empty-no-sections"
+        icon={<IconSections className="h-7 w-7" />}
+        title={t('ux.empty_sections_title')}
+        description={t('ux.empty_sections_desc')}
+        primaryAction={{ label: t('ux.empty_sections_cta'), onClick: () => { openStep('sections'); setActiveWorkspaceView('3d'); } }}
       />
     );
   }
 
-  // 3. Process completion check
-  if (bothUploaded && hasSections && !isComplete && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
+  if (bothUploaded && hasSections && !isComplete && !(isVirtualDemoSession && activeWorkspaceView === 'export-ai') && (activeWorkspaceView === 'profiles' || activeWorkspaceView === 'dashboard' || activeWorkspaceView === 'blast' || activeWorkspaceView === 'export-ai')) {
     return (
-      <WarningState
-        icon="⚡"
-        title={t('warning.no_process_title', { defaultValue: 'Conciliación Pendiente' })}
-        description={t('warning.no_process_desc', { defaultValue: 'Las secciones están definidas, pero el análisis no ha corrido. Haga clic en "Iniciar Análisis" en la sección de Procesamiento del panel lateral.' })}
+      <WorkspaceEmptyState
+        data-slot="empty-no-process"
+        icon={<IconPlay className="h-7 w-7" />}
+        title={t('ux.empty_process_title')}
+        description={t('ux.empty_process_desc')}
+        primaryAction={{ label: t('ux.empty_process_cta'), onClick: () => openStep('process') }}
       />
     );
   }
 
-  // Active View Render
   switch (activeWorkspaceView) {
     case '3d':
       return <LazyMesh3DViewer />;
@@ -187,14 +176,10 @@ function WorkspaceRouter() {
           <div className="shrink-0">
             <LazyDashboard />
           </div>
-          <div className="flex-1 border rounded-lg overflow-hidden" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
-            <div className="p-3 border-b border-border text-xs font-mono font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)', backgroundColor: 'var(--color-surface-raised)' }}>
-              Tabla Detallada de Comparación
-            </div>
-            <div className="p-4 overflow-x-auto">
-              <LazyResultsTable />
-            </div>
-          </div>
+          <section data-slot="detail-table" className="min-w-0 shrink-0 space-y-3 pb-2">
+            <h3 className="ui-section-title">{t('ux.detail_table')}</h3>
+            <LazyResultsTable />
+          </section>
         </div>
       );
     case 'blast':
@@ -209,7 +194,7 @@ function WorkspaceRouter() {
       return (
         <div data-slot="export-workspace" className="h-full flex flex-col gap-5 overflow-y-auto pb-4">
           <ExportPanel />
-          <LazyAIReporter />
+          {!isVirtualDemoSession && <LazyAIReporter />}
         </div>
       );
     default:
@@ -247,9 +232,9 @@ function App() {
   // Workspace view hotkeys
   useHotkeys(['1', '2', '3', '4', '5'], (e) => {
     const target = e.key;
-    if (target === '1') setActiveWorkspaceView('3d');
+    if (target === '1') setActiveWorkspaceView('dashboard');
     if (target === '2') setActiveWorkspaceView('profiles');
-    if (target === '3') setActiveWorkspaceView('dashboard');
+    if (target === '3') setActiveWorkspaceView('3d');
     if (target === '4') setActiveWorkspaceView('blast');
     if (target === '5') setActiveWorkspaceView('export-ai');
   });

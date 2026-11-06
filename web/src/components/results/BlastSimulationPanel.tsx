@@ -6,6 +6,7 @@ import {
   extractSimulationErrorDiagnostics,
 } from '@/api/hooks';
 import client from '@/api/client';
+import { BlastSectionHeader } from './blastLayout';
 import type {
   SimulationCreateRequest,
   SimulationCreateResponse,
@@ -356,24 +357,24 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
   const tensorInRequest = state.anisotropyMode === 'ANISOTROPIC_TENSOR';
 
   return (
-    <section className="rounded-lg border p-4 space-y-4" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}>
-      <header className="space-y-1">
-        <h2 className="text-lg font-semibold">{t('blast.simulation.title')}</h2>
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('blast.simulation.subtitle')}</p>
-        <p
-          className="text-xs px-2 py-1 rounded"
-          style={{ backgroundColor: 'var(--status-warn-bg, rgba(230,143,25,0.10))', color: 'var(--status-warn-text, #e68f19)' }}
-        >
-          ⚠ {t('blast.simulation.warning_uncalibrated')}
+    <section className="flex flex-col gap-4 border-t border-border pt-6" data-slot="blast-simulation">
+      <header className="flex flex-col gap-1">
+        <BlastSectionHeader
+          title={t('blast.simulation.title')}
+          info={t('blast.simulation.subtitle')}
+        />
+        <p className="flex items-start gap-2 text-xs text-text-muted">
+          <span aria-hidden="true" className="mt-1 inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--status-warn-text)]" />
+          <span>{t('blast.simulation.warning_uncalibrated')}</span>
         </p>
       </header>
 
       {!sessionId && (
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{t('blast.simulation.no_session')}</p>
+        <p className="text-sm text-text-muted">{t('blast.simulation.no_session')}</p>
       )}
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t('blast.simulation.domain_section')}</legend>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t('blast.simulation.domain_section')}</legend>
         <div className="grid grid-cols-3 gap-2">
           <NumberField label={t('blast.simulation.x_min')} value={state.xMin} onChange={(v) => update({ xMin: v })} />
           <NumberField label={t('blast.simulation.y_min')} value={state.yMin} onChange={(v) => update({ yMin: v })} />
@@ -385,8 +386,8 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
         </div>
       </fieldset>
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t('blast.simulation.physics_section')}</legend>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t('blast.simulation.physics_section')}</legend>
         <div className="grid grid-cols-3 gap-2">
           <SelectField
             label={t('blast.simulation.energy_mode')}
@@ -419,7 +420,7 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
             ]}
           />
         </div>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{t('blast.simulation.energy_mode_help')}</p>
+        <p className="text-xs text-text-muted">{t('blast.simulation.energy_mode_help')}</p>
       </fieldset>
 
       {tensorInRequest && (
@@ -432,8 +433,8 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
         />
       )}
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t('blast.simulation.kernel_section')}</legend>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t('blast.simulation.kernel_section')}</legend>
         <div className="grid grid-cols-3 gap-2">
           <NumberField label={t('blast.simulation.attenuation')} value={state.attenuation} onChange={(v) => update({ attenuation: v })} />
           <NumberField label={t('blast.simulation.regularization')} value={state.regularization} onChange={(v) => update({ regularization: v })} />
@@ -443,8 +444,8 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
       </fieldset>
 
       {state.temporalMode === 'TEMPORAL' && (
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">{t('blast.simulation.temporal_section')}</legend>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-xs font-medium text-text-secondary">{t('blast.simulation.temporal_section')}</legend>
           <div className="grid grid-cols-3 gap-2">
             <NumberField label={t('blast.simulation.velocity')} value={state.velocity} onChange={(v) => update({ velocity: v })} />
             <TextField label={t('blast.simulation.velocity_source')} value={state.velocitySource} onChange={(v) => update({ velocitySource: v })} />
@@ -453,14 +454,14 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
         </fieldset>
       )}
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t('blast.simulation.plan_elevations')}</legend>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t('blast.simulation.plan_elevations')}</legend>
         <TextField label={t('blast.simulation.section_coords')} value={state.sectionCoords} onChange={(v) => update({ sectionCoords: v })} />
         <TextField label={t('blast.simulation.plan_elevations')} value={state.planElevations} onChange={(v) => update({ planElevations: v })} />
       </fieldset>
 
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">{t('blast.simulation.profile.title')}</legend>
+      <fieldset className="flex flex-col gap-2">
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t('blast.simulation.profile.title')}</legend>
         <div className="grid grid-cols-3 gap-2">
           <TextField label={t('blast.simulation.profile.start_end')} value={state.profileStart} onChange={(v) => update({ profileStart: v })} />
           <TextField label={t('blast.simulation.profile.start_end')} value={state.profileEnd} onChange={(v) => update({ profileEnd: v })} />
@@ -470,12 +471,7 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
           type="button"
           onClick={requestProfile}
           disabled={!result || !parseXYZ(state.profileStart) || !parseXYZ(state.profileEnd)}
-          className="px-3 py-1.5 rounded text-sm"
-          style={{
-            backgroundColor: 'var(--color-mine-blue)',
-            color: 'var(--color-surface)',
-            opacity: !result || !parseXYZ(state.profileStart) || !parseXYZ(state.profileEnd) ? 0.5 : 1,
-          }}
+          className="self-start rounded-md border border-border bg-surface-raised px-3 py-1.5 text-xs font-medium text-text-primary hover:border-border-strong disabled:opacity-50"
           data-testid="sim-profile-button"
         >
           {t('blast.simulation.profile.run_button')}
@@ -489,7 +485,7 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
           </summary>
           <pre
             className="mt-1 p-2 rounded font-mono"
-            style={{ backgroundColor: 'var(--color-surface-sunken)', color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)', borderWidth: 1 }}
+            style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)', borderWidth: 1 }}
           >
 {`[ ${state.tensor[0].toFixed(4)}  ${state.tensor[1].toFixed(4)}  ${state.tensor[2].toFixed(4)} ]
 [ ${state.tensor[3].toFixed(4)}  ${state.tensor[4].toFixed(4)}  ${state.tensor[5].toFixed(4)} ]
@@ -498,8 +494,8 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
         </details>
       )}
 
-      <div className="space-y-2">
-        <label className="flex items-start gap-2 text-sm">
+      <div className="flex flex-col gap-2">
+        <label className="flex items-start gap-2 text-sm text-text-secondary">
           <input
             type="checkbox"
             data-testid="sim-confirm-checkbox"
@@ -509,25 +505,22 @@ export function BlastSimulationPanel({ sessionId, geometryConfigurationVersion }
           />
           <span>{t('blast.simulation.confirm_label')}</span>
         </label>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{t('blast.simulation.edit_invalidates')}</p>
+        <p className="text-xs text-text-muted">{t('blast.simulation.edit_invalidates')}</p>
         <button
           type="button"
           onClick={onSubmit}
           disabled={!canRun}
           data-testid="sim-run-button"
-          className="px-3 py-1.5 rounded disabled:opacity-50"
-          style={{ backgroundColor: 'var(--color-mine-blue)', color: 'var(--color-surface)' }}
+          className="self-start rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg disabled:opacity-50"
         >
           {mutation.isPending ? t('blast.simulation.run_pending') : t('blast.simulation.run_button')}
         </button>
       </div>
 
       {errorDiag && (
-        <div
-          className="text-sm p-2 rounded"
-          style={{ backgroundColor: 'var(--status-nok-bg, rgba(232,49,73,0.10))', color: 'var(--status-nok-text, #e83149)' }}
-        >
-          <strong>{errorDiag.error_code}</strong>: {errorDiag.message || t('blast.simulation.missing_field')}
+        <div role="alert" className="flex items-start gap-2 text-sm text-text-secondary">
+          <span aria-hidden="true" className="mt-1.5 inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--status-nok-text)]" />
+          <span><strong className="font-mono text-text-primary">{errorDiag.error_code}</strong>: {errorDiag.message || t('blast.simulation.missing_field')}</span>
         </div>
       )}
 
@@ -565,28 +558,21 @@ function TensorEditor({
 
   return (
     <fieldset
-      className="space-y-2 p-3 rounded border"
-      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-sunken)' }}
+      className="flex flex-col gap-2"
       data-testid="sim-tensor-editor"
     >
       <div className="flex items-center justify-between">
-        <legend className="text-sm font-medium">{t('blast.simulation.tensor.title')}</legend>
+        <legend className="mb-1 text-xs font-medium text-text-secondary">{t('blast.simulation.tensor.title')}</legend>
         <button
           type="button"
           onClick={onUseIdentity}
-          className="text-xs px-2 py-1 rounded"
-          style={{
-            borderWidth: 1,
-            borderColor: 'var(--color-border-strong)',
-            backgroundColor: 'var(--color-surface-raised)',
-            color: 'var(--color-text-secondary)',
-          }}
+          className="rounded-md border border-border px-2 py-1 text-xs text-text-secondary hover:border-border-strong hover:text-text-primary"
           data-testid="sim-tensor-identity"
         >
           {t('blast.simulation.tensor.identity_hint')}
         </button>
       </div>
-      <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+      <p className="text-xs text-text-muted">
         {t('blast.simulation.tensor.identity_help')}
       </p>
       <div className="grid grid-cols-3 gap-2">
@@ -605,7 +591,7 @@ function TensorEditor({
       {errorKey && (
         <p
           className="text-xs"
-          style={{ color: 'var(--status-nok-text, #e83149)' }}
+          style={{ color: 'var(--status-nok-text)' }}
           data-testid="sim-tensor-error"
         >
           {t(errorKey)}
@@ -654,9 +640,9 @@ function SimulationResultView({ result }: { result: SimulationCreateResponse }) 
     ? t('blast.simulation.energy_unit_j')
     : t('blast.simulation.energy_unit_dimensionless');
   return (
-    <div className="space-y-3 border-t pt-3" style={{ borderColor: 'var(--color-border)' }} data-testid="sim-result">
-      <h3 className="font-medium">{t('blast.simulation.summary_section')}</h3>
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+    <div className="flex flex-col gap-4 border-t border-border pt-4" data-testid="sim-result">
+      <h4 className="ui-section-title">{t('blast.simulation.summary_section')}</h4>
+      <dl className="grid max-w-xl grid-cols-2 gap-x-4 gap-y-1 text-sm tabular-nums [&_dt]:text-text-muted [&_dd]:text-right [&_dd]:text-text-primary">
         <dt>{t('blast.simulation.represented_energy')}</dt>
         <dd>{result.energy_field.represented_energy_j.toFixed(0)} {unitLabel}</dd>
         <dt>{t('blast.simulation.outside_energy')}</dt>
@@ -669,8 +655,8 @@ function SimulationResultView({ result }: { result: SimulationCreateResponse }) 
 
       {result.blocking_errors.length > 0 && (
         <div
-          className="text-sm p-2 rounded"
-          style={{ backgroundColor: 'var(--status-nok-bg, rgba(232,49,73,0.10))', color: 'var(--status-nok-text, #e83149)' }}
+          className="pl-3 text-sm"
+          style={{ borderLeft: '2px solid var(--status-nok-text)', color: 'var(--color-text-secondary)' }}
         >
           <strong>{t('blast.simulation.blocking_errors_title')}</strong>
           <ul className="list-disc ml-4">
@@ -683,8 +669,8 @@ function SimulationResultView({ result }: { result: SimulationCreateResponse }) 
 
       {result.warnings.length > 0 && (
         <div
-          className="text-sm p-2 rounded"
-          style={{ backgroundColor: 'var(--status-warn-bg, rgba(230,143,25,0.10))', color: 'var(--status-warn-text, #e68f19)' }}
+          className="pl-3 text-sm"
+          style={{ borderLeft: '2px solid var(--status-warn-text)', color: 'var(--color-text-secondary)' }}
         >
           <strong>{t('blast.simulation.warnings_title')}</strong>
           <ul className="list-disc ml-4">
@@ -727,9 +713,9 @@ function SliceGrid({
 }) {
   return (
     <div data-testid="sim-slice-grid">
-      <h4 className="text-sm font-medium">{title}</h4>
+      <h5 className="mb-2 text-xs font-medium text-text-secondary">{title}</h5>
       {slices.length === 0 ? (
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{emptyMessage}</p>
+        <p className="text-xs text-text-muted">{emptyMessage}</p>
       ) : (
         <div className="space-y-3">
           {slices.map((s, i: number) => {
@@ -867,12 +853,12 @@ function SliceHeatmap({
 
   return (
     <div
-      className="space-y-2 p-2 rounded border"
-      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-sunken)' }}
+      className="flex flex-col gap-2"
+      style={{ borderColor: 'var(--color-border)' }}
       data-testid="sim-slice-heatmap"
     >
       <div className="flex items-center justify-between text-xs">
-        <strong style={{ color: 'var(--color-text-primary)' }}>{title}</strong>
+        <strong className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{title}</strong>
         <span style={{ color: 'var(--color-text-muted)' }} className="font-mono">
           {xLabel} × {yLabel} · {t('blast.simulation.map.scale')} {valueMin.toExponential(2)}–{valueMax.toExponential(2)} {unitLabel}
         </span>
@@ -905,7 +891,7 @@ function SliceHeatmap({
             const sy = height - ((p.y - yMin) / (yMax - yMin || 1)) * height;
             return (
               <g key={`hole-${i}`}>
-                <circle cx={sx} cy={sy} r={3.5} fill="var(--color-accent-bright, #92a9c7)" stroke="var(--color-surface, #0b0f19)" strokeWidth={1} />
+                <circle cx={sx} cy={sy} r={3.5} fill="var(--color-accent-bright)" stroke="var(--color-surface)" strokeWidth={1} />
                 <title>{String(h.hole_id ?? '')} @ {(p.value ?? 0).toExponential(2)} {unitLabel}</title>
               </g>
             );
@@ -997,7 +983,7 @@ function bandColor(b: RelativeBand): string {
 function SliceLegend({ bands, unitLabel }: { bands: RelativeBand[]; unitLabel: string }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2 text-xs" data-testid="sim-slice-bands">
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-testid="sim-slice-bands">
       <span style={{ color: 'var(--color-text-muted)' }}>{t('blast.simulation.map.bands')}:</span>
       {bands.map((b, i) => (
         <span key={i} className="flex items-center gap-1">
@@ -1052,12 +1038,12 @@ function ProfileChart({ profile }: { profile: ProfileResponse }) {
 
   return (
     <div
-      className="space-y-2 p-2 rounded border"
-      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface-sunken)' }}
+      className="flex flex-col gap-2"
+      style={{ borderColor: 'var(--color-border)' }}
       data-testid="sim-profile-chart"
     >
       <div className="flex items-center justify-between text-xs">
-        <strong style={{ color: 'var(--color-text-primary)' }}>{t('blast.simulation.profile.title')}</strong>
+        <strong className="font-medium" style={{ color: 'var(--color-text-primary)' }}>{t('blast.simulation.profile.title')}</strong>
         <span className="font-mono" style={{ color: 'var(--color-text-muted)' }}>
           min={profile.min.toExponential(2)} · max={profile.max.toExponential(2)} · mean={profile.mean.toExponential(2)} {profile.unit}
         </span>
@@ -1074,7 +1060,7 @@ function ProfileChart({ profile }: { profile: ProfileResponse }) {
         <text x={w - padding} y={h - 4} fill="var(--color-text-muted)" fontSize="10" textAnchor="end">
           {dMax.toFixed(1)} m
         </text>
-        <path d={path} fill="none" stroke="var(--color-accent-bright, #92a9c7)" strokeWidth={1.5} />
+        <path d={path} fill="none" stroke="var(--color-accent-bright)" strokeWidth={1.5} />
         {holes.map((h2, i) => {
           const x = padding + ((Number(h2.x_m ?? 0) - dMin) / dx) * (w - 2 * padding);
           return (
@@ -1084,7 +1070,7 @@ function ProfileChart({ profile }: { profile: ProfileResponse }) {
               x2={x}
               y1={padding}
               y2={h - padding}
-              stroke="var(--status-warn-border, #e68f19)"
+              stroke="var(--status-warn-text)"
               strokeDasharray="2 2"
             />
           );
@@ -1098,11 +1084,11 @@ function ProvenanceBlock({ result, unitLabel }: { result: SimulationCreateRespon
   const { t } = useTranslation();
   return (
     <div
-      className="space-y-1 text-xs p-2 rounded"
-      style={{ backgroundColor: 'var(--color-surface-muted)', color: 'var(--color-text-secondary)' }}
+      className="flex flex-col gap-1 border-t border-border pt-3 text-xs"
+      style={{ color: 'var(--color-text-muted)' }}
       data-testid="sim-provenance"
     >
-      <strong>{t('blast.simulation.provenance_title')}</strong>
+      <strong className="font-medium text-text-secondary">{t('blast.simulation.provenance_title')}</strong>
       <p>
         {t('blast.simulation.provenance_engine')}: <span className="font-mono">{result.provenance.engine_version}</span> ·
         {' '}{t('blast.simulation.provenance_config')}: <span className="font-mono">{result.provenance.simulation_configuration_version}</span>
@@ -1130,13 +1116,13 @@ function ProvenanceBlock({ result, unitLabel }: { result: SimulationCreateRespon
 function NumberField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="text-xs space-y-1 block">
-      <span className="block" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+      <span className="block text-text-muted">{label}</span>
       <input
         type="number"
         step="any"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-2 py-1 rounded border outline-none"
+        className="w-full rounded-md border px-2 py-1 tabular-nums outline-none focus:border-accent"
         style={{
           borderColor: 'var(--color-border)',
           backgroundColor: 'var(--color-surface)',
@@ -1150,12 +1136,12 @@ function NumberField({ label, value, onChange }: { label: string; value: string;
 function TextField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
     <label className="text-xs space-y-1 block">
-      <span className="block" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+      <span className="block text-text-muted">{label}</span>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-2 py-1 rounded border outline-none font-mono"
+        className="w-full rounded-md border px-2 py-1 font-mono outline-none focus:border-accent"
         style={{
           borderColor: 'var(--color-border)',
           backgroundColor: 'var(--color-surface)',
@@ -1174,11 +1160,11 @@ function SelectField({ label, value, onChange, options }: {
 }) {
   return (
     <label className="text-xs space-y-1 block">
-      <span className="block" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+      <span className="block text-text-muted">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-2 py-1 rounded border outline-none"
+        className="w-full rounded-md border px-2 py-1 tabular-nums outline-none focus:border-accent"
         style={{
           borderColor: 'var(--color-border)',
           backgroundColor: 'var(--color-surface)',

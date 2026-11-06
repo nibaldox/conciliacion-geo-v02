@@ -1,13 +1,5 @@
-/**
- * SectionHeader — the row above the chart with the section's
- * identifying metadata.
- *
- * Visual: small caps tracking-wider labels, metric values inline.
- * Subtitle (bench count, last-run) in muted text below.
- */
-
+import { Fragment } from 'react';
 import { useTranslation } from 'react-i18next';
-import { MetricValue } from './atoms/MetricValue';
 import { SectionNavigator } from './SectionNavigator';
 import type { SectionMeta } from '../domain/types';
 import { formatStatus } from '../domain/status';
@@ -17,118 +9,62 @@ export interface SectionHeaderProps {
   readonly benchCount: number;
   readonly floorElevation?: number | null;
   readonly crestElevationMax?: number | null;
-  /** Optional: ISO timestamp of the last successful analysis run. */
   readonly lastRunAt?: string | null;
+}
+
+interface Fact {
+  readonly key: string;
+  readonly label: string;
+  readonly value: string;
 }
 
 export function SectionHeader({ section, benchCount, floorElevation, crestElevationMax, lastRunAt }: SectionHeaderProps) {
   const { t } = useTranslation();
 
+  const facts: Fact[] = [
+    { key: 'azimuth', label: t('profileView.header.azimuth', { defaultValue: 'Azimut' }), value: `${section.azimuth.toFixed(0)}°` },
+    { key: 'sector', label: t('profileView.header.sector', { defaultValue: 'Sector' }), value: section.sector || '—' },
+    { key: 'length', label: t('profileView.header.length', { defaultValue: 'Longitud' }), value: `${section.length.toFixed(1)} m` },
+    { key: 'benches', label: t('profileView.header.benches', { defaultValue: 'Bancos' }), value: String(benchCount) },
+  ];
+  if (floorElevation != null && Number.isFinite(floorElevation)) {
+    facts.push({ key: 'floor', label: t('profileView.header.floorElev', { defaultValue: 'Cota piso' }), value: `${floorElevation.toFixed(0)} m` });
+  }
+  if (crestElevationMax != null && Number.isFinite(crestElevationMax)) {
+    facts.push({ key: 'crest', label: t('profileView.header.crestMax', { defaultValue: 'Cota cresta' }), value: `${crestElevationMax.toFixed(0)} m` });
+  }
+
   return (
     <header
       data-slot="section-header"
-      className="px-4 py-3 rounded-xl border flex flex-wrap items-center gap-x-4 gap-y-2"
-      style={{
-        backgroundColor: 'var(--color-surface-raised)',
-        borderColor: 'var(--color-border)',
-      }}
+      className="sticky -top-3 z-20 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-surface py-2 md:-top-6"
     >
-      {/* Eyebrow + section name as the title group */}
-      <div className="flex items-baseline gap-2 mr-1 min-w-0">
-        <span
-          className="text-xs font-semibold"
-          style={{
-            color: 'var(--color-accent-bright)',
-            fontFamily: 'var(--font-sans)',
-          }}
-        >
-          {t('profileView.header.eyebrow', { defaultValue: 'Sección' })}
-        </span>
-        <span
-          className="text-xs"
-          style={{
-            color: 'var(--color-text-dim)',
-            fontFamily: 'var(--font-sans)',
-          }}
-        >
-          /
-        </span>
-        <h2
-          className="text-base font-semibold"
-          style={{
-            color: 'var(--color-text-primary)',
-            fontFamily: 'var(--font-sans)',
-          }}
-          title={section.id}
-        >
-          {section.name}
-        </h2>
-      </div>
-
-      {/* Inline metadata: az, sector, length, bench count */}
-      <MetricValue
-        label={t('profileView.header.azimuth', { defaultValue: 'Az' })}
-        value={section.azimuth.toFixed(0)}
-        unit="°"
-        size="sm"
-      />
-      <MetricValue
-        label={t('profileView.header.sector', { defaultValue: 'Sector' })}
-        value={section.sector || '—'}
-        size="sm"
-      />
-      <MetricValue
-        label={t('profileView.header.length', { defaultValue: 'Length' })}
-        value={section.length.toFixed(1)}
-        unit="m"
-        size="sm"
-      />
-      <MetricValue
-        label={t('profileView.header.benches', { defaultValue: 'Bancos' })}
-        value={benchCount}
-        size="sm"
-      />
-      {floorElevation != null && Number.isFinite(floorElevation) && (
-        <MetricValue
-          label={t('profileView.header.floorElev', { defaultValue: 'Cota Piso' })}
-          value={floorElevation.toFixed(0)}
-          unit="m"
-          size="sm"
-        />
-      )}
-      {crestElevationMax != null && Number.isFinite(crestElevationMax) && (
-        <MetricValue
-          label={t('profileView.header.crestMax', { defaultValue: 'Cota Cresta' })}
-          value={crestElevationMax.toFixed(0)}
-          unit="m"
-          size="sm"
-        />
-      )}
-
+      <h2 className="truncate text-base font-semibold text-text-primary" title={section.id}>
+        {section.name}
+      </h2>
+      <p data-slot="section-header-facts" className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs text-text-muted">
+        {facts.map((fact, index) => (
+          <Fragment key={fact.key}>
+            {index > 0 && <span aria-hidden="true">·</span>}
+            <span data-fact={fact.key} className="whitespace-nowrap">
+              {fact.label} <span className="tabular-nums text-text-secondary">{fact.value}</span>
+            </span>
+          </Fragment>
+        ))}
+      </p>
       <div className="flex-1" />
-
       {lastRunAt && (
-        <span
-          className="text-xs hidden lg:inline tabular-nums"
-          style={{
-            color: 'var(--color-text-muted)',
-            fontFamily: 'var(--font-sans)',
-          }}
-          title={lastRunAt}
-        >
-          {t('profileView.header.last_run', {
-            defaultValue: 'LAST RUN · {{ago}}',
+        <span className="hidden text-xs tabular-nums text-text-muted lg:inline" title={lastRunAt}>
+          {t('profileView.header.last_run_short', {
+            defaultValue: 'Último análisis hace {{ago}}',
             ago: formatRelativeTime(lastRunAt),
           })}
         </span>
       )}
-
       <SectionNavigator variant="compact" />
     </header>
   );
 }
-
-// ─── Helper: "hace 2 minutos" / "hace 3 días" ────────────────
 
 function formatRelativeTime(iso: string): string {
   const then = new Date(iso).getTime();
@@ -145,10 +81,8 @@ function formatRelativeTime(iso: string): string {
   return `${day} d`;
 }
 
-// Helper for the `title` attribute, when needed externally.
 export { formatRelativeTime };
 
-// Type guard for narrow string unions (kept here as a utility)
 export function isSectionStatus(s: string): s is ReturnType<typeof formatStatus> {
   return s === 'CUMPLE' || s === 'FUERA' || s === 'NO_CUMPLE' || s === 'UNKNOWN';
 }

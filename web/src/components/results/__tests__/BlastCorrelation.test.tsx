@@ -12,6 +12,7 @@ import {
   BlastCorrelation,
 } from '../BlastCorrelation';
 import type { BlastCorrelationRow } from '../../../api/types';
+import { DEMO_MESH_IDS, useSession } from '../../../stores/session';
 
 // ─── Pure helper / type-mapping tests ───────────────────────
 
@@ -159,7 +160,10 @@ describe('<BlastCorrelation /> empty-rows state', () => {
     await i18n.changeLanguage('es');
   });
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSession.setState({ demoMode: false, demoData: null, designMeshId: null, topoMeshId: null });
+  });
 
   it('renders the friendly empty message when rows is empty', async () => {
     mockHook({ data: { rows: [], tolerance: null, n_sections: 0 } });
@@ -167,6 +171,15 @@ describe('<BlastCorrelation /> empty-rows state', () => {
     expect(
       screen.getByText('Sin datos de tronadura'),
     ).toBeInTheDocument();
+  });
+
+  it('does not invite uploading or processing when any active mesh is virtual', () => {
+    useSession.setState({ demoMode: false, designMeshId: 'real-design', topoMeshId: DEMO_MESH_IDS.topo });
+    mockHook({ data: { rows: [], tolerance: null, n_sections: 0 } });
+    render(<BlastCorrelation />);
+    expect(screen.getByText('La demo usa mallas virtuales y no incluye datos de tronadura.')).toBeInTheDocument();
+    expect(screen.queryByText(/Cargue un archivo.*ejecute el análisis/)).not.toBeInTheDocument();
+    expect(screen.getByTestId('blast-demo-notice')).toBeInTheDocument();
   });
 
   it('renders the loading message while pending', async () => {

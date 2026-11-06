@@ -1,8 +1,8 @@
 /** Default tolerances matching core/config.py */
 export const DEFAULT_TOLERANCES = {
-  bench_height: { neg: 1.0, pos: 1.5 },
+  bench_height: { neg: 2.0, pos: 2.0 },
   face_angle: { neg: 5.0, pos: 5.0 },
-  berm_width: { min: 6.0 },
+  berm_width: { min: 7.0 },
   inter_ramp_angle: { neg: 3.0, pos: 2.0 },
   overall_angle: { neg: 2.0, pos: 2.0 },
   crest_toe_deviation: { neg: 1.0, pos: 1.0 },
@@ -11,8 +11,8 @@ export const DEFAULT_TOLERANCES = {
 /** Default process settings matching core/config.py */
 export const DEFAULT_SETTINGS = {
   resolution: 0.1,
-  face_threshold: 40.0,
-  berm_threshold: 20.0,
+  face_threshold: 30.0,
+  berm_threshold: 10.0,
 };
 
 /** Wizard steps */

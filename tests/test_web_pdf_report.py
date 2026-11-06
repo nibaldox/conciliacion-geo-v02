@@ -1,11 +1,4 @@
-"""Tests for the web executive PDF report (``core.web_pdf_report``).
-
-Every case builds a real ``ReportData`` through
-``core.report_data.build_report_data`` (or derives from one with
-``dataclasses.replace``) so the assertions run against the same numbers the
-Word report and the dashboard use. Page text is read back with ``pdftotext``;
-the tests skip when that binary is not installed.
-"""
+"""Tests for the web executive PDF report built from the shared ReportData model."""
 
 import shutil
 import subprocess
@@ -15,11 +8,19 @@ from dataclasses import replace
 import pytest
 
 from core.report_data import ReportFilters, build_report_data
-from core.web_pdf_report import build_pdf_report
+import core.web_pdf_report as web_pdf_report
+from core.web_pdf_report import _plan_sections, build_pdf_report
 
 PDFTOTEXT = shutil.which("pdftotext")
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
 
-pytestmark = pytest.mark.skipif(PDFTOTEXT is None, reason="pdftotext not available")
+requires_pdf_text = pytest.mark.skipif(
+    PDFTOTEXT is None and PdfReader is None,
+    reason="neither pdftotext nor pypdf is available",
+)
 
 
 def _comparison(
@@ -114,18 +115,38 @@ def _sample_data():
     return build_report_data(rows, SETTINGS, ReportFilters(), META, plan_inputs=PLAN_INPUTS)
 
 
-def _text(pdf_bytes):
-    proc = subprocess.run(
-        [PDFTOTEXT, "-layout", "-", "-"],
-        input=pdf_bytes,
-        capture_output=True,
-        check=True,
-    )
-    return proc.stdout.decode("utf-8", errors="replace")
+def _text(pdf_bytes, *, layout=True):
+    if PDFTOTEXT:
+        proc = subprocess.run(
+            [PDFTOTEXT, *(["-layout"] if layout else []), "-", "-"],
+            input=pdf_bytes,
+            capture_output=True,
+            check=True,
+        )
+        return proc.stdout.decode("utf-8", errors="replace")
+    if PdfReader is not None:
+        import io
+
+        return "\f".join(
+            " ".join((page.extract_text() or "").split())
+            for page in PdfReader(io.BytesIO(pdf_bytes)).pages
+        )
+    raise RuntimeError("neither pdftotext nor pypdf is available")
 
 
 def _pages(pdf_bytes):
     return [page for page in _text(pdf_bytes).split("\f") if page.strip()]
+
+
+def _flowable_text(flowable):
+    if hasattr(flowable, "getPlainText"):
+        return flowable.getPlainText()
+    cells = getattr(flowable, "_cellvalues", None)
+    if cells is not None:
+        return " ".join(_flowable_text(cell) for cell in cells)
+    if isinstance(flowable, (list, tuple)):
+        return " ".join(_flowable_text(item) for item in flowable)
+    return str(flowable)
 
 
 @pytest.fixture(scope="module")
@@ -141,6 +162,133 @@ def test_returns_seekable_pdf_buffer():
     assert payload.rstrip().endswith(b"%%EOF")
 
 
+@pytest.mark.skipif(PdfReader is None, reason="pypdf not available")
+def test_embedded_font_roundtrips_accents_and_keeps_a4_pages():
+    import io
+
+    reader = PdfReader(io.BytesIO(build_pdf_report(_sample_data()).getvalue()))
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+    assert "Desv. criterio" in text
+    assert "Informe" in text
+    assert len(reader.pages) <= 10
+    assert all(
+        float(page.mediabox.width) == pytest.approx(595.28, abs=0.1)
+        and float(page.mediabox.height) == pytest.approx(841.89, abs=0.1)
+        for page in reader.pages
+    )
+    if web_pdf_report._BODY_FONT == "GeoVera":
+        assert "Informe de conciliación geotécnica" in text
+        assert "Sección" in text
+        assert web_pdf_report._report_styles()["body"].fontName == "GeoVera"
+        assert web_pdf_report._report_styles()["h1"].fontName == "GeoVera-Bold"
+    else:
+        assert web_pdf_report._BODY_FONT == "Helvetica"
+        assert web_pdf_report._BOLD_FONT == "Helvetica-Bold"
+        assert web_pdf_report._report_styles()["body"].fontName == "Helvetica"
+        assert web_pdf_report._report_styles()["h1"].fontName == "Helvetica-Bold"
+
+
+@pytest.mark.skipif(PdfReader is None, reason="pypdf not available")
+def test_concurrent_reports_keep_unicode_text_and_valid_pdf_pages():
+    from concurrent.futures import ThreadPoolExecutor
+    import io
+
+    def generate_and_extract(_index):
+        payload = build_pdf_report(_sample_data()).getvalue()
+        reader = PdfReader(io.BytesIO(payload))
+        extracted = " ".join((page.extract_text() or "") for page in reader.pages)
+        expected_text = "conciliación" if web_pdf_report._BODY_FONT == "GeoVera" else "Informe"
+        return payload.startswith(b"%PDF"), expected_text in extracted, len(reader.pages)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(generate_and_extract, range(8)))
+
+    assert all(is_pdf and has_unicode and 1 <= page_count <= 10 for is_pdf, has_unicode, page_count in results)
+
+
+def test_missing_reportlab_fonts_fall_back_to_base14_fonts(tmp_path):
+    assert web_pdf_report._register_report_fonts(str(tmp_path)) == ("Helvetica", "Helvetica-Bold")
+
+
+def test_summary_story_reports_unknown_separately_from_classified_denominator():
+    rows = [
+        _comparison(section="S-01", sector="A"),
+        _comparison(section="S-01", sector="B", bench=2, height=(15.0, 19.0, "NO CUMPLE")),
+        _comparison(section="S-02", height=(15.0, None, None), angle=(60.0, None, None), berm=(8.0, None, None)),
+    ]
+    data = build_report_data(rows, SETTINGS, ReportFilters(), META)
+    story = []
+
+    web_pdf_report._summary_section(story, data, web_pdf_report._report_styles())
+    text = _flowable_text(story)
+
+    assert "peor estado entre sus registros de banco, incluidos faltantes y adicionales" in text
+    assert "Perfiles con estado clasificado: 1" in text
+    assert "Perfiles UNKNOWN / SIN EVALUAR: 1" in text
+    assert "quedan fuera del denominador clasificado" in text
+    assert "más de una identidad de sector" in text
+    assert "no se pueden atribuir a un sector de forma inequívoca" in text
+
+
+def test_design_achievement_lists_component_denominators_without_assuming_all_components():
+    row = _comparison(
+        section="S-01", sector="A", delta_crest=0.4, delta_toe=None,
+        height=(15.0, None, None), angle=(60.0, None, None), berm=(8.0, None, None),
+    )
+    data = build_report_data([row], SETTINGS, ReportFilters(), META)
+    story = []
+
+    web_pdf_report._summary_section(story, data, web_pdf_report._report_styles())
+    text = _flowable_text(story)
+
+    assert "cresta 100.0% (n=1)" in text
+    assert "pie N/A (n=0)" in text
+    assert "berma N/A (n=0)" in text
+    assert "registros con algún componente disponible 1" in text
+    assert "pueden tener solo uno de los componentes" in text
+
+
+def test_parameter_story_shows_criteria_and_reported_count_denominators(monkeypatch):
+    data = _sample_data()
+    story = []
+    monkeypatch.setattr(web_pdf_report, "parameter_donuts_png", lambda _parameters: None)
+
+    web_pdf_report._parameters_section(story, data, web_pdf_report._report_styles())
+    text = _flowable_text(story)
+
+    assert "Criterio" in text
+    assert "Con estado" in text
+    assert "Otros estados" in text
+    assert "-2.00 m / +3.00 m" in text
+    assert "no equivale solo a NO CUMPLE" in text
+
+
+def test_parameter_table_headers_use_white_text_and_fit_content_width(monkeypatch):
+    story = []
+    styles = web_pdf_report._report_styles()
+    monkeypatch.setattr(web_pdf_report, "parameter_donuts_png", lambda _parameters: None)
+    web_pdf_report._parameters_section(story, _sample_data(), styles)
+    table = next(item for item in story if isinstance(item, web_pdf_report.Table))
+
+    assert sum(table._argW) <= web_pdf_report.CONTENT_WIDTH
+    assert all(
+        header.style.textColor == web_pdf_report.colors.white
+        for header in table._cellvalues[0]
+    )
+
+
+def test_criteria_distinguishes_height_angle_bands_from_berm_minimum():
+    story = []
+    web_pdf_report._criteria_section(story, _sample_data(), web_pdf_report._report_styles())
+    text = _flowable_text(story)
+
+    assert "Para altura y ángulo" in text
+    assert "Para berma, se compara el ancho con el mínimo configurado" in text
+    assert "esta regla no usa los tres tramos de tolerancia" in text
+
+
+@requires_pdf_text
 def test_expected_sections_present(sample_pdf):
     text = _text(sample_pdf)
     assert "1. Resumen ejecutivo" in text
@@ -151,12 +299,14 @@ def test_expected_sections_present(sample_pdf):
     assert "6. Plano de cumplimiento" in text
 
 
+@requires_pdf_text
 def test_depth_section_absent_when_depth_is_none(sample_pdf):
     data = _sample_data()
     assert data.depth is None
     assert "Profundidad del rajo" not in _text(sample_pdf)
 
 
+@requires_pdf_text
 def test_depth_section_present_with_depth():
     data = replace(
         _sample_data(),
@@ -168,12 +318,14 @@ def test_depth_section_present_with_depth():
     assert "120.50 m" in text
 
 
+@requires_pdf_text
 def test_sector_section_omitted_without_design_achievement():
     data = replace(_sample_data(), design_achievement=None)
     text = _text(build_pdf_report(data).getvalue())
     assert "Logro de diseño por sector" not in text
 
 
+@requires_pdf_text
 def test_blast_section_only_with_blast(sample_pdf):
     assert "Resumen de tronadura" not in _text(sample_pdf)
 
@@ -193,6 +345,37 @@ def test_blast_section_only_with_blast(sample_pdf):
     assert "3.70 m" in text
 
 
+@requires_pdf_text
+def test_design_surface_collar_elevation_is_labeled_as_estimated():
+    data = replace(
+        _sample_data(),
+        blast={
+            "holes": [{"X": 1.0, "Y": 2.0, "Z_collar": 3100.0, "Z_collar_semantic": "design_surface_estimate"}],
+            "tolerance": {"neg": 1.0, "pos": 1.0},
+        },
+    )
+    text = " ".join(_text(build_pdf_report(data).getvalue(), layout=False).split())
+    assert "Advertencia sobre la cota" in text
+    assert "estimada desde la superficie de diseño" in text
+    assert "no es una medición de terreno" in text
+
+
+def test_pdf_blast_rows_include_estimated_collar_warning_when_provenance_is_present():
+    data = replace(
+        _sample_data(),
+        blast={
+            "holes": [{"Z_collar": 3100.0, "z_collar_semantic": "design_surface_estimate"}],
+            "tolerance": {"neg": 1.0, "pos": 1.0},
+        },
+    )
+    rows = web_pdf_report._blast_rows(data, web_pdf_report._report_styles())
+    assert rows is not None
+    rendered_cells = [cell.getPlainText() for row in rows for cell in row]
+    assert any("estimada desde la superficie de diseño" in cell for cell in rendered_cells)
+    assert any("de algunos pozos" in cell for cell in rendered_cells)
+
+
+@requires_pdf_text
 def test_blast_missing_values_never_render_nan():
     data = replace(
         _sample_data(),
@@ -213,6 +396,7 @@ def test_blast_missing_values_never_render_nan():
     assert "—" in text
 
 
+@requires_pdf_text
 def test_top_deviation_headers_and_values():
     data = _sample_data()
     parameters = {entry["parameter"] for entry in data.top_deviations}
@@ -220,14 +404,16 @@ def test_top_deviation_headers_and_values():
     text = _text(build_pdf_report(data).getvalue())
     assert "Altura de banco —" in text
     assert "Ángulo de cara —" in text
-    assert "Desviación (m)" in text
-    assert "Desviación (°)" in text
-    assert "Tolerancia (m)" in text
-    assert "Tolerancia (°)" in text
+    assert "Desv. criterio (m)" in text
+    assert "Desv. criterio (°)" in text
+    assert "Base e índice" in text
+    assert "|desvío|/límite" in text
+    assert "déficit/mínimo" in text
     assert "Estado" in text
     assert "NO CUMPLE" in text
 
 
+@requires_pdf_text
 def test_top_deviations_grouped_per_parameter_present():
     data = _sample_data()
     grouped = {}
@@ -241,6 +427,7 @@ def test_top_deviations_grouped_per_parameter_present():
         assert f"{labels[parameter]} — {shown} de {len(entries)} mayores" in text
 
 
+@requires_pdf_text
 def test_top_deviations_limited_to_five_per_parameter():
     rows = [
         _comparison(
@@ -261,6 +448,7 @@ def test_top_deviations_limited_to_five_per_parameter():
     assert "S-02" not in text
 
 
+@requires_pdf_text
 def test_top_deviation_headers_are_metres_when_only_lengths():
     rows = [
         _comparison(section="S-01", bench=1, height=(15.0, 19.4, "FUERA DE TOLERANCIA"),
@@ -271,12 +459,13 @@ def test_top_deviation_headers_are_metres_when_only_lengths():
     data = build_report_data(rows, SETTINGS, ReportFilters(), META)
     assert {entry["parameter"] for entry in data.top_deviations} == {"height"}
     text = _text(build_pdf_report(data).getvalue())
-    assert "Desviación (m)" in text
-    assert "Tolerancia (m)" in text
-    assert "Desviación (°)" not in text
+    assert "Desv. criterio (m)" in text
+    assert "Base e índice" in text
+    assert "Desv. criterio (°)" not in text
     assert "-3.00" in text
 
 
+@requires_pdf_text
 def test_page_numbering_on_every_page_except_cover(sample_pdf):
     pages = _pages(sample_pdf)
     total = len(pages)
@@ -289,6 +478,7 @@ def test_page_numbering_on_every_page_except_cover(sample_pdf):
         assert "Informe de conciliación geotécnica" in page
 
 
+@requires_pdf_text
 def test_criteria_shows_signed_tolerances_and_filters(sample_pdf):
     text = _text(sample_pdf)
     assert "-2.00 m / +3.00 m" in text
@@ -300,13 +490,16 @@ def test_criteria_shows_signed_tolerances_and_filters(sample_pdf):
     assert "diseno.stl" in text
 
 
-def test_plan_section_omitted_without_geometry():
+@requires_pdf_text
+def test_plan_section_explains_when_geometry_is_unavailable():
     data = replace(_sample_data(), plan_inputs=None, section_geometry=())
     text = _text(build_pdf_report(data).getvalue())
-    assert "Plano de cumplimiento" not in text
+    assert "Plano de cumplimiento" in text
+    assert "No hay geometría de secciones disponible para generar el plano" in text
     assert "5. Mayores desviaciones" in text
 
 
+@requires_pdf_text
 def test_plan_section_accepts_section_line_objects():
     section_line = types.SimpleNamespace(
         name="S-01", origin=[100.0, 200.0], azimuth=45.0, length=80.0, sector="A"
@@ -316,15 +509,147 @@ def test_plan_section_accepts_section_line_objects():
     assert "Plano de cumplimiento" in text
 
 
+def test_plan_sections_mark_filter_exclusions_without_reclassifying_unknown():
+    plan_inputs = {"sections": [
+        {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-02", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-99", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
+    ]}
+    data = build_report_data(
+        [_comparison(section="S-01"), _comparison(section="S-02", sector="B")],
+        SETTINGS,
+        ReportFilters(sections=("S-01",)),
+        META,
+        plan_inputs=plan_inputs,
+    )
+
+    sections, _contours = _plan_sections(data)
+
+    assert [(section["name"], section["included"]) for section in sections] == [
+        ("S-01", True), ("S-02", False), ("S-99", False),
+    ]
+    assert sections[1]["worst_status"] == "UNKNOWN"
+
+
+def test_plan_sections_resolve_duplicate_names_by_sector_and_keep_ambiguous_unknown():
+    plan_inputs = {"sections": [
+        {"name": "S-01", "sector": "A", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "sector": "B", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
+    ]}
+    data = build_report_data(
+        [
+            _comparison(section="S-01", sector="A"),
+            _comparison(section="S-01", sector="B", height=(15.0, 19.0, "NO CUMPLE")),
+        ],
+        SETTINGS,
+        ReportFilters(sectors=("A",)),
+        META,
+        plan_inputs=plan_inputs,
+    )
+
+    sections, _contours = _plan_sections(data)
+
+    assert [(section["sector"], section["included"], section["worst_status"]) for section in sections] == [
+        ("A", True, "CUMPLE"),
+        ("B", False, "UNKNOWN"),
+        ("", True, "UNKNOWN"),
+    ]
+
+
+def test_plan_section_without_sector_stays_unknown_when_same_name_geometry_is_unmatched():
+    plan_inputs = {"sections": [
+        {"name": "S-01", "sector": "A", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "sector": "B", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
+        {"name": "S-01", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
+    ]}
+    data = build_report_data(
+        [_comparison(section="S-01", sector="A")],
+        SETTINGS,
+        ReportFilters(sectors=("A",)),
+        META,
+        plan_inputs=plan_inputs,
+    )
+
+    sections, _contours = _plan_sections(data)
+
+    assert [(section["included"], section["worst_status"]) for section in sections] == [
+        (True, "CUMPLE"), (False, "UNKNOWN"), (True, "UNKNOWN"),
+    ]
+
+
+@requires_pdf_text
 def test_parameter_table_and_summary_numbers(sample_pdf):
     text = _text(sample_pdf)
     assert "Altura de banco (m)" in text
-    assert "Valor medio real" in text
+    assert "Media real (n)" in text
     assert "Perfiles" in text
-    assert "Total de perfiles" in text
+    assert "Total clasificado" in text
     assert "Puntaje ponderado global" in text
 
 
+@requires_pdf_text
+def test_summary_denominator_excludes_unclassified_profiles():
+    rows = [
+        _comparison(section="S-01"),
+        _comparison(section="S-02", height=(15.0, None, None), angle=(60.0, None, None), berm=(8.0, None, None)),
+    ]
+    data = build_report_data(rows, SETTINGS, ReportFilters(), META)
+    assert len(data.profiles) == 2
+    assert sum(data.profile_counts.values()) == 1
+
+    text = _text(build_pdf_report(data).getvalue())
+
+    assert "Perfiles con estado clasificado: 1" in text
+    assert "Perfiles UNKNOWN / SIN EVALUAR: 1" in text
+    assert "Total de perfiles" not in text
+
+
+@requires_pdf_text
+def test_cover_and_criteria_identify_filters_and_sources():
+    data = build_report_data(
+        [_comparison(section="S-01", sector="A", bench=2)],
+        SETTINGS,
+        ReportFilters(sectors=("A",), sections=("S-01",), levels=("3100",), benches=(2,)),
+        META,
+    )
+    text = _text(build_pdf_report(data).getvalue())
+
+    assert "Filtros aplicados" in text
+    assert "Sectores: A" in text
+    assert "Secciones: S-01" in text
+    assert "Bancos: 2" in text
+    assert "Diseño: diseno.stl" in text
+    assert "Topografía: topografia.stl" in text
+    assert "1,5 veces la tolerancia" in text
+
+
+@requires_pdf_text
+def test_ambiguous_section_sector_warning_is_visible_in_the_pdf():
+    rows = [
+        _comparison(section="S-01", sector="A", bench=1),
+        _comparison(section="S-01", sector="B", bench=2, height=(15.0, 19.0, "NO CUMPLE")),
+    ]
+    data = build_report_data(rows, SETTINGS, ReportFilters(), META)
+
+    text = " ".join(_text(build_pdf_report(data).getvalue(), layout=False).split())
+
+    assert "estos nombres aparecen asociados a más de una identidad de sector" in text
+    assert "no se pueden atribuir a un sector de forma inequívoca" in text
+
+
+@requires_pdf_text
+def test_parameter_denominator_and_other_statuses_are_labeled_without_claiming_measurement():
+    text = _text(build_pdf_report(_sample_data()).getvalue())
+
+    assert "Otros estados" in text
+    assert "Con estado" in text
+    assert "incluidos FUERA DE TOLERANCIA y NO CUMPLE" in text
+    assert "no equivale solo a NO CUMPLE" in text
+    assert "valores reales disponibles con estado registrado" in text
+
+
+@requires_pdf_text
 def test_empty_data_still_builds_a_valid_pdf():
     data = build_report_data([], SETTINGS, ReportFilters(), META)
     payload = build_pdf_report(data).getvalue()

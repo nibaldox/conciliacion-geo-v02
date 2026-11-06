@@ -544,9 +544,9 @@ def _emit_reconciliation_gaps(
     if not design_benches:
         return gaps
 
-    tol_h = tolerances.get("bench_height", {"neg": 1.0, "pos": 1.5})
-    tol_pos = float(tol_h.get("pos", 1.5))
-    tol_neg = float(tol_h.get("neg", 1.0))
+    tol_h = tolerances.get("bench_height", TOLERANCES.bench_height)
+    tol_pos = float(tol_h.get("pos", TOLERANCES.bench_height["pos"]))
+    tol_neg = float(tol_h.get("neg", TOLERANCES.bench_height["neg"]))
     tol_mag = max(tol_pos, tol_neg)
 
     matched_topo: set = set()
@@ -613,7 +613,9 @@ _GAP_TOLERANCES = {
 
 
 def _simplify_and_classify_segments(
-    distances, elevations,
+    distances, elevations, *,
+    face_threshold=DETECTION.face_threshold,
+    berm_threshold=DETECTION.berm_threshold,
 ) -> tuple[np.ndarray, np.ndarray, list[dict]] | None:
     """Run RDP simplification and merge segments into face/berm buckets.
 
@@ -643,8 +645,8 @@ def _simplify_and_classify_segments(
     angles[valid_seg] = np.abs(np.degrees(np.arctan2(dy[valid_seg], dx[valid_seg])))
 
     segment_type = np.full(len(angles), 0)
-    segment_type[angles >= DETECTION.face_threshold] = 1
-    segment_type[angles <= DETECTION.berm_threshold] = 2
+    segment_type[angles >= face_threshold] = 1
+    segment_type[angles <= berm_threshold] = 2
 
     merged_segments = _merge_adjacent_segments(segment_type)
     return simplified, angles, merged_segments
@@ -705,6 +707,7 @@ def _build_face_bench(
 
     final_toe_x, final_angle, spill_w, spill_pt = _correct_toe_with_spill(
         face_pts, crest, toe, distances, elevations, weighted_angle,
+        face_threshold=face_threshold,
     )
 
     face_mask = _face_span_mask(distances, crest, toe)
@@ -748,7 +751,8 @@ def _weighted_face_angle(
 
 def _correct_toe_with_spill(
     face_pts: np.ndarray, crest: np.ndarray, toe: np.ndarray,
-    distances, elevations, weighted_angle: float,
+    distances, elevations, weighted_angle: float, *,
+    face_threshold=DETECTION.face_threshold,
 ) -> tuple[float, float, float, np.ndarray]:
     """Detect a corrected toe and spill point; return (toe_x, angle, spill_w, spill_pt)."""
     crest_index = int(np.argmin(np.linalg.norm(face_pts - crest, axis=1)))
@@ -758,7 +762,7 @@ def _correct_toe_with_spill(
     else:
         oriented_face_pts = face_pts[toe_index:crest_index + 1][::-1]
     corrected_toe_x, corrected_angle, spill_pt = _detect_and_project_solid_toe(
-        oriented_face_pts, DETECTION.face_threshold
+        oriented_face_pts, face_threshold
     )
     if abs(corrected_toe_x - toe[0]) > 1e-3:
         return corrected_toe_x, corrected_angle, abs(toe[0] - corrected_toe_x), spill_pt
@@ -865,7 +869,10 @@ def extract_parameters(distances, elevations, section_name, sector,
     """
     result = ExtractionResult(section_name=section_name, sector=sector)
 
-    simplified_info = _simplify_and_classify_segments(distances, elevations)
+    simplified_info = _simplify_and_classify_segments(
+        distances, elevations, face_threshold=face_threshold,
+        berm_threshold=berm_threshold,
+    )
     if simplified_info is None:
         return result
     simplified, angles, merged_segments = simplified_info

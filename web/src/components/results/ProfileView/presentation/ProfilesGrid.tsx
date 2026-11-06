@@ -27,9 +27,11 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
   const { isDark } = useTheme();
   const { data: profile, isPending, isError, refetch } = useProfile(section.id);
 
-  const gridColor = isDark ? '#1e293b' : '#e2e8f0';
+  const gridColor = readThemeColor('--color-border', isDark ? '#1e293b' : '#e2e8f0');
   const designColor = readThemeColor('--color-mine-blue', '#7693b7');
   const topoColor = readThemeColor('--color-mine-green', '#4ade80');
+  const tickColor = readThemeColor('--color-text-secondary', isDark ? '#bfccd9' : '#4b5563');
+  const tickFont = { size: 10, color: tickColor };
 
   const plotData: Data[] = [];
   if (profile) {
@@ -65,14 +67,14 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
       showgrid: true,
       gridcolor: gridColor,
       zeroline: false,
-      tickfont: { size: 7, color: isDark ? '#64748b' : '#94a3b8' },
+      tickfont: tickFont,
       showticklabels: true,
     },
     yaxis: {
       showgrid: true,
       gridcolor: gridColor,
       zeroline: false,
-      tickfont: { size: 7, color: isDark ? '#64748b' : '#94a3b8' },
+      tickfont: tickFont,
       showticklabels: true,
       scaleanchor: 'x',
       scaleratio: 1,
@@ -83,53 +85,38 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
 
   return (
     <div
-      className="rounded-xl overflow-hidden transition-all hover:scale-[1.01]"
-      style={{
-        border: isSelected
-          ? '2px solid var(--color-accent-bright)'
-          : '1px solid var(--color-border)',
-        backgroundColor: 'var(--color-surface-raised)',
-        boxShadow: isSelected ? 'var(--shadow-glow-accent)' : 'none',
-      }}
+      className={[
+        'border-b border-border transition-colors',
+        isSelected ? 'border-accent-bright' : '',
+      ].join(' ')}
     >
       <button
         type="button"
+        aria-pressed={isSelected}
         onClick={onSelect}
-        className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
       >
-        <div
-          className="px-3 py-1.5 flex items-center justify-between gap-2 border-b"
-          style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-surface)' }}
-        >
+        <div className="flex items-baseline justify-between gap-2 px-3 pt-2">
           <span
-            className="text-xs font-mono font-semibold truncate"
+            className="truncate text-sm font-medium"
             style={{ color: isSelected ? 'var(--color-accent-bright)' : 'var(--color-text-primary)' }}
           >
             {section.name}
           </span>
           {section.sector && (
-            <span
-              className="text-[10px] font-mono px-1.5 py-0.5 rounded"
-              style={{
-                color: 'var(--color-text-muted)',
-                backgroundColor: 'var(--color-surface-muted)',
-              }}
-            >
+            <span className="truncate text-xs" style={{ color: 'var(--color-text-secondary)' }}>
               {section.sector}
             </span>
           )}
         </div>
 
-        <div style={{ height: 160, position: 'relative' }}>
+        <div className="relative h-40">
           {isPending && !profile ? (
-            <div
-              className="flex items-center justify-center h-full"
-              style={{ color: 'var(--color-text-dim)' }}
-            >
+            <div className="flex h-full items-center justify-center text-text-muted">
               <Spinner size="sm" />
             </div>
           ) : !profile && isError ? (
-            <div className="flex h-full items-center justify-center px-3 text-center text-xs text-status-nok-text">
+            <div className="flex h-full items-center justify-center px-3 text-center text-xs text-text-muted">
               {t('profilesGrid.profileError', { defaultValue: 'No se pudo cargar este perfil.' })}
             </div>
           ) : plotData.length > 0 ? (
@@ -148,16 +135,16 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
         </div>
       </button>
       {isError && (
-        <div className="flex justify-center border-t border-border px-3 py-2">
+        <div className="flex items-center justify-center gap-2 border-t border-border px-3 py-1.5">
           {profile && (
-            <span className="mr-2 text-xs text-status-nok-text">
+            <span className="text-xs text-text-muted">
               {t('profilesGrid.profileRefreshError', { defaultValue: 'No se pudo actualizar este perfil.' })}
             </span>
           )}
           <button
             type="button"
             onClick={() => { void refetch(); }}
-            className="text-xs text-accent-bright underline underline-offset-2"
+            className="rounded text-xs text-accent-bright underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             {t('profilesGrid.retryProfile', { defaultValue: 'Reintentar perfil' })}
           </button>
@@ -181,8 +168,8 @@ export function ProfilesGrid({ onSectionSelect }: ProfilesGridProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-16 gap-3" style={{ color: 'var(--color-text-muted)' }}>
-        <Spinner />
+      <div className="flex items-center justify-center gap-3 py-16 text-text-muted">
+        <Spinner size="sm" />
         <span className="text-sm">{t('common.loading', { defaultValue: 'Cargando…' })}</span>
       </div>
     );
@@ -190,13 +177,7 @@ export function ProfilesGrid({ onSectionSelect }: ProfilesGridProps) {
 
   if (!sections || sections.length === 0) {
     return (
-      <div
-        className="flex items-center justify-center py-16 rounded-xl"
-        style={{
-          border: '1px dashed var(--color-border)',
-          color: 'var(--color-text-muted)',
-        }}
-      >
+      <div className="flex items-center justify-center py-16 text-text-muted">
         <p className="text-sm">{t('profilesGrid.empty', { defaultValue: 'No hay secciones procesadas.' })}</p>
       </div>
     );
@@ -211,14 +192,13 @@ export function ProfilesGrid({ onSectionSelect }: ProfilesGridProps) {
 
   return (
     <div
-      className="grid gap-3"
-      style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' }}
+      className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
     >
       {sections.map((sec) => (
         <MiniCard
           key={sec.id}
           section={sec}
-          isSelected={selectedSection === sec.name}
+          isSelected={selectedSection === sec.id}
           onSelect={() => handleSelect(sec)}
         />
       ))}

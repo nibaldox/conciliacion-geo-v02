@@ -38,7 +38,6 @@ i18n.use(initReactI18next).init({
         common: { retry: 'Reintentar' },
         ai_reporter: {
           title: 'AI Reporter',
-          ready_badge: 'Listo',
           backend_status: 'Estado del backend',
           health: {
             ok: 'AI service disponible',
@@ -179,7 +178,7 @@ describe('AIReporter', () => {
     renderWith(<AIReporter />, qc);
 
     expect(screen.getByText('AI Reporter')).toBeInTheDocument();
-    expect(screen.getByText('Listo')).toBeInTheDocument();
+    expect(screen.getByText('Estado del backend')).toBeInTheDocument();
     expect(screen.getByTestId('ai-reporter-health')).toHaveTextContent(
       'Verificando...',
     );

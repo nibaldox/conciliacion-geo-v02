@@ -43,9 +43,9 @@ def _env_max_upload_mb(name: str, default: int = 500, ceiling: int = 10240) -> i
 @dataclass(frozen=True)
 class Tolerances:
     """Default tolerances for compliance evaluation."""
-    bench_height: Dict[str, float] = field(default_factory=lambda: {'neg': 1.0, 'pos': 1.5})
+    bench_height: Dict[str, float] = field(default_factory=lambda: {'neg': 2.0, 'pos': 2.0})
     face_angle: Dict[str, float] = field(default_factory=lambda: {'neg': 5.0, 'pos': 5.0})
-    berm_width: Dict[str, float] = field(default_factory=lambda: {'min': 6.0})
+    berm_width: Dict[str, float] = field(default_factory=lambda: {'min': 7.0})
     inter_ramp_angle: Dict[str, float] = field(default_factory=lambda: {'neg': 3.0, 'pos': 2.0})
     overall_angle: Dict[str, float] = field(default_factory=lambda: {'neg': 2.0, 'pos': 2.0})
     crest_toe_deviation: Dict[str, float] = field(default_factory=lambda: {'neg': 1.0, 'pos': 1.0})
@@ -54,8 +54,8 @@ class Tolerances:
 @dataclass(frozen=True)
 class DetectionDefaults:
     """Defaults for bank/berm detection algorithm."""
-    face_threshold: float = 40.0      # degrees, minimum angle to classify as face
-    berm_threshold: float = 20.0      # degrees, maximum angle to classify as berm
+    face_threshold: float = 30.0      # degrees, minimum angle to classify as face
+    berm_threshold: float = 10.0      # degrees, maximum angle to classify as berm
     max_berm_width: float = 50.0      # meters, filter unrealistically large berms
     min_bench_height: float = 2.0     # meters, minimum bench height to be detected
     simplify_epsilon: float = 0.05    # meters, RDP simplification tolerance (was 0.1)

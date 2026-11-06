@@ -130,7 +130,7 @@ export function AIReporter() {
   void t;
 
   return (
-    <div data-slot="ai-reporter" className="space-y-5">
+    <section data-slot="ai-reporter" className="flex flex-col gap-3 border-t border-border pt-6">
       <AIStatusCard healthState={healthState} />
 
       {healthState === 'unavailable' && (
@@ -174,7 +174,7 @@ export function AIReporter() {
         onCopy={reportState.copy}
         onDownload={reportState.download}
       />
-    </div>
+    </section>
   );
 }
 

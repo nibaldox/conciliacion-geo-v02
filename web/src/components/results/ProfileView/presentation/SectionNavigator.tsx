@@ -125,18 +125,13 @@ function CompactButton({
       data-direction={direction}
       data-testid={`nav-${direction}`}
       className={[
-        'inline-flex items-center justify-center w-7 h-7 rounded-md text-sm font-semibold',
-        'transition-all duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
+        'inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-sm text-text-secondary',
+        'transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         disabled
           ? 'opacity-30 cursor-not-allowed'
-          : 'cursor-pointer hover:opacity-80 hover:scale-105',
+          : 'cursor-pointer hover:bg-surface-muted hover:text-text-primary',
       ].join(' ')}
-      style={{
-        color: 'var(--color-text-primary)',
-        backgroundColor: 'var(--color-surface-muted)',
-        border: '1px solid var(--color-border)',
-      }}
     >
       {direction === 'prev' ? '‹' : '›'}
     </button>
@@ -183,7 +178,7 @@ function OverlayButton({
         'absolute top-1/2 -translate-y-1/2 z-10',
         'flex items-center gap-2',
         isLeft ? 'left-2' : 'right-2',
-        'px-3 py-2 rounded-full shadow-md',
+        'px-3 py-2 rounded-full shadow-lg',
         'transition-all duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
         disabled

@@ -17,13 +17,13 @@ test('summary plan shows topography and processed profiles with canonical compli
   await page.getByRole('button', { name: /Probar con datos/i }).click();
   await page.getByRole('button', { name: 'Salir del demo' }).waitFor();
   await page.locator('canvas').waitFor();
-  await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await page.getByRole('tab', { name: 'Dashboard', exact: true }).click();
   const plan = page.locator('[data-slot="compliance-plan-view"]');
   await expect(plan.locator('image')).toHaveAttribute('href', /^data:image\/png;base64,/);
   await expect(plan.locator('polyline')).toHaveCount(5);
-  await expect(plan.locator('[data-section-name="DEMO-S01"]')).toHaveAttribute('data-status', 'cumple');
-  await expect(plan.locator('[data-section-name="DEMO-S02"]')).toHaveAttribute('data-status', 'no_cumple');
-  await expect(plan.locator('[data-section-name="DEMO-S03"]')).toHaveAttribute('data-status', 'unknown');
+  await expect(plan.locator('[data-section-name="DEMO-S01"]')).toHaveAttribute('data-status', 'CUMPLE');
+  await expect(plan.locator('[data-section-name="DEMO-S02"]')).toHaveAttribute('data-status', 'NO_CUMPLE');
+  await expect(plan.locator('[data-section-name="DEMO-S03"]')).toHaveAttribute('data-status', 'NO_CUMPLE');
   const linePoints = await plan.locator('[data-section-name="DEMO-S01"] polyline').getAttribute('points');
   const points = linePoints!.split(' ').map((point) => point.split(',').map(Number));
   expect(points[0]![0]).toBeCloseTo(points.at(-1)![0]!);
@@ -52,7 +52,7 @@ test('clustered profiles open at the evaluated area and keep their labels separa
   await page.getByRole('button', { name: /Probar con datos/i }).click();
   await page.getByRole('button', { name: 'Salir del demo' }).waitFor();
   await page.locator('canvas').waitFor();
-  await page.getByRole('button', { name: 'Dashboard', exact: true }).click();
+  await page.getByRole('tab', { name: 'Dashboard', exact: true }).click();
   const plan = page.locator('[data-slot="compliance-plan-view"]');
   await expect(plan.locator('polyline')).toHaveCount(32);
   const focused = (await plan.getAttribute('data-extent'))!.split(',').map(Number);
@@ -80,7 +80,7 @@ test('profile plan thumbnail follows the active profile without changing its sel
   await page.getByRole('button', { name: /Probar con datos/i }).click();
   await page.getByRole('button', { name: 'Salir del demo' }).waitFor();
   await page.locator('canvas').waitFor();
-  await page.getByRole('button', { name: 'Perfiles', exact: true }).click();
+  await page.getByRole('tab', { name: 'Perfiles', exact: true }).click();
   await page.locator('button').filter({ has: page.locator('.js-plotly-plot') }).first().click();
   const thumbnail = page.locator('[data-slot="profile-plan-thumbnail"]');
   await expect(thumbnail.locator('image')).toHaveAttribute('href', /^data:image\/png;base64,/);

@@ -198,7 +198,7 @@ test('profile shows measured h-from-toe samples at equal elevation and keeps B2 
   await page.setViewportSize({ width: 1600, height: 1000 });
   const intercepted = await mockApi(page);
   await seedNonDemoSession(page);
-  await page.getByRole('button', { name: 'Perfiles', exact: true }).click();
+  await page.getByRole('tab', { name: 'Perfiles', exact: true }).click();
   await page.getByRole('button', { name: 'Detalle', exact: true }).click();
   await page.locator('#profile-section-select').selectOption('sec-1');
 

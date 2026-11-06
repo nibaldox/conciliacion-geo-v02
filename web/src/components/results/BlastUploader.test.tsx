@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import i18n from '../../i18n';
 import { BlastUploader } from './BlastUploader';
+import { DEMO_MESH_IDS, useSession } from '../../stores/session';
 import type { BlastUploadResponse } from '../../api/types';
 
 // ─── Mocks ─────────────────────────────────────────────────
@@ -82,6 +83,9 @@ function renderUploader(props: { onUploaded?: (r: BlastUploadResponse) => void }
 // input becomes enabled. Mirrors the operator's flow: pick one option in
 // every dropdown, fill both source columns, then tick confirmation.
 function fillCompleteContract() {
+  fireEvent.change(screen.getByTestId('collar-elevation-source'), {
+    target: { value: 'bench_height' },
+  });
   fireEvent.change(screen.getByTestId('incl-source-column'), {
     target: { value: 'Inclinacion_real' },
   });
@@ -115,6 +119,113 @@ describe('<BlastUploader />', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getSessionId).mockReturnValue('sess-001');
+    useSession.setState({ demoMode: false, demoData: null, designMeshId: null, topoMeshId: null });
+  });
+
+  it('explains that blast data is absent and prevents upload for virtual demo meshes', () => {
+    useSession.setState({
+      demoMode: true,
+      designMeshId: DEMO_MESH_IDS.design,
+      topoMeshId: DEMO_MESH_IDS.topo,
+    });
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    expect(screen.getByTestId('blast-demo-notice')).toHaveTextContent(
+      'La demo usa mallas virtuales y no incluye datos de tronadura',
+    );
+    expect(screen.queryByTestId('blast-file-input')).not.toBeInTheDocument();
+    expect(vi.mocked(useBlastHolesBySession)).toHaveBeenCalledWith(null);
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('offers detected CSV headers in native inclination and azimuth dropdowns', async () => {
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), {
+      target: { files: [new File(['"ID","Inclinacion real","Azimuth, real"\n1,45,90'], 'pozos.csv', { type: 'text/csv' })] },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('incl-source-column').tagName).toBe('SELECT');
+      expect(screen.getByTestId('az-source-column').tagName).toBe('SELECT');
+      expect(screen.getByTestId('incl-source-column').querySelector('option[value="Inclinacion real"]')).not.toBeNull();
+      expect(screen.getByTestId('az-source-column').querySelector('option[value="Azimuth, real"]')).not.toBeNull();
+    });
+  });
+
+  it('reads a bounded Windows-1252 header with a BOM and preserves selected columns missing from a replacement file', async () => {
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    const cp1252Header = new Uint8Array([0xef, 0xbb, 0xbf, ...Array.from('ID,Inclinación,Azimuth_real', (char) => char.charCodeAt(0) > 255 ? 0xed : char.charCodeAt(0))]);
+    const firstFile = new File([cp1252Header], 'pozos.csv', { type: 'text/csv' });
+    const sliceSpy = vi.spyOn(firstFile, 'slice');
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [firstFile] } });
+
+    await waitFor(() => expect(screen.getByTestId('incl-source-column').querySelector('option[value="Inclinación"]')).not.toBeNull());
+    expect(sliceSpy).toHaveBeenCalledWith(0, 64 * 1024);
+    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinación' } });
+    fireEvent.change(screen.getByTestId('az-source-column'), { target: { value: 'Azimuth_real' } });
+    fillCompleteContract();
+    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinación' } });
+    fireEvent.change(screen.getByTestId('az-source-column'), { target: { value: 'Azimuth_real' } });
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Otra_inclinacion,Otro_azimuth\n1,2'], 'otro.csv', { type: 'text/csv' })] } });
+
+    await waitFor(() => {
+      expect((screen.getByTestId('incl-source-column') as HTMLSelectElement).value).toBe('Inclinación');
+      expect((screen.getByTestId('az-source-column') as HTMLSelectElement).value).toBe('Azimuth_real');
+      expect(screen.getByText(/«Inclinación» no está en el encabezado/i)).toBeInTheDocument();
+      expect(screen.getByText(/«Azimuth_real» no está en el encabezado/i)).toBeInTheDocument();
+      expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
+    });
+    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Otra_inclinacion' } });
+    fireEvent.change(screen.getByTestId('az-source-column'), { target: { value: 'Otro_azimuth' } });
+    expect(screen.queryByText(/no está en el encabezado/i)).toBeNull();
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
+  });
+
+  it('blocks the incompatible vertical inclination and negative-downward sign combination', () => {
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
+    fillCompleteContract();
+    fireEvent.change(screen.getByTestId('incl-sign'), { target: { value: 'NEGATIVE_IS_DOWNWARD_DIP' } });
+    expect(screen.getByText(/no es compatible/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
+  });
+
+  it('shows event warning messages returned with a successful upload', () => {
+    mockUpload({ isSuccess: true, data: { ...uploadResponse, event_warnings: [{ warning_code: 'INCLINATION_ALL_ZERO', message: 'La columna de inclinación declarada contiene cero en todas las filas. Verifique el dato y la convención confirmada; no se asumió una orientación.' }] } });
+    mockHoles();
+    renderUploader();
+    expect(screen.getByTestId('event-warnings')).toHaveTextContent('1');
+    expect(screen.getByTestId('event-warning-messages')).toHaveTextContent('La columna de inclinación declarada contiene cero en todas las filas.');
+  });
+
+  it('blocks mixed sessions and skips the session-scoped holes query when either mesh is virtual', () => {
+    useSession.setState({ demoMode: false, designMeshId: 'real-design', topoMeshId: DEMO_MESH_IDS.topo });
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    expect(screen.getByTestId('blast-demo-notice')).toBeInTheDocument();
+    expect(vi.mocked(useBlastHolesBySession)).toHaveBeenCalledWith(null);
+    expect(screen.queryByTestId('blast-file-input')).not.toBeInTheDocument();
+  });
+
+  it('keeps blast upload available when demoMode is sticky but active meshes are real', () => {
+    useSession.setState({ demoMode: true, designMeshId: 'real-design', topoMeshId: 'real-topo' });
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    expect(screen.queryByTestId('blast-demo-notice')).not.toBeInTheDocument();
+    expect(screen.getByTestId('blast-file-input')).toBeInTheDocument();
   });
 
   it('renders the file input when sessionId exists', () => {
@@ -124,11 +235,20 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('blast-file-input')).toBeInTheDocument();
   });
 
+  it('defaults to design-surface elevation and requires spatial reference confirmation', () => {
+    mockUpload();
+    mockHoles();
+    renderUploader();
+    expect((screen.getByTestId('collar-elevation-source') as HTMLSelectElement).value).toBe('design_surface');
+    expect(screen.getByTestId('spatial-reference-confirmed')).not.toBeChecked();
+    expect(screen.queryByTestId('bench-height')).not.toBeInTheDocument();
+  });
+
   it('selects the CSV before geometry confirmation and opens its configuration', () => {
     mockUpload();
     mockHoles();
     renderUploader();
-    const file = new File(['x,y'], 'antes.csv', { type: 'text/csv' });
+    const file = new File(['Inclinacion_real,Azimuth_real'], 'antes.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
     expect(screen.getByTestId('geometry-contract-form')).toHaveAttribute('open');
     expect(screen.getByText(/antes.csv/)).toBeInTheDocument();
@@ -143,7 +263,7 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
-    const file = new File(['x,y'], 'pozos.csv', { type: 'text/csv' });
+    const file = new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
     fillCompleteContract();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
@@ -161,12 +281,62 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('upload-error')).toHaveTextContent('Error al cargar el archivo:');
   });
 
+  it('shows transfer percentage, then an unquantified geometry-processing phase', async () => {
+    let resolveUpload!: (response: BlastUploadResponse) => void;
+    mockMutateAsync.mockImplementation(() => new Promise<BlastUploadResponse>((resolve) => { resolveUpload = resolve; }));
+    mockUpload({ mutateAsync: mockMutateAsync, isPending: false });
+    mockHoles();
+    renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
+    fillCompleteContract();
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    fireEvent.click(screen.getByTestId('blast-upload-submit'));
+
+    const { onUploadProgress } = mockMutateAsync.mock.calls[0][0];
+    expect(screen.getByTestId('blast-upload-progress')).toHaveTextContent('Enviando archivo');
+    act(() => onUploadProgress(62));
+    expect(screen.getByRole('progressbar', { name: 'Progreso de transferencia del archivo' })).toHaveAttribute('value', '62');
+    act(() => onUploadProgress(100));
+    expect(screen.getByTestId('blast-upload-progress')).toHaveTextContent('Archivo enviado. Analizando pozos y geometría');
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+
+    await act(async () => { resolveUpload(uploadResponse); });
+    await waitFor(() => expect(screen.queryByTestId('blast-upload-progress')).not.toBeInTheDocument());
+  });
+
   it('shows summary with n_holes after successful upload', () => {
     mockUpload({ isSuccess: true, data: uploadResponse });
     mockHoles();
     renderUploader();
     expect(screen.getByTestId('blast-upload-summary')).toBeInTheDocument();
     expect(screen.getByText('42 pozos cargados, 3 filas omitidas')).toBeInTheDocument();
+  });
+
+  it('shows design-surface sampling coverage and all sample outcome counts', () => {
+    mockUpload({
+      isSuccess: true,
+      data: {
+        ...uploadResponse,
+        design_surface: {
+          mode: 'sample_design',
+          mesh_id: 'design-1',
+          mesh_sha256: 'abc',
+          spatial_reference_confirmed: true,
+          unit: 'm',
+          method: 'vertical_triangle_intersection',
+          rows: 42,
+          coverage: 0.75,
+          counts: { sampled: 32, outside: 4, ambiguous: 3, invalid: 3 },
+        },
+      },
+    });
+    mockHoles();
+    renderUploader();
+    expect(screen.getByTestId('design-surface-sampling-summary')).toHaveTextContent('Cota muestreada en 75.0% de 42 pozos.');
+    expect(screen.getByTestId('design-surface-sampled')).toHaveTextContent('32');
+    expect(screen.getByTestId('design-surface-outside')).toHaveTextContent('4');
+    expect(screen.getByTestId('design-surface-ambiguous')).toHaveTextContent('3');
+    expect(screen.getByTestId('design-surface-invalid')).toHaveTextContent('3');
   });
 
   it('shows persisted hole count after the GET request resolves', () => {
@@ -214,7 +384,7 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
-    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     // Fields complete but checkbox unticked → still disabled.
     expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
@@ -226,7 +396,7 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
-    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
@@ -242,7 +412,7 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
-    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-sign'), {
       target: { value: 'SOURCE_DEFINED' },
@@ -265,7 +435,7 @@ describe('<BlastUploader />', () => {
     mockUpload();
     mockHoles();
     renderUploader();
-    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'RADIANS' } });
     // After editing the unit, the confirmation auto-clears but NO
@@ -302,6 +472,7 @@ describe('<BlastUploader />', () => {
       blocking_errors: [
         { error_code: 'NO_ACCEPTED_ROWS', message: 'Ninguna fila pasó la validación.' },
       ],
+      event_warnings: [{ warning_code: 'INCLINATION_ALL_ZERO', message: 'La columna de inclinación declarada contiene cero en todas las filas. Verifique la convención confirmada.' }],
     };
     const axiosLikeError = {
       response: { data: structuredBody, status: 422 },
@@ -312,6 +483,7 @@ describe('<BlastUploader />', () => {
     renderUploader();
     expect(screen.getByTestId('rejected-rows')).toHaveTextContent('INVALID_X');
     expect(screen.getByTestId('blocking-errors')).toHaveTextContent('NO_ACCEPTED_ROWS');
+    expect(screen.getByTestId('event-warning-messages')).toHaveTextContent('La columna de inclinación declarada contiene cero en todas las filas.');
   });
 
   // ── Hook FormData assertion ──
@@ -322,7 +494,7 @@ describe('<BlastUploader />', () => {
     } as Partial<ReturnType<typeof useUploadBlastCsv>>);
     mockHoles();
     renderUploader();
-    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['x,y'], 'pozos.csv', { type: 'text/csv' })] } });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
     fillCompleteContract();
     // Set differing units to prove they are transmitted independently.
     fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'DEGREES' } });
@@ -331,7 +503,7 @@ describe('<BlastUploader />', () => {
     fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinacion_real' } });
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
 
-    const file = new File(['x,y'], 'pozos.csv', { type: 'text/csv' });
+    const file = new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     fireEvent.click(screen.getByTestId('blast-upload-submit'));
@@ -344,5 +516,24 @@ describe('<BlastUploader />', () => {
     expect(call.geometry.inclination_source_column).toBe('Inclinacion_real');
     expect(call.geometry.azimuth_source_column).toBe('Azimuth_real');
     expect(call.geometry.geometry_user_confirmed).toBe(true);
+  });
+
+  it('requires spatial reference confirmation and sends design-surface elevation source', async () => {
+    mockUpload({ mutateAsync: mockMutateAsync.mockResolvedValue(uploadResponse) } as Partial<ReturnType<typeof useUploadBlastCsv>>);
+    mockHoles();
+    renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
+    fillCompleteContract();
+    fireEvent.change(screen.getByTestId('collar-elevation-source'), { target: { value: 'design_surface' } });
+    expect(screen.getByTestId('design-surface-elevation')).toHaveTextContent('no se infiere la altura real del banco');
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('spatial-reference-confirmed'));
+    fireEvent.click(screen.getByTestId('geometry-confirmed'));
+    fireEvent.click(screen.getByTestId('blast-upload-submit'));
+    await waitFor(() => expect(mockMutateAsync).toHaveBeenCalledTimes(1));
+    const { geometry } = mockMutateAsync.mock.calls[0][0];
+    expect(geometry.bench_height_m).toBeUndefined();
+    expect(geometry.collar_elevation_source).toBe('design_surface');
+    expect(geometry.spatial_reference_confirmed).toBe(true);
   });
 });

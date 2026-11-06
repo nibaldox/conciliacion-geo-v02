@@ -73,6 +73,7 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
   // blast holes are drilled into). `buildTraces` receives the raw
   // holes array so it stays a pure, testable function.
   const topoMeshId = useSession((s) => s.topoMeshId);
+  const selectedBlastHoleRowId = useSession((s) => s.selectedBlastHoleRowId);
   const blastQuery = useBlastHoles(
     viewModel.section.id,
     topoMeshId,
@@ -131,8 +132,32 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
       actualBerm: t('profileView.chart.hover.actualBerm'),
       plannedBerm: t('profileView.chart.hover.plannedBerm'),
       unmatched: t('profileView.chart.hover.unmatched'),
-    }, horizontalLabels),
-    [viewModel, filterState, crossLink, isDark, blastHoles, horizontalLabels, t],
+    }, horizontalLabels, {
+      design: t('profileView.chart.trace.design'),
+      topography: t('profileView.chart.trace.topography'),
+      ground: t('profileView.chart.trace.ground'),
+      reconciledDesign: t('profileView.chart.trace.reconciledDesign'),
+      reconciledTopography: t('profileView.chart.trace.reconciledTopography'),
+      debt: t('profileView.chart.trace.debt'),
+      overexcavation: t('profileView.chart.trace.overexcavation'),
+      spill: t('profileView.chart.trace.spill'),
+      benches: t('profileView.chart.trace.benches'),
+      blastHoles: t('profileView.chart.trace.blastHoles'),
+      blastHoleIntersections: t('profileView.chart.trace.blastHoleIntersections'),
+      hole: (id) => t('profileView.chart.trace.hole', { id }),
+      burden: t('profileView.chart.trace.burden'),
+      spacing: t('profileView.chart.trace.spacing'),
+      profilePointKind: t('profileView.chart.trace.profilePointKind'),
+      projectedCollarKind: t('profileView.chart.trace.projectedCollarKind'),
+      intersectionKind: t('profileView.chart.trace.intersectionKind'),
+      statuses: {
+        CUMPLE: t('profileView.chart.trace.status.compliant'),
+        FUERA: t('profileView.chart.trace.status.outside'),
+        NO_CUMPLE: t('profileView.chart.trace.status.noncompliant'),
+        UNKNOWN: t('profileView.chart.trace.status.unknown'),
+      },
+    }, selectedBlastHoleRowId),
+    [viewModel, filterState, crossLink, isDark, blastHoles, horizontalLabels, selectedBlastHoleRowId, t],
   );
 
   // ── 2. Build the layout (pure, depends on viewModel + theme) ─
@@ -343,6 +368,8 @@ export function buildTraces(
   blastHoles?: readonly BlastHoleOnProfile[],
   hoverLabels: BenchHoverLabels = DEFAULT_BENCH_HOVER_LABELS,
   horizontalLabels: HorizontalDeviationChartLabels = DEFAULT_HORIZONTAL_DEVIATION_CHART_LABELS,
+  traceLabels: ProfileChartTraceLabels = DEFAULT_PROFILE_CHART_TRACE_LABELS,
+  selectedBlastHoleRowId: string | null = null,
 ): Data[] {
   const traces: Data[] = [];
 
@@ -351,29 +378,29 @@ export function buildTraces(
     const design = vm.lines.find((l) => l.kind === 'design');
     const topo = vm.lines.find((l) => l.kind === 'topo');
     if (design && design.points.length > 1 && topo && topo.points.length > 1) {
-      traces.push(...buildAreaFills(design, topo, isDark));
+      traces.push(...buildAreaFills(design, topo, isDark, traceLabels));
     }
   }
 
   // 2. Design polyline (always, if data exists)
   const design = vm.lines.find((l) => l.kind === 'design');
   if (design && design.points.length > 0) {
-    traces.push(buildPolyline(design, 'Diseño', designLineStyle()));
+    traces.push(buildPolyline(design, traceLabels.design, designLineStyle()));
   }
 
   // 3. Topo polyline (always, if data exists)
   const topo = vm.lines.find((l) => l.kind === 'topo');
   if (topo && topo.points.length > 0) {
-    traces.push(buildTopoPolyline(topo, vm.benches, hoverLabels));
+    traces.push(buildTopoPolyline(topo, vm.benches, hoverLabels, traceLabels));
     // Subtle "ground" fill under the topo line so the profile
     // doesn't look like a floating squiggle. Uses 'tozeroy' to
     // fill down to y=0 of the axis (the y range is set tight so
     // this looks like filling the area below the profile).
-    traces.push(buildGroundFill(topo, isDark));
+    traces.push(buildGroundFill(topo, isDark, traceLabels.ground));
   }
 
   if (filterState.showHorizontalDeviation && vm.horizontalDeviation) {
-    traces.push(...buildHorizontalDeviationTraces(vm, hoverLabels, horizontalLabels));
+    traces.push(...buildHorizontalDeviationTraces(vm, hoverLabels, horizontalLabels, traceLabels));
     traces.push(...buildHorizontalDeviationSampleTraces(vm, horizontalLabels));
   }
 
@@ -382,7 +409,7 @@ export function buildTraces(
     const rd = vm.lines.find((l) => l.kind === 'reconciled_design');
     if (rd && rd.points.length > 0) {
       traces.push(
-        buildPolyline(rd, 'Diseño (reconciliado)', {
+        buildPolyline(rd, traceLabels.reconciledDesign, {
           color: 'royalblue',
           width: 2,
           dash: 'dash',
@@ -395,23 +422,30 @@ export function buildTraces(
   if (filterState.showReconciledTopo) {
     const rt = vm.lines.find((l) => l.kind === 'reconciled_topo');
     if (rt && rt.points.length > 0) {
-      traces.push(buildPolyline(rt, 'Topografía (reconciliada)', reconciledTopoLineStyle()));
+      traces.push(buildPolyline(rt, traceLabels.reconciledTopography, reconciledTopoLineStyle()));
     }
   }
 
   // 5. Spill areas — filled rectangles per bench with spill data
   if (filterState.showSpillAreas) {
-    traces.push(...buildSpillAreaTraces(vm.benches));
+    traces.push(...buildSpillAreaTraces(vm.benches, traceLabels.spill));
   }
 
   // 6. Bench markers — split by status when showSemaphore, else one trace
-  traces.push(...buildBenchMarkers(vm.benches, filterState, crossLink, hoverLabels));
+  traces.push(...buildBenchMarkers(vm.benches, filterState, crossLink, hoverLabels, traceLabels));
 
   // 7. Blast-hole markers — projected pozos de tronadura.
   //    The caller passes these in from the `useBlastHoles` hook;
   //    undefined/empty is the no-data case and emits nothing.
   if (blastHoles && blastHoles.length > 0) {
-    traces.push(buildBlastHolesTrace(blastHoles));
+    const collars = blastHoles.filter((hole) => hole.profile_point_kind !== 'intersection');
+    const intersections = blastHoles.filter((hole) => hole.profile_point_kind === 'intersection');
+    if (collars.length > 0) {
+      traces.push(buildBlastHolesTrace(collars, traceLabels, selectedBlastHoleRowId, 'projected_collar'));
+    }
+    if (intersections.length > 0) {
+      traces.push(buildBlastHolesTrace(intersections, traceLabels, selectedBlastHoleRowId, 'intersection'));
+    }
   }
 
   return traces;
@@ -421,6 +455,7 @@ export function buildHorizontalDeviationTraces(
   vm: ProfileViewModel,
   hoverLabels: BenchHoverLabels = DEFAULT_BENCH_HOVER_LABELS,
   labels: HorizontalDeviationChartLabels = DEFAULT_HORIZONTAL_DEVIATION_CHART_LABELS,
+  traceLabels: ProfileChartTraceLabels = DEFAULT_PROFILE_CHART_TRACE_LABELS,
 ): Partial<Plotly.ScatterData>[] {
   const points = vm.horizontalDeviation?.points ?? [];
   const runs: { category: string; points: typeof points[number][] }[] = [];
@@ -447,7 +482,7 @@ export function buildHorizontalDeviationTraces(
     const baseHover = (index: number) => {
       const bench = benches[index];
       if (bench) return makeHoverTemplate(hoverLabels, bench.matched);
-      return '%{x:.1f} m, %{y:.1f} m<extra>Topografía</extra>';
+      return `%{x:.1f} m, %{y:.1f} m<extra>${traceLabels.topography}</extra>`;
     };
     const hovertemplate = run.points.map((point, index) => {
       const deviation = Number.isFinite(point.deviation)
@@ -543,7 +578,7 @@ export function buildHorizontalDeviationSampleAnnotations(
       arrowhead: 0,
       arrowwidth: 1,
       arrowcolor: getHorizontalDeviationColor(sample.category),
-      bgcolor: readThemeColor('--color-surface-raised', '#19232d'),
+      bgcolor: readThemeColor('--color-surface-raised', '#0e1217'),
       bordercolor: readThemeColor('--color-border', '#2d3b49'),
       borderwidth: 1,
       borderpad: 3,
@@ -648,6 +683,7 @@ function buildPolyline(
 function buildGroundFill(
   topo: ProfileLine,
   isDark: boolean,
+  name: string,
 ): Partial<Plotly.ScatterData> {
   // We use 'tozeroy' which fills down to the y-axis minimum. The
   // y-axis is already set tight to the data, so the fill visually
@@ -656,7 +692,7 @@ function buildGroundFill(
   return {
     type: 'scatter',
     mode: 'lines',
-    name: 'Terreno',
+    name,
     x: topo.points.map((p) => p.distance),
     y: topo.points.map((p) => p.elevation),
     fill: 'tozeroy',
@@ -671,6 +707,7 @@ function buildAreaFills(
   design: ProfileLine,
   topo: ProfileLine,
   isDark: boolean,
+  labels: ProfileChartTraceLabels,
 ): Partial<Plotly.ScatterData>[] {
   const xSet = new Set<number>([
     ...design.points.map((p) => p.distance),
@@ -713,7 +750,7 @@ function buildAreaFills(
     {
       type: 'scatter',
       mode: 'lines',
-      name: 'Deuda',
+      name: labels.debt,
       x: xAll,
       y: y_deuda,
       fill: 'tonexty',
@@ -734,7 +771,7 @@ function buildAreaFills(
     {
       type: 'scatter',
       mode: 'lines',
-      name: 'Sobrexcavación',
+      name: labels.overexcavation,
       x: xAll,
       y: y_sobrexcavacion,
       fill: 'tonexty',
@@ -748,6 +785,7 @@ function buildAreaFills(
 
 function buildSpillAreaTraces(
   benches: readonly Bench[],
+  name: string,
 ): Partial<Plotly.ScatterData>[] {
   const traces: Partial<Plotly.ScatterData>[] = [];
   for (const bench of benches) {
@@ -765,13 +803,13 @@ function buildSpillAreaTraces(
     traces.push({
       type: 'scatter',
       mode: 'lines',
-      name: 'Derrame',
+      name,
       x: [startD, endD, endD, startD],
       y: [startE, startE, toeEl, toeEl],
       fill: 'toself',
       fillcolor: 'rgba(255, 100, 100, 0.3)',
       line: { color: 'rgba(255, 100, 100, 0.6)', width: 1 },
-      hovertext: `Spill bench ${bench.benchNumber}`,
+      hovertext: `${name} ${bench.benchNumber}`,
       hoverinfo: 'skip',
       showlegend: false,
     });
@@ -792,23 +830,33 @@ function buildSpillAreaTraces(
  */
 function buildBlastHolesTrace(
   blastHoles: readonly BlastHoleOnProfile[],
+  labels: ProfileChartTraceLabels,
+  selectedBlastHoleRowId: string | null = null,
+  profilePointKind: 'projected_collar' | 'intersection' = 'projected_collar',
 ): Partial<Plotly.ScatterData> {
+  const selectedIndex = selectedBlastHoleRowId === null ? -1 : blastHoles.findIndex(
+    (hole) => hole.row_id === selectedBlastHoleRowId,
+  );
+  const selected = selectedIndex >= 0;
   return {
     type: 'scatter',
     mode: 'markers',
-    name: 'Pozos de tronadura',
-    meta: { profileViewRole: 'blast-hole' },
+    name: profilePointKind === 'intersection' ? labels.blastHoleIntersections : labels.blastHoles,
+    meta: { profileViewRole: 'blast-hole', profilePointKind },
     x: blastHoles.map((h) => h.distance),
     y: blastHoles.map((h) => h.elevation),
     marker: {
-      color: blastHoles.map((h) => (h.is_within_tolerance ? '#22c55e' : '#ef4444')),
-      size: 8,
+      color: blastHoles.map((h, index) => index === selectedIndex
+        ? '#fde047'
+        : h.is_within_tolerance ? '#22c55e' : '#ef4444'),
+      size: selected ? blastHoles.map((_, index) => index === selectedIndex ? 13 : 8) : 8,
       symbol: 'diamond',
+      ...(selected ? { line: { color: blastHoles.map((_, index) => index === selectedIndex ? '#7c2d12' : 'rgba(0,0,0,0)'), width: 2 } } : {}),
     },
-    text: blastHoles.map((h) => `Hole ${h.hole_id}`),
-    hovertemplate:
-      '<b>%{text}</b><br>burden=%{customdata[0]:.2f}m<br>spacing=%{customdata[1]:.2f}m<extra></extra>',
-    customdata: blastHoles.map((h) => [h.burden, h.spacing]),
+    text: blastHoles.map((h) => labels.hole(h.hole_id)),
+    hovertemplate: `<b>%{text}</b><br>${labels.profilePointKind}=%{customdata[2]}<br>${labels.burden}=%{customdata[0]:.2f}m<br>${labels.spacing}=%{customdata[1]:.2f}m<extra></extra>`,
+    customdata: blastHoles.map((h) => [h.burden, h.spacing,
+      profilePointKind === 'intersection' ? labels.intersectionKind : labels.projectedCollarKind]),
     showlegend: true,
   };
 }
@@ -835,6 +883,53 @@ export interface HorizontalDeviationChartLabels {
   readonly sampleUnmeasured: (height: string, status: string) => string;
   readonly status: (status: string) => string;
 }
+
+export interface ProfileChartTraceLabels {
+  readonly design: string;
+  readonly topography: string;
+  readonly ground: string;
+  readonly reconciledDesign: string;
+  readonly reconciledTopography: string;
+  readonly debt: string;
+  readonly overexcavation: string;
+  readonly spill: string;
+  readonly benches: string;
+  readonly blastHoles: string;
+  readonly blastHoleIntersections: string;
+  readonly hole: (id: string) => string;
+  readonly burden: string;
+  readonly spacing: string;
+  readonly profilePointKind: string;
+  readonly projectedCollarKind: string;
+  readonly intersectionKind: string;
+  readonly statuses: Readonly<Record<Bench['status'], string>>;
+}
+
+const DEFAULT_PROFILE_CHART_TRACE_LABELS: ProfileChartTraceLabels = {
+  design: 'Diseño',
+  topography: 'Topografía',
+  ground: 'Terreno',
+  reconciledDesign: 'Diseño (reconciliado)',
+  reconciledTopography: 'Topografía (reconciliada)',
+  debt: 'Deuda',
+  overexcavation: 'Sobreexcavación',
+  spill: 'Derrame',
+  benches: 'Bancos',
+  blastHoles: 'Collares de pozos proyectados',
+  blastHoleIntersections: 'Intersecciones pozo-sección',
+  hole: (id) => `Pozo ${id}`,
+  burden: 'Burden',
+  spacing: 'Espaciamiento',
+  profilePointKind: 'Tipo de punto',
+  projectedCollarKind: 'Collar proyectado',
+  intersectionKind: 'Intersección segmento-sección',
+  statuses: {
+    CUMPLE: 'Cumple',
+    FUERA: 'Fuera',
+    NO_CUMPLE: 'No cumple',
+    UNKNOWN: 'Sin datos',
+  },
+};
 
 const DEFAULT_BENCH_HOVER_LABELS: BenchHoverLabels = {
   elevation: 'Cota',
@@ -864,6 +959,7 @@ function buildBenchMarkers(
   filterState: FilterState,
   crossLink: UseCrossLinkStateApi,
   hoverLabels: BenchHoverLabels,
+  traceLabels: ProfileChartTraceLabels,
 ): Partial<Plotly.ScatterData>[] {
   if (benches.length === 0) return [];
 
@@ -873,6 +969,8 @@ function buildBenchMarkers(
     resolveCssVar(STATUS_BORDER_VAR[status], '#e5e7eb');
   const fillColor = (status: Bench['status']): string =>
     resolveCssVar(STATUS_BG_VAR[status], '#f3f4f6');
+  const labelStride = Math.max(1, Math.ceil(benches.length / 12));
+  const labeledBenches = new Set(benches.filter((_, index) => index % labelStride === 0));
 
   const makeTrace = (
     name: string,
@@ -880,7 +978,11 @@ function buildBenchMarkers(
   ): Partial<Plotly.ScatterData> => {
     const x = matched.map((b) => b.crestDistance);
     const y = matched.map((b) => b.crestElevation);
-    const text = matched.map((b) => `${STATUS_ICON[b.status]} ${b.benchNumber}`);
+    const text = matched.map((b) =>
+      labeledBenches.has(b) || b.benchNumber === crossLink.selected || b.benchNumber === crossLink.hovered
+        ? `${STATUS_ICON[b.status]} ${b.benchNumber}`
+        : '',
+    );
     const customdata = matched.map(buildBenchHoverCustomdata);
     // Highlight the currently-hovered or selected bench.
     const sizes = matched.map((b) => {
@@ -913,7 +1015,8 @@ function buildBenchMarkers(
         },
         symbol: 'circle',
       },
-      hovertemplate: matched.map((bench) => makeHoverTemplate(hoverLabels, bench.matched)),
+      hovertemplate: matched.map((bench) => makeHoverTemplate(hoverLabels, bench.matched)
+        .replace('%{text}', `${STATUS_ICON[bench.status]} %{customdata[0]}`)),
       showlegend: false,
     };
   };
@@ -927,21 +1030,12 @@ function buildBenchMarkers(
       groups.get(b.status)!.push(b);
     }
     return Array.from(groups.entries()).map(([status, list]) =>
-      makeTrace(statusName(status), list),
+      makeTrace(traceLabels.statuses[status], list),
     );
   }
 
   // Default: one trace, all benches with their natural colour.
-  return [makeTrace('Bancos', benches)];
-}
-
-function statusName(status: Bench['status']): string {
-  switch (status) {
-    case 'CUMPLE': return 'Cumple';
-    case 'FUERA': return 'Fuera';
-    case 'NO_CUMPLE': return 'No cumple';
-    case 'UNKNOWN': return 'Sin datos';
-  }
+  return [makeTrace(traceLabels.benches, benches)];
 }
 
 function makeHoverTemplate(labels: BenchHoverLabels, matched = true): string {
@@ -960,11 +1054,12 @@ function buildTopoPolyline(
   topo: ProfileLine,
   benches: readonly Bench[],
   hoverLabels: BenchHoverLabels,
+  traceLabels: ProfileChartTraceLabels,
 ): Partial<Plotly.ScatterData> {
   const pointBenches = topo.points.map((point) => findUniqueBenchAtDistance(point.distance, benches));
-  const coordinateHoverTemplate = '%{x:.1f} m, %{y:.1f} m<extra>Topografía</extra>';
+  const coordinateHoverTemplate = `%{x:.1f} m, %{y:.1f} m<extra>${traceLabels.topography}</extra>`;
   return {
-    ...buildPolyline(topo, 'Topografía', topoLineStyle()),
+    ...buildPolyline(topo, traceLabels.topography, topoLineStyle()),
     meta: { profileViewRole: 'bench-face' },
     customdata: pointBenches.map((bench) => bench ? buildBenchHoverCustomdata(bench) : []),
     text: pointBenches.map((bench) => bench ? `${STATUS_ICON[bench.status]} ${bench.benchNumber}` : ''),

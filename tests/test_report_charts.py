@@ -1,5 +1,6 @@
 """Tests for core.report_charts — donuts, plan view and section profiles."""
 import io
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import matplotlib
@@ -110,13 +111,78 @@ class TestParameterPct:
 
 
 class TestParameterDonuts:
+    def test_other_state_bucket_label_is_explicit_and_legible(self, monkeypatch):
+        from core import report_charts
+
+        observed = {}
+        render = report_charts._fig_to_png
+
+        def inspect_before_render(fig, dpi):
+            observed["texts"] = [text.get_text() for ax in fig.axes for text in ax.texts]
+            observed["labels"] = [
+                text for ax in fig.axes for text in ax.texts
+                if text.get_text().startswith("Otros estados")
+            ]
+            observed["centers"] = [
+                text for ax in fig.axes for text in ax.texts
+                if text.get_gid() == "donut-center"
+            ]
+            observed["colors"] = [
+                patch.get_facecolor() for ax in fig.axes for patch in ax.patches
+            ]
+            fig.canvas.draw()
+            renderer = fig.canvas.get_renderer()
+            observed["overlaps"] = []
+            observed["center_title_label_overlaps"] = []
+            for ax in fig.axes:
+                artists = [ax.title, *ax.texts]
+                boxes = [artist.get_window_extent(renderer) for artist in artists]
+                observed["overlaps"].extend(
+                    (left, right)
+                    for index, left in enumerate(boxes)
+                    for right in boxes[index + 1:]
+                    if left.overlaps(right)
+                )
+                center = next(text for text in ax.texts if text.get_gid() == "donut-center")
+                center_box = center.get_window_extent(renderer)
+                title_box = ax.title.get_window_extent(renderer)
+                labels = [text for text in ax.texts if text is not center]
+                observed["center_title_label_overlaps"].extend(
+                    (kind, label.get_text())
+                    for kind, box in (("title", title_box), ("label", None))
+                    for label in (labels if kind == "label" else [ax.title])
+                    if center_box.overlaps(
+                        label.get_window_extent(renderer) if box is None else box
+                    )
+                )
+            return render(fig, dpi)
+
+        monkeypatch.setattr(report_charts, "_fig_to_png", inspect_before_render)
+        png = parameter_donuts_png([{"label": "Ángulo", "cumple": 3, "no_cumple": 9}])
+
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        assert "Otros estados\n9" in observed["texts"]
+        assert "Cumple\n3" in observed["texts"]
+        assert not any("No cumple" in text for text in observed["texts"])
+        assert observed["labels"]
+        assert observed["labels"][0].get_fontsize() == 10
+        assert observed["labels"][0].get_fontweight() == "semibold"
+        assert len(observed["centers"]) == 1
+        assert observed["centers"][0].get_text() == "25.0%"
+        assert observed["overlaps"] == []
+        assert observed["center_title_label_overlaps"] == []
+        assert observed["colors"] == [
+            matplotlib.colors.to_rgba("#A9D6AE"),
+            matplotlib.colors.to_rgba("#F1A9A9"),
+        ]
+
     def test_returns_png_bytes(self):
         png = parameter_donuts_png(_sample_parameters())
         assert isinstance(png, bytes)
         assert png[:8] == b"\x89PNG\r\n\x1a\n"
         width, height = _open_size(png)
-        assert 1400 < width < 2000
-        assert 480 < height < 780
+        assert 1000 < width < 1300
+        assert 220 < height < 400
 
     def test_deterministic(self):
         assert parameter_donuts_png(_sample_parameters()) == parameter_donuts_png(_sample_parameters())
@@ -172,6 +238,29 @@ class TestPlanView:
 
     def test_no_geometry_returns_none(self):
         assert plan_view_png([{"name": "S-01", "worst_status": "CUMPLE"}]) is None
+
+    def test_filtered_out_sections_are_gray_dashed_and_listed_separately(self):
+        sections = [
+            {**_sample_sections()[0], "included": True},
+            {**_sample_sections()[1], "included": False, "worst_status": "UNKNOWN"},
+        ]
+        _fig, ax = _build_plan_view_figure(sections)
+
+        included = next(line for line in ax.lines if line.get_gid() == "plan-section")
+        excluded = next(line for line in ax.lines if line.get_gid() == "plan-section-excluded")
+        assert included.get_color() == STATUS_COLORS["CUMPLE"]
+        assert excluded.get_color() == "#9CA3AF"
+        assert excluded.get_linestyle() == "--"
+        assert any(text.get_text() == "Excluida por filtros (1)" for text in ax.get_legend().get_texts())
+        assert any(text.get_gid() == "plan-label-excluded" for text in ax.texts)
+
+    def test_unknown_sections_without_filter_marker_keep_unknown_color(self):
+        section = {**_sample_sections()[0], "worst_status": "UNKNOWN"}
+        _fig, ax = _build_plan_view_figure([section])
+
+        line = next(line for line in ax.lines if line.get_gid() == "plan-section")
+        assert line.get_color() == STATUS_COLORS["UNKNOWN"]
+        assert not any("Excluida por filtros" in text.get_text() for text in ax.get_legend().get_texts())
 
 
 class TestProfileTitle:
@@ -412,6 +501,31 @@ class TestPlanLabels:
 
 
 class TestRasterGuard:
+    def test_construction_failure_clears_registered_figure(self, monkeypatch):
+        from core import report_charts
+
+        created = []
+        make_figure = report_charts._new_figure
+        make_subplots = report_charts.Figure.subplots
+
+        def capture_figure(**kwargs):
+            fig = make_figure(**kwargs)
+            created.append(fig)
+            return fig
+
+        def fail_after_axes_created(fig, *args, **kwargs):
+            make_subplots(fig, *args, **kwargs)
+            raise RuntimeError("construction failed")
+
+        monkeypatch.setattr(report_charts, "_new_figure", capture_figure)
+        monkeypatch.setattr(report_charts.Figure, "subplots", fail_after_axes_created)
+        with pytest.raises(RuntimeError, match="construction failed"):
+            report_charts.plan_view_png(_sample_sections())
+
+        assert len(created) == 1
+        assert created[0].axes == []
+        assert created[0].canvas is None
+
     def test_huge_figure_is_rejected_before_allocating(self):
         from core.report_charts import _fig_to_png
 
@@ -419,8 +533,40 @@ class TestRasterGuard:
         ax.plot([0, 1], [0, 1])
         with pytest.raises(ValueError, match="too large"):
             _fig_to_png(fig, 150)
+        assert fig.axes == []
+        assert fig.canvas is None
+
+    def test_failed_save_clears_figure(self, monkeypatch):
+        from core.report_charts import _fig_to_png
+
+        fig, ax = plt.subplots(figsize=(4, 3))
+        ax.plot([0, 1], [0, 1])
+
+        def fail_save(*_args, **_kwargs):
+            raise RuntimeError("save failed")
+
+        monkeypatch.setattr(fig, "savefig", fail_save)
+        with pytest.raises(RuntimeError, match="save failed"):
+            _fig_to_png(fig, 100)
+        assert fig.axes == []
+        assert fig.canvas is None
 
     def test_profile_raster_stays_bounded(self):
         png = section_profile_png(_sample_profile(), size="full", dpi=130)
         width, height = _open_size(png)
         assert width * height < 4_000_000
+
+
+def test_concurrent_public_renders_are_isolated_and_deterministic():
+    renderers = (
+        lambda: parameter_donuts_png(_sample_parameters()),
+        lambda: plan_view_png(_sample_sections()),
+        lambda: section_profile_png(_sample_profile(), size="full"),
+    )
+    expected = [renderer() for renderer in renderers]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        rendered = list(executor.map(lambda i: renderers[i % len(renderers)](), range(12)))
+
+    assert rendered == [expected[i % len(expected)] for i in range(12)]
+    assert all(png.startswith(b"\x89PNG\r\n\x1a\n") for png in rendered)
+    assert plt.get_fignums() == []

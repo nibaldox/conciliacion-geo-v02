@@ -265,6 +265,18 @@ npx playwright test
 
 La cobertura del dominio `src/components/results/ProfileView/domain/**` se exige al **100%** en sentencias, ramas, funciones y líneas. Playwright tiene configuración de servidores en `web/playwright.config.ts` y puede reutilizar servidores existentes; para QA usar datos y sesiones aislados. La configuración Edge `playwright.horizontal.config.ts` presupone un frontend en 5174 y no lo inicia.
 
+El 2 de noviembre de 2026, la suite frontend pasó **759 pruebas en 84 archivos** con Node 22.23.1 y cobertura del dominio de perfiles del 100 %. TypeScript, ESLint y build con PWA también aprobaron. La comprobación visual de la tanda UI se hizo en escritorio con datos demo; quedan pendientes móvil, datos reales y Playwright.
+
+Tras las tandas de lectura de perfiles y dashboard se agregaron pruebas. La última suite completa terminó con **763 aprobadas y 4 fallos** en 84 archivos: los fallos corresponden a los dos archivos fullstack de tronadura, con timeouts de subprocesos o status null en un entorno restringido. Excluyéndolos pasaron **762 pruebas en 82 archivos**, con cobertura del dominio de perfiles del 100 %. También aprobaron TypeScript, ESLint dirigido y build con PWA.
+
+La investigación posterior reprodujo una restricción de loopback del entorno de pruebas anterior. Tras las últimas correcciones, la suite completa pasó en una sesión con loopback permitido: **772 pruebas en 84 archivos**, con cobertura del dominio de perfiles del 100 %.
+
+En la continuación de interfaz, una ejecución posterior tuvo 778 pruebas aprobadas y dos timeouts en tronadura. El reintento con `--maxWorkers=2` pasó **780 pruebas en 85 archivos**, con cobertura del dominio de perfiles del 100 %.
+
+El 3 de noviembre se añadieron pruebas de selección y filtros de perfil; la suite completa no se repitió tras ese cambio. Pasaron 72 pruebas focalizadas de perfil y mapeo y, después de añadir un caso de transición, el archivo de selección pasó 16/16; también aprobaron TypeScript, ESLint dirigido y build PWA.
+
+Tras el rediseño inicial de informes, se ejecutaron **167 pruebas** de datos, gráficos, Word, PDF y exportación, usando pypdf del runtime incluido para verificar extracción del PDF. La revisión visual cubrió un PDF sintético; la paginación de Word y la validación con datos reales siguen pendientes.
+
 ### Verificación local — 24 de octubre de 2026
 
 | Validación | Resultado ejecutado | Alcance |

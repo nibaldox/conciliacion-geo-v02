@@ -49,32 +49,35 @@ export function BenchFilter({ available, selected, onChange }: { available: read
   const labels = selected.map((number) => available.find((option) => option.number === number)).filter((option): option is DesignBenchOption => option != null).map(optionLabel);
   const summary = selected.length === 0 ? t('dashboard.bench_filter.all_benches') : labels.length <= 2 ? labels.join(', ') : t('dashboard.bench_filter.selected', { count: labels.length });
   return (
-    <section data-slot="dashboard-bench-filter" className="relative z-10 rounded-xl border border-border bg-surface-raised p-4 space-y-2">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-full sm:w-72">
-          <p id="bench-filter-label" className="mb-1 text-xs font-semibold text-text-secondary">{t('dashboard.bench_filter.label')}</p>
-          <details ref={root} className="relative" onToggle={(event) => { if (!event.currentTarget.open) setSearch(''); }}>
-            <summary aria-labelledby="bench-filter-label bench-filter-value" className="flex h-9 cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-border bg-surface-sunken px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-              <span id="bench-filter-value" className="truncate">{summary}</span><span aria-hidden="true" className="text-xs text-text-muted">▾</span>
-            </summary>
-            <div className="absolute left-0 top-full z-20 mt-1 w-full rounded-lg border border-border bg-surface-raised p-2 shadow-lg space-y-2">
-              <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('dashboard.bench_filter.search')} aria-label={t('dashboard.bench_filter.search')} className={PROJECT_INPUT_CLASS} />
-              <Button size="sm" variant="secondary" fullWidth onClick={() => onChange([])}>{t('dashboard.bench_filter.all_benches')}</Button>
-              <div className="max-h-48 overflow-y-auto">
-                {visible.map((option) => (
-                  <label key={option.number} title={t('dashboard.bench_filter.design_elevation_help')} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface-muted">
-                    <input type="checkbox" checked={selected.includes(option.number)} onChange={() => onChange(selected.includes(option.number) ? selected.filter((value) => value !== option.number) : [...selected, option.number].sort((a, b) => a - b))} className="accent-accent" />
-                    {optionLabel(option)}
-                  </label>
-                ))}
-                {!visible.length && <p className="p-2 text-xs text-text-muted">{t('dashboard.bench_filter.no_options')}</p>}
-              </div>
-            </div>
-          </details>
+    <section data-slot="dashboard-bench-filter" className="relative z-10 flex items-center gap-1.5">
+      <p id="bench-filter-label" className="text-xs text-text-muted">{t('dashboard.bench_filter.label')}</p>
+      <details ref={root} className="relative" onToggle={(event) => { if (!event.currentTarget.open) setSearch(''); }}>
+        <summary aria-labelledby="bench-filter-label bench-filter-value" className="flex h-8 w-44 cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-border bg-surface-sunken px-2.5 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+          <span id="bench-filter-value" className="truncate">{summary}</span><span aria-hidden="true" className="text-text-muted">▾</span>
+        </summary>
+        <div className="absolute left-0 top-full z-20 mt-1 w-64 space-y-2 rounded-lg border border-border bg-surface-raised p-2 shadow-lg">
+          <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('dashboard.bench_filter.search')} aria-label={t('dashboard.bench_filter.search')} className={PROJECT_INPUT_CLASS} />
+          <Button size="sm" variant="secondary" fullWidth onClick={() => onChange([])}>{t('dashboard.bench_filter.all_benches')}</Button>
+          <div className="max-h-48 overflow-y-auto">
+            {visible.map((option) => (
+              <label key={option.number} title={t('dashboard.bench_filter.design_elevation_help')} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface-muted">
+                <input type="checkbox" checked={selected.includes(option.number)} onChange={() => onChange(selected.includes(option.number) ? selected.filter((value) => value !== option.number) : [...selected, option.number].sort((a, b) => a - b))} className="accent-accent" />
+                {optionLabel(option)}
+              </label>
+            ))}
+            {!visible.length && <p className="p-2 text-xs text-text-muted">{t('dashboard.bench_filter.no_options')}</p>}
+          </div>
+          <p className="px-1 text-xs text-text-muted">{t('dashboard.bench_filter.help')}</p>
         </div>
-        <Button size="sm" variant="secondary" disabled={!selected.length} onClick={() => onChange([])}>{t('dashboard.bench_filter.reset')}</Button>
-      </div>
-      <p className="text-xs text-text-muted">{t('dashboard.bench_filter.help')}</p>
+      </details>
+      <button
+        type="button"
+        disabled={!selected.length}
+        onClick={() => onChange([])}
+        className="text-xs text-text-muted underline-offset-2 hover:text-text-primary hover:underline disabled:invisible"
+      >
+        {t('dashboard.bench_filter.reset')}
+      </button>
     </section>
   );
 }

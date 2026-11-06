@@ -29,10 +29,10 @@ def _get_default_settings() -> dict:
         },
         "tolerances": {
             "bench_height": {
-                "neg": DEFAULT_TOLERANCES.bench_height.get("neg", 1.0)
+                "neg": DEFAULT_TOLERANCES.bench_height.get("neg", 2.0)
                 if isinstance(DEFAULT_TOLERANCES.bench_height, dict)
                 else DEFAULT_TOLERANCES.bench_height["neg"],
-                "pos": DEFAULT_TOLERANCES.bench_height.get("pos", 1.5)
+                "pos": DEFAULT_TOLERANCES.bench_height.get("pos", 2.0)
                 if isinstance(DEFAULT_TOLERANCES.bench_height, dict)
                 else DEFAULT_TOLERANCES.bench_height["pos"],
             },
@@ -45,7 +45,7 @@ def _get_default_settings() -> dict:
                 else DEFAULT_TOLERANCES.face_angle["pos"],
             },
             "berm_width": {
-                "min": DEFAULT_TOLERANCES.berm_width.get("min", 6.0)
+                "min": DEFAULT_TOLERANCES.berm_width.get("min", 7.0)
                 if isinstance(DEFAULT_TOLERANCES.berm_width, dict)
                 else DEFAULT_TOLERANCES.berm_width["min"],
             },

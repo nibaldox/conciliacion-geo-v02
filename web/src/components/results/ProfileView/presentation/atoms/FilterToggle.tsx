@@ -113,7 +113,7 @@ export function FilterToggle({
         // the same baseline in the FilterBar. `box-border` (the
         // Tailwind default) means the 1px border is INSIDE the
         // OFF (border: surface) and ON (border: accent).
-        'group inline-flex items-center justify-center gap-2.5 h-8 px-2.5 rounded-md text-xs font-semibold',
+        'group inline-flex items-center justify-center gap-2.5 h-7 px-2 rounded-md text-xs font-medium',
         'transition-colors duration-150 select-none whitespace-nowrap',
         'border',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
@@ -131,7 +131,7 @@ export function FilterToggle({
           : 'var(--color-surface-raised)',
         borderColor: checked
           ? ACCENT_VAR[accent]
-          : 'var(--color-border-strong)',
+          : 'var(--color-border)',
       }}
     >
       {/* The track — secondary cue.

@@ -4,6 +4,19 @@ import { useSession } from '../../stores/session';
 import { setDemoProcessStatus, setDemoSectionsCache, setDemoComparisonsCache } from '../../api/hooks';
 import { Button } from '../ui/Button';
 
+export function useStartDemo() {
+  const loadDemo = useSession((s) => s.loadDemo);
+  const qc = useQueryClient();
+  return async () => {
+    await loadDemo();
+    const { demoData } = useSession.getState();
+    if (!demoData) return;
+    setDemoProcessStatus(qc, demoData.summary);
+    setDemoSectionsCache(qc, demoData);
+    setDemoComparisonsCache(qc, demoData);
+  };
+}
+
 /**
  * CTA shown in the mesh-upload empty state. Triggers demo mode:
  * loads the precomputed payload and jumps the user straight to the
@@ -12,20 +25,10 @@ import { Button } from '../ui/Button';
 export function TryDemoButton({ compact = false }: { compact?: boolean }) {
   const demoMode = useSession((s) => s.demoMode);
   const demoLoading = useSession((s) => s.demoLoading);
-  const loadDemo = useSession((s) => s.loadDemo);
-  const qc = useQueryClient();
+  const handleClick = useStartDemo();
   const { t } = useTranslation();
 
   if (demoMode) return null;  // banner is enough — no need for the button
-
-  const handleClick = async () => {
-    await loadDemo();
-    const { demoData } = useSession.getState();
-    if (!demoData) return;
-    setDemoProcessStatus(qc, demoData.summary);
-    setDemoSectionsCache(qc, demoData);
-    setDemoComparisonsCache(qc, demoData);
-  };
 
   if (compact) {
     return (

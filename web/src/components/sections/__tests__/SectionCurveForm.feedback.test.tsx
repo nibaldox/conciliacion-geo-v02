@@ -332,6 +332,33 @@ describe('SectionCurveForm continuous feedback (T10a)', () => {
   });
 });
 
+describe('SectionCurveForm action row symmetry', () => {
+  it('keeps generate and reset buttons equal in width and height inside a two-column grid', () => {
+    mocks.breaklines.current = buildContourData();
+    mounted();
+
+    const generate = screen.getByRole('button', { name: 'Generar perfiles' });
+    const reset = screen.getByRole('button', { name: 'RESTABLECER SELECCIÓN' });
+    const row = generate.parentElement;
+
+    expect(row).not.toBeNull();
+    expect(row).toBe(reset.parentElement);
+    expect(row?.className).toContain('grid');
+    expect(row?.className).toContain('grid-cols-2');
+    expect(row?.className?.split(/\s+/)).not.toContain('flex-wrap');
+
+    for (const button of [generate, reset]) {
+      const classes = button.className.split(/\s+/);
+      expect(classes).toContain('w-full');
+      expect(classes).toContain('min-h-8');
+      expect(classes).toContain('h-full');
+      expect(classes).toContain('text-center');
+      expect(classes).not.toContain('flex-1');
+      expect(classes).not.toContain('shrink-0');
+    }
+  });
+});
+
 describe('SectionCurveForm generation preconditions (T10b)', () => {
   it('keeps generation disabled with hidden summaries when only the selection context no longer matches the snapshot', () => {
     mocks.breaklines.current = buildContourData();

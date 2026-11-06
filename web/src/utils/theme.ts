@@ -10,7 +10,7 @@ export function applyTheme(isDark: boolean): void {
   root.classList.toggle('light', !isDark);
   root.style.colorScheme = isDark ? 'dark' : 'light';
   document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', isDark ? 'dark' : 'light');
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', readThemeColor('--color-surface', root.style.colorScheme === 'dark' ? '#111820' : '#f1f5f9'));
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', readThemeColor('--color-surface', root.style.colorScheme === 'dark' ? '#07090c' : '#eceef1'));
 }
 
 export function resolveThemeVariables(value: unknown): unknown {

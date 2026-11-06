@@ -80,8 +80,8 @@
       "sector_Z": 0,
       "section_S01_bench_2": 1
     },
-    "profiles": {"S-01": "CUMPLE", "S-02": "FUERA", "S-03": "NO_CUMPLE", "S-04": "NO_CUMPLE"},
-    "profile_counts": {"CUMPLE": 1, "FUERA": 1, "NO_CUMPLE": 2},
+    "profiles": {"S-01": "CUMPLE", "S-02": "CUMPLE", "S-03": "NO_CUMPLE", "S-04": "NO_CUMPLE"},
+    "profile_counts": {"CUMPLE": 2, "FUERA": 0, "NO_CUMPLE": 2},
     "profile_scores": {"S-01": 100.0, "S-02": 70.0, "S-03": 40.0},
     "global_weighted_score": 70.0,
     "parameters": [
@@ -89,7 +89,7 @@
       {"parameter": "angle", "cumple": 4, "no_cumple": 1, "pct_cumple": 80.0, "mean_real": 74.0},
       {"parameter": "berm", "cumple": 3, "no_cumple": 2, "pct_cumple": 60.0, "mean_real": 6.7}
     ],
-    "bench_labels": ["CUMPLE", "CUMPLE", "FUERA DE TOLERANCIA", "NO CUMPLE", "NO CONSTRUIDO", "BANCO ADICIONAL"],
+    "bench_labels": ["CUMPLE", "CUMPLE", "CUMPLE", "NO CUMPLE", "NO CONSTRUIDO", "BANCO ADICIONAL"],
     "top_deviations_top3": [
       {"section": "S-02", "parameter": "height", "deviation": 2.0, "ratio": 1.3333},
       {"section": "S-01", "parameter": "height", "deviation": -1.0, "ratio": 1.0},
@@ -137,7 +137,7 @@
     }
   ],
   "fallback_expected": {
-    "profile_scores": {"F-01": 47.5, "F-02": 80.0, "F-03": 30.0},
-    "global_weighted_score": 52.5
+    "profile_scores": {"F-01": 47.5, "F-02": 80.0, "F-03": null},
+    "global_weighted_score": 63.75
   }
 }

@@ -15,6 +15,7 @@ import {
   computeAxisRanges,
   getBenchNumberFromPlotEvent,
   getBenchNumberFromPointerGlyph,
+  type ProfileChartTraceLabels,
 } from '../ProfileChart';
 import type { Data } from 'plotly.js';
 import type { ProfileViewModel } from '../../domain/types';
@@ -67,6 +68,26 @@ const stubCrossLink: UseCrossLinkStateApi = {
   clear: () => {},
 };
 
+const EN_TRACE_LABELS: ProfileChartTraceLabels = {
+  design: 'Design', topography: 'Topography', ground: 'Ground',
+  reconciledDesign: 'Reconciled design', reconciledTopography: 'Reconciled topography',
+  debt: 'Debt', overexcavation: 'Overexcavation', spill: 'Spill', benches: 'Benches',
+  blastHoles: 'Projected hole collars', blastHoleIntersections: 'Hole-section intersections',
+  hole: (id) => `Hole ${id}`, burden: 'Burden', spacing: 'Spacing',
+  profilePointKind: 'Point type', projectedCollarKind: 'Projected collar', intersectionKind: 'Segment-section intersection',
+  statuses: { CUMPLE: 'Compliant', FUERA: 'Outside tolerance', NO_CUMPLE: 'Noncompliant', UNKNOWN: 'Unknown' },
+};
+
+const ES_TRACE_LABELS: ProfileChartTraceLabels = {
+  design: 'Diseño', topography: 'Topografía', ground: 'Terreno',
+  reconciledDesign: 'Diseño (reconciliado)', reconciledTopography: 'Topografía (reconciliada)',
+  debt: 'Deuda', overexcavation: 'Sobreexcavación', spill: 'Derrame', benches: 'Bancos',
+  blastHoles: 'Collares de pozos proyectados', blastHoleIntersections: 'Intersecciones pozo-sección',
+  hole: (id) => `Pozo ${id}`, burden: 'Burden', spacing: 'Espaciamiento',
+  profilePointKind: 'Tipo de punto', projectedCollarKind: 'Collar proyectado', intersectionKind: 'Intersección segmento-sección',
+  statuses: { CUMPLE: 'Cumple', FUERA: 'Fuera de tolerancia', NO_CUMPLE: 'No cumple', UNKNOWN: 'Sin datos' },
+};
+
 function makeFilterState(overrides: Partial<FilterState> = {}): FilterState {
   return { ...DEFAULT_FILTER_STATE, ...overrides };
 }
@@ -74,6 +95,52 @@ function makeFilterState(overrides: Partial<FilterState> = {}): FilterState {
 // ─── Tests ──────────────────────────────────────────────────
 
 describe('buildTraces', () => {
+  it.each([
+    ['English', EN_TRACE_LABELS, 'Design', 'Topography', 'Elevation', 'Actual angle'],
+    ['Spanish', ES_TRACE_LABELS, 'Diseño', 'Topografía', 'Cota', 'Ángulo real'],
+  ] as const)('uses %s labels for trace names and hover text', (_language, labels, designName, topoName, elevationLabel, angleLabel) => {
+    const vm = makeViewModel({
+      lines: [
+        { kind: 'design', points: [{ distance: 0, elevation: 100 }, { distance: 10, elevation: 90 }] },
+        { kind: 'topo', points: [{ distance: 0, elevation: 99 }, { distance: 10, elevation: 89 }] },
+        { kind: 'reconciled_design', points: [{ distance: 0, elevation: 100 }, { distance: 10, elevation: 90 }] },
+        { kind: 'reconciled_topo', points: [{ distance: 0, elevation: 99 }, { distance: 10, elevation: 89 }] },
+      ],
+      benches: [{
+        ...makeBench(),
+        spillWidth: 2,
+        spillStartDistance: 20,
+        spillStartElevation: 85,
+      } as ProfileViewModel['benches'][number]],
+    });
+    const hoverLabels = {
+      elevation: elevationLabel, crestDelta: 'Crest Δ', toeDelta: 'Toe Δ',
+      actualAngle: angleLabel, plannedAngle: 'Planned angle', actualBerm: 'Actual berm',
+      plannedBerm: 'Planned berm', unmatched: 'No design bench associated',
+    };
+    const traces = buildTraces(vm, makeFilterState({ showAreas: true, showReconciledDesign: true, showReconciledTopo: true, showSpillAreas: true, showSemaphore: true }), stubCrossLink, false, [
+      { hole_id: 'P-10', distance: 5, elevation: 95, burden: 3, spacing: 4, is_within_tolerance: true },
+    ], hoverLabels, undefined, labels);
+    const design = traces.find((trace) => (trace as { name?: string }).name === designName) as { name?: string } | undefined;
+    const topo = traces.find((trace) => (trace as { name?: string }).name === topoName) as { hovertemplate?: string[] } | undefined;
+    const names = traces.map((trace) => (trace as { name?: string }).name);
+    const holeTrace = traces.find((trace) => (trace as { name?: string }).name === labels.blastHoles) as { text?: string[]; hovertemplate?: string } | undefined;
+
+    expect(design?.name).toBe(designName);
+    expect(names).toContain(labels.ground);
+    expect(names).toContain(labels.debt);
+    expect(names).toContain(labels.overexcavation);
+    expect(names).toContain(labels.reconciledDesign);
+    expect(names).toContain(labels.reconciledTopography);
+    expect(names).toContain(labels.spill);
+    expect(names).toContain(labels.statuses.CUMPLE);
+    expect(holeTrace?.text).toEqual([labels.hole('P-10')]);
+    expect(holeTrace?.hovertemplate).toContain(`${labels.burden}=`);
+    expect(holeTrace?.hovertemplate).toContain(`${labels.spacing}=`);
+    expect(topo?.hovertemplate?.[1]).toContain(`${angleLabel}:`);
+    expect(topo?.hovertemplate?.[1]).toContain(`${elevationLabel} `);
+  });
+
   it('emits a design polyline when design line is present', () => {
     const vm = makeViewModel({
       lines: [
@@ -353,7 +420,7 @@ describe('buildTraces', () => {
     const topoIndex = traces.findIndex((trace) => (trace as { name?: string }).name === 'Topografía');
     const topo = traces[topoIndex] as { customdata?: unknown[][] };
     const markerIndex = traces.findIndex((trace) => (trace as { name?: string }).name === 'Bancos');
-    const holeIndex = traces.findIndex((trace) => (trace as { name?: string }).name === 'Pozos de tronadura');
+    const holeIndex = traces.findIndex((trace) => (trace as { name?: string }).name === 'Collares de pozos proyectados');
 
     expect(getBenchNumberFromPlotEvent({ points: [
       { curveNumber: topoIndex, customdata: topo.customdata?.[1] },
@@ -382,6 +449,46 @@ describe('buildTraces', () => {
     const traces = buildTraces(vm, makeFilterState(), crossLink, false);
     const bench = traces.find((t) => (t as { name?: string }).name === 'Bancos') as { marker?: { size?: number[] } } | undefined;
     expect(bench?.marker?.size).toEqual([16]);
+  });
+
+  it('thins dense bench labels while retaining every marker and labeling the selected bench', () => {
+    const benches = Array.from({ length: 24 }, (_, index) => makeBench({
+      benchNumber: index + 1,
+      crestDistance: index * 2,
+    }));
+    const traces = buildTraces(makeViewModel({ benches }), makeFilterState(), {
+      ...stubCrossLink,
+      selected: 23,
+    }, false);
+    const bench = traces.find((trace) => (trace as { name?: string }).name === 'Bancos') as {
+      x?: number[];
+      text?: string[];
+      customdata?: unknown[][];
+      hovertemplate?: string[];
+    } | undefined;
+
+    expect(bench?.x).toHaveLength(24);
+    expect(bench?.customdata).toHaveLength(24);
+    expect(bench?.text?.filter(Boolean).length).toBeLessThan(24);
+    expect(bench?.text?.[22]).toContain('23');
+    expect(bench?.hovertemplate?.[1]).toContain('%{customdata[0]}');
+  });
+
+  it('thins labels across all status groups while retaining a selected bench', () => {
+    const statuses = ['CUMPLE', 'FUERA', 'NO_CUMPLE'] as const;
+    const benches = Array.from({ length: 24 }, (_, index) => makeBench({
+      benchNumber: index + 1,
+      status: statuses[index % statuses.length],
+    }));
+    const traces = buildTraces(makeViewModel({ benches }), makeFilterState({ showSemaphore: true }), {
+      ...stubCrossLink,
+      selected: 24,
+    }, false).filter((trace) => (trace as { meta?: { profileViewRole?: string } }).meta?.profileViewRole === 'bench-marker') as { text?: string[]; x?: number[] }[];
+
+    expect(traces.flatMap((trace) => trace.x ?? [])).toHaveLength(24);
+    const labels = traces.flatMap((trace) => trace.text ?? []).filter(Boolean);
+    expect(labels).toHaveLength(13);
+    expect(labels.some((label) => label.includes('24'))).toBe(true);
   });
 
   it('handles an empty view model (no lines, no benches)', () => {

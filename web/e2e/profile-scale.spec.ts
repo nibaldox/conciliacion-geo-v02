@@ -17,7 +17,7 @@ test('profile retains equal distance and elevation scales through navigation, zo
   await page.getByRole('button', { name: /Probar con datos/i }).click();
   await page.getByRole('button', { name: 'Salir del demo' }).waitFor();
   await page.locator('canvas').waitFor();
-  await page.getByRole('button', { name: 'Perfiles', exact: true }).click();
+  await page.getByRole('tab', { name: 'Perfiles', exact: true }).click();
   await page.locator('button').filter({ has: page.locator('.js-plotly-plot') }).first().click();
   const chart = page.locator('[data-slot="profile-chart"] .js-plotly-plot');
   await expectEqualScale(chart);

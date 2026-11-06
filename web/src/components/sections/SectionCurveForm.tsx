@@ -269,11 +269,11 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
       {!parametersValid && (
         <p id="curve-params-error" className="text-xs text-mine-red">{t('project_input.curve_params_invalid')}</p>
       )}
-      <div className="flex items-center gap-2">
-        <Button size="sm" fullWidth className="min-h-8 flex-1" disabled={!isReady || !parametersValid || mutation.isPending} loading={mutation.isPending} onClick={handleGenerate}>
+      <div className="grid grid-cols-2 gap-2">
+        <Button size="sm" fullWidth className="min-h-8 h-full text-center leading-tight" disabled={!isReady || !parametersValid || mutation.isPending} loading={mutation.isPending} onClick={handleGenerate}>
           {t(mutation.isPending ? 'project_input.generating' : 'project_input.generate')}
         </Button>
-        <Button size="sm" variant="secondary" className="min-h-8 shrink-0" onClick={handleReset}>
+        <Button size="sm" variant="secondary" fullWidth className="min-h-8 h-full text-center leading-tight" onClick={handleReset}>
           {t('project_input.curve_reset')}
         </Button>
       </div>

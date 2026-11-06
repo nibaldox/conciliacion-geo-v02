@@ -1,14 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ComparisonResult } from '../../api/types';
-import { Button } from '../ui/Button';
 import {
   toggleDimensionValue,
   uniqueLevelOptions,
   uniqueSectionOptions,
   uniqueSectorOptions,
   type ResultFilterState,
-} from './resultFilters';
+} from './resultFilters.utils';
 
 interface DimensionOption {
   readonly value: string;
@@ -59,30 +58,25 @@ function DimensionSelect({ dimension, label, options, selected, onToggle }: Dime
   const valueId = `result-filters-${dimension}-value`;
 
   return (
-    <div ref={rootRef} data-dimension={dimension} className="relative z-10 w-40">
-      <p id={labelId} className="mb-1 text-xs font-semibold text-text-secondary">{label}</p>
+    <div ref={rootRef} data-dimension={dimension} className="relative z-10 flex items-center gap-1.5">
+      <p id={labelId} className="text-xs text-text-muted">{label}</p>
       <div role="group" aria-labelledby={labelId}>
         <details className="relative">
           <summary
             aria-labelledby={`${labelId} ${valueId}`}
-            aria-haspopup="listbox"
-            className="flex h-9 cursor-pointer list-none items-center justify-between gap-2 rounded-md bg-surface-sunken px-3 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            style={{ border: '1px solid var(--color-border)' }}
+            className="flex h-8 w-32 cursor-pointer list-none items-center justify-between gap-2 rounded-md border border-border bg-surface-sunken px-2.5 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <span id={valueId} className="truncate">{summary}</span>
-            <span aria-hidden="true" className="text-xs text-text-muted">▾</span>
+            <span aria-hidden="true" className="text-text-muted">▾</span>
           </summary>
           <ul
-            role="listbox"
-            aria-multiselectable="true"
-            aria-label={`${label}: ${summary}`}
-            className="absolute left-0 top-full z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg bg-surface-raised p-1 shadow-lg"
+            className="absolute left-0 top-full z-20 mt-1 max-h-48 w-56 overflow-y-auto rounded-lg border border-border bg-surface-raised p-1 shadow-lg"
           >
             {options.map((option) => {
               const isSelected = selected.includes(option.value);
               return (
-                <li key={option.value} role="option" aria-selected={isSelected}>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-surface-muted">
+                <li key={option.value}>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-surface-muted">
                     <input
                       type="checkbox"
                       value={option.value}
@@ -126,9 +120,14 @@ export function ResultFilters({ results, filters, onChange }: {
   const toggleLevel = (value: string) => onChange({ ...filters, level: toggleDimensionValue(filters.level, value) });
 
   const noDimensionSelected = filters.sector.length === 0 && filters.section.length === 0 && filters.level.length === 0;
+  const activeFilters = [
+    ...filters.sector.map((value) => `${sectorLabel}: ${value === '' ? noSectorLabel : value}`),
+    ...filters.section.map((value) => `${sectionLabel}: ${value}`),
+    ...filters.level.map((value) => `${levelLabel}: ${value}`),
+  ];
 
   return (
-    <section data-slot="result-filters" className="flex flex-wrap items-end gap-3 rounded-xl bg-surface-raised p-4">
+    <section data-slot="result-filters" aria-label={t('results.filters.group_label', { defaultValue: 'Filtros de resultados' })} className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <DimensionSelect
         dimension="sector"
         label={sectorLabel}
@@ -150,14 +149,27 @@ export function ResultFilters({ results, filters, onChange }: {
         selected={filters.level}
         onToggle={toggleLevel}
       />
-      <Button
-        size="sm"
-        variant="secondary"
+      <button
+        type="button"
         disabled={noDimensionSelected}
+        aria-describedby="result-filters-reset-help"
+        title={t('results.filters.reset_help', { defaultValue: 'Restablece sector, sección y cota; conserva el filtro de banco.' })}
         onClick={() => onChange({ ...filters, sector: [], section: [], level: [] })}
+        className="text-xs text-text-muted underline-offset-2 hover:text-text-primary hover:underline disabled:invisible"
       >
         {t('dashboard.bench_filter.reset')}
-      </Button>
+      </button>
+      <p id="result-filters-reset-help" className="sr-only">
+        {t('results.filters.reset_help', { defaultValue: 'Restablece sector, sección y cota; conserva el filtro de banco.' })}
+      </p>
+      <p className="sr-only" aria-live="polite">
+        {activeFilters.length > 0 && (
+          <>
+            <span>{t('results.filters.active_label', { defaultValue: 'Filtros activos en este panel:' })}</span>{' '}
+            {activeFilters.join(' · ')}
+          </>
+        )}
+      </p>
     </section>
   );
 }

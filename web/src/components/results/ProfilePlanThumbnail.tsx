@@ -5,7 +5,7 @@ import { useSession } from '../../stores/session';
 import { Spinner } from '../ui/Spinner';
 import { createPlanProjection, createSurfaceRaster, expandPlanBounds, projectPlanPoint, sectionPlanPoints, planBounds } from './planGeometry';
 
-export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ sectionId }: { sectionId: string }) {
+export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ sectionId, showTitle = true, fill = false }: { sectionId: string; showTitle?: boolean; fill?: boolean }) {
   const { t } = useTranslation();
   const topoMeshId = useSession((state) => state.topoMeshId);
   const { data: sections } = useSections();
@@ -25,11 +25,14 @@ export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ section
   const projection = useMemo(() => vertices && hasActive && xMin !== undefined && yMin !== undefined && xMax !== undefined && yMax !== undefined ? createPlanProjection(vertices, [[xMin, yMin], [xMax, yMax]], false, { width: 1000, height: 900 }, 0.24) : null, [vertices, hasActive, xMin, yMin, xMax, yMax]);
   const raster = useMemo(() => vertices && projection ? createSurfaceRaster(vertices, projection) : '', [vertices, projection]);
   const loading = isLoading || profiles.some((profile) => profile.isLoading);
+  const mediaClass = fill
+    ? 'aspect-[10/9] w-full rounded-md bg-surface-sunken xl:aspect-auto xl:min-h-0 xl:flex-1'
+    : 'aspect-[10/9] w-full rounded-md bg-surface-sunken';
   return (
-    <section data-slot="profile-plan-thumbnail" data-active-section={sectionId} className="min-w-0 rounded-xl border border-border bg-surface-raised p-3 space-y-2">
-      <h3 className="text-xs font-semibold">{t('profile_plan.title')}</h3>
-      {loading ? <Spinner /> : error || !projection || !raster ? <p className="text-xs text-text-muted">{t('plan_view.unavailable')}</p> : (
-        <svg viewBox="0 0 1000 900" className="aspect-[10/9] w-full rounded-md bg-surface-sunken" role="img" aria-label={t('profile_plan.active', { name: active?.name })}>
+    <section data-slot="profile-plan-thumbnail" data-active-section={sectionId} className={`min-w-0 space-y-2${fill ? ' flex h-full min-h-0 flex-col' : ''}`}>
+      {showTitle && <h3 className="shrink-0 border-b border-border pb-2 text-sm font-medium text-text-primary">{t('profile_plan.title')}</h3>}
+      {loading ? <div className={`flex ${mediaClass} items-center justify-center text-text-muted`}><Spinner size="sm" /></div> : error || !projection || !raster ? <div className={`flex ${mediaClass} items-center justify-center px-4 text-center text-xs text-text-muted`}>{t('plan_view.unavailable')}</div> : (
+        <svg viewBox="0 0 1000 900" preserveAspectRatio="xMidYMid meet" className={`${mediaClass} overflow-hidden`} role="img" aria-label={t('profile_plan.active', { name: active?.name })}>
           <image href={raster} width="1000" height="900" />
           {[...lines].sort((a, b) => Number(a.section.id === sectionId) - Number(b.section.id === sectionId)).map(({ section, points }) => (
             <polyline key={section.id} data-section-id={section.id} data-active={section.id === sectionId}
@@ -42,8 +45,8 @@ export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ section
           <text x="930" y="35" textAnchor="middle" fill="var(--color-text-secondary)" fontSize="40">N</text>
         </svg>
       )}
-      <p className="text-xs text-accent-bright">{t('profile_plan.active', { name: active?.name ?? '—' })}</p>
-      <p className="text-xs text-text-muted">{t('profile_plan.neighbours')}</p>
+      <p className="shrink-0 truncate text-xs text-text-secondary">{t('profile_plan.active', { name: active?.name ?? '—' })}</p>
+      <p className="shrink-0 truncate text-xs text-text-muted">{t('profile_plan.neighbours')}</p>
     </section>
   );
 });

@@ -14,18 +14,15 @@ test.describe('Conciliación Geotécnica App', () => {
     await expect(page.getByText('Cargue superficies para ver la vista 3D', { exact: true })).toBeVisible();
   });
 
-  test('side panel lists current navigation and keeps surfaces section expanded', async ({ page }) => {
+  test('side panel lists the workflow steps and keeps surfaces step expanded', async ({ page }) => {
     await page.goto('/');
 
-    const navLabels = [
-      'Cargar Superficies',
-      'Definir Secciones',
-      'Parámetros de Procesamiento',
-      'Análisis',
-    ];
-    for (const label of navLabels) {
-      await expect(page.getByRole('button', { name: label })).toBeVisible();
+    for (const step of ['surfaces', 'sections', 'parameters', 'process']) {
+      await expect(page.locator(`#workflow-step-${step}`)).toBeVisible();
     }
+    await expect(page.locator('#workflow-step-surfaces')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByRole('heading', { name: 'Flujo de trabajo' })).toBeVisible();
+    await expect(page.locator('[data-slot="left-sidebar"] [data-slot="views-toolbar"]')).toHaveCount(0);
 
     const uploadZones = page.getByRole('button', { name: 'Cargar archivo' });
     await expect(uploadZones).toHaveCount(2);

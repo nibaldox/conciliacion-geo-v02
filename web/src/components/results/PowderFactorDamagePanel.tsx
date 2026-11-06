@@ -2,6 +2,14 @@ import Plot from '../charts/Plot';
 import type { Data, Layout, Config } from 'plotly.js';
 import { useTranslation } from 'react-i18next';
 import { useBlastDamageModel } from '../../api/hooks';
+import {
+  BlastSectionHeader,
+  BLAST_PLOT_AXIS_BASE,
+  BLAST_PLOT_LAYOUT_BASE,
+  readBlastChartColors,
+  useBlastChartColors,
+  type BlastChartColors,
+} from './blastLayout';
 import type {
   BlastDamagePoint,
   BlastDamageModelFit,
@@ -26,6 +34,7 @@ export const DAMAGE_MODEL_MIN_SAMPLES = 5;
 export function buildDamageTraces(
   points: BlastDamagePoint[],
   fit: BlastDamageModelFit | null,
+  colors: BlastChartColors = readBlastChartColors(),
 ): Partial<Data>[] {
   if (!points || points.length === 0) return [];
 
@@ -40,7 +49,7 @@ export function buildDamageTraces(
     y: ys,
     text: names,
     hovertemplate: '<b>%{text}</b><br>PF: %{x:.2f} g/ton<br>Over-break: %{y:.2f} m<extra></extra>',
-    marker: { color: '#f97316', size: 10, line: { color: '#ffffff', width: 1 } },
+    marker: { color: colors.secondary, size: 9, line: { color: colors.outline, width: 1 } },
     name: 'Secciones',
   };
 
@@ -57,7 +66,7 @@ export function buildDamageTraces(
       x: [xMin, xMax],
       y: [yMin, yMax],
       hoverinfo: 'skip',
-      line: { color: '#ef4444', width: 2, dash: 'solid' },
+      line: { color: colors.fit, width: 1.5, dash: 'solid' },
       name: 'Ajuste OLS',
     };
     traces.push(line);
@@ -81,16 +90,14 @@ export function buildDamageTraces(
 export function PowderFactorDamagePanel() {
   const { t } = useTranslation();
   const { data } = useBlastDamageModel();
+  const colors = useBlastChartColors();
 
   const points = data?.points ?? [];
   const fit = data?.fit ?? null;
 
-  // Empty state: no points at all → nothing to draw. The table's own
-  // empty state already covers the "no blast data" message; we only
-  // render the chart once rows exist.
   if (points.length === 0) return null;
 
-  const traces = buildDamageTraces(points, fit);
+  const traces = buildDamageTraces(points, fit, colors);
   const showFit = Boolean(fit) && points.length >= DAMAGE_MODEL_MIN_SAMPLES;
   const insufficient =
     points.length < DAMAGE_MODEL_MIN_SAMPLES || !fit;
@@ -100,77 +107,56 @@ export function PowderFactorDamagePanel() {
     : '';
 
   return (
-    <div
-      className="glass-panel rounded-xl p-5 space-y-3"
+    <section
+      className="flex min-w-0 flex-col gap-3"
       data-testid="blast-damage-chart"
     >
-      <p
-        className="text-xs font-bold uppercase tracking-wider"
-        style={{ color: 'var(--color-text-secondary)' }}
-      >
-        {t('blast.damage_title', {
+      <BlastSectionHeader
+        title={t('blast.damage_title', {
           defaultValue: 'Factor de carga vs Sobre-excavación',
         })}
-      </p>
+        aside={showFit && r2Text ? (
+          <span className="font-mono text-xs tabular-nums text-text-muted" data-testid="blast-damage-fit">
+            {r2Text}
+          </span>
+        ) : undefined}
+      />
       <Plot
         data={traces as Data[]}
         layout={{
-          height: 340,
-          margin: { l: 55, r: 20, t: 24, b: 50 },
-          paper_bgcolor: 'rgba(0,0,0,0)',
-          plot_bgcolor: 'rgba(0,0,0,0)',
-          font: { color: 'var(--color-text-secondary)', size: 11 },
+          ...BLAST_PLOT_LAYOUT_BASE,
+          height: 320,
+          margin: { l: 50, r: 12, t: 8, b: 48 },
           xaxis: {
+            ...BLAST_PLOT_AXIS_BASE,
             title: {
               text: t('blast.damage_x_axis', {
                 defaultValue: 'Factor de carga (g/ton)',
               }),
               font: { size: 11 },
             },
-            gridcolor: 'var(--color-border)',
-            zeroline: false,
           },
           yaxis: {
+            ...BLAST_PLOT_AXIS_BASE,
             title: {
               text: t('blast.damage_y_axis', {
                 defaultValue: 'Over-break (m)',
               }),
               font: { size: 11 },
             },
-            gridcolor: 'var(--color-border)',
-            zeroline: false,
           },
-          legend: { orientation: 'h', y: -0.22, font: { size: 10 } },
-          annotations: showFit && r2Text
-            ? [
-                {
-                  text: r2Text,
-                  showarrow: false,
-                  x: 0.99,
-                  xanchor: 'right',
-                  y: 0.99,
-                  yanchor: 'top',
-                  font: { size: 10, color: 'var(--color-text-muted)' },
-                  bgcolor: 'rgba(0,0,0,0)',
-                },
-              ]
-            : [],
         } as Partial<Layout>}
         config={{ displayModeBar: false, responsive: true } as Partial<Config>}
         style={{ width: '100%' }}
       />
       {insufficient && (
-        <p
-          className="text-xs"
-          style={{ color: 'var(--color-text-muted)' }}
-          data-testid="blast-damage-insufficient"
-        >
+        <p className="text-xs text-text-muted" data-testid="blast-damage-insufficient">
           {t('blast.damage_insufficient', {
             defaultValue:
               'Insuficientes secciones para ajustar el modelo (mínimo 5).',
           })}
         </p>
       )}
-    </div>
+    </section>
   );
 }

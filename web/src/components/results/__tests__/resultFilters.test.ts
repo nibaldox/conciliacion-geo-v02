@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_RESULT_FILTERS, filterResults, type ResultFilterState } from '../resultFilters';
+import { EMPTY_RESULT_FILTERS, filterResults, type ResultFilterState } from '../resultFilters.utils';
 import type { ComparisonResult } from '../../../api/types';
 
 function makeRow(overrides: Partial<ComparisonResult>): ComparisonResult {

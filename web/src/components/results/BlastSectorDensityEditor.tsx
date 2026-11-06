@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { BlastInfoTip } from './blastLayout';
 
 /**
  * Per-sector ρ editor (BlastDensityControl sub-panel).
@@ -28,32 +29,26 @@ export function BlastSectorDensityEditor({
 }) {
   const { t } = useTranslation();
 
-  const inputStyle: React.CSSProperties = {
-    backgroundColor: 'var(--color-surface)',
-    borderColor: 'var(--color-border)',
-    color: 'var(--color-text-primary)',
-  };
   const sectorInputCls =
-    'w-20 px-2 py-1 border rounded-md text-xs outline-none transition-colors focus:ring-2 focus:ring-accent/30 font-mono';
+    'w-20 rounded-md border border-border bg-surface px-2 py-1 text-xs tabular-nums text-text-primary outline-none focus:border-accent';
 
   return (
-    <div
-      className="flex flex-col gap-2 basis-full pt-2 border-t"
-      style={{ borderColor: 'var(--color-border)' }}
-      data-testid="blast-sector-density-editor"
-    >
-      <p
-        className="text-xs font-semibold"
-        style={{ color: 'var(--color-text-secondary)' }}
-      >
-        {t('blast.sector_density_title', { defaultValue: 'Densidad por sector' })}
-      </p>
+    <div className="flex flex-col gap-2" data-testid="blast-sector-density-editor">
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-medium text-text-secondary">
+          {t('blast.sector_density_title', { defaultValue: 'Densidad por sector' })}
+        </p>
+        {sectors.length > 0 && (
+          <BlastInfoTip>
+            {t('blast.sector_density_help', {
+              defaultValue:
+                'Vacío = usar densidad global. Cada sector anula la densidad solo en sus secciones.',
+            })}
+          </BlastInfoTip>
+        )}
+      </div>
       {sectors.length === 0 ? (
-        <p
-          className="text-xs"
-          style={{ color: 'var(--color-text-muted)' }}
-          data-testid="blast-sector-density-empty"
-        >
+        <p className="text-xs text-text-muted" data-testid="blast-sector-density-empty">
           {t('blast.sector_density_empty', {
             defaultValue:
               'Asigne un sector a cada sección para definir una densidad específica.',
@@ -63,11 +58,7 @@ export function BlastSectorDensityEditor({
         <div className="flex flex-wrap gap-3">
           {sectors.map((sec) => (
             <div key={sec} className="flex flex-col gap-1">
-              <label
-                htmlFor={`blast-sector-rho-${sec}`}
-                className="text-xs font-mono"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
+              <label htmlFor={`blast-sector-rho-${sec}`} className="text-xs text-text-muted">
                 {sec}
               </label>
               <input
@@ -92,20 +83,10 @@ export function BlastSectorDensityEditor({
                   });
                 }}
                 className={sectorInputCls}
-                style={inputStyle}
                 data-testid={`blast-sector-rho-${sec}`}
               />
             </div>
           ))}
-          <p
-            className="text-xs leading-relaxed self-center"
-            style={{ color: 'var(--color-text-muted)' }}
-          >
-            {t('blast.sector_density_help', {
-              defaultValue:
-                'Vacío = usar densidad global. Cada sector anula la densidad solo en sus secciones.',
-            })}
-          </p>
         </div>
       )}
     </div>

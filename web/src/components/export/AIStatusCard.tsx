@@ -6,6 +6,12 @@ interface AIStatusCardProps {
   healthState: AIHealthState;
 }
 
+const HEALTH_DOT: Record<AIHealthState, string> = {
+  ok: 'var(--status-ok-text)',
+  unavailable: 'var(--status-nok-text)',
+  pending: 'var(--color-text-muted)',
+};
+
 export function AIStatusCard({ healthState }: AIStatusCardProps) {
   const { t } = useTranslation();
   const healthLabel =
@@ -14,53 +20,21 @@ export function AIStatusCard({ healthState }: AIStatusCardProps) {
       : healthState === 'unavailable'
         ? t('ai_reporter.health.unavailable')
         : t('ai_reporter.health.pending');
-  const healthIcon =
-    healthState === 'ok' ? '✓' : healthState === 'unavailable' ? '⚠' : '…';
 
   return (
-    <div
-      className="rounded-xl shadow-sm p-5"
-      style={{
-        backgroundColor: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-      }}
-    >
-      <div className="flex items-center justify-between gap-3">
-        <h4
-          className="text-sm font-semibold"
-          style={{ color: 'var(--color-text-primary)' }}
-        >
-          {t('ai_reporter.title')}
-        </h4>
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+      <h3 className="ui-section-title">{t('ai_reporter.title')}</h3>
+      <div className="flex items-center gap-2 text-xs text-text-muted">
+        <span className="sr-only">{t('ai_reporter.backend_status')}</span>
         <span
-          className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full"
-          style={{
-            backgroundColor: 'var(--color-accent-soft)',
-            color: 'var(--color-text-muted)',
-          }}
-        >
-          {t('ai_reporter.ready_badge')}
+          aria-hidden="true"
+          data-health={healthState}
+          className="inline-block h-2 w-2 shrink-0 rounded-full"
+          style={{ backgroundColor: HEALTH_DOT[healthState] }}
+        />
+        <span data-testid="ai-reporter-health" className="text-text-secondary">
+          {healthLabel}
         </span>
-      </div>
-      <div className="flex items-center gap-3 mt-3">
-        <span aria-hidden="true" className="text-base">
-          {healthIcon}
-        </span>
-        <div className="flex-1 min-w-0">
-          <div
-            className="text-[10px] uppercase tracking-wider mb-0.5"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            {t('ai_reporter.backend_status')}
-          </div>
-          <div
-            className="text-xs font-medium"
-            style={{ color: 'var(--color-text-primary)' }}
-            data-testid="ai-reporter-health"
-          >
-            {healthLabel}
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -75,26 +49,9 @@ interface AIUnavailableCardProps {
 export function AIInfoCard({ testId, titleKey, descriptionKey }: AIUnavailableCardProps) {
   const { t } = useTranslation();
   return (
-    <div
-      className="rounded-xl shadow-sm p-5"
-      style={{
-        backgroundColor: 'var(--color-surface)',
-        border: '1px solid var(--color-border)',
-      }}
-      data-testid={testId}
-    >
-      <h5
-        className="text-sm font-semibold mb-1"
-        style={{ color: 'var(--color-text-primary)' }}
-      >
-        {t(titleKey)}
-      </h5>
-      <p
-        className="text-xs leading-relaxed"
-        style={{ color: 'var(--color-text-muted)' }}
-      >
-        {t(descriptionKey)}
-      </p>
+    <div data-testid={testId} className="flex flex-col gap-1">
+      <p className="text-sm font-medium text-text-primary">{t(titleKey)}</p>
+      <p className="text-xs leading-relaxed text-text-muted">{t(descriptionKey)}</p>
     </div>
   );
 }
