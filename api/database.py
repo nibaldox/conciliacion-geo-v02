@@ -5,6 +5,7 @@ import functools
 import tempfile
 import os
 import threading
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -159,8 +160,23 @@ def init_db():
         conn.execute("ALTER TABLE meshes ADD COLUMN import_options TEXT")
     if "import_report" not in mesh_columns:
         conn.execute("ALTER TABLE meshes ADD COLUMN import_report TEXT")
+    _ensure_settings_version_column(conn)
     conn.commit()
     conn.close()
+
+
+def _ensure_settings_version_column(conn: sqlite3.Connection) -> None:
+    """Add ``sessions.settings_version`` to pre-existing databases.
+
+    Idempotent and safe to call from both ``init_db`` and the read/write
+    paths that may run against a database created before this column
+    existed.
+    """
+    session_columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if "settings_version" not in session_columns:
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN settings_version INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def create_session() -> str:
@@ -202,6 +218,17 @@ def get_or_create_session(session_id: Optional[str] = None) -> str:
         finally:
             conn.close()
     return create_session()
+
+
+def session_exists(session_id: str) -> bool:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        return row is not None
+    finally:
+        conn.close()
 
 
 def cleanup_old_sessions(max_age_hours: int = 24):
@@ -308,9 +335,9 @@ def get_mesh_by_id(mesh_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-@functools.lru_cache(maxsize=8)
+@functools.lru_cache(maxsize=4)
 def get_trimesh_by_id(mesh_id: str) -> trimesh.Trimesh:
-    """Get trimesh by its ID, cached in memory."""
+    """Get trimesh by its ID, cached in memory (max 4 meshes ~ 4x196 MB)."""
     conn = get_connection()
     row = conn.execute(
         "SELECT filename, data, import_options FROM meshes WHERE id = ?", (mesh_id,)
@@ -403,28 +430,127 @@ def get_sections(session_id: str) -> List[Dict]:
 
 # --- Settings operations ---
 
+_SETTINGS_CACHE_MAX = 3
+_SETTINGS_CACHE: "OrderedDict[Tuple[str, str], Tuple[Optional[int], Dict[str, Any]]]" = (
+    OrderedDict()
+)
+_SETTINGS_CACHE_LOCK = threading.RLock()
+
+
+def clear_settings_cache() -> None:
+    """Drop every cached parsed settings blob (process-wide)."""
+    with _SETTINGS_CACHE_LOCK:
+        _SETTINGS_CACHE.clear()
+
+
+def _settings_cache_key(session_id: str) -> Tuple[str, str]:
+    return (str(DB_PATH), session_id)
+
+
+def _drop_settings_cache_entry(session_id: str) -> None:
+    with _SETTINGS_CACHE_LOCK:
+        _SETTINGS_CACHE.pop(_settings_cache_key(session_id), None)
+
+
+def _read_settings_version(conn: sqlite3.Connection, session_id: str) -> Optional[int]:
+    query = "SELECT settings_version FROM sessions WHERE id = ?"
+    try:
+        row = conn.execute(query, (session_id,)).fetchone()
+    except sqlite3.OperationalError:
+        _ensure_settings_version_column(conn)
+        conn.commit()
+        row = conn.execute(query, (session_id,)).fetchone()
+    if row is None:
+        return None
+    return row["settings_version"]
+
+
+def read_settings_version(session_id: str) -> Optional[int]:
+    """Read only ``sessions.settings_version``, never the settings blob."""
+    conn = get_connection()
+    try:
+        return _read_settings_version(conn, session_id)
+    finally:
+        conn.close()
+
+
+def _copy_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """Hand out a caller-owned top-level dict with fresh small branches.
+
+    The audit of every ``get_settings`` caller found in-place merges of the
+    ``process`` / ``tolerances`` / ``blast`` branches (and their one-level
+    child dicts), so those are copied. The multi-megabyte blast-row lists are
+    shared read-only: no audited caller mutates a hole record in place.
+    """
+    copied = dict(settings)
+    for name in ("process", "tolerances", "blast"):
+        branch = copied.get(name)
+        if isinstance(branch, dict):
+            copied[name] = {
+                key: dict(value) if isinstance(value, dict) else value
+                for key, value in branch.items()
+            }
+    return copied
+
 
 def save_settings(session_id: str, settings: Dict):
     """Save process settings + tolerances for a session."""
     conn = get_connection()
-    conn.execute(
-        "UPDATE sessions SET settings = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (json.dumps(settings), session_id),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        try:
+            conn.execute(
+                "UPDATE sessions SET settings = ?, "
+                "settings_version = COALESCE(settings_version, 0) + 1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(settings), session_id),
+            )
+        except sqlite3.OperationalError:
+            _ensure_settings_version_column(conn)
+            conn.execute(
+                "UPDATE sessions SET settings = ?, "
+                "settings_version = COALESCE(settings_version, 0) + 1, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (json.dumps(settings), session_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    _drop_settings_cache_entry(session_id)
 
 
 def get_settings(session_id: str) -> Dict:
-    """Get settings for a session."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT settings FROM sessions WHERE id = ?", (session_id,)
-    ).fetchone()
-    conn.close()
-    if not row or not row["settings"]:
-        return {}
-    return json.loads(row["settings"])
+    """Get settings for a session, parsed at most once per stored version.
+
+    The cached object must never be handed out directly: callers mutate the
+    result (``PUT /settings``, ``POST /process``) without persisting it, and
+    that would leak between concurrent requests.
+    """
+    key = _settings_cache_key(session_id)
+    with _SETTINGS_CACHE_LOCK:
+        conn = get_connection()
+        try:
+            version = _read_settings_version(conn, session_id)
+            cached = _SETTINGS_CACHE.get(key)
+            if cached is not None and cached[0] == version:
+                _SETTINGS_CACHE.move_to_end(key)
+                return _copy_settings(cached[1])
+            if version is None:
+                _SETTINGS_CACHE.pop(key, None)
+                return {}
+            row = conn.execute(
+                "SELECT settings FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row or not row["settings"]:
+            parsed: Dict[str, Any] = {}
+        else:
+            parsed = json.loads(row["settings"])
+        _SETTINGS_CACHE[key] = (version, parsed)
+        _SETTINGS_CACHE.move_to_end(key)
+        while len(_SETTINGS_CACHE) > _SETTINGS_CACHE_MAX:
+            _SETTINGS_CACHE.popitem(last=False)
+        return _copy_settings(parsed)
 
 
 # --- Process status operations ---

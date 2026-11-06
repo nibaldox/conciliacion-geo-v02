@@ -6,6 +6,7 @@ export interface BlastHoles3DResponse {
   session_id: string;
   section_id: number | null;
   corridor_m: number | null;
+  data_revision?: string | null;
   holes: BlastHole3DRecord[];
   summary: {
     total_loaded: number;
@@ -20,7 +21,7 @@ export interface BlastHoles3DResponse {
 export function useBlastHoles3D(enabled: boolean, sectionId: number | null, sectionGeometry: string) {
   const sessionId = getSessionId();
   return useQuery({
-    queryKey: ['blast-holes-3d', 'attributes-v2', sessionId, sectionId, sectionGeometry],
+    queryKey: ['blast-holes-3d', 'attributes-v3', sessionId, sectionId, sectionGeometry],
     queryFn: () => client.get<BlastHoles3DResponse>('/blast/holes/3d', {
       params: sectionId === null ? {} : { section_id: sectionId, corridor_m: 10 },
     }).then((response) => response.data),

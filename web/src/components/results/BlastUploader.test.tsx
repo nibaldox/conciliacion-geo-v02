@@ -11,7 +11,7 @@ const mockMutateAsync = vi.fn();
 
 vi.mock('../../api/hooks', () => ({
   useUploadBlastCsv: vi.fn(),
-  useBlastHolesBySession: vi.fn(),
+  useBlastSessionSummary: vi.fn(),
   extractBlastErrorDiagnostics: (error: unknown) => {
     const anyErr = error as { response?: { data?: unknown } };
     return (anyErr?.response?.data ?? null) as Partial<BlastUploadResponse> | null;
@@ -22,7 +22,10 @@ vi.mock('../../api/client', () => ({
   getSessionId: vi.fn(),
 }));
 
-const { useUploadBlastCsv, useBlastHolesBySession } = await import('../../api/hooks');
+const { mockPreview } = vi.hoisted(() => ({ mockPreview: vi.fn() }));
+vi.mock('../../api/blastImport', () => ({ previewBlastImport: (...args: unknown[]) => mockPreview(...args) }));
+
+const { useUploadBlastCsv, useBlastSessionSummary } = await import('../../api/hooks');
 const { getSessionId } = await import('../../api/client');
 
 const uploadResponse: BlastUploadResponse = {
@@ -66,13 +69,13 @@ function mockUpload(overrides: Partial<ReturnType<typeof useUploadBlastCsv>> = {
   } as ReturnType<typeof useUploadBlastCsv>);
 }
 
-function mockHoles(overrides: Partial<ReturnType<typeof useBlastHolesBySession>> = {}) {
-  vi.mocked(useBlastHolesBySession).mockReturnValue({
+function mockBlastSummary(overrides: Partial<ReturnType<typeof useBlastSessionSummary>> = {}) {
+  vi.mocked(useBlastSessionSummary).mockReturnValue({
     data: undefined,
     isLoading: false,
     error: null,
     ...overrides,
-  } as ReturnType<typeof useBlastHolesBySession>);
+  } as ReturnType<typeof useBlastSessionSummary>);
 }
 
 function renderUploader(props: { onUploaded?: (r: BlastUploadResponse) => void } = {}) {
@@ -82,7 +85,8 @@ function renderUploader(props: { onUploaded?: (r: BlastUploadResponse) => void }
 // Helper: select every required field with conscious values so the file
 // input becomes enabled. Mirrors the operator's flow: pick one option in
 // every dropdown, fill both source columns, then tick confirmation.
-function fillCompleteContract() {
+async function fillCompleteContract() {
+  await waitFor(() => expect(screen.getByTestId('blast-import-mapper')).toBeInTheDocument());
   fireEvent.change(screen.getByTestId('collar-elevation-source'), {
     target: { value: 'bench_height' },
   });
@@ -107,6 +111,7 @@ function fillCompleteContract() {
   fireEvent.change(screen.getByTestId('az-unit'), {
     target: { value: 'DEGREES' },
   });
+  fireEvent.click(screen.getByTestId('mapping-confirmed'));
 }
 
 // ─── Tests ─────────────────────────────────────────────────
@@ -118,135 +123,176 @@ describe('<BlastUploader />', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPreview.mockResolvedValue({
+      file_type: 'csv', encoding: 'utf-8', sheets: [], sheet_name: null,
+      headers: ['Inclinacion_real', 'Azimuth_real', 'X', 'Y', 'Z_collar', 'longitud_real'],
+      preview: [{ Inclinacion_real: 45, Azimuth_real: 90, X: 1, Y: 2, Z_collar: 100, longitud_real: 10 }],
+      suggested_mapping: { Incl: 'Inclinacion_real', Az: 'Azimuth_real', X: 'X', Y: 'Y', Z_collar: 'Z_collar', Len: 'longitud_real' },
+      confidence: { Incl: { kind: 'exact', score: 1 } }, missing_required: [],
+    });
     vi.mocked(getSessionId).mockReturnValue('sess-001');
     useSession.setState({ demoMode: false, demoData: null, designMeshId: null, topoMeshId: null });
   });
 
-  it('explains that blast data is absent and prevents upload for virtual demo meshes', () => {
+  it('explains that blast data is absent and prevents upload for virtual demo meshes', async () => {
     useSession.setState({
       demoMode: true,
       designMeshId: DEMO_MESH_IDS.design,
       topoMeshId: DEMO_MESH_IDS.topo,
     });
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('blast-demo-notice')).toHaveTextContent(
       'La demo usa mallas virtuales y no incluye datos de tronadura',
     );
     expect(screen.queryByTestId('blast-file-input')).not.toBeInTheDocument();
-    expect(vi.mocked(useBlastHolesBySession)).toHaveBeenCalledWith(null);
+    expect(vi.mocked(useBlastSessionSummary)).toHaveBeenCalledWith(null);
     expect(mockMutateAsync).not.toHaveBeenCalled();
   });
 
-  it('offers detected CSV headers in native inclination and azimuth dropdowns', async () => {
+  it('renders the server preview and suggested canonical mapping', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
-    fireEvent.change(screen.getByTestId('blast-file-input'), {
-      target: { files: [new File(['"ID","Inclinacion real","Azimuth, real"\n1,45,90'], 'pozos.csv', { type: 'text/csv' })] },
-    });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('incl-source-column').tagName).toBe('SELECT');
-      expect(screen.getByTestId('az-source-column').tagName).toBe('SELECT');
-      expect(screen.getByTestId('incl-source-column').querySelector('option[value="Inclinacion real"]')).not.toBeNull();
-      expect(screen.getByTestId('az-source-column').querySelector('option[value="Azimuth, real"]')).not.toBeNull();
-    });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['data'], 'pozos.csv', { type: 'text/csv' })] } });
+    await waitFor(() => expect(screen.getByTestId('blast-import-mapper')).toBeInTheDocument());
+    expect(screen.getByTestId('map-Incl')).toHaveValue('Inclinacion_real');
+    expect(screen.getByTestId('map-Az')).toHaveValue('Azimuth_real');
+    expect(screen.getByTestId('blast-import-mapper').querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(mockPreview).toHaveBeenCalledWith(expect.any(File));
   });
 
-  it('reads a bounded Windows-1252 header with a BOM and preserves selected columns missing from a replacement file', async () => {
+  it('resets the explicit mapping confirmation when a new file is selected', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
-    const cp1252Header = new Uint8Array([0xef, 0xbb, 0xbf, ...Array.from('ID,Inclinación,Azimuth_real', (char) => char.charCodeAt(0) > 255 ? 0xed : char.charCodeAt(0))]);
-    const firstFile = new File([cp1252Header], 'pozos.csv', { type: 'text/csv' });
-    const sliceSpy = vi.spyOn(firstFile, 'slice');
+    const firstFile = new File(['data'], 'pozos.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [firstFile] } });
-
-    await waitFor(() => expect(screen.getByTestId('incl-source-column').querySelector('option[value="Inclinación"]')).not.toBeNull());
-    expect(sliceSpy).toHaveBeenCalledWith(0, 64 * 1024);
-    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinación' } });
-    fireEvent.change(screen.getByTestId('az-source-column'), { target: { value: 'Azimuth_real' } });
-    fillCompleteContract();
-    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinación' } });
-    fireEvent.change(screen.getByTestId('az-source-column'), { target: { value: 'Azimuth_real' } });
-    fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
-    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Otra_inclinacion,Otro_azimuth\n1,2'], 'otro.csv', { type: 'text/csv' })] } });
-
-    await waitFor(() => {
-      expect((screen.getByTestId('incl-source-column') as HTMLSelectElement).value).toBe('Inclinación');
-      expect((screen.getByTestId('az-source-column') as HTMLSelectElement).value).toBe('Azimuth_real');
-      expect(screen.getByText(/«Inclinación» no está en el encabezado/i)).toBeInTheDocument();
-      expect(screen.getByText(/«Azimuth_real» no está en el encabezado/i)).toBeInTheDocument();
-      expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
-    });
-    fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Otra_inclinacion' } });
-    fireEvent.change(screen.getByTestId('az-source-column'), { target: { value: 'Otro_azimuth' } });
-    expect(screen.queryByText(/no está en el encabezado/i)).toBeNull();
-    fireEvent.click(screen.getByTestId('geometry-confirmed'));
-    expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
+    await waitFor(() => expect(screen.getByTestId('blast-import-mapper')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('mapping-confirmed'));
+    expect(screen.getByTestId('mapping-confirmed')).toBeChecked();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['other'], 'otro.csv', { type: 'text/csv' })] } });
+    expect(screen.queryByTestId('mapping-confirmed')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('mapping-confirmed')).not.toBeChecked());
   });
 
-  it('blocks the incompatible vertical inclination and negative-downward sign combination', () => {
+  it('requires all required source fields and blocks duplicate column assignments', async () => {
+    mockPreview.mockResolvedValueOnce({
+      file_type: 'csv', encoding: 'utf-8', sheets: [], sheet_name: null,
+      headers: ['incl', 'az'], preview: [{ incl: 45, az: 90 }],
+      suggested_mapping: { Incl: 'incl', Az: 'az' }, confidence: {},
+      missing_required: ['X', 'Y', 'Z_collar', 'Len'],
+    });
+    mockUpload(); mockBlastSummary(); renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['a,b'], 'pozos.csv', { type: 'text/csv' })] } });
+    await waitFor(() => expect(screen.getByTestId('blast-import-mapper')).toBeInTheDocument());
+    expect(screen.getByText(/Asigne todos los campos obligatorios: X, Y, Len/)).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('map-X'), { target: { value: 'incl' } });
+    fireEvent.change(screen.getByTestId('map-Y'), { target: { value: 'incl' } });
+    expect(screen.getByText(/Cada columna del archivo/)).toBeInTheDocument();
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
+  });
+
+  it('requests a new preview when the selected workbook sheet changes', async () => {
+    mockPreview.mockResolvedValue({
+      file_type: 'xlsx', encoding: null, sheets: ['Datos', 'Revisión'], sheet_name: 'Datos',
+      headers: ['Inclinacion_real', 'Azimuth_real', 'X', 'Y', 'Z_collar', 'longitud_real'], preview: [],
+      suggested_mapping: { Incl: 'Inclinacion_real', Az: 'Azimuth_real', X: 'X', Y: 'Y', Z_collar: 'Z_collar', Len: 'longitud_real' }, confidence: {}, missing_required: [],
+    });
+    mockUpload(); mockBlastSummary(); renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['workbook'], 'pozos.xlsx')] } });
+    await waitFor(() => expect(screen.getByTestId('blast-sheet-select')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('mapping-confirmed'));
+    fireEvent.change(screen.getByTestId('blast-sheet-select'), { target: { value: 'Revisión' } });
+    await waitFor(() => expect(mockPreview).toHaveBeenLastCalledWith(expect.any(File), 'Revisión'));
+    await waitFor(() => expect(screen.getByTestId('mapping-confirmed')).not.toBeChecked());
+  });
+
+  it('ignores an older preview response after a newer file is selected', async () => {
+    let resolveOld!: (value: unknown) => void;
+    let resolveNew!: (value: unknown) => void;
+    mockPreview.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNew = resolve; }));
+    mockUpload(); mockBlastSummary(); renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['old'], 'old.csv', { type: 'text/csv' })] } });
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['new'], 'new.csv', { type: 'text/csv' })] } });
+    const response = (source: string) => ({ file_type: 'csv', encoding: 'utf-8', sheets: [], sheet_name: null, headers: [source], preview: [{ [source]: 1 }], suggested_mapping: {}, confidence: {}, missing_required: [] });
+    resolveNew(response('new_header'));
+    await waitFor(() => expect(screen.getByTestId('blast-import-mapper')).toBeInTheDocument());
+    resolveOld(response('old_header'));
+    await waitFor(() => expect(screen.getByTestId('map-X')).toHaveValue(''));
+    expect(screen.getByTestId('map-X')).toHaveTextContent('new_header');
+    expect(screen.getByTestId('map-X')).not.toHaveTextContent('old_header');
+  });
+
+  it('keeps upload blocked when server preview fails', async () => {
+    mockPreview.mockRejectedValueOnce(new Error('Formato inválido'));
+    mockUpload(); mockBlastSummary(); renderUploader();
+    fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['bad'], 'pozos.csv', { type: 'text/csv' })] } });
+    await waitFor(() => expect(screen.getByText('Formato inválido')).toBeInTheDocument());
+    expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
+    expect(mockMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('blocks the incompatible vertical inclination and negative-downward sign combination', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-sign'), { target: { value: 'NEGATIVE_IS_DOWNWARD_DIP' } });
     expect(screen.getByText(/no es compatible/i)).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
   });
 
-  it('shows event warning messages returned with a successful upload', () => {
+  it('shows event warning messages returned with a successful upload', async () => {
     mockUpload({ isSuccess: true, data: { ...uploadResponse, event_warnings: [{ warning_code: 'INCLINATION_ALL_ZERO', message: 'La columna de inclinación declarada contiene cero en todas las filas. Verifique el dato y la convención confirmada; no se asumió una orientación.' }] } });
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('event-warnings')).toHaveTextContent('1');
     expect(screen.getByTestId('event-warning-messages')).toHaveTextContent('La columna de inclinación declarada contiene cero en todas las filas.');
   });
 
-  it('blocks mixed sessions and skips the session-scoped holes query when either mesh is virtual', () => {
+  it('blocks mixed sessions and skips the session-scoped holes query when either mesh is virtual', async () => {
     useSession.setState({ demoMode: false, designMeshId: 'real-design', topoMeshId: DEMO_MESH_IDS.topo });
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('blast-demo-notice')).toBeInTheDocument();
-    expect(vi.mocked(useBlastHolesBySession)).toHaveBeenCalledWith(null);
+    expect(vi.mocked(useBlastSessionSummary)).toHaveBeenCalledWith(null);
     expect(screen.queryByTestId('blast-file-input')).not.toBeInTheDocument();
   });
 
-  it('keeps blast upload available when demoMode is sticky but active meshes are real', () => {
+  it('keeps blast upload available when demoMode is sticky but active meshes are real', async () => {
     useSession.setState({ demoMode: true, designMeshId: 'real-design', topoMeshId: 'real-topo' });
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.queryByTestId('blast-demo-notice')).not.toBeInTheDocument();
     expect(screen.getByTestId('blast-file-input')).toBeInTheDocument();
   });
 
-  it('renders the file input when sessionId exists', () => {
+  it('renders the file input when sessionId exists', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('blast-file-input')).toBeInTheDocument();
   });
 
-  it('defaults to design-surface elevation and requires spatial reference confirmation', () => {
+  it('defaults to design-surface elevation and requires spatial reference confirmation', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect((screen.getByTestId('collar-elevation-source') as HTMLSelectElement).value).toBe('design_surface');
     expect(screen.getByTestId('spatial-reference-confirmed')).not.toBeChecked();
     expect(screen.queryByTestId('bench-height')).not.toBeInTheDocument();
   });
 
-  it('selects the CSV before geometry confirmation and opens its configuration', () => {
+  it('selects the CSV before geometry confirmation and opens its configuration', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     const file = new File(['Inclinacion_real,Azimuth_real'], 'antes.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
@@ -259,13 +305,13 @@ describe('<BlastUploader />', () => {
     expect(mockMutateAsync).not.toHaveBeenCalled();
   });
 
-  it('keeps file selection available and requires reconfirmation when replacing the CSV', () => {
+  it('keeps file selection available and requires reconfirmation when replacing the CSV', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     const file = new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
@@ -274,9 +320,9 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('blast-file-picker')).not.toBeDisabled();
   });
 
-  it('shows error state when upload fails', () => {
+  it('shows error state when upload fails', async () => {
     mockUpload({ isError: true, error: new Error('Network error') });
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('upload-error')).toHaveTextContent('Error al cargar el archivo:');
   });
@@ -285,10 +331,10 @@ describe('<BlastUploader />', () => {
     let resolveUpload!: (response: BlastUploadResponse) => void;
     mockMutateAsync.mockImplementation(() => new Promise<BlastUploadResponse>((resolve) => { resolveUpload = resolve; }));
     mockUpload({ mutateAsync: mockMutateAsync, isPending: false });
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
@@ -304,15 +350,15 @@ describe('<BlastUploader />', () => {
     await waitFor(() => expect(screen.queryByTestId('blast-upload-progress')).not.toBeInTheDocument());
   });
 
-  it('shows summary with n_holes after successful upload', () => {
+  it('shows summary with n_holes after successful upload', async () => {
     mockUpload({ isSuccess: true, data: uploadResponse });
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('blast-upload-summary')).toBeInTheDocument();
     expect(screen.getByText('42 pozos cargados, 3 filas omitidas')).toBeInTheDocument();
   });
 
-  it('shows design-surface sampling coverage and all sample outcome counts', () => {
+  it('shows design-surface sampling coverage and all sample outcome counts', async () => {
     mockUpload({
       isSuccess: true,
       data: {
@@ -330,7 +376,7 @@ describe('<BlastUploader />', () => {
         },
       },
     });
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('design-surface-sampling-summary')).toHaveTextContent('Cota muestreada en 75.0% de 42 pozos.');
     expect(screen.getByTestId('design-surface-sampled')).toHaveTextContent('32');
@@ -339,26 +385,18 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('design-surface-invalid')).toHaveTextContent('3');
   });
 
-  it('shows persisted hole count after the GET request resolves', () => {
+  it('shows persisted hole count after the GET request resolves', async () => {
     mockUpload();
-    mockHoles({
-      data: {
-        session_id: 'sess-001',
-        holes: [
-          { hole_id: 'H1', x: 1, y: 2, z: 3, carga: 10, descarga: 5, hardness: 'Blando' },
-          { hole_id: 'H2', x: 4, y: 5, z: 6, carga: 20, descarga: 10, hardness: 'Duro' },
-        ],
-      },
-    });
+    mockBlastSummary({ data: { n_holes: 2 } });
     renderUploader();
     expect(screen.getByTestId('blast-hole-count')).toHaveTextContent('2 pozos persistidos en sesión');
   });
 
   // ── INTEGRACIÓN §5.3 — no defaults ──
 
-  it('permits choosing a file but blocks submission until geometry is confirmed', () => {
+  it('permits choosing a file but blocks submission until geometry is confirmed', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('blast-file-picker')).not.toBeDisabled();
     expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
@@ -367,9 +405,9 @@ describe('<BlastUploader />', () => {
     expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
   });
 
-  it('all dropdowns start with the placeholder option selected', () => {
+  it('all dropdowns start with the placeholder option selected', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect((screen.getByTestId('incl-convention') as HTMLSelectElement).value).toBe('');
     expect((screen.getByTestId('incl-sign') as HTMLSelectElement).value).toBe('');
@@ -380,24 +418,24 @@ describe('<BlastUploader />', () => {
 
   // ── INTEGRACIÓN §5.3/§5.4 — confirmation + invalidation ──
 
-  it('requires confirmation after filling every field', () => {
+  it('requires confirmation after filling every field', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     // Fields complete but checkbox unticked → still disabled.
     expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
   });
 
-  it('invalidates confirmation when any field is edited after ticking', () => {
+  it('invalidates confirmation when any field is edited after ticking', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
     // Edit a field — confirmation must auto-clear.
@@ -408,12 +446,12 @@ describe('<BlastUploader />', () => {
     expect((screen.getByTestId('geometry-confirmed') as HTMLInputElement).checked).toBe(false);
   });
 
-  it('requires source rule when sign convention is SOURCE_DEFINED', () => {
+  it('requires source rule when sign convention is SOURCE_DEFINED', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-sign'), {
       target: { value: 'SOURCE_DEFINED' },
     });
@@ -431,18 +469,19 @@ describe('<BlastUploader />', () => {
 
   // ── INTEGRACIÓN §5.2 — independent units ──
 
-  it('accepts differing inclination and azimuth units (no mismatch warning)', () => {
+  it('accepts differing inclination and azimuth units (no mismatch warning)', async () => {
     mockUpload();
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'RADIANS' } });
     // After editing the unit, the confirmation auto-clears but NO
     // units-mismatch warning is rendered (independent units are valid).
     expect(screen.queryByText(/Las unidades de inclinación y azimut difieren/)).toBeNull();
     // Re-confirm with the mixed configuration — submission still enabled.
     fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinacion_real' } });
+    fireEvent.click(screen.getByTestId('mapping-confirmed'));
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     expect(screen.getByTestId('blast-upload-submit')).not.toBeDisabled();
   });
@@ -479,7 +518,7 @@ describe('<BlastUploader />', () => {
       message: 'Request failed with status code 422',
     };
     mockUpload({ isError: true, error: axiosLikeError as unknown as Error });
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     expect(screen.getByTestId('rejected-rows')).toHaveTextContent('INVALID_X');
     expect(screen.getByTestId('blocking-errors')).toHaveTextContent('NO_ACCEPTED_ROWS');
@@ -492,10 +531,10 @@ describe('<BlastUploader />', () => {
     mockUpload({
       mutateAsync: mockMutateAsync.mockResolvedValue(uploadResponse),
     } as Partial<ReturnType<typeof useUploadBlastCsv>>);
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     // Set differing units to prove they are transmitted independently.
     fireEvent.change(screen.getByTestId('incl-unit'), { target: { value: 'DEGREES' } });
     fireEvent.change(screen.getByTestId('az-unit'), { target: { value: 'RADIANS' } });
@@ -505,6 +544,8 @@ describe('<BlastUploader />', () => {
 
     const file = new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' });
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [file] } });
+    await waitFor(() => expect(screen.getByTestId('blast-import-mapper')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('mapping-confirmed'));
     fireEvent.click(screen.getByTestId('geometry-confirmed'));
     fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
@@ -520,10 +561,10 @@ describe('<BlastUploader />', () => {
 
   it('requires spatial reference confirmation and sends design-surface elevation source', async () => {
     mockUpload({ mutateAsync: mockMutateAsync.mockResolvedValue(uploadResponse) } as Partial<ReturnType<typeof useUploadBlastCsv>>);
-    mockHoles();
+    mockBlastSummary();
     renderUploader();
     fireEvent.change(screen.getByTestId('blast-file-input'), { target: { files: [new File(['Inclinacion_real,Azimuth_real'], 'pozos.csv', { type: 'text/csv' })] } });
-    fillCompleteContract();
+    await fillCompleteContract();
     fireEvent.change(screen.getByTestId('collar-elevation-source'), { target: { value: 'design_surface' } });
     expect(screen.getByTestId('design-surface-elevation')).toHaveTextContent('no se infiere la altura real del banco');
     expect(screen.getByTestId('blast-upload-submit')).toBeDisabled();

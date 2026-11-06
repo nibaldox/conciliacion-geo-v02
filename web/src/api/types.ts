@@ -451,12 +451,24 @@ export interface BlastCorrelationRow {
   rock_density_used: number;
 }
 
+export interface BlastTemporalFilter {
+  enabled: boolean;
+  survey_date: string | null;
+  effective_cutoff_date: string | null;
+  buffer_days: number;
+  policy: string;
+  included: number;
+  excluded: number;
+  missing: number;
+}
+
 export interface BlastCorrelationResponse {
   rows: BlastCorrelationRow[];
   tolerance: number | null;
   n_sections: number;
   carga?: number[];
   descarga?: number[];
+  temporal_filter?: BlastTemporalFilter;
 }
 
 // Blast PF↔damage regression model
@@ -492,6 +504,7 @@ export interface BlastDamageModelResponse {
   fit: BlastDamageModelFit | null;
   x_metric: string;
   y_metric: string;
+  temporal_filter?: BlastTemporalFilter;
 }
 
 // Blast-hole upload summary
@@ -555,7 +568,7 @@ export interface BlastUploadResponse {
   // Structured processing output (integración §3.6).
   data_warnings: string;
   processing_summary: Record<string, unknown>;
-  accepted_rows: Record<string, unknown>[];
+  accepted_rows?: Record<string, unknown>[];
   rejected_rows: RejectedRow[];
   event_warnings: Record<string, unknown>[];
   blocking_errors: BlockingError[];
@@ -588,6 +601,10 @@ export interface BlastHoleSummary {
 export interface BlastHolesResponse {
   session_id: string;
   holes: BlastHoleSummary[];
+}
+
+export interface BlastSessionSummaryResponse {
+  n_holes: number;
 }
 
 // AI reporter (core/ai_v2)

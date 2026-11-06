@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import Plot from '../charts/Plot';
@@ -13,6 +13,7 @@ import { BlastSectorDensityEditor } from './BlastSectorDensityEditor';
 import { BlastCorrelationTable } from './BlastCorrelationTable';
 import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { useBlastSettings } from './useBlastSettings';
+import { BlastTemporalFilter } from './BlastTemporalFilter';
 import { DEMO_MESH_IDS, useSession } from '../../stores/session';
 import { Button } from '../ui/Button';
 import {
@@ -21,6 +22,7 @@ import {
   BLAST_PLOT_LAYOUT_BASE,
   useBlastChartColors,
 } from './blastLayout';
+import { useBlastView } from '../../stores/blastView';
 // Re-exports below kept for backwards-compat with existing tests:
 //   - damage test suite imports `buildDamageTraces` / `DAMAGE_MODEL_MIN_SAMPLES`
 //     (canonical home: PowderFactorDamagePanel.tsx)
@@ -103,45 +105,59 @@ export function buildOverlayHistogram(
 
 // ─── Component ──────────────────────────────────────────────
 
-export function BlastCorrelation() {
+export interface BlastCorrelationProps {
+  presentation?: 'legacy' | 'analysis';
+}
+
+export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationProps = {}) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { designMeshId, topoMeshId } = useSession();
   const hasVirtualMesh = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
-  const { data, isLoading, error } = useBlastCorrelation();
+  const isAnalysis = presentation === 'analysis';
+  const [localSurveyDate, setLocalSurveyDate] = useState('');
+  const storeSurveyDate = useBlastView((s) => s.surveyDate);
+  const setStoreSurveyDate = useBlastView((s) => s.setSurveyDate);
+  const surveyDate = isAnalysis ? storeSurveyDate : localSurveyDate;
+  const setSurveyDate = isAnalysis ? setStoreSurveyDate : setLocalSurveyDate;
+  const { data, isLoading, error } = useBlastCorrelation(surveyDate || undefined);
+  const temporalControl = <BlastTemporalFilter surveyDate={surveyDate} onApply={setSurveyDate} metadata={data?.temporal_filter} />;
+  const refreshAnalysis = () => Promise.all([
+    qc.invalidateQueries({ queryKey: ['blast-correlation'] }),
+    qc.invalidateQueries({ queryKey: ['blast-damage-model'] }),
+  ]);
 
   const rows: BlastCorrelationRow[] = data?.rows ?? [];
+  const emptyAfterCutoff = Boolean(surveyDate && data?.temporal_filter?.enabled && data.temporal_filter.included === 0 && data.temporal_filter.excluded + data.temporal_filter.missing > 0);
   const carga: number[] = data?.carga ?? [];
   const descarga: number[] = data?.descarga ?? [];
 
   if (isLoading) {
     return (
-      <div className="flex h-48 items-center justify-center text-sm text-text-muted">
+      <div className="space-y-4">{temporalControl}<div className="flex h-48 items-center justify-center text-sm text-text-muted">
         {t('blast.loading', { defaultValue: 'Cargando…' })}
-      </div>
+      </div></div>
     );
   }
 
   if (error) {
     return (
-      <div role="alert" className="flex h-48 items-center justify-center gap-2 text-sm text-text-secondary">
+      <div className="space-y-4">{temporalControl}<div role="alert" className="flex h-48 items-center justify-center gap-2 text-sm text-text-secondary">
         <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-[var(--status-nok-text)]" />
         {t('blast.error', { defaultValue: 'Error al cargar datos de tronadura.' })}
-      </div>
+      </div></div>
     );
   }
 
-  const invalidateCorrelation = () => qc.invalidateQueries({ queryKey: ['blast-correlation'] });
-
   if (rows.length === 0) {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-6">
+      <div className="space-y-4">{temporalControl}<div className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-6">
         <div className="flex flex-col gap-1">
           <h2 className="ui-section-title">
-            {t('blast.empty_title', { defaultValue: 'Sin datos de tronadura' })}
+            {emptyAfterCutoff ? t('blast.temporal.emptyTitle') : t('blast.empty_title', { defaultValue: 'Sin datos de tronadura' })}
           </h2>
           <p className="text-xs leading-relaxed text-text-muted">
-            {hasVirtualMesh
+            {emptyAfterCutoff ? t('blast.temporal.emptyDescription') : hasVirtualMesh
               ? t('blast.empty_demo_desc', {
                   defaultValue: 'La demo usa mallas virtuales y no incluye datos de tronadura.',
                 })
@@ -151,8 +167,8 @@ export function BlastCorrelation() {
                 })}
           </p>
         </div>
-        <BlastUploader onUploaded={invalidateCorrelation} />
-      </div>
+        {!isAnalysis && <BlastUploader onUploaded={refreshAnalysis} />}
+      </div></div>
     );
   }
 
@@ -164,6 +180,7 @@ export function BlastCorrelation() {
 
   return (
     <div className="flex flex-col gap-6" data-slot="blast-correlation">
+      {temporalControl}
       <BlastSectionHeader
         as="h2"
         title={t('blast.summary_title', { defaultValue: 'Correlación de Tronadura' })}
@@ -177,7 +194,7 @@ export function BlastCorrelation() {
         }
       />
 
-      <BlastUploader collapsible onUploaded={invalidateCorrelation} />
+      {!isAnalysis && <BlastUploader collapsible onUploaded={refreshAnalysis} />}
 
       <BlastDensityControl />
 
@@ -189,20 +206,20 @@ export function BlastCorrelation() {
       </section>
 
       <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
-        <PowderFactorDamagePanel />
+        <PowderFactorDamagePanel surveyDate={surveyDate || undefined} />
         <BlastHistogramChart carga={carga} descarga={descarga} />
       </div>
 
-      <Suspense fallback={loadingFallback}>
-        <BlastHoles3DViewer sessionId={getSessionId()} />
-      </Suspense>
-
-      <Suspense fallback={loadingFallback}>
-        <BlastSimulationPanel
-          sessionId={getSessionId()}
-          geometryConfigurationVersion={GEOMETRY_CONFIGURATION_VERSION}
-        />
-      </Suspense>
+      {!isAnalysis && (
+        <>
+          <Suspense fallback={loadingFallback}>
+            <BlastHoles3DViewer sessionId={getSessionId()} />
+          </Suspense>
+          <Suspense fallback={loadingFallback}>
+            <BlastSimulationPanel sessionId={getSessionId()} geometryConfigurationVersion={GEOMETRY_CONFIGURATION_VERSION} />
+          </Suspense>
+        </>
+      )}
     </div>
   );
 }
@@ -213,65 +230,101 @@ function BlastHistogramChart({ carga, descarga }: { carga: number[]; descarga: n
   const hasData = carga.length > 0 || descarga.length > 0;
   if (!hasData) return null;
 
-  const bins = buildOverlayHistogram(carga, descarga, 20);
-  const binSize = bins.binEdges.length > 1 ? bins.binEdges[1] - bins.binEdges[0] : 1;
-  const xbins = {
-    start: bins.binEdges[0],
-    end: bins.binEdges[bins.binEdges.length - 1],
-    size: binSize,
-  };
-
   return (
     <section
       className="flex min-w-0 flex-col gap-3"
       data-testid="blast-histogram-chart"
     >
-      <BlastSectionHeader
-        title={t('blast.histogram_title', { defaultValue: 'Carga vs Descarga' })}
-      />
+      <BlastSectionHeader title={t('blast.histograms_title', { defaultValue: 'Distribución de carga y longitud cargada' })} />
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {carga.length > 0 && <HistogramPlot
+          values={carga}
+          title={t('blast.charge_density_histogram_title', { defaultValue: 'Densidad lineal de carga de explosivo' })}
+          xAxisTitle={t('blast.charge_density_histogram_x_axis', { defaultValue: 'Densidad lineal de carga (kg/m)' })}
+          color={colors.primary}
+          testId="blast-charge-density-histogram"
+        />}
+        {descarga.length > 0 && <HistogramPlot
+          values={descarga}
+          title={t('blast.loaded_length_histogram_title', { defaultValue: 'Longitud de columna cargada' })}
+          xAxisTitle={t('blast.loaded_length_histogram_x_axis', { defaultValue: 'Longitud cargada (m)' })}
+          color={colors.secondary}
+          testId="blast-loaded-length-histogram"
+        />}
+      </div>
+    </section>
+  );
+}
+
+function buildHistogramSeries(values: number[], binCount = 20) {
+  const finite = values.filter(Number.isFinite);
+  let min = finite[0] ?? 0;
+  let max = finite[0] ?? 0;
+  for (const value of finite) {
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  const width = max === min ? 1 : (max - min) / binCount;
+  const midpoints = Array.from({ length: binCount }, (_, index) => min + (index + 0.5) * width);
+  const counts = new Array<number>(binCount).fill(0);
+  for (const value of finite) {
+    const index = Math.min(binCount - 1, Math.floor((value - min) / width));
+    counts[index] += 1;
+  }
+  return { midpoints, counts };
+}
+
+function HistogramPlot({
+  values,
+  title,
+  xAxisTitle,
+  color,
+  testId,
+}: {
+  values: number[];
+  title: string;
+  xAxisTitle: string;
+  color: string;
+  testId: string;
+}) {
+  const { t } = useTranslation();
+  const series = buildHistogramSeries(values);
+  return (
+    <div className="min-w-0" data-testid={testId}>
+      <p className="text-xs font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{title}</p>
       <Plot
-        data={[
-          {
-            x: carga,
-            type: 'histogram',
-            name: t('blast.carga', { defaultValue: 'Carga' }),
-            marker: { color: colors.primary },
-            opacity: 0.7,
-            xbins,
-          },
-          {
-            x: descarga,
-            type: 'histogram',
-            name: t('blast.descarga', { defaultValue: 'Descarga' }),
-            marker: { color: colors.secondary },
-            opacity: 0.7,
-            xbins,
-          },
-        ] as Data[]}
+        data={[{
+          x: series.midpoints,
+          y: series.counts,
+          type: 'bar',
+          name: title,
+          marker: { color },
+        }] as Data[]}
         layout={{
           ...BLAST_PLOT_LAYOUT_BASE,
-          height: 320,
-          barmode: 'overlay',
-          margin: { l: 50, r: 12, t: 8, b: 48 },
+          height: 280,
+          margin: { l: 55, r: 20, t: 12, b: 50 },
+          paper_bgcolor: 'rgba(0,0,0,0)',
+          plot_bgcolor: 'rgba(0,0,0,0)',
+          font: { color: 'var(--color-text-secondary)', size: 11 },
           xaxis: {
             ...BLAST_PLOT_AXIS_BASE,
-            title: {
-              text: t('blast.histogram_x_axis', { defaultValue: 'Carga (kg)' }),
-              font: { size: 11 },
-            },
+            title: { text: xAxisTitle, font: { size: 11 } },
+            gridcolor: 'var(--color-border)',
+            zeroline: false,
           },
           yaxis: {
             ...BLAST_PLOT_AXIS_BASE,
-            title: {
-              text: t('blast.histogram_y_axis', { defaultValue: 'Frecuencia' }),
-              font: { size: 11 },
-            },
+            title: { text: t('blast.histogram_y_axis_wells', { defaultValue: 'Pozos por intervalo' }), font: { size: 11 } },
+            gridcolor: 'var(--color-border)',
+            zeroline: false,
           },
+          showlegend: false,
         } as Partial<Layout>}
         config={{ displayModeBar: false, responsive: true } as Partial<Config>}
         style={{ width: '100%' }}
       />
-    </section>
+    </div>
   );
 }
 

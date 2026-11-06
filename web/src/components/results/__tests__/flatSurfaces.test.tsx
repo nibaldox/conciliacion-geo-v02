@@ -25,6 +25,7 @@ vi.mock('../CompliancePlanView', () => ({ CompliancePlanView: () => null }));
 vi.mock('../DesignAchievementPanel', () => ({ DesignAchievementPanel: () => null }));
 vi.mock('../../charts/Plot', () => ({ default: () => <div data-testid="plot" /> }));
 
+import { BlastTemporalFilter } from '../BlastTemporalFilter';
 import { Dashboard } from '../Dashboard';
 import { ExportPanel } from '../../export/ExportPanel';
 
@@ -61,6 +62,14 @@ function makeRow(overrides: Partial<ComparisonResult> = {}): ComparisonResult {
 }
 
 describe('flat content surfaces', () => {
+  it('renders the temporal filter as a flat section', () => {
+    render(<BlastTemporalFilter surveyDate="" onApply={vi.fn()} />);
+    const section = screen.getByRole('region', { name: 'blast.temporal.title' });
+    expectNoCard(section.className);
+    expect(section.className).not.toContain('bg-surface-muted');
+    expect(section.className).toContain('border-t');
+  });
+
   it('renders the dashboard sections without card wrappers', () => {
     mocks.rows = [makeRow()];
     const { container } = render(<Dashboard />);

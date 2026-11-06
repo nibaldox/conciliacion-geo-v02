@@ -26,6 +26,7 @@ vi.mock('./components/lazy', () => ({
   LazyResultsTable: () => <div data-testid="results-table" />,
   LazyDashboard: () => <div data-testid="dashboard" />,
   LazyBlastCorrelation: () => <div data-testid="blast" />,
+  LazyBlastWorkspace: () => <div data-testid="blast" />,
   LazyAIReporter: () => <div data-testid="ai-reporter" />,
   LazyProfileView: () => <div data-testid="profile" />,
   LazyProfilesGrid: () => <div data-testid="profiles-grid" />,

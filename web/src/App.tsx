@@ -16,7 +16,7 @@ import {
   LazyMesh3DViewer,
   LazyResultsTable,
   LazyDashboard,
-  LazyBlastCorrelation,
+  LazyBlastWorkspace,
   LazyAIReporter,
   LazyProfileView,
   LazyProfilesGrid,
@@ -184,10 +184,8 @@ function WorkspaceRouter() {
       );
     case 'blast':
       return (
-        <div className="h-full flex flex-col gap-6 overflow-y-auto pr-1">
-          <div className="shrink-0">
-            <LazyBlastCorrelation />
-          </div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <LazyBlastWorkspace />
         </div>
       );
     case 'export-ai':
@@ -214,7 +212,7 @@ function LoadingSpinner() {
   );
 }
 
-function App() {
+function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean }) {
   const [queryClient] = useState(() => new QueryClient({
     defaultOptions: {
       queries: {
@@ -257,6 +255,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppLayout>
+        {sessionRestoreFailed && (
+          <div role="alert" className="mx-4 mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--color-status-error)', color: 'var(--color-status-error)' }}>
+            {i18n.t('sessionRecovery.failed')}
+          </div>
+        )}
         <ErrorBoundary>
           <Suspense fallback={<LoadingSpinner />}>
             <WorkspaceRouter />

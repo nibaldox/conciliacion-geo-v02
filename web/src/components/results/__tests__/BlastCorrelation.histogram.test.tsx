@@ -55,7 +55,7 @@ vi.mock('../../../api/hooks', () => ({
     data: undefined,
     error: null,
   })),
-  useBlastHolesBySession: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  useBlastSessionSummary: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
   useCreateBlastSimulation: vi.fn(() => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),
@@ -78,7 +78,20 @@ vi.mock('@tanstack/react-query', async () => {
 });
 
 vi.mock('../../charts/Plot', () => ({
-  default: () => <div data-testid="plotly-stub" />,
+  default: ({
+    data,
+    layout,
+  }: {
+    data: Array<{ x: number[]; type: string }>;
+    layout: { xaxis: { title: { text: string } } };
+  }) => (
+    <div
+      data-testid="plotly-stub"
+      data-point-count={data[0]?.x.length}
+      data-series-type={data[0]?.type}
+      data-x-axis-title={layout.xaxis.title.text}
+    />
+  ),
 }));
 
 const { useBlastCorrelation } = await import('../../../api/hooks');
@@ -130,10 +143,23 @@ describe('<BlastCorrelation /> histogram section', () => {
     await waitFor(() => {
       expect(screen.getByTestId('blast-histogram-chart')).toBeInTheDocument();
     });
-    expect(
-      screen.getByText('Histograma Carga vs Descarga'),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('plotly-stub')).toBeInTheDocument();
+    expect(screen.getByText('Distribución de carga y longitud cargada')).toBeInTheDocument();
+    expect(screen.getByTestId('blast-charge-density-histogram')).toHaveTextContent(
+      'Densidad lineal de carga de explosivo',
+    );
+    expect(screen.getByTestId('blast-loaded-length-histogram')).toHaveTextContent(
+      'Longitud de columna cargada',
+    );
+    const plots = screen.getAllByTestId('plotly-stub');
+    expect(plots).toHaveLength(2);
+    for (const [index, plot] of plots.entries()) {
+      expect(plot).toHaveAttribute('data-series-type', 'bar');
+      expect(plot).toHaveAttribute('data-point-count', '20');
+      expect(plot).toHaveAttribute(
+        'data-x-axis-title',
+        index === 0 ? 'Densidad lineal de carga (kg/m)' : 'Longitud cargada (m)',
+      );
+    }
   });
 
   it('does not render the histogram section when carga/descarga are absent', () => {

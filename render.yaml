@@ -74,6 +74,11 @@ services:
       # ── Python runtime tweaks ───────────────────────────────────
       - key: PYTHONUNBUFFERED
         value: "1"
+      # Cap glibc malloc arenas. /blast/* parses ~79 MB and builds thousands of
+      # models per request; the default per-thread arenas fragment the heap and
+      # the measured peak drops ~40% with two arenas. Free tier has 512 MB.
+      - key: MALLOC_ARENA_MAX
+        value: "2"
       # Single worker on purpose: request staging, in-memory caches and
       # background jobs plus the local SQLite store are per-process.
       # Raise only after those stores move to shared backends — see

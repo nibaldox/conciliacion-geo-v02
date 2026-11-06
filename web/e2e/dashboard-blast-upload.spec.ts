@@ -55,7 +55,7 @@ test('blast CSV chooser works before confirmation and submits only explicit conf
     if (url.pathname.endsWith('/breaklines')) json = { lines: [] };
     if (url.pathname.endsWith('/info')) json = { filename: 'review.stl', bounds: { min_x: 0, max_x: 100, min_y: 0, max_y: 100, min_z: 0, max_z: 0 }, n_vertices: 3, n_faces: 1 };
     if (url.pathname.endsWith('/blast-correlation')) json = { rows: [], carga: [], descarga: [] };
-    if (url.pathname.endsWith('/holes')) json = { session_id: 'review-blast-session', holes: [] };
+    if (url.pathname.endsWith('/summary')) json = { n_holes: 0 };
     if (url.pathname.endsWith('/blast/upload')) json = { n_holes: 1, n_rows_skipped: 0, blocking_errors: [], rejected_rows: [], event_warnings: [] };
     await route.fulfill({ json, headers });
   });
@@ -83,9 +83,11 @@ test('blast CSV chooser works before confirmation and submits only explicit conf
   await expect(page.getByTestId('blast-upload-submit')).toBeDisabled();
   await page.getByTestId('geometry-confirmed').check();
   await expect(page.getByTestId('blast-upload-submit')).toBeEnabled();
-  const request = page.waitForRequest((request) => request.url().endsWith('/blast/upload') && request.method() === 'POST');
+  const request = page.waitForRequest((request) => new URL(request.url()).pathname.endsWith('/blast/upload') && request.method() === 'POST');
   await page.getByTestId('blast-upload-submit').click();
-  const body = (await request).postData()!;
+  const uploadRequest = await request;
+  expect(new URL(uploadRequest.url()).searchParams.get('compact')).toBe('true');
+  const body = uploadRequest.postData()!;
   for (const [key, value] of Object.entries({ session_id: 'review-blast-session', geometry_configuration_version: '2.0', geometry_user_confirmed: 'true', inclination_source_column: 'Inclinacion_real', azimuth_source_column: 'Azimuth_real', inclination_convention: 'FROM_VERTICAL', inclination_sign_convention: 'ABSOLUTE_VALUE', inclination_unit: 'DEGREES', azimuth_convention: 'CLOCKWISE_FROM_NORTH', azimuth_unit: 'RADIANS' })) {
     expect(body).toContain(`name="${key}"\r\n\r\n${value}`);
   }

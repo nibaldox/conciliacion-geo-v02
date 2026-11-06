@@ -1,9 +1,10 @@
+import { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Html } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import { useBlastHolesBySession } from '../../api/hooks';
 import type { BlastHoleSummary } from '../../api/types';
 import { useTranslation } from 'react-i18next';
-import { useMemo } from 'react';
+import { BlastHolesLayer, type BlastHole3D } from '../mesh/BlastHolesLayer';
 import { useTheme } from '../../stores/theme';
 import { readThemeColor } from '../../utils/theme';
 
@@ -37,19 +38,20 @@ export interface BlastHoles3DViewerProps {
 
 /** Convert a flat list of holes to a centered mesh for camera positioning. */
 export function centerHoles(holes: BlastHoleSummary[]): { center: [number, number, number]; radius: number } {
-  if (holes.length === 0) return { center: [0, 0, 0], radius: 10 };
+  const drawable = holes.filter((hole) => Number.isFinite(hole.x) && Number.isFinite(hole.y) && hole.z !== null && Number.isFinite(hole.z));
+  if (drawable.length === 0) return { center: [0, 0, 0], radius: 10 };
   let sx = 0, sy = 0, sz = 0;
-  for (const h of holes) {
-    sx += h.x; sy += h.y; sz += h.z ?? 0;
+  for (const h of drawable) {
+    sx += h.x; sy += h.y; sz += h.z!;
   }
-  const cx = sx / holes.length;
-  const cy = sy / holes.length;
-  const cz = sz / holes.length;
+  const cx = sx / drawable.length;
+  const cy = sy / drawable.length;
+  const cz = sz / drawable.length;
   let maxD2 = 0;
-  for (const h of holes) {
+  for (const h of drawable) {
     const dx = h.x - cx;
     const dy = h.y - cy;
-    const dz = (h.z ?? 0) - cz;
+    const dz = h.z! - cz;
     const d2 = dx * dx + dy * dy + dz * dz;
     if (d2 > maxD2) maxD2 = d2;
   }
@@ -58,9 +60,35 @@ export function centerHoles(holes: BlastHoleSummary[]): { center: [number, numbe
 
 export function BlastHoles3DViewer({ sessionId, sectionName }: BlastHoles3DViewerProps) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <section data-testid="blast-3d-viewer" className="flex flex-col gap-3">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between text-left"
+        aria-expanded={open}
+        aria-controls="blast-3d-viewer-content"
+        aria-label={t(open ? 'blast.viewer_close' : 'blast.viewer_open')}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('blast.viewer_title')}
+        </span>
+        <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>{open ? '−' : '+'}</span>
+      </button>
+      {open && (
+        <div id="blast-3d-viewer-content">
+          <BlastHoles3DContent sessionId={sessionId} sectionName={sectionName} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function BlastHoles3DContent({ sessionId, sectionName }: BlastHoles3DViewerProps) {
+  const { t } = useTranslation();
   const { data, isLoading, error } = useBlastHolesBySession(sessionId, sectionName);
-  const hardnessColors = useHardnessColors();
-  const [gridColor, gridMinorColor] = useGridColors();
 
   if (!sessionId) {
     return <p className="text-sm text-text-muted" data-testid="viewer-no-session">{t('blast.viewer_no_session')}</p>;
@@ -76,8 +104,22 @@ export function BlastHoles3DViewer({ sessionId, sectionName }: BlastHoles3DViewe
     return <p className="text-sm text-text-muted" data-testid="viewer-empty">{t('blast.viewer_empty')}</p>;
   }
 
-  const { center, radius } = centerHoles(holes);
+  return <BlastHolesCanvas holes={holes} />;
+}
+
+function BlastHolesCanvas({ holes }: { holes: BlastHoleSummary[] }) {
+  const { t } = useTranslation();
+  const hardnessColors = useHardnessColors();
+  const [gridColor, gridMinorColor] = useGridColors();
+  const { center, radius } = useMemo(() => centerHoles(holes), [holes]);
   const cameraDistance = radius * 2.5;
+  const meshHoles = useMemo<BlastHole3D[]>(() => holes.filter((hole) => (
+    Number.isFinite(hole.x) && Number.isFinite(hole.y) && hole.z !== null && Number.isFinite(hole.z)
+  )).map((hole) => ({
+    key: hole.hole_id,
+    collar: [hole.x, hole.y, hole.z!],
+    color: hardnessColors[hole.hardness ?? 'unknown'] ?? hardnessColors.unknown,
+  })), [holes, hardnessColors]);
 
   return (
     <section data-testid="blast-3d-viewer" className="flex flex-col gap-3">
@@ -92,26 +134,17 @@ export function BlastHoles3DViewer({ sessionId, sectionName }: BlastHoles3DViewe
           ))}
         </div>
       </div>
+      <p className="text-xs text-text-muted" data-testid="viewer-hole-count">{t('blast.viewer_hole_count', { count: meshHoles.length })}</p>
       <div className="overflow-hidden rounded-lg border border-border" style={{ width: '100%', height: '500px', backgroundColor: 'var(--color-viewer-bg)' }} data-testid="viewer-canvas-container">
         <Canvas
-          camera={{ position: [center[0] + cameraDistance, center[1] + cameraDistance, center[2] + cameraDistance], fov: 50 }}
+          camera={{ position: [cameraDistance, cameraDistance, cameraDistance], fov: 50 }}
           data-testid="viewer-canvas"
         >
           <ambientLight intensity={0.5} />
           <directionalLight position={[10, 10, 5]} intensity={1} />
           <gridHelper args={[radius * 3, 20, gridColor, gridMinorColor]} />
-          {holes.map((h) => (
-            <mesh key={h.hole_id} position={[h.x, h.y, h.z ?? 0]} data-testid={`hole-${h.hole_id}`}>
-              <sphereGeometry args={[radius * 0.02, 16, 16]} />
-              <meshStandardMaterial color={hardnessColors[h.hardness ?? 'unknown']} />
-              <Html distanceFactor={radius * 0.1}>
-                <div className="rounded-sm px-1 py-0.5 font-mono text-[10px]" style={{ color: 'var(--color-text-primary)', backgroundColor: 'color-mix(in srgb, var(--color-surface) 75%, transparent)' }}>
-                  {h.hole_id}
-                </div>
-              </Html>
-            </mesh>
-          ))}
-          <OrbitControls enablePan enableZoom enableRotate target={center} />
+          <BlastHolesLayer holes={meshHoles} center={center} collarRadius={0.35} />
+          <OrbitControls enablePan enableZoom enableRotate target={[0, 0, 0]} />
         </Canvas>
       </div>
     </section>

@@ -8,6 +8,10 @@ export function getSessionId(): string | null {
   return currentSessionId;
 }
 
+export function setSessionId(sessionId: string | null): void {
+  currentSessionId = sessionId;
+}
+
 /**
  * Resolve the API base URL from the build-time env var.
  *

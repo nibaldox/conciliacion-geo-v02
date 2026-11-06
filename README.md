@@ -232,6 +232,9 @@ Los defaults de detección, tolerancias y física están en las dataclasses cong
 | `CONCILIACION_RATE_LIMIT_ENABLED`, `CONCILIACION_RATE_LIMIT_PER_MIN` | Activación y límite de solicitudes |
 | `CONCILIACION_LOG_LEVEL`, `CONCILIACION_LOG_FORMAT` | Nivel y formato de logs |
 | `CONCILIACION_WORKERS` | Configuración de workers |
+| `CONCILIACION_MESH_CACHE_MB` | Presupuesto en MiB de la caché compartida de payloads de mallas (`api/byte_cache.py`); 512 por defecto, valores inválidos caen al default |
+| `CONCILIACION_BLAST_CONCURRENCY` | Cálculos pesados de `/blast/*` que pueden ejecutarse a la vez (semáforo `run_blast_limited`); 2 por defecto, el resto hace cola |
+| `MALLOC_ARENA_MAX` | Arenas glibc; fijado a `2` en Docker, `render.yaml`, `dev.sh` y el sidecar de Electron. No lo lee Python |
 | `CONCILIACION_USE_SUPABASE`, `CONCILIACION_USE_R2`, `CONCILIACION_AUTH_REQUIRED` | Flags opt-in; no acreditan por sí solos una integración operativa |
 | `VITE_BASE` | Base web; `/conciliacion-geo-v02/` por defecto, `/` para portable |
 | `VITE_API_URL` | Base API usada por el cliente; `/api/v1` para proxy local/portable |
@@ -276,6 +279,20 @@ En la continuación de interfaz, una ejecución posterior tuvo 778 pruebas aprob
 El 3 de noviembre se añadieron pruebas de selección y filtros de perfil; la suite completa no se repitió tras ese cambio. Pasaron 72 pruebas focalizadas de perfil y mapeo y, después de añadir un caso de transición, el archivo de selección pasó 16/16; también aprobaron TypeScript, ESLint dirigido y build PWA.
 
 Tras el rediseño inicial de informes, se ejecutaron **167 pruebas** de datos, gráficos, Word, PDF y exportación, usando pypdf del runtime incluido para verificar extracción del PDF. La revisión visual cubrió un PDF sintético; la paginación de Word y la validación con datos reales siguen pendientes.
+
+### Verificación local — 5 de noviembre de 2026
+
+Cierre técnico de la entrega 1 de tronadura (entrada y contexto temporal) y de la entrega de colores y espacio de trabajo de Tronadura, sobre datos sintéticos y aislados y una copia QA de 11.184 pozos. Los totales de la tabla incluyen ambas entregas. **No es validación operacional**: faltan datos reales confirmados, CRS/datum y rendimiento con 20.939 pozos.
+
+| Validación | Resultado ejecutado | Alcance |
+|---|---|---|
+| Backend | 2.807 aprobadas, 10 omitidas, 12 advertencias; total 2.817 | Python 3.14.6; `MemoryMax=6G` sin swap; comandos `--ignore=tests/test_openblast.py --skip-electron --benchmark-skip-slow` (log `T14-final/backend.xml`). Una línea base de 3 GiB terminó por falta de memoria y no cuenta |
+| Frontend | 1.178 aprobadas en 100 archivos (también tras el último ajuste de la entrega de colores) | Node 22.23.0; dominio de perfiles 100 % (226/226 sentencias, 261/261 ramas, 54/54 funciones, 194/194 líneas) |
+| ESLint / build | Aprobados | ESLint completo (una advertencia de variable no usada en el spec E2E) y build web con PWA (30 entradas precache) |
+| Playwright GPU (colores de Tronadura) | 4/4 aprobadas | Capa real en React Three Fiber: color de dato, cambio de paleta, collar neutro y halo de selección; requiere `BLAST_COLORS_CHROME_PATH=/usr/sbin/google-chrome-stable` y Vite en 5173 |
+| Browser QA sintético | 2 casos × 22 comprobaciones aprobadas | Escritorio 1280 y móvil 390; componente real aislado, hook y API real; 0 errores de página; sin desbordamiento; datos sintéticos QA |
+
+La suite frontend, el build y el lint se repitieron al cerrar la entrega de colores y espacio de trabajo y aprobaron (1.178/1.178). Evidencias en `data/qa-tronadura-20261105/` y `data/qa-blast-workspace-20261105/` (ignoradas por Git). Detalles y límites en [HANDOFF.md](docs/HANDOFF.md).
 
 ### Verificación local — 24 de octubre de 2026
 

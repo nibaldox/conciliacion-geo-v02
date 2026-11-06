@@ -310,6 +310,9 @@ class BlastCorrelationResponse(BaseModel):
     rows: List[BlastCorrelationRowSchema] = Field(default_factory=list)
     tolerance: Optional[float] = None
     n_sections: int = 0
+    temporal_filter: Dict[str, Any] = Field(default_factory=dict)
+    carga: List[float] = Field(default_factory=list)
+    descarga: List[float] = Field(default_factory=list)
 
 
 class BlastDamagePointSchema(BaseModel):
@@ -360,6 +363,7 @@ class BlastDamageModelResponse(BaseModel):
     fit: Optional[BlastDamageModelFitSchema] = None
     x_metric: str = "pf_g_per_ton"
     y_metric: str = "over_break"
+    temporal_filter: Dict[str, Any] = Field(default_factory=dict)
 
 
 class BlastHoleSummary(BaseModel):
@@ -427,6 +431,7 @@ class BlastHoles3DResponse(BaseModel):
     session_id: str
     section_id: Optional[int] = None
     corridor_m: Optional[float] = None
+    data_revision: Optional[str] = None
     holes: List[BlastHole3D] = Field(default_factory=list)
     rejected_rows: List[Dict[str, Any]] = Field(default_factory=list)
     summary: BlastHoles3DSummary

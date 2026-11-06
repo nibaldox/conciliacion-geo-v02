@@ -31,6 +31,10 @@ export const LazyBlastCorrelation = lazy(() =>
   import('./results/BlastCorrelation').then(m => ({ default: m.BlastCorrelation }))
 );
 
+export const LazyBlastWorkspace = lazy(() =>
+  import('./results/BlastWorkspace').then(m => ({ default: m.BlastWorkspace }))
+);
+
 export const LazyBenchEditor = lazy(() =>
   import('./analysis/BenchEditor').then(m => ({ default: m.BenchEditor }))
 );

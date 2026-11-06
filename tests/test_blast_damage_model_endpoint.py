@@ -193,6 +193,30 @@ def test_seeded_session_returns_points_and_fit(client):
         assert math.isfinite(fit[f]), f"non-finite {f}: {fit[f]!r}"
 
 
+def test_survey_date_filters_damage_model_and_reports_same_counts(client):
+    headers = _seed_session(client)
+    session_id = headers["x-session-id"]
+    db.save_settings(session_id, {"blast_holes": [
+        {**_hole("H-early", 0.0, 10.0), "fecha_tronadura": "2026-05-01"},
+        {**_hole("H-late", 0.0, 12.0), "fecha_tronadura": "2026-05-04"},
+        {**_hole("H-missing", 0.0, 14.0), "fecha_tronadura": None},
+    ]})
+    db.save_results(session_id, [{"section": "S-01", "delta_crest": 0.3}])
+
+    resp = client.get(
+        "/api/v1/process/blast-correlation/damage-model?survey_date=2026-05-10",
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert len(data["points"]) == 1
+    assert data["points"][0]["section_name"] == "S-01"
+    assert data["temporal_filter"]["effective_cutoff_date"] == "2026-05-03"
+    assert data["temporal_filter"]["included"] == 1
+    assert data["temporal_filter"]["excluded"] == 1
+    assert data["temporal_filter"]["missing"] == 1
+
+
 def test_response_schema_is_correct(client):
     """The response validates against BlastDamageModelResponse and the
     fit shape matches BlastDamageModelFitSchema fields."""

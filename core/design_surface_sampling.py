@@ -42,6 +42,7 @@ class _TriangleAABBIndex:
         self.triangle_max = np.maximum.reduce(
             [vertices[faces[:, corner], :2] for corner in range(3)]
         )
+        self.triangle_metrics = {}
         centroids = (self.triangle_min + self.triangle_max) * 0.5
         self.order = np.arange(len(faces), dtype=np.int64)
         self.leaf_size = leaf_size
@@ -111,12 +112,7 @@ def _point_segment_distance(point: np.ndarray, start: np.ndarray, end: np.ndarra
     return float(np.linalg.norm(point - (start + fraction * segment)))
 
 
-def _triangle_hit(
-    triangle: np.ndarray,
-    point: np.ndarray,
-    xy_tolerance: float,
-) -> tuple[Optional[float], bool]:
-    """Return (interpolated Z, vertical-face-hit) for the projected triangle."""
+def _triangle_metrics(triangle: np.ndarray) -> tuple:
     projected = triangle[:, :2]
     edge_ab = projected[1] - projected[0]
     edge_ac = projected[2] - projected[0]
@@ -128,6 +124,20 @@ def _triangle_hit(
     )
     max_edge = max(edge_lengths)
     area3 = float(np.linalg.norm(np.cross(triangle[1] - triangle[0], triangle[2] - triangle[0])))
+    return edge_ab, edge_ac, area2, edge_lengths, max_edge, area3
+
+
+def _triangle_hit(
+    triangle: np.ndarray,
+    point: np.ndarray,
+    xy_tolerance: float,
+    metrics: Optional[tuple] = None,
+) -> tuple[Optional[float], bool]:
+    """Return (interpolated Z, vertical-face-hit) for the projected triangle."""
+    projected = triangle[:, :2]
+    if metrics is None:
+        metrics = _triangle_metrics(triangle)
+    edge_ab, edge_ac, area2, edge_lengths, max_edge, area3 = metrics
     if max_edge == 0.0 or abs(area2) <= max_edge * xy_tolerance:
         if area3 <= max_edge * max_edge * 1.0e-14:
             return None, False
@@ -242,7 +252,13 @@ def sample_design_surface(
         vertical_face_hit = False
         for face_id in candidate_ids:
             triangle = vertices[faces[face_id]]
-            elevation, vertical_hit = _triangle_hit(triangle, point, xy_tolerance_m)
+            metrics = index.triangle_metrics.get(face_id)
+            if metrics is None:
+                metrics = _triangle_metrics(triangle)
+                index.triangle_metrics[face_id] = metrics
+            elevation, vertical_hit = _triangle_hit(
+                triangle, point, xy_tolerance_m, metrics
+            )
             vertical_face_hit = vertical_face_hit or vertical_hit
             if elevation is not None:
                 elevations.append(elevation)

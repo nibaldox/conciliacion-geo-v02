@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import {
   buildBlastHoleGeometry,
   getBlastHoleKeyByInstanceId,
+  getBlastHoleCollarColor,
+  getBlastHoleLocalCollar,
   getBlastHoleMarkerColor,
   handleBlastHoleInstanceSelection,
   type BlastHole3D,
@@ -72,23 +74,43 @@ describe('BlastHolesLayer selection', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it('uses the highlight color for the selected marker', () => {
-    const selected = holes[0];
-    expect(getBlastHoleMarkerColor(selected, 'first', '#f97316', '#38bdf8', '#fde047')).toBe('#fde047');
-    expect(getBlastHoleMarkerColor(selected, null, '#f97316', '#38bdf8', '#fde047')).toBe('#f97316');
-    expect(getBlastHoleMarkerColor(holes[2], null, '#f97316', '#38bdf8', '#fde047')).toBe('#38bdf8');
+  it('keeps the default marker color for complete and collar-only holes', () => {
+    expect(getBlastHoleMarkerColor(holes[0], '#f97316', '#38bdf8')).toBe('#f97316');
+    expect(getBlastHoleMarkerColor(holes[2], '#f97316', '#38bdf8')).toBe('#38bdf8');
   });
 
-  it('uses the attribute palette for markers and line buffers while keeping selection visible', () => {
-    const hole: BlastHole3D = { key: 'colored', collar: [0, 0, 0], toe: [0, 0, -5], color: '#636efa' };
-    expect(getBlastHoleMarkerColor(hole, null, '#f97316', '#38bdf8', '#fde047')).toBe('#636efa');
-    expect(getBlastHoleMarkerColor(hole, 'colored', '#f97316', '#38bdf8', '#fde047')).toBe('#fde047');
+  it('ignores the data color of collars when collar coloring is disabled and keeps the line data color', () => {
+    const hole: BlastHole3D = { key: 'colored', collar: [0, 0, 0], toe: [0, 0, -5], color: '#ff0000' };
+    expect(getBlastHoleCollarColor(hole, '#f97316', '#38bdf8', false)).toBe('#f97316');
+    expect(getBlastHoleCollarColor({ ...hole, toe: null }, '#f97316', '#38bdf8', false)).toBe('#38bdf8');
+    expect(getBlastHoleCollarColor(hole, '#f97316', '#38bdf8', true)).toBe('#ff0000');
+    expect(getBlastHoleCollarColor(hole, '#f97316', '#38bdf8')).toBe('#ff0000');
     const data = buildBlastHoleGeometry([hole]);
-    const color = new THREE.Color('#636efa');
+    const red = new THREE.Color('#ff0000');
+    expect(Array.from(data.lineColors)).toEqual([red.r, red.g, red.b, red.r, red.g, red.b]);
+  });
+
+  it('keeps the data color for the selected marker and the line buffers', () => {
+    const hole: BlastHole3D = { key: 'colored', collar: [0, 0, 0], toe: [0, 0, -5], color: '#ff0000' };
+    expect(getBlastHoleMarkerColor(hole, '#f97316', '#38bdf8')).toBe('#ff0000');
+    const data = buildBlastHoleGeometry([hole]);
+    const red = new THREE.Color('#ff0000');
     expect(Array.from(data.lineColors)).toEqual([
-      expect.closeTo(color.r), expect.closeTo(color.g), expect.closeTo(color.b),
-      expect.closeTo(color.r), expect.closeTo(color.g), expect.closeTo(color.b),
+      red.r, red.g, red.b, red.r, red.g, red.b,
     ]);
+  });
+
+  it('places the selection halo at the local collar of the selected hole only', () => {
+    const haloHoles: BlastHole3D[] = [
+      { key: 'a', collar: [10, 7, 20] as const },
+      { key: 'b', collar: [-4, 3, 5] as const },
+      { key: 'missing', collar: null },
+    ];
+    expect(getBlastHoleLocalCollar(haloHoles, 'b', [0, 0, 0])).toEqual([-4, 5, -3]);
+    expect(getBlastHoleLocalCollar(haloHoles, 'b', [1, 2, 3])).toEqual([-5, 2, -1]);
+    expect(getBlastHoleLocalCollar(haloHoles, 'missing', [0, 0, 0])).toBeNull();
+    expect(getBlastHoleLocalCollar(haloHoles, 'unknown', [0, 0, 0])).toBeNull();
+    expect(getBlastHoleLocalCollar(haloHoles, null, [0, 0, 0])).toBeNull();
   });
 
   it('returns the same selected hole from a batched Three.js raycast as the original flat instance list', () => {

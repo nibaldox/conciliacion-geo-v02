@@ -9,11 +9,15 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import functools
 import io
 import logging
 import math
 import hashlib
-from typing import Dict, List, Optional
+import json
+import threading
+from collections import OrderedDict
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,6 +25,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 
 import api.database as db
 import api.schemas as schemas
+from api._async_db import run_blast_limited
 from api.blast_identity import blast_hole_id, blast_row_ids
 from core.calculo_tronadura import procesar_pozos
 from core.column_utils import KILOS_CANDIDATES, first_present_column
@@ -40,6 +45,14 @@ def _run_in_executor(func, *args):
 
 
 router = APIRouter(prefix="/blast", tags=["blast"])
+
+from api.blast_import import mapping_errors, preview_payload, read_blast_file
+from core.blast_dates import (
+    BlastDateContractError,
+    apply_date_column,
+    date_event_warnings,
+    validate_date_contract,
+)
 
 _LENGTH_CANDIDATES = ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
 _TACO_CANDIDATES = ("Taco_m", "Taco", "Stemming")
@@ -73,21 +86,39 @@ def _resolve_design_xy_columns(
     return resolved_x, resolved_y
 
 
-def _sample_uploaded_design_surface(content: bytes, mesh_id: str):
+def _sample_uploaded_design_surface(content: bytes, mesh_id: str, filename: str = "upload.csv", sheet_name: Optional[str] = None, column_map: Optional[dict[str, str | None]] = None):
     from core.design_surface_sampling import sample_design_surface
 
-    csv_df = pd.read_csv(
-        io.StringIO(_decode_csv_bytes(content)),
-        engine="python",
-        on_bad_lines="warn",
-    )
-    x_column, y_column = _resolve_design_xy_columns(csv_df)
+    csv_df, headers, _, _ = read_blast_file(content, filename, sheet_name)
+    if column_map:
+        x_column, y_column = column_map.get("X"), column_map.get("Y")
+        if not x_column or not y_column or x_column not in headers or y_column not in headers:
+            raise ValueError("El mapeo confirmado debe incluir columnas existentes para X e Y.")
+    else:
+        x_column, y_column = _resolve_design_xy_columns(csv_df)
     design_mesh = db.get_trimesh_by_id(mesh_id)
     samples = sample_design_surface(design_mesh, csv_df[[x_column, y_column]].to_numpy())
     mesh_info = db.get_mesh_by_id(mesh_id)
     if not mesh_info or not mesh_info.get("data"):
         raise ValueError("design mesh blob unavailable")
     return samples, {"X": x_column, "Y": y_column}, hashlib.sha256(mesh_info["data"]).hexdigest()
+
+
+@router.post("/preview")
+async def preview_blast_file(
+    file: UploadFile = File(...),
+    sheet_name: Optional[str] = Form(None),
+):
+    content = await file.read()
+    try:
+        frame, headers, sheets, encoding = read_blast_file(content, file.filename or "", sheet_name, preview=True)
+    except ValueError as exc:
+        raise HTTPException(400, detail={"error_code": "BLAST_FILE_INVALID", "message": str(exc)}) from exc
+    if frame.empty:
+        raise HTTPException(400, detail={"error_code": "BLAST_FILE_EMPTY", "message": "El archivo no contiene filas."})
+    if len(headers) != len(set(headers)):
+        raise HTTPException(400, detail={"error_code": "DUPLICATE_COLUMNS", "message": "El archivo contiene encabezados duplicados."})
+    return preview_payload(frame, headers, sheets, sheet_name or (sheets[0] if sheets else None), encoding)
 
 
 def _read_uploaded_csv(file: UploadFile) -> pd.DataFrame:
@@ -308,6 +339,12 @@ def _build_upload_payload(
     design_surface_mesh_id: Optional[str] = None,
     design_surface_sha256: Optional[str] = None,
     coordinate_column_map: Optional[dict[str, str]] = None,
+    filename: str = "upload.csv",
+    sheet_name: Optional[str] = None,
+    column_map: Optional[dict[str, str | None]] = None,
+    *,
+    date_source_column: Optional[str] = None,
+    date_format: Optional[str] = None,
 ) -> dict:
     """Run the full blast-upload pipeline off the event-loop thread.
 
@@ -320,24 +357,27 @@ def _build_upload_payload(
     whether to map that to a 4xx status code, but the body never loses
     the rejection detail (remediación 3.2).
     """
-    if isinstance(file_bytes, bytes):
-        content = _decode_csv_bytes(file_bytes)
-    else:
-        content = file_bytes
-
     try:
-        df = pd.read_csv(io.StringIO(content), engine="python", on_bad_lines="warn")
-    except Exception as exc:
-        raise HTTPException(400, f"Invalid CSV: {exc}")
+        df, headers, _, _ = read_blast_file(file_bytes if isinstance(file_bytes, bytes) else file_bytes.encode(), filename, sheet_name)
+    except ValueError as exc:
+        raise HTTPException(400, f"Invalid upload: {exc}") from exc
 
     if df.empty:
         raise HTTPException(400, "CSV file is empty")
 
-    if coordinate_column_map:
+    if coordinate_column_map and not column_map:
         for canonical, source in coordinate_column_map.items():
             compatibility_alias = {"X": "Latitud_Geo", "Y": "Longitud_Geo"}.get(canonical)
             if compatibility_alias and compatibility_alias not in df.columns:
                 df[compatibility_alias] = df[source]
+    processing_map = column_map
+    if column_map and design_surface_samples is not None and not column_map.get("Z_collar"):
+        df["__design_surface_z_pending"] = 0.0
+        processing_map = {**column_map, "Z_collar": "__design_surface_z_pending"}
+
+    date_counts = None
+    if date_source_column is not None:
+        date_counts = apply_date_column(df, date_source_column, date_format)
 
     n_rows_input = len(df)
 
@@ -358,7 +398,8 @@ def _build_upload_payload(
             design_surface_samples=design_surface_samples,
             design_surface_mesh_id=design_surface_mesh_id,
             design_surface_sha256=design_surface_sha256,
-            column_map=None,
+            column_map=processing_map,
+            preserve_invalid_mapped_rows=column_map is not None,
         )
     except KeyError as exc:
         blocking_errors.append({
@@ -387,6 +428,9 @@ def _build_upload_payload(
             rows_received=n_rows_input,
         )
         result.blocking_errors = list(blocking_errors)
+
+    if date_counts is not None:
+        result.event_warnings.extend(date_event_warnings(date_counts, date_source_column, date_format))
 
     source_inclination = config.inclination_source_column
     if source_inclination in df.columns and not df.empty:
@@ -459,6 +503,7 @@ async def upload_blast_csv(
     request: Request,
     file: UploadFile = File(..., description="Blast-hole CSV"),
     session_id: str = Form(..., description="Session UUID"),
+    compact: bool = Query(False, description="Omit accepted_rows from successful responses"),
     geometry_configuration_version: Optional[str] = Form(
         None, description="OBLIGATORIO v2: versión exacta del contrato geométrico"
     ),
@@ -519,8 +564,12 @@ async def upload_blast_csv(
     sign_source_rule: Optional[str] = Form(None, description="LEGACY"),
     az_convention: Optional[str] = Form(None, description="LEGACY"),
     design_surface_mode: Optional[str] = Form(None, description="Opt-in: sample_design"),
+    sheet_name: Optional[str] = Form(None),
+    column_map: Optional[str] = Form(None),
     collar_elevation_source: Optional[str] = Form(None),
     spatial_reference_confirmed: Optional[bool] = Form(None),
+    date_source_column: Optional[str] = Form(None, description="Opcional: encabezado exacto de la columna de fecha"),
+    date_format: Optional[str] = Form(None, description="Obligatorio con date_source_column: ISO | DMY | MDY"),
 ) -> schemas.BlastUploadResponse:
     """Accept a blast-hole CSV, parse it, compute charge metrics, and persist.
 
@@ -535,7 +584,7 @@ async def upload_blast_csv(
     """
     form = await request.form()
     allowed_fields = {
-        "file", "session_id", "bench_height_m",
+        "file", "session_id", "bench_height_m", "sheet_name", "column_map",
         "geometry_configuration_version", "geometry_user_confirmed",
         "inclination_source_column", "inclination_convention",
         "inclination_sign_convention", "inclination_unit",
@@ -544,6 +593,7 @@ async def upload_blast_csv(
         "incl_source_column", "incl_convention", "incl_sign_convention",
         "sign_source_rule", "az_source_column", "az_convention",
         "design_surface_mode", "collar_elevation_source", "spatial_reference_confirmed",
+        "date_source_column", "date_format",
     }
     unknown_fields = sorted(set(form.keys()) - allowed_fields)
     if unknown_fields:
@@ -685,6 +735,46 @@ async def upload_blast_csv(
     except Exception as exc:
         raise HTTPException(400, f"Could not read uploaded file: {exc}")
 
+    date_selected = date_source_column not in (None, "")
+    if date_format not in (None, "") and not date_selected:
+        raise HTTPException(400, detail={"error_code": "DATE_COLUMN_REQUIRED", "message": "Seleccione la columna de fecha antes de declarar el formato."})
+
+    confirmed_map = None
+    upload_headers: Optional[list[str]] = None
+    if column_map is not None:
+        try:
+            confirmed_map = json.loads(column_map)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(400, detail={"error_code": "COLUMN_MAP_INVALID", "message": "column_map debe ser JSON válido."}) from exc
+        if not isinstance(confirmed_map, dict):
+            raise HTTPException(400, detail={"error_code": "COLUMN_MAP_INVALID", "message": "column_map debe ser un objeto JSON."})
+        try:
+            _, headers, _, _ = await _run_in_executor(
+                read_blast_file, content, file.filename or "", sheet_name, True
+            )
+        except ValueError as exc:
+            raise HTTPException(400, detail={"error_code": "BLAST_FILE_INVALID", "message": str(exc)}) from exc
+        upload_headers = headers
+        errors = mapping_errors(confirmed_map, headers, allow_missing_z=design_surface_mode == "sample_design" or collar_elevation_source == "design_surface")
+        if errors:
+            raise HTTPException(400, detail={"error_code": "COLUMN_MAP_INVALID", "message": "El mapeo no es válido.", "details": {"errors": errors}})
+        confirmed_map = {key: (value or None) for key, value in confirmed_map.items()}
+        if confirmed_map.get("Incl") != final_incl_col or confirmed_map.get("Az") != final_az_col:
+            raise HTTPException(400, detail={"error_code": "GEOMETRY_COLUMN_MAP_CONFLICT", "message": "Las columnas geométricas confirmadas deben coincidir con el mapeo de inclinación y azimut."})
+
+    if date_selected:
+        if upload_headers is None:
+            try:
+                _, upload_headers, _, _ = await _run_in_executor(
+                    read_blast_file, content, file.filename or "", sheet_name, True
+                )
+            except ValueError as exc:
+                raise HTTPException(400, detail={"error_code": "BLAST_FILE_INVALID", "message": str(exc)}) from exc
+        try:
+            validate_date_contract(date_source_column, date_format, upload_headers, confirmed_map)
+        except BlastDateContractError as exc:
+            raise HTTPException(400, detail={"error_code": exc.error_code, "message": str(exc), "details": exc.details}) from exc
+
     design_samples = None
     design_mesh_id = None
     design_sha256 = None
@@ -702,14 +792,23 @@ async def upload_blast_csv(
             raise HTTPException(404, detail={"error_code": "DESIGN_SURFACE_NOT_FOUND"})
         try:
             design_samples, coordinate_column_map, design_sha256 = await _run_in_executor(
-                _sample_uploaded_design_surface, content, mesh_info["id"]
+                _sample_uploaded_design_surface, content, mesh_info["id"], file.filename or "", sheet_name, confirmed_map
             )
             design_mesh_id = mesh_info["id"]
         except Exception as exc:
             raise HTTPException(400, detail={"error_code": "DESIGN_SURFACE_SAMPLING_FAILED", "message": str(exc)}) from exc
 
     try:
-        payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m, design_samples, design_mesh_id, design_sha256, coordinate_column_map)
+        if date_selected:
+            payload = await _run_in_executor(
+                functools.partial(
+                    _build_upload_payload, date_source_column=date_source_column, date_format=date_format
+                ),
+                content, config, bench_height_m, design_samples, design_mesh_id, design_sha256,
+                coordinate_column_map, file.filename or "upload.csv", sheet_name, confirmed_map,
+            )
+        else:
+            payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m, design_samples, design_mesh_id, design_sha256, coordinate_column_map, file.filename or "upload.csv", sheet_name, confirmed_map)
     except GeometryConfigurationError as exc:
         # The processor may raise GEOMETRY errors after the contract check
         # (e.g. declared source column not found in dataset).
@@ -790,6 +889,10 @@ async def upload_blast_csv(
             status_code=422,
             content=response_body.model_dump(),
         )
+    if compact:
+        return JSONResponse(
+            content=response_body.model_dump(mode="json", exclude={"accepted_rows"}),
+        )
     return response_body
 
 
@@ -800,6 +903,19 @@ def _build_hole_summaries(records: List[Dict[str, object]]) -> List[schemas.Blas
 # ---------------------------------------------------------------------------
 # GET /blast/{session_id}/holes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/{session_id}/summary")
+async def get_blast_holes_summary(session_id: str, request: Request) -> dict[str, int]:
+    if session_id != request.state.session_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"error_code": "SESSION_ID_MISMATCH"},
+        )
+    settings = db.get_settings(session_id) or {}
+    records = settings.get("blast_holes", [])
+    n_holes = len(records) if isinstance(records, list) else 0
+    return {"n_holes": n_holes}
 
 
 @router.get("/{session_id}/holes")
@@ -814,7 +930,7 @@ async def get_blast_holes(
     if not isinstance(raw, list):
         return schemas.BlastHolesResponse(session_id=session_id, holes=[])
 
-    holes = await _run_in_executor(_build_hole_summaries, raw)
+    holes = await run_blast_limited(_build_hole_summaries, raw)
     return schemas.BlastHolesResponse(session_id=session_id, holes=holes)
 
 
@@ -848,13 +964,54 @@ def _rejected_source_row_count(
     return len(source_indices) if source_indices else len(rejected_rows)
 
 
+def _blast_holes_digest(source: List[object]) -> str:
+    payload = json.dumps(
+        source,
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+_DATA_REVISION_CACHE_MAX = 8
+_DATA_REVISION_CACHE: "OrderedDict[Tuple[str, str, int], str]" = OrderedDict()
+_DATA_REVISION_CACHE_LOCK = threading.RLock()
+
+
+def _data_revision(
+    settings: Dict[str, object],
+    session_id: Optional[str] = None,
+    settings_version: Optional[int] = None,
+) -> Optional[str]:
+    source = settings.get("blast_holes")
+    if not isinstance(source, list) or not source:
+        return None
+    cache_key = None
+    if session_id is not None and settings_version is not None:
+        cache_key = (str(db.DB_PATH), session_id, int(settings_version))
+        with _DATA_REVISION_CACHE_LOCK:
+            cached = _DATA_REVISION_CACHE.get(cache_key)
+            if cached is not None:
+                _DATA_REVISION_CACHE.move_to_end(cache_key)
+                return cached
+    digest = _blast_holes_digest(source)
+    if cache_key is not None:
+        with _DATA_REVISION_CACHE_LOCK:
+            _DATA_REVISION_CACHE[cache_key] = digest
+            _DATA_REVISION_CACHE.move_to_end(cache_key)
+            while len(_DATA_REVISION_CACHE) > _DATA_REVISION_CACHE_MAX:
+                _DATA_REVISION_CACHE.popitem(last=False)
+    return digest
+
+
 def _build_holes_3d(
     settings: Dict[str, object],
     session_id: str,
     section=None,
     corridor_m: Optional[float] = None,
     section_id: Optional[int] = None,
+    settings_version: Optional[int] = None,
 ) -> schemas.BlastHoles3DResponse:
+    data_revision = _data_revision(settings, session_id, settings_version)
     records = settings.get("blast_holes", [])
     records = records if isinstance(records, list) else []
     records = [record if isinstance(record, dict) else {} for record in records]
@@ -927,6 +1084,7 @@ def _build_holes_3d(
         session_id=session_id,
         section_id=section_id,
         corridor_m=corridor_m if section_id is not None else None,
+        data_revision=data_revision,
         holes=output,
         rejected_rows=rejected,
         summary=schemas.BlastHoles3DSummary(
@@ -946,6 +1104,7 @@ async def get_blast_holes_3d(
 ) -> schemas.BlastHoles3DResponse:
     """Return compact collar/toe coordinates and provenance for the session."""
     session_id = request.state.session_id
+    settings_version = db.read_settings_version(session_id)
     settings = db.get_settings(session_id) or {}
     section = None
     if section_id is not None:
@@ -958,6 +1117,8 @@ async def get_blast_holes_3d(
             section = _section_from_dict(section_rows[section_id])
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(400, detail={"error_code": "SECTION_INVALID"}) from exc
-    return await _run_in_executor(
-        _build_holes_3d, settings, session_id, section, corridor_m, section_id
+    if db.read_settings_version(session_id) != settings_version:
+        settings_version = None
+    return await run_blast_limited(
+        _build_holes_3d, settings, session_id, section, corridor_m, section_id, settings_version
     )

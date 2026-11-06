@@ -87,9 +87,9 @@ export function buildDamageTraces(
  * matches the established Dashboard Plotly pattern (transparent bg, CSS
  * variable font color, compact margins).
  */
-export function PowderFactorDamagePanel() {
+export function PowderFactorDamagePanel({ surveyDate }: { surveyDate?: string } = {}) {
   const { t } = useTranslation();
-  const { data } = useBlastDamageModel();
+  const { data } = useBlastDamageModel(surveyDate);
   const colors = useBlastChartColors();
 
   const points = data?.points ?? [];

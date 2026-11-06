@@ -26,7 +26,7 @@ vi.mock('../../../api/hooks', () => ({
     data: undefined,
     error: null,
   })),
-  useBlastHolesBySession: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  useBlastSessionSummary: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
   useCreateBlastSimulation: vi.fn(() => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),

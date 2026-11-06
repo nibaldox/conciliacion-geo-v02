@@ -24,6 +24,10 @@ if [[ ! -d web/node_modules ]]; then
 fi
 
 # --- Start backend -----------------------------------------------------------
+# Cap glibc malloc arenas (mirrors Dockerfile-api): /blast/* parses ~79 MB and
+# builds thousands of models, and the default per-thread arenas fragment the
+# heap. Override by exporting MALLOC_ARENA_MAX before running this script.
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
 echo "📡 Starting API server on :8000..."
 .venv/bin/uvicorn api.main:app --reload --port 8000 --host localhost \
   > /tmp/conciliacion-api.log 2>&1 &

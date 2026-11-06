@@ -14,6 +14,7 @@ import math
 import os
 import tempfile
 import warnings
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +26,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 import api.database as db
 import api.schemas as schemas
+from api._async_db import run_blast_limited
 from api.blast_identity import blast_hole_id, blast_row_ids
 from core import (
     load_mesh,
@@ -44,6 +46,7 @@ from core.param_extractor import (
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.blast_correlation import compute_blast_geotech_correlation
 from core.blast_model import fit_powder_factor_damage_model
+from core.column_utils import KILOS_CANDIDATES, first_present_column
 from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 from core.design_achievement import (
     build_design_achievement_summary,
@@ -1130,7 +1133,7 @@ async def get_blast_holes(
         session_id = await _run_in_executor(
             db.get_or_create_session, request.state.session_id
         )
-        return await _run_in_executor(
+        return await run_blast_limited(
             _project_blast_holes_sync,
             session_id,
             section_id,
@@ -1152,6 +1155,7 @@ async def get_blast_holes(
 def _resolve_blast_correlation_rows(
     session_id: str,
     tolerance: Optional[float],
+    survey_date: Optional[date] = None,
 ):
     """Resolve the session's ``BlastCorrelationRow`` list.
 
@@ -1166,6 +1170,9 @@ def _resolve_blast_correlation_rows(
     sections_raw = db.get_sections(session_id)
     df_holes = _load_session_blast_holes(session_id)
     comparisons = db.get_results(session_id)
+    temporal_filter = _build_temporal_filter(df_holes, survey_date)
+    if survey_date is not None and df_holes is not None:
+        df_holes = _filter_blast_holes_by_survey_date(df_holes, survey_date)
 
     resolved_tolerance = (
         float(tolerance) if tolerance is not None
@@ -1178,7 +1185,7 @@ def _resolve_blast_correlation_rows(
         or not sections_raw
         or not comparisons
     ):
-        return [], sections_raw, resolved_tolerance
+        return [], sections_raw, resolved_tolerance, temporal_filter, _blast_histogram_values(df_holes)
 
     settings = db.get_settings(session_id) or {}
     blast = settings.get("blast") or {}
@@ -1194,12 +1201,105 @@ def _resolve_blast_correlation_rows(
         height_fallback_m=height_fallback_m,
         sector_density=sector_density,
     )
-    return rows, sections_raw, resolved_tolerance
+    return rows, sections_raw, resolved_tolerance, temporal_filter, _blast_histogram_values(df_holes)
+
+
+def _blast_histogram_values(df_holes: Optional[pd.DataFrame]) -> tuple[list[float], list[float]]:
+    if df_holes is None or df_holes.empty:
+        return [], []
+    if "kg_per_meter" in df_holes.columns:
+        carga = pd.to_numeric(df_holes["kg_per_meter"], errors="coerce")
+    else:
+        kg_column = first_present_column(df_holes, KILOS_CANDIDATES)
+        length_column = first_present_column(
+            df_holes, ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
+        )
+        if kg_column is not None and length_column is not None:
+            kilos = pd.to_numeric(df_holes[kg_column], errors="coerce")
+            length = pd.to_numeric(df_holes[length_column], errors="coerce")
+            carga = (kilos / length).where(length > 0)
+        else:
+            carga = pd.Series(dtype=float)
+    if "altura_carga_m" in df_holes.columns:
+        descarga = pd.to_numeric(df_holes["altura_carga_m"], errors="coerce")
+    else:
+        length_column = first_present_column(
+            df_holes, ("Len", "longitud_real", "Longitud", "Length", "Profundidad")
+        )
+        taco_column = first_present_column(df_holes, ("Taco_m", "Taco", "Stemming"))
+        if length_column is not None and taco_column is not None:
+            length = pd.to_numeric(df_holes[length_column], errors="coerce")
+            taco = pd.to_numeric(df_holes[taco_column], errors="coerce")
+            descarga = (length - taco).clip(lower=0.0)
+        else:
+            descarga = pd.Series(dtype=float)
+    return (
+        [float(value) for value in carga if pd.notna(value) and np.isfinite(value)],
+        [float(value) for value in descarga if pd.notna(value) and np.isfinite(value)],
+    )
+
+
+def _build_temporal_filter(
+    df_holes: Optional[pd.DataFrame], survey_date: Optional[date]
+) -> dict:
+    total = 0 if df_holes is None else len(df_holes)
+    date_column = "fecha_tronadura"
+    if survey_date is None:
+        missing = total
+        if df_holes is not None and date_column in df_holes.columns:
+            dates = pd.to_datetime(df_holes[date_column], errors="coerce")
+            missing = int(dates.isna().sum())
+        return {
+            "enabled": False,
+            "survey_date": None,
+            "effective_cutoff_date": None,
+            "buffer_days": DEFAULTS.blast_temporal_filter_days,
+            "policy": "inactive: all holes are included; missing dates are reported separately",
+            "included": total,
+            "excluded": 0,
+            "missing": missing,
+            "total": total,
+        }
+
+    buffer_days = int(DEFAULTS.blast_temporal_filter_days)
+    cutoff = survey_date - timedelta(days=buffer_days)
+    if df_holes is None or date_column not in df_holes.columns:
+        missing = total
+        included = excluded = 0
+    else:
+        dates = pd.to_datetime(df_holes[date_column], errors="coerce").dt.date
+        missing_mask = dates.isna()
+        eligible_mask = dates.notna() & (dates <= cutoff)
+        missing = int(missing_mask.sum())
+        included = int(eligible_mask.sum())
+        excluded = total - missing - included
+    return {
+        "enabled": True,
+        "survey_date": survey_date.isoformat(),
+        "effective_cutoff_date": cutoff.isoformat(),
+        "buffer_days": buffer_days,
+        "policy": "include known blast dates on or before effective_cutoff_date; exclude later known dates; never include missing or invalid dates",
+        "included": included,
+        "excluded": excluded,
+        "missing": missing,
+        "total": total,
+    }
+
+
+def _filter_blast_holes_by_survey_date(
+    df_holes: pd.DataFrame, survey_date: date
+) -> pd.DataFrame:
+    if df_holes.empty or "fecha_tronadura" not in df_holes.columns:
+        return df_holes.iloc[0:0].copy()
+    cutoff = survey_date - timedelta(days=int(DEFAULTS.blast_temporal_filter_days))
+    dates = pd.to_datetime(df_holes["fecha_tronadura"], errors="coerce").dt.date
+    return df_holes.loc[dates.notna() & (dates <= cutoff)].copy()
 
 
 def _build_blast_correlation_sync(
     session_id: str,
     tolerance: Optional[float],
+    survey_date: Optional[date] = None,
 ) -> schemas.BlastCorrelationResponse:
     """Build the blast↔geotech correlation response off the event loop.
 
@@ -1207,8 +1307,8 @@ def _build_blast_correlation_sync(
     mapping run on the default executor so the event loop isn't blocked
     while the (potentially large) correlation table is assembled.
     """
-    rows, sections_raw, resolved_tolerance = _resolve_blast_correlation_rows(
-        session_id, tolerance
+    rows, sections_raw, resolved_tolerance, temporal_filter, histogram_values = _resolve_blast_correlation_rows(
+        session_id, tolerance, survey_date
     )
 
     schema_rows = [
@@ -1237,6 +1337,9 @@ def _build_blast_correlation_sync(
         rows=schema_rows,
         tolerance=resolved_tolerance,
         n_sections=len(sections_raw),
+        temporal_filter=temporal_filter,
+        carga=histogram_values[0],
+        descarga=histogram_values[1],
     )
 
 
@@ -1244,6 +1347,7 @@ def _build_blast_correlation_sync(
 async def get_blast_correlation(
     request: Request,
     tolerance: Optional[float] = None,
+    survey_date: Optional[date] = Query(default=None),
 ):
     """Per-section blast↔geotech correlation summary, including powder factor.
 
@@ -1290,8 +1394,8 @@ async def get_blast_correlation(
         session_id = await _run_in_executor(
             db.get_or_create_session, request.state.session_id
         )
-        return await _run_in_executor(
-            _build_blast_correlation_sync, session_id, tolerance
+        return await run_blast_limited(
+            _build_blast_correlation_sync, session_id, tolerance, survey_date
         )
     except HTTPException:
         raise
@@ -1308,6 +1412,7 @@ async def get_blast_correlation(
 def _build_damage_model_sync(
     session_id: str,
     tolerance: Optional[float],
+    survey_date: Optional[date] = None,
 ) -> schemas.BlastDamageModelResponse:
     """Fit the PF↔damage OLS model off the event loop.
 
@@ -1315,8 +1420,8 @@ def _build_damage_model_sync(
     schema assembly all happen on the default executor so the event
     loop isn't blocked while the fit is computed.
     """
-    rows, _sections_raw, _tol = _resolve_blast_correlation_rows(
-        session_id, tolerance
+    rows, _sections_raw, _tol, temporal_filter, _histogram_values = _resolve_blast_correlation_rows(
+        session_id, tolerance, survey_date
     )
 
     # Build the (PF, overbreak) sample, dropping zero/NaN PF rows so the
@@ -1362,6 +1467,7 @@ def _build_damage_model_sync(
         fit=fit_schema,
         x_metric="pf_g_per_ton",
         y_metric="over_break",
+        temporal_filter=temporal_filter,
     )
 
 
@@ -1369,6 +1475,7 @@ def _build_damage_model_sync(
 async def get_blast_correlation_damage_model(
     request: Request,
     tolerance: Optional[float] = None,
+    survey_date: Optional[date] = Query(default=None),
 ):
     """OLS fit of mean overbreak against the per-mass powder factor.
 
@@ -1411,8 +1518,8 @@ async def get_blast_correlation_damage_model(
         session_id = await _run_in_executor(
             db.get_or_create_session, request.state.session_id
         )
-        return await _run_in_executor(
-            _build_damage_model_sync, session_id, tolerance
+        return await run_blast_limited(
+            _build_damage_model_sync, session_id, tolerance, survey_date
         )
     except HTTPException:
         raise

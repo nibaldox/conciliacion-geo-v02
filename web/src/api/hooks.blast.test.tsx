@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import client from './client';
 import { useSession } from '../stores/session';
 import {
   extractBlastErrorDiagnostics,
   useUploadBlastCsv,
+  useBlastCorrelation,
+  useBlastDamageModel,
+  buildBlastUploadFormData,
   type BlastGeometryForm,
 } from './hooks';
 
@@ -22,6 +25,44 @@ const geometry: BlastGeometryForm = {
   azimuth_convention: 'CLOCKWISE_FROM_NORTH',
   azimuth_unit: 'RADIANS',
 };
+
+describe('blast analysis context', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('sends the same survey date to correlation and the damage model and refetches for a changed date', async () => {
+    useSession.setState({ demoMode: false });
+    const get = vi.spyOn(client, 'get').mockResolvedValue({ data: { rows: [], points: [], fit: null } });
+    const view = renderHook(({ date }) => ({ correlation: useBlastCorrelation(date), damage: useBlastDamageModel(date) }), { initialProps: { date: '2026-11-04' }, wrapper: wrapper() });
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/process/blast-correlation', { params: { survey_date: '2026-11-04' } }));
+    expect(get).toHaveBeenCalledWith('/process/blast-correlation/damage-model', { params: { survey_date: '2026-11-04' } });
+    view.rerender({ date: '2026-10-01' });
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/process/blast-correlation/damage-model', { params: { survey_date: '2026-10-01' } }));
+  });
+
+  it('carries the confirmed column map and worksheet with the geometry contract', () => {
+    const form = buildBlastUploadFormData('session', new File([''], 'pozos.xlsx'), { ...geometry, column_map: { X: 'Este real', Y: 'Norte real' }, sheet_name: 'Pozos 2026' });
+    expect(JSON.parse(String(form.get('column_map')))).toEqual({ X: 'Este real', Y: 'Norte real' });
+    expect(form.get('sheet_name')).toBe('Pozos 2026');
+  });
+
+  it('serializes the explicit date source and format as top-level multipart fields outside column_map', () => {
+    const form = buildBlastUploadFormData('session', new File([''], 'pozos.csv'), {
+      ...geometry,
+      column_map: { X: 'Este real' },
+      date_source_column: 'Fecha tronadura ',
+      date_format: 'DMY',
+    });
+    expect(form.get('date_source_column')).toBe('Fecha tronadura ');
+    expect(form.get('date_format')).toBe('DMY');
+    expect(JSON.parse(String(form.get('column_map')))).toEqual({ X: 'Este real' });
+  });
+
+  it('omits date fields from multipart when no date source is selected', () => {
+    const form = buildBlastUploadFormData('session', new File([''], 'pozos.csv'), { ...geometry, date_format: 'ISO' });
+    expect(form.has('date_source_column')).toBe(false);
+    expect(form.has('date_format')).toBe(false);
+  });
+});
 
 function wrapper(queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } })) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -46,6 +87,8 @@ describe('useUploadBlastCsv production request', () => {
     });
 
     const form = post.mock.calls[0][1] as FormData;
+    expect(post.mock.calls[0][0]).toBe('/blast/upload');
+    expect((post.mock.calls[0][2] as { params?: Record<string, unknown> }).params).toEqual({ compact: true });
     const entries = Object.fromEntries(form.entries());
     expect(Object.keys(entries).sort()).toEqual([
       'azimuth_convention',
@@ -101,13 +144,13 @@ describe('useUploadBlastCsv production request', () => {
       });
     });
 
-    expect(invalidate).toHaveBeenCalledTimes(3);
+    expect(invalidate).toHaveBeenCalledTimes(4);
     const invalidatedKeys = invalidate.mock.calls.map(([filters]) => {
       if (!filters) throw new Error('invalidateQueries se llamó sin filtros');
       return filters.queryKey;
     });
     expect(invalidatedKeys).toEqual([
-      ['blast-holes-3d'], ['blast-holes-by-session'], ['blast-holes'],
+      ['blast-holes-3d'], ['blast-holes-by-session'], ['blast-summary'], ['blast-holes'],
     ]);
     expect(useSession.getState().selectedBlastHoleRowId).toBeNull();
   });

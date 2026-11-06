@@ -2,20 +2,54 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import i18n from '../../i18n';
+import type { BlastImportPreview } from '../../api/blastImport';
 
 vi.mock('../../api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/client')>();
   return { ...actual, getSessionId: () => 'session-integration' };
 });
 
+const { mockPreview } = vi.hoisted(() => ({ mockPreview: vi.fn() }));
+vi.mock('../../api/blastImport', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/blastImport')>();
+  return { ...actual, previewBlastImport: (...args: unknown[]) => mockPreview(...args) };
+});
+
 const { default: client } = await import('../../api/client');
 const { BlastUploader } = await import('./BlastUploader');
+
+const PREVIEW_HEADERS = [
+  'Latitud_Geo', 'Longitud_Geo', 'Cota_Collar', 'Inclinacion_real', 'Azimuth_real', 'longitud_real',
+  'Burden', 'Espaciamiento', 'Diametro', 'Tipo_Explosivo', 'Taco', 'Secuencia', 'Retardo_ms', 'Fila',
+  'Carga_Fondo_kg', 'Carga_Columna_kg', 'Longitud_Carga_m', 'Tipo_Pozo', 'Azimuth_Diseno', 'Inclinacion_Diseno',
+];
+
+const PREVIEW_MAPPING: Record<string, string> = {
+  X: 'Latitud_Geo', Y: 'Longitud_Geo', Z_collar: 'Cota_Collar', Incl: 'Inclinacion_real', Az: 'Azimuth_real',
+  Len: 'longitud_real', Burden: 'Burden', Esp: 'Espaciamiento', Diam_mm: 'Diametro', Tipo_Explosivo: 'Tipo_Explosivo',
+  Taco_m: 'Taco', Secuencia: 'Secuencia', Retardo_ms: 'Retardo_ms', Fila: 'Fila', Carga_Fondo_kg: 'Carga_Fondo_kg',
+  Carga_Columna_kg: 'Carga_Columna_kg', Longitud_Carga_m: 'Longitud_Carga_m', Tipo_Pozo: 'Tipo_Pozo',
+  Az_Diseno: 'Azimuth_Diseno', Incl_Diseno: 'Inclinacion_Diseno',
+};
+
+const previewFixture: BlastImportPreview = {
+  file_type: 'csv',
+  encoding: 'utf-8',
+  sheets: [],
+  sheet_name: null,
+  headers: PREVIEW_HEADERS,
+  preview: [Object.fromEntries(PREVIEW_HEADERS.map((header) => [header, 1]))],
+  suggested_mapping: PREVIEW_MAPPING,
+  confidence: Object.fromEntries(Object.keys(PREVIEW_MAPPING).map((key) => [key, { kind: 'exact', score: 1 }])),
+  missing_required: [],
+};
 
 function select(testId: string, value: string) {
   fireEvent.change(screen.getByTestId(testId), { target: { value } });
 }
 
-function completeContract() {
+async function completeContract() {
+  await waitFor(() => expect(screen.getByTestId('mapping-confirmed')).toBeInTheDocument());
   fireEvent.change(screen.getByTestId('incl-source-column'), { target: { value: 'Inclinacion_real' } });
   fireEvent.change(screen.getByTestId('az-source-column'), { target: { value: 'Azimuth_real' } });
   select('incl-convention', 'FROM_VERTICAL');
@@ -23,6 +57,7 @@ function completeContract() {
   select('incl-unit', 'DEGREES');
   select('az-convention', 'CLOCKWISE_FROM_NORTH');
   select('az-unit', 'RADIANS');
+  fireEvent.click(screen.getByTestId('mapping-confirmed'));
   fireEvent.click(screen.getByTestId('spatial-reference-confirmed'));
   fireEvent.click(screen.getByTestId('geometry-confirmed'));
 }
@@ -41,6 +76,8 @@ describe('BlastUploader with production hook', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockPreview.mockReset();
+    mockPreview.mockResolvedValue(previewFixture);
     vi.spyOn(client, 'get').mockResolvedValue({
       data: { session_id: 'session-integration', holes: [] },
     });
@@ -52,7 +89,7 @@ describe('BlastUploader with production hook', () => {
       response: {
         status: 422,
         data: {
-          accepted_rows: [],
+          n_rows_loaded: 0,
           rejected_rows: [{
             hole_id: 'BAD-1',
             source_row_index: 0,
@@ -76,7 +113,7 @@ describe('BlastUploader with production hook', () => {
     fireEvent.change(screen.getByTestId('blast-file-input'), {
       target: { files: [new File(['bad'], 'bad.csv', { type: 'text/csv' })] },
     });
-    completeContract();
+    await completeContract();
     fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
@@ -109,7 +146,7 @@ describe('BlastUploader with production hook', () => {
     fireEvent.change(screen.getByTestId('blast-file-input'), {
       target: { files: [new File(['bad'], 'bad.csv', { type: 'text/csv' })] },
     });
-    completeContract();
+    await completeContract();
     fireEvent.click(screen.getByTestId('blast-upload-submit'));
 
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));

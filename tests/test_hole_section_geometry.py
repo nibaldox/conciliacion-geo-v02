@@ -105,4 +105,3 @@ def test_numeric_tolerance_is_distance_based_and_invalid_section_lengths_rejecte
     import pytest
     with pytest.raises(ValueError):
         classify_hole_segment_to_section((-1, 0, 1), (1, 0, 0), invalid)
-

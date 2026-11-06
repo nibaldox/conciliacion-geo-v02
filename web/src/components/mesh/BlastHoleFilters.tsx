@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export interface BlastHole3DRecord {
@@ -25,6 +25,9 @@ export interface BlastHoleFiltersProps<T extends BlastHole3DRecord = BlastHole3D
   holes: readonly T[];
   hasSection?: boolean;
   initialCorridorM?: number;
+  value?: BlastHoleFilterState;
+  onChange?: (value: BlastHoleFilterState) => void;
+  compact?: boolean;
   onFilteredChange?: (holes: T[], corridorM: number, counts: BlastHoleFilterCounts) => void;
 }
 
@@ -153,29 +156,46 @@ export function filterBlastHoles<T extends BlastHole3DRecord>(
   });
 }
 
+function defaultFilterState(initialCorridorM: number): BlastHoleFilterState {
+  return {
+    query: '', bench: '', grid: [], polygon: [], originalBench: [], phase: [],
+    depthMin: '', depthMax: '', chargeMin: '', chargeMax: '', date: '', datePresence: '', geometryStatus: '', provenance: '', surfaceSampleStatus: '', sectionRelation: '',
+    corridorM: Number.isFinite(initialCorridorM) ? Math.max(0, initialCorridorM) : 10,
+  };
+}
+
 export function BlastHoleFilters<T extends BlastHole3DRecord = BlastHole3DRecord>({
   holes,
   hasSection = false,
   initialCorridorM = 10,
   onFilteredChange,
+  value,
+  onChange,
+  compact = false,
 }: BlastHoleFiltersProps<T>) {
   const { t } = useTranslation();
-  const [filters, setFilters] = useState<BlastHoleFilterState>({
-    query: '', bench: '', grid: [], polygon: [], originalBench: [], phase: [],
-    depthMin: '', depthMax: '', chargeMin: '', chargeMax: '', date: '', datePresence: '', geometryStatus: '', provenance: '', surfaceSampleStatus: '', sectionRelation: '',
-    corridorM: Number.isFinite(initialCorridorM) ? Math.max(0, initialCorridorM) : 10,
-  });
+  const [localFilters, setLocalFilters] = useState<BlastHoleFilterState>(() => defaultFilterState(initialCorridorM));
+  const controlled = value !== undefined;
+  const filters = value ?? localFilters;
   const [filtersClearedNotice, setFiltersClearedNotice] = useState(false);
   const currentFiltersRef = useRef(filters);
   currentFiltersRef.current = filters;
+  const commit = (next: BlastHoleFilterState) => {
+    currentFiltersRef.current = next;
+    if (controlled) onChange?.(next);
+    else setLocalFilters(next);
+  };
+  const commitRef = useRef(commit);
+  commitRef.current = commit;
 
   useEffect(() => {
-    if (!hasSection) setFilters((current) => current.sectionRelation ? { ...current, sectionRelation: '' } : current);
+    const current = currentFiltersRef.current;
+    if (!hasSection && current.sectionRelation) commitRef.current({ ...current, sectionRelation: '' });
   }, [hasSection]);
 
   const update = (key: keyof BlastHoleFilterState, value: string | number | string[]) => {
     setFiltersClearedNotice(false);
-    setFilters((current) => ({ ...current, [key]: value }));
+    commitRef.current({ ...currentFiltersRef.current, [key]: value });
   };
   const benches = useMemo(() => [...new Set(holes.map((hole) => firstAttribute(hole.attributes, BENCH_KEYS)).filter(Boolean))].sort(), [holes]);
   const statuses = useMemo(() => [...new Set(holes.map((hole) => hole.geometry_status).filter(Boolean))].sort(), [holes]);
@@ -271,9 +291,9 @@ export function BlastHoleFilters<T extends BlastHole3DRecord = BlastHole3DRecord
       depthMin !== current.depthMin || depthMax !== current.depthMax || chargeMin !== current.chargeMin || chargeMax !== current.chargeMax;
 
     if (removedUnavailableFilters) {
-      setFilters((previous) => ({ ...previous, grid: nextGrid, polygon: nextPolygon, originalBench: nextOriginalBench, phase: nextPhase,
+      commitRef.current({ ...current, grid: nextGrid, polygon: nextPolygon, originalBench: nextOriginalBench, phase: nextPhase,
         bench: nextBench, datePresence: nextDatePresence, geometryStatus: nextGeometryStatus, provenance: nextProvenance,
-        surfaceSampleStatus: nextSurfaceSampleStatus, depthMin, depthMax, chargeMin, chargeMax }));
+        surfaceSampleStatus: nextSurfaceSampleStatus, depthMin, depthMax, chargeMin, chargeMax });
       setFiltersClearedNotice(true);
     } else {
       setFiltersClearedNotice(false);
@@ -285,90 +305,134 @@ export function BlastHoleFilters<T extends BlastHole3DRecord = BlastHole3DRecord
   }, [filtered, filters.corridorM, counts, onFilteredChange]);
   const resetFilters = () => {
     setFiltersClearedNotice(false);
-    setFilters({
-      query: '', bench: '', grid: [], polygon: [], originalBench: [], phase: [],
-      depthMin: '', depthMax: '', chargeMin: '', chargeMax: '', date: '', datePresence: '', geometryStatus: '', provenance: '', surfaceSampleStatus: '', sectionRelation: '',
-      corridorM: Number.isFinite(initialCorridorM) ? Math.max(0, initialCorridorM) : 10,
-    });
+    commit(defaultFilterState(initialCorridorM));
   };
+
+  const gridControl = categoryAttributeKeys.grid && <SearchMultiSelect label={t('blast.holeFilters.grid', { defaultValue: 'Malla (Grid)' })} options={categoryOptions.grid} selected={filters.grid} onChange={(value) => update('grid', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar mallas' })} />;
+  const polygonControl = categoryAttributeKeys.polygon && <SearchMultiSelect label={t('blast.holeFilters.polygon', { defaultValue: 'Polígono' })} options={categoryOptions.polygon} selected={filters.polygon} onChange={(value) => update('polygon', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar polígonos' })} />;
+  const originalBenchControl = categoryAttributeKeys.originalBench && <SearchMultiSelect label={t('blast.holeFilters.originalBench', { defaultValue: 'Banco de tronadura' })} options={categoryOptions.originalBench} selected={filters.originalBench} onChange={(value) => update('originalBench', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar bancos' })} />;
+  const phaseControl = categoryAttributeKeys.phase && <SearchMultiSelect label={t('blast.holeFilters.phase', { defaultValue: 'Fase' })} options={categoryOptions.phase} selected={filters.phase} onChange={(value) => update('phase', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar fases' })} />;
+  const depthControl = depthAttributeKey && <RangeFilter label={t('blast.holeFilters.depthRange', { defaultValue: 'Profundidad (m)' })} min={filters.depthMin} max={filters.depthMax} extent={depthExtent} minLabel={t('blast.holeFilters.minimum', { defaultValue: 'Mínimo' })} maxLabel={t('blast.holeFilters.maximum', { defaultValue: 'Máximo' })} onMinChange={(value) => update('depthMin', value)} onMaxChange={(value) => update('depthMax', value)} />;
+  const chargeControl = chargeAttributeKey && <RangeFilter label={t('blast.holeFilters.chargeRange', { defaultValue: 'Explosivo (kg)' })} min={filters.chargeMin} max={filters.chargeMax} extent={chargeExtent} minLabel={t('blast.holeFilters.minimum', { defaultValue: 'Mínimo' })} maxLabel={t('blast.holeFilters.maximum', { defaultValue: 'Máximo' })} onMinChange={(value) => update('chargeMin', value)} onMaxChange={(value) => update('chargeMax', value)} />;
+  const idControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.id')}</span>
+      <input className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.query} onChange={(event) => update('query', event.target.value)} />
+    </label>
+  );
+  const benchControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.bench')}</span>
+      <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.bench} onChange={(event) => update('bench', event.target.value)}>
+        <option value="">{t('blast.holeFilters.any')}</option>
+        <option value={MISSING_VALUE}>{t('blast.noData')}</option>
+        {benches.map((bench) => <option key={bench} value={bench}>{bench}</option>)}
+      </select>
+    </label>
+  );
+  const dateControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.dateEvent')}</span>
+      <select aria-label={t('blast.holeFilters.datePresence', { defaultValue: 'Presencia de fecha' })} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.datePresence ?? ''} onChange={(event) => update('datePresence', event.target.value)}>
+        <option value="">{t('blast.holeFilters.any')}</option>
+        <option value={PRESENT_VALUE}>{t('blast.holeFilters.withDate', { defaultValue: 'Con fecha' })}</option>
+        <option value={MISSING_VALUE}>{t('blast.noData')}</option>
+      </select>
+      <input className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.date} onChange={(event) => update('date', event.target.value)} placeholder={t('blast.holeFilters.datePlaceholder')} />
+    </label>
+  );
+  const geometryControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.geometry')}</span>
+      <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.geometryStatus} onChange={(event) => update('geometryStatus', event.target.value)}>
+        <option value="">{t('blast.holeFilters.any')}</option>
+        {statuses.map((status) => <option key={status} value={status}>{t(`blast.holeFilters.geometryStatus.${status}`, status)}</option>)}
+      </select>
+    </label>
+  );
+  const provenanceControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.collarProvenanceLabel', { defaultValue: 'Procedencia de cota' })}</span>
+      <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.provenance} onChange={(event) => update('provenance', event.target.value)}>
+        <option value="">{t('blast.holeFilters.any')}</option>
+        <option value={MISSING_VALUE}>{t('blast.noData')}</option>
+        {provenances.map((status) => <option key={status} value={status}>{PROVENANCE_LABELS[status] ? t(PROVENANCE_LABELS[status]) : status}</option>)}
+      </select>
+    </label>
+  );
+  const surfaceControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.surfaceSampleStatusLabel', { defaultValue: 'Estado de muestreo de superficie' })}</span>
+      <select className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm" value={filters.surfaceSampleStatus} onChange={(event) => update('surfaceSampleStatus', event.target.value)}>
+        <option value="">{t('blast.holeFilters.any')}</option>
+        <option value={MISSING_VALUE}>{t('blast.noData')}</option>
+        {surfaceSampleStatuses.map((status) => <option key={status} value={status}>{PROVENANCE_LABELS[status] ? t(PROVENANCE_LABELS[status]) : status}</option>)}
+      </select>
+    </label>
+  );
+  const sectionControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.section')}</span>
+      <select disabled={!hasSection} className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm disabled:opacity-50" value={filters.sectionRelation} onChange={(event) => update('sectionRelation', event.target.value)}>
+        <option value="">{t('blast.holeFilters.any')}</option>
+        {['exact_intersection', 'near_section', 'outside', 'incomplete'].map((relation) => <option key={relation} value={relation}>{t(`blast.holeFilters.relation.${relation}`)}</option>)}
+      </select>
+    </label>
+  );
+  const corridorControl = (
+    <label className="space-y-1 text-xs">
+      <span>{t('blast.holeFilters.corridor')}</span>
+      <input disabled={!hasSection} type="number" min="0" step="1" inputMode="decimal" className="w-full rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1.5 text-sm disabled:opacity-50" value={filters.corridorM} onChange={(event) => update('corridorM', Math.max(0, Number(event.target.value) || 0))} />
+    </label>
+  );
+
+  const gridStyle = { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))' };
+  const compactGridStyle = { gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))' };
+  const advancedControls: [string, ReactNode][] = [['polygon', polygonControl], ['originalBench', originalBenchControl], ['phase', phaseControl],
+    ['depth', depthControl], ['charge', chargeControl], ['date', dateControl], ['geometry', geometryControl], ['provenance', provenanceControl],
+    ['surface', surfaceControl], ['section', sectionControl], ['corridor', corridorControl]];
 
   return (
     <fieldset className="flex min-w-0 flex-col gap-2 border-t border-border pt-2" aria-label={t('blast.holeFilters.title')}>
-      <legend className="mb-1 text-xs font-medium text-text-primary">{t('blast.holeFilters.title')}</legend>
-      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))' }}>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.id')}</span>
-          <input className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.query} onChange={(event) => update('query', event.target.value)} />
-        </label>
-        {categoryAttributeKeys.grid && <SearchMultiSelect label={t('blast.holeFilters.grid', { defaultValue: 'Malla (Grid)' })} options={categoryOptions.grid} selected={filters.grid} onChange={(value) => update('grid', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar mallas' })} />}
-        {categoryAttributeKeys.polygon && <SearchMultiSelect label={t('blast.holeFilters.polygon', { defaultValue: 'Polígono' })} options={categoryOptions.polygon} selected={filters.polygon} onChange={(value) => update('polygon', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar polígonos' })} />}
-        {categoryAttributeKeys.originalBench && <SearchMultiSelect label={t('blast.holeFilters.originalBench', { defaultValue: 'Banco de tronadura' })} options={categoryOptions.originalBench} selected={filters.originalBench} onChange={(value) => update('originalBench', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar bancos' })} />}
-        {categoryAttributeKeys.phase && <SearchMultiSelect label={t('blast.holeFilters.phase', { defaultValue: 'Fase' })} options={categoryOptions.phase} selected={filters.phase} onChange={(value) => update('phase', value)} searchLabel={t('blast.holeFilters.searchOptions', { defaultValue: 'Buscar fases' })} />}
-        {depthAttributeKey && <RangeFilter label={t('blast.holeFilters.depthRange', { defaultValue: 'Profundidad (m)' })} min={filters.depthMin} max={filters.depthMax} extent={depthExtent} minLabel={t('blast.holeFilters.minimum', { defaultValue: 'Mínimo' })} maxLabel={t('blast.holeFilters.maximum', { defaultValue: 'Máximo' })} onMinChange={(value) => update('depthMin', value)} onMaxChange={(value) => update('depthMax', value)} />}
-        {chargeAttributeKey && <RangeFilter label={t('blast.holeFilters.chargeRange', { defaultValue: 'Explosivo (kg)' })} min={filters.chargeMin} max={filters.chargeMax} extent={chargeExtent} minLabel={t('blast.holeFilters.minimum', { defaultValue: 'Mínimo' })} maxLabel={t('blast.holeFilters.maximum', { defaultValue: 'Máximo' })} onMinChange={(value) => update('chargeMin', value)} onMaxChange={(value) => update('chargeMax', value)} />}
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.bench')}</span>
-          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.bench} onChange={(event) => update('bench', event.target.value)}>
-            <option value="">{t('blast.holeFilters.any')}</option>
-            <option value={MISSING_VALUE}>{t('blast.noData')}</option>
-            {benches.map((bench) => <option key={bench} value={bench}>{bench}</option>)}
-          </select>
-        </label>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.dateEvent')}</span>
-          <select aria-label={t('blast.holeFilters.datePresence', { defaultValue: 'Presencia de fecha' })} className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.datePresence ?? ''} onChange={(event) => update('datePresence', event.target.value)}>
-            <option value="">{t('blast.holeFilters.any')}</option>
-            <option value={PRESENT_VALUE}>{t('blast.holeFilters.withDate', { defaultValue: 'Con fecha' })}</option>
-            <option value={MISSING_VALUE}>{t('blast.noData')}</option>
-          </select>
-          <input className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.date} onChange={(event) => update('date', event.target.value)} placeholder={t('blast.holeFilters.datePlaceholder')} />
-        </label>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.geometry')}</span>
-          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.geometryStatus} onChange={(event) => update('geometryStatus', event.target.value)}>
-            <option value="">{t('blast.holeFilters.any')}</option>
-            {statuses.map((status) => <option key={status} value={status}>{t(`blast.holeFilters.geometryStatus.${status}`, status)}</option>)}
-          </select>
-        </label>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.collarProvenanceLabel', { defaultValue: 'Procedencia de cota' })}</span>
-          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.provenance} onChange={(event) => update('provenance', event.target.value)}>
-            <option value="">{t('blast.holeFilters.any')}</option>
-            <option value={MISSING_VALUE}>{t('blast.noData')}</option>
-            {provenances.map((status) => <option key={status} value={status}>{PROVENANCE_LABELS[status] ? t(PROVENANCE_LABELS[status]) : status}</option>)}
-          </select>
-        </label>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.surfaceSampleStatusLabel', { defaultValue: 'Estado de muestreo de superficie' })}</span>
-          <select className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary" value={filters.surfaceSampleStatus} onChange={(event) => update('surfaceSampleStatus', event.target.value)}>
-            <option value="">{t('blast.holeFilters.any')}</option>
-            <option value={MISSING_VALUE}>{t('blast.noData')}</option>
-            {surfaceSampleStatuses.map((status) => <option key={status} value={status}>{PROVENANCE_LABELS[status] ? t(PROVENANCE_LABELS[status]) : status}</option>)}
-          </select>
-        </label>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.section')}</span>
-          <select disabled={!hasSection} className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary disabled:opacity-50" value={filters.sectionRelation} onChange={(event) => update('sectionRelation', event.target.value)}>
-            <option value="">{t('blast.holeFilters.any')}</option>
-            {['exact_intersection', 'near_section', 'outside', 'incomplete'].map((relation) => <option key={relation} value={relation}>{t(`blast.holeFilters.relation.${relation}`)}</option>)}
-          </select>
-        </label>
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-text-muted">
-          <span>{t('blast.holeFilters.corridor')}</span>
-          <input disabled={!hasSection} type="number" min="0" step="1" inputMode="decimal" className="w-full rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-primary disabled:opacity-50" value={filters.corridorM} onChange={(event) => update('corridorM', Math.max(0, Number(event.target.value) || 0))} />
-        </label>
-      </div>
-      {!hasSection && <p className="text-xs text-text-muted">{t('blast.holeFilters.chooseSection')}</p>}
-      {filtersClearedNotice && <p role="status" className="text-xs text-text-muted">{t('blast.holeFilters.unavailableFiltersCleared', { defaultValue: 'Se limpiaron filtros porque sus columnas ya no están disponibles.' })}</p>}
-      <details className="text-xs text-text-muted">
-        <summary className="cursor-pointer text-text-secondary hover:text-text-primary">{t('blast.holeFilters.helpSummary', { defaultValue: 'Notas sobre los filtros' })}</summary>
-        <div className="mt-1 flex flex-col gap-1">
-          {hasSection && <p>{t('blast.holeFilters.corridorHelp')}</p>}
-          <p>{t('blast.holeFilters.estimateHelp')}</p>
+      <legend className="px-1 text-sm font-semibold">{t('blast.holeFilters.title')}</legend>
+      {compact ? (
+        <>
+          <div className="grid gap-2" style={compactGridStyle}>
+            <div className="col-span-full">{idControl}</div>
+            {benchControl}
+            {gridControl}
+          </div>
+          <details className="border-t border-border pt-2">
+            <summary className="min-h-10 cursor-pointer py-2 text-sm font-medium">{t('blast.holeFilters.advanced', { defaultValue: 'Filtros avanzados' })}</summary>
+            <div className="mt-2 grid gap-2" style={compactGridStyle}>
+              {advancedControls.map(([key, control]) => <Fragment key={key}>{control}</Fragment>)}
+            </div>
+          </details>
+        </>
+      ) : (
+        <div className="grid gap-2" style={gridStyle}>
+          {idControl}
+          {gridControl}
+          {polygonControl}
+          {originalBenchControl}
+          {phaseControl}
+          {depthControl}
+          {chargeControl}
+          {benchControl}
+          {dateControl}
+          {geometryControl}
+          {provenanceControl}
+          {surfaceControl}
+          {sectionControl}
+          {corridorControl}
         </div>
-      </details>
-      <button type="button" className="self-start rounded-md border border-border px-2.5 py-1 text-xs text-text-secondary hover:border-border-strong hover:text-text-primary" onClick={resetFilters}>{t('blast.holeFilters.clear')}</button>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs tabular-nums text-text-muted" aria-live="polite">
+      )}
+      {!hasSection && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.chooseSection')}</p>}
+      {filtersClearedNotice && <p role="status" className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.unavailableFiltersCleared', { defaultValue: 'Se limpiaron filtros porque sus columnas ya no están disponibles.' })}</p>}
+      {hasSection && <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.corridorHelp')}</p>}
+      <p className="text-xs text-[var(--color-text-secondary)]">{t('blast.holeFilters.estimateHelp')}</p>
+      <button type="button" className="min-h-10 rounded border border-[var(--color-border)] px-3 py-2 text-sm" onClick={resetFilters}>{t('blast.holeFilters.clear')}</button>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs" aria-live="polite">
         <span>{t('blast.holeFilters.countTotal', { count: counts.total })}</span>
         <span>{t('blast.holeFilters.countDrawable', { count: counts.drawable })}</span>
         <span>{t('blast.holeFilters.countVisible', { count: counts.visible })}</span>
@@ -376,6 +440,7 @@ export function BlastHoleFilters<T extends BlastHole3DRecord = BlastHole3DRecord
       </div>
     </fieldset>
   );
+
 }
 
 function resolveAttributeKey(holes: readonly BlastHole3DRecord[], keys: readonly string[]): string | undefined {

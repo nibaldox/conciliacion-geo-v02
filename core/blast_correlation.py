@@ -137,6 +137,14 @@ _LENGTH_CANDIDATES = ('longitud_real', 'Len', 'Longitud', 'Length', 'Profundidad
 _INCLINATION_CANDIDATES = ('Inclinacion_real', 'Incl', 'Inclinacion', 'Inclination')
 
 
+def _domain_area_or_nan(rep: pd.DataFrame) -> float:
+    if "domain_area_m2" not in rep.columns:
+        return np.nan
+    values = np.asarray(pd.to_numeric(rep["domain_area_m2"], errors="coerce"), dtype=float)
+    finite = values[np.isfinite(values)]
+    return float(finite[0]) if finite.size else np.nan
+
+
 def _assign_voronoi_global(
     df: pd.DataFrame,
     *,
@@ -257,7 +265,7 @@ def _assign_voronoi_global(
     # Strategy 1 (default): ONE Voronoi over the whole event, one domain.
     rep = compute_influence_area_report(df, boundary_polygon=boundary_polygon)
     method = "global_polygon" if boundary_polygon is not None else "global_bbox"
-    domain = float(rep["domain_area_m2"].iloc[0]) if "domain_area_m2" in rep.columns else np.nan
+    domain = _domain_area_or_nan(rep)
     assigned = float(rep["area_m2"].sum())
 
     # Auditoría §3.1: external/invalid collars — explicit count, ids and

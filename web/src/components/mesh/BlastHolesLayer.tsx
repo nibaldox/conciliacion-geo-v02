@@ -26,6 +26,7 @@ export interface BlastHoleMarkerBatchData {
 }
 
 export const BLAST_HOLE_PICKING_CELL_SIZE_M = 350;
+const SELECTION_HALO_SCALE = 2.2;
 
 export interface BlastHolesLayerProps {
   holes: readonly BlastHole3D[];
@@ -39,6 +40,7 @@ export interface BlastHolesLayerProps {
   selectedColor?: THREE.ColorRepresentation;
   onSelect?: (key: string) => void;
   colorTrajectories?: boolean;
+  colorCollars?: boolean;
 }
 
 function isPoint(point: BlastHolePoint): point is readonly [number, number, number] {
@@ -70,16 +72,34 @@ export function handleBlastHoleInstanceSelection(
   if (key !== null) onSelect?.(key);
 }
 
-export function getBlastHoleMarkerColor(
+export function getBlastHoleCollarColor(
   hole: BlastHole3D,
-  selectedKey: string | null | undefined,
   completeCollarColor: THREE.ColorRepresentation,
   collarOnlyColor: THREE.ColorRepresentation,
-  selectedColor: THREE.ColorRepresentation,
+  colorCollars = true,
 ): THREE.ColorRepresentation {
-  if (hole.key === selectedKey) return selectedColor;
-  if (hole.color) return hole.color;
+  if (colorCollars && hole.color) return hole.color;
   return isPoint(hole.toe) ? completeCollarColor : collarOnlyColor;
+}
+
+export function getBlastHoleMarkerColor(
+  hole: BlastHole3D,
+  completeCollarColor: THREE.ColorRepresentation,
+  collarOnlyColor: THREE.ColorRepresentation,
+): THREE.ColorRepresentation {
+  return getBlastHoleCollarColor(hole, completeCollarColor, collarOnlyColor, true);
+}
+
+export function getBlastHoleLocalCollar(
+  holes: readonly BlastHole3D[],
+  key: string | null | undefined,
+  center: readonly [number, number, number] = [0, 0, 0],
+): [number, number, number] | null {
+  if (key === null || key === undefined) return null;
+  const hole = holes.find((candidate) => candidate.key === key);
+  if (!hole || !isPoint(hole.collar)) return null;
+  const [centerX, centerY, centerZ] = center;
+  return [hole.collar[0] - centerX, hole.collar[2] - centerZ, -(hole.collar[1] - centerY)];
 }
 
 export function buildBlastHoleGeometry(
@@ -149,8 +169,10 @@ export function BlastHolesLayer({
   selectedColor = '#fde047',
   onSelect,
   colorTrajectories = false,
+  colorCollars = true,
 }: BlastHolesLayerProps) {
   const data = useMemo(() => buildBlastHoleGeometry(holes, center), [holes, center]);
+  const selectedPosition = useMemo(() => getBlastHoleLocalCollar(holes, selectedKey, center), [holes, selectedKey, center]);
   const lineGeometry = useMemo(() => {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(data.linePositions, 3));
@@ -181,11 +203,21 @@ export function BlastHolesLayer({
           collarRadius={collarRadius}
           completeCollarColor={completeCollarColor}
           collarOnlyColor={collarOnlyColor}
-          selectedKey={selectedKey}
-          selectedColor={selectedColor}
+          colorCollars={colorCollars}
           onSelect={onSelect}
         />
       ))}
+      {selectedPosition && (
+        <mesh
+          name="blast-hole-selection-halo"
+          geometry={markerGeometry}
+          position={selectedPosition}
+          scale={collarRadius * SELECTION_HALO_SCALE}
+          raycast={() => undefined}
+        >
+          <meshBasicMaterial color={selectedColor} side={THREE.BackSide} />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -196,8 +228,7 @@ interface BlastHoleMarkerBatchProps {
   collarRadius: number;
   completeCollarColor: THREE.ColorRepresentation;
   collarOnlyColor: THREE.ColorRepresentation;
-  selectedKey: string | null;
-  selectedColor: THREE.ColorRepresentation;
+  colorCollars: boolean;
   onSelect?: (key: string) => void;
 }
 
@@ -207,8 +238,7 @@ function BlastHoleMarkerBatch({
   collarRadius,
   completeCollarColor,
   collarOnlyColor,
-  selectedKey,
-  selectedColor,
+  colorCollars,
   onSelect,
 }: BlastHoleMarkerBatchProps) {
   const instancedRef = useRef<THREE.InstancedMesh>(null);
@@ -228,13 +258,13 @@ function BlastHoleMarkerBatch({
         batch.positions[positionOffset + 2]!,
       );
       mesh.setMatrixAt(index, matrix);
-      color.set(getBlastHoleMarkerColor(hole, selectedKey, completeCollarColor, collarOnlyColor, selectedColor));
+      color.set(getBlastHoleCollarColor(hole, completeCollarColor, collarOnlyColor, colorCollars));
       mesh.setColorAt(index, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     mesh.computeBoundingSphere();
-  }, [batch, collarRadius, completeCollarColor, collarOnlyColor, selectedKey, selectedColor]);
+  }, [batch, collarRadius, completeCollarColor, collarOnlyColor, colorCollars]);
 
   return (
     <instancedMesh
@@ -242,7 +272,7 @@ function BlastHoleMarkerBatch({
       args={[geometry, undefined, batch.holes.length]}
       onClick={(event) => handleBlastHoleInstanceSelection(batch.holes, event.instanceId, onSelect, () => event.stopPropagation())}
     >
-      <meshBasicMaterial vertexColors />
+      <meshBasicMaterial />
     </instancedMesh>
   );
 }

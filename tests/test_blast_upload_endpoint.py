@@ -96,6 +96,83 @@ def test_upload_valid_csv_returns_summary(client, session_id):
     assert model.design_surface is None
 
 
+def test_upload_compact_response_omits_only_accepted_rows(client, session_id):
+    response = client.post(
+        "/api/v1/blast/upload",
+        params={"compact": "true"},
+        files={"file": ("pozos.csv", io.BytesIO(VALID_CSV.encode()), "text/csv")},
+        data={"session_id": session_id, **GEOMETRY_FORM},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert "accepted_rows" not in body
+    assert body["session_id"] == session_id
+    assert body["n_holes"] == 3
+    assert body["n_rows_loaded"] == 3
+    assert body["n_rows_skipped"] == 0
+    assert body["rejected_rows"] == []
+    assert "processing_summary" in body
+    assert "spatial_diagnostics" in body
+    assert "event_warnings" in body
+    assert "blocking_errors" in body
+    assert "geometry_configuration" in body
+    assert "design_surface" in body
+
+
+def test_upload_rejects_non_object_column_map_without_server_error(client, session_id):
+    response = client.post(
+        "/api/v1/blast/upload",
+        files={"file": ("pozos.csv", io.BytesIO(VALID_CSV.encode()), "text/csv")},
+        data={"session_id": session_id, **GEOMETRY_FORM, "column_map": "[]"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == "COLUMN_MAP_INVALID"
+
+
+def test_compact_upload_keeps_full_diagnostics_on_422(client, session_id):
+    response = client.post(
+        "/api/v1/blast/upload",
+        params={"compact": "true"},
+        files={"file": ("pozos.csv", io.BytesIO(INVALID_CSV.encode()), "text/csv")},
+        data={"session_id": session_id, **GEOMETRY_FORM},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert "accepted_rows" in body
+    assert "rejected_rows" in body
+    assert body["blocking_errors"]
+    assert "processing_summary" in body
+    assert "spatial_diagnostics" in body
+
+
+def test_blast_holes_summary_returns_only_persisted_count(client, session_id):
+    uploaded = _upload_csv(client, session_id, VALID_CSV)
+    assert uploaded.status_code == 200, uploaded.text
+
+    response = client.get(
+        f"/api/v1/blast/{session_id}/summary",
+        headers={"x-session-id": session_id},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"n_holes": 3}
+
+
+def test_blast_holes_summary_rejects_a_different_active_session(client, session_id):
+    other_session_id = db.create_session()
+
+    response = client.get(
+        f"/api/v1/blast/{session_id}/summary",
+        headers={"x-session-id": other_session_id},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["error_code"] == "SESSION_ID_MISMATCH"
+
+
 def test_upload_dates_survive_response_and_persistence(client, session_id):
     lines = VALID_CSV.strip().splitlines()
     dated = '\n'.join([lines[0] + ',fecha_tronadura', *(line + ',2026-11-02' for line in lines[1:])])

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 // Initialise i18next so useTranslation() returns real Spanish strings
 // instead of the raw keys (mirrors app entry in main.tsx).
 import i18n from '../../../i18n';
@@ -13,6 +13,7 @@ import {
 } from '../BlastCorrelation';
 import type { BlastCorrelationRow } from '../../../api/types';
 import { DEMO_MESH_IDS, useSession } from '../../../stores/session';
+import { useBlastView } from '../../../stores/blastView';
 
 // ─── Pure helper / type-mapping tests ───────────────────────
 
@@ -111,7 +112,7 @@ vi.mock('../../../api/hooks', () => ({
     data: undefined,
     error: null,
   })),
-  useBlastHolesBySession: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
+  useBlastSessionSummary: vi.fn(() => ({ data: undefined, isLoading: false, error: null })),
   useCreateBlastSimulation: vi.fn(() => ({
     mutate: vi.fn(),
     mutateAsync: vi.fn(),
@@ -223,5 +224,72 @@ describe('<BlastCorrelation /> empty-rows state', () => {
     await waitFor(() => {
       expect(screen.getByText('42.50')).toBeInTheDocument();
     });
+  });
+});
+
+describe('<BlastCorrelation /> analysis presentation', () => {
+  beforeAll(async () => {
+    await i18n.changeLanguage('es');
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSession.setState({ demoMode: false, demoData: null, designMeshId: null, topoMeshId: null });
+    useBlastView.setState({ surveyDate: '' });
+  });
+
+  const analysisRow: BlastCorrelationRow = {
+    section_name: 'S-001',
+    num_wells: 5,
+    total_kg: 1000,
+    mean_abs_deviation: 0.2,
+    avg_over_break: 0.5,
+    avg_under_break: 0.2,
+    n_over: 1,
+    n_under: 1,
+    pf_vol_avg_kgm3: 0.9,
+    pf_area_avg_kgm2: 2.3,
+    pf_g_per_ton_avg: 82.4,
+    pf_g_per_ton_net_avg: 88.6,
+    energy_total_mj: 24500,
+    n_pf_valid: 5,
+    sector: 'Principal',
+    rock_density_used: 2.7,
+  };
+
+  it('omits uploader, simplified 3D viewer and simulation panel but keeps the table', () => {
+    mockHook({ data: { rows: [analysisRow], tolerance: null, n_sections: 1 } });
+    render(<BlastCorrelation presentation="analysis" />);
+    expect(screen.getByText(/correlación de tronadura/i)).toBeInTheDocument();
+    expect(screen.getByText('S-001')).toBeInTheDocument();
+    expect(screen.queryByTestId('blast-uploader')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('blast-3d-viewer')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sim-run-button')).not.toBeInTheDocument();
+  });
+
+  it('does not embed the uploader in the analysis empty state', () => {
+    mockHook({ data: { rows: [], tolerance: null, n_sections: 0 } });
+    render(<BlastCorrelation presentation="analysis" />);
+    expect(screen.getByText('Sin datos de tronadura')).toBeInTheDocument();
+    expect(screen.queryByTestId('blast-uploader')).not.toBeInTheDocument();
+  });
+
+  it('reads the survey date from the blastView store in analysis mode', () => {
+    useBlastView.setState({ surveyDate: '2026-03-01' });
+    mockHook({ data: { rows: [analysisRow], tolerance: null, n_sections: 1 } });
+    render(<BlastCorrelation presentation="analysis" />);
+    expect(vi.mocked(useBlastCorrelation)).toHaveBeenLastCalledWith('2026-03-01');
+    act(() => {
+      useBlastView.getState().setSurveyDate('2026-04-02');
+    });
+    expect(vi.mocked(useBlastCorrelation)).toHaveBeenLastCalledWith('2026-04-02');
+  });
+
+  it('keeps the local survey date and the uploader in legacy mode', () => {
+    useBlastView.setState({ surveyDate: '2026-03-01' });
+    mockHook({ data: { rows: [analysisRow], tolerance: null, n_sections: 1 } });
+    render(<BlastCorrelation />);
+    expect(vi.mocked(useBlastCorrelation)).toHaveBeenLastCalledWith(undefined);
+    expect(screen.getByTestId('blast-uploader')).toBeInTheDocument();
   });
 });

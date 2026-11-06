@@ -8,9 +8,11 @@ export const COLOR_SCALE_NAMES = [
 
 export type BlastHoleColorScale = (typeof COLOR_SCALE_NAMES)[number];
 export type BlastHoleCategory = 'grid' | 'polygon' | 'phase' | 'bench';
+export type BlastHoleRangeMode = 'legacy' | 'data' | 'manual';
 export type BlastHoleVariable =
   | 'charge'
   | 'powderFactor'
+  | 'powderFactorGeometry'
   | 'collarElevation'
   | 'hardness'
   | 'diameter'
@@ -23,6 +25,7 @@ export type BlastHoleVariable =
 export const BLAST_HOLE_VARIABLE_OPTIONS: readonly { value: BlastHoleVariable; label: string }[] = [
   { value: 'charge', label: 'Carga Explosiva (Kg)' },
   { value: 'powderFactor', label: 'Factor de Carga (g/ton)' },
+  { value: 'powderFactorGeometry', label: 'Factor de Carga geométrico (g/ton)' },
   { value: 'collarElevation', label: 'Cota Collar' },
   { value: 'hardness', label: 'Dureza' },
   { value: 'diameter', label: 'Diámetro (mm)' },
@@ -42,6 +45,9 @@ export interface BlastHoleColorOptions {
   missingLabel?: string;
   domainRecords?: readonly BlastHole3DRecord[];
   sourceRecords?: readonly BlastHole3DRecord[];
+  rangeMode?: BlastHoleRangeMode;
+  rangeMin?: number;
+  rangeMax?: number;
 }
 
 export interface BlastHoleColorLegendEntry {
@@ -55,7 +61,21 @@ export interface BlastHoleColorScaleLegendStop extends BlastHoleColorLegendEntry
 
 export type BlastHoleColorLegend =
   | { kind: 'category'; entries: BlastHoleColorLegendEntry[]; missing: BlastHoleColorLegendEntry | null }
-  | { kind: 'variable'; min: number | null; max: number | null; palette: BlastHoleColorScale; stops: BlastHoleColorScaleLegendStop[]; missing: BlastHoleColorLegendEntry };
+  | {
+      kind: 'variable';
+      min: number | null;
+      max: number | null;
+      palette: BlastHoleColorScale;
+      stops: BlastHoleColorScaleLegendStop[];
+      missing: BlastHoleColorLegendEntry;
+      sourceKey?: string;
+      unit?: string;
+      belowCount?: number;
+      aboveCount?: number;
+      missingCount?: number;
+      observedMin?: number | null;
+      observedMax?: number | null;
+    };
 
 export interface BlastHoleColorMapping {
   colorsByRowId: Map<string, string>;
@@ -82,6 +102,21 @@ export const BLAST_HOLE_CATEGORY_OPTIONS: readonly { value: BlastHoleCategory; l
 
 const CHARGE_KEYS = ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'];
 const POWDER_FACTOR_KEYS = ['pf_g_per_ton_inf', 'pf_g_per_ton'];
+const GEOMETRY_POWDER_FACTOR_KEYS = ['pf_g_per_ton'];
+const VARIABLE_UNITS: Partial<Record<BlastHoleVariable, string>> = {
+  charge: 'kg',
+  powderFactor: 'g/t',
+  powderFactorGeometry: 'g/t',
+  collarElevation: 'm',
+  diameter: 'mm',
+  depth: 'm',
+  inclination: '°',
+};
+const FIXED_RANGES: Partial<Record<BlastHoleVariable, readonly [number, number]>> = {
+  charge: [0, 1000],
+  powderFactor: [0, 200],
+  powderFactorGeometry: [0, 200],
+};
 const VARIABLE_ATTRIBUTE_KEYS: Partial<Record<Exclude<BlastHoleVariable, 'charge' | 'powderFactor' | 'collarElevation' | 'hardness' | 'attribute'>, readonly string[]>> = {
   diameter: ['Diam_mm', 'Diametro', 'Diameter', 'Diametro_mm', 'diameter_mm'],
   hardnessIndex: ['indice_dureza', 'Indice_Dureza', 'hardness_index'],
@@ -96,30 +131,37 @@ const HARDNESS_VALUES: Record<string, number> = {
   'roca muy dura': 4,
 };
 
+function hasResolvableValue(holes: readonly BlastHole3DRecord[], variable: BlastHoleVariable, keys: readonly string[]): boolean {
+  const key = sourceKey(holes, keys);
+  return key !== undefined && holes.some((hole) => variableValue(hole, variable, key) !== null);
+}
+
 export function getAvailableBlastHoleVariables(holes: readonly BlastHole3DRecord[]): BlastHoleVariable[] {
-  const conditional: readonly [BlastHoleVariable, readonly string[]][] = [
+  const conditional: readonly (readonly [BlastHoleVariable, readonly string[]])[] = [
     ['charge', CHARGE_KEYS],
     ['powderFactor', POWDER_FACTOR_KEYS],
+    ['powderFactorGeometry', GEOMETRY_POWDER_FACTOR_KEYS],
     ['diameter', VARIABLE_ATTRIBUTE_KEYS.diameter ?? []],
     ['hardness', ['dureza', 'Dureza', 'hardness']],
     ['hardnessIndex', VARIABLE_ATTRIBUTE_KEYS.hardnessIndex ?? []],
     ['penetrationRate', VARIABLE_ATTRIBUTE_KEYS.penetrationRate ?? []],
+    ['depth', VARIABLE_ATTRIBUTE_KEYS.depth ?? []],
+    ['inclination', VARIABLE_ATTRIBUTE_KEYS.inclination ?? []],
   ];
   const available: BlastHoleVariable[] = conditional
-    .filter(([, keys]) => sourceKey(holes, keys) !== undefined)
+    .filter(([variable, keys]) => hasResolvableValue(holes, variable, keys))
     .map(([variable]) => variable);
-  if (sourceKey(holes, VARIABLE_ATTRIBUTE_KEYS.depth ?? []) !== undefined) available.push('depth');
-  if (sourceKey(holes, VARIABLE_ATTRIBUTE_KEYS.inclination ?? []) !== undefined) available.push('inclination');
   if (holes.some((hole) => hole.collar && hole.collar.length >= 3 && numericValue(hole.collar[2]) !== null)) {
     available.push('collarElevation');
   }
-  return [
-    ...available,
-  ];
+  return available;
 }
 
 export function getAvailableBlastHoleCategories(holes: readonly BlastHole3DRecord[]): BlastHoleCategory[] {
-  return (Object.keys(CATEGORY_KEYS) as BlastHoleCategory[]).filter((category) => sourceKey(holes, CATEGORY_KEYS[category]) !== undefined);
+  return (Object.keys(CATEGORY_KEYS) as BlastHoleCategory[]).filter((category) => {
+    const key = sourceKey(holes, CATEGORY_KEYS[category]);
+    return key !== undefined && holes.some((hole) => categoryValue(firstValue(hole, key)) !== null);
+  });
 }
 
 type ScaleStop = readonly [number, string];
@@ -149,7 +191,7 @@ function variableValue(hole: BlastHole3DRecord, variable: BlastHoleVariable, sel
     return hole.collar && hole.collar.length >= 3 ? numericValue(hole.collar[2]) : null;
   }
   if (variable === 'hardness') {
-    const hardness = categoryValue(firstValue(hole, selectedKey))?.toLocaleLowerCase();
+    const hardness = categoryValue(firstValue(hole, selectedKey))?.trim().toLocaleLowerCase();
     return hardness ? HARDNESS_VALUES[hardness] ?? null : null;
   }
   return numericValue(firstValue(hole, selectedKey));
@@ -190,8 +232,39 @@ function interpolateScale(stops: readonly ScaleStop[], value: number): string {
   return `#${lowerRgb.map((channel, index) => Math.round(channel + (upperRgb[index] - channel) * fraction).toString(16).padStart(2, '0')).join('')}`;
 }
 
+function normalizedPosition(value: number, minimum: number, maximum: number): number {
+  const span = maximum - minimum;
+  if (Number.isFinite(span)) {
+    const position = (value - minimum) / span;
+    if (Number.isFinite(position)) return position;
+  }
+  return (value / 2 - minimum / 2) / (maximum / 2 - minimum / 2);
+}
+
+function convexValue(position: number, minimum: number, maximum: number): number {
+  const value = (1 - position) * minimum + position * maximum;
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
 function formatValue(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toPrecision(4)));
+}
+
+function validateManualRange(min: number | undefined, max: number | undefined): readonly [number, number] {
+  if (min === undefined || max === undefined || !Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+    throw new RangeError(`Manual blast hole color range must be finite with min < max (received ${String(min)}..${String(max)})`);
+  }
+  return [min, max];
+}
+
+function variableKeysFor(variable: BlastHoleVariable, attributeKey: string | undefined): readonly string[] {
+  if (variable === 'charge') return CHARGE_KEYS;
+  if (variable === 'powderFactor') return POWDER_FACTOR_KEYS;
+  if (variable === 'powderFactorGeometry') return GEOMETRY_POWDER_FACTOR_KEYS;
+  if (variable === 'hardness') return ['dureza', 'Dureza', 'hardness'];
+  if (variable === 'attribute') return attributeKey ? [attributeKey] : [];
+  if (variable === 'collarElevation') return [];
+  return VARIABLE_ATTRIBUTE_KEYS[variable] ?? [];
 }
 
 export function mapBlastHoleColors(
@@ -203,10 +276,11 @@ export function mapBlastHoleColors(
 
   if (options.kind === 'category') {
     const keys = CATEGORY_KEYS[options.category ?? 'bench'];
-    const domain = options.domainRecords ?? holes;
+    const domain = options.domainRecords ?? options.sourceRecords ?? holes;
     const key = sourceKey(options.sourceRecords ?? domain, keys);
     const values = holes.map((hole) => categoryValue(firstValue(hole, key)));
-    const categories = [...new Set(domain.map((hole) => categoryValue(firstValue(hole, key))).filter((value): value is string => value !== null))].sort();
+    const domainValues = domain.map((hole) => categoryValue(firstValue(hole, key)));
+    const categories = [...new Set(domainValues.filter((value): value is string => value !== null))].sort();
     const entries = categories.map((label, index) => ({ label, color: COLOR_CYCLE[index % COLOR_CYCLE.length] }));
     const colors = new Map(entries.map(({ label, color }) => [label, color]));
     holes.forEach((hole, index) => colorsByRowId.set(hole.row_id, values[index] === null ? MISSING_COLOR : colors.get(values[index]!)!));
@@ -215,46 +289,55 @@ export function mapBlastHoleColors(
       legend: {
         kind: 'category',
         entries,
-        missing: values.some((value) => value === null) ? { label: missingLabel, color: MISSING_COLOR } : null,
+        missing: domainValues.some((value) => value === null) ? { label: missingLabel, color: MISSING_COLOR } : null,
       },
     };
   }
 
   const variable = options.variable ?? 'attribute';
-  const keys = variable === 'charge'
-    ? CHARGE_KEYS
-    : variable === 'powderFactor'
-      ? POWDER_FACTOR_KEYS
-      : variable === 'hardness'
-        ? ['dureza', 'Dureza', 'hardness']
-        : variable === 'attribute'
-          ? options.attributeKey ? [options.attributeKey] : []
-          : variable === 'collarElevation' ? [] : VARIABLE_ATTRIBUTE_KEYS[variable] ?? [];
-  const key = variable === 'collarElevation' ? undefined : sourceKey(options.sourceRecords ?? options.domainRecords ?? holes, keys);
+  const rangeMode = options.rangeMode ?? 'legacy';
+  const manualRange = rangeMode === 'manual' ? validateManualRange(options.rangeMin, options.rangeMax) : null;
+  const keys = variableKeysFor(variable, options.attributeKey);
+  const sourceRecords = options.sourceRecords ?? options.domainRecords ?? holes;
+  const key = variable === 'collarElevation' ? undefined : sourceKey(sourceRecords, keys);
   const values = holes.map((hole) => variableValue(hole, variable, key));
-  const domainHoles = options.domainRecords ?? holes;
-  const domainKey = variable === 'collarElevation' ? undefined : sourceKey(options.sourceRecords ?? domainHoles, keys);
-  const domainValues = domainHoles.map((hole) => variableValue(hole, variable, domainKey)).filter((value): value is number => value !== null);
-  const fixedBounds = variable === 'charge' ? [0, 1000] as const : variable === 'powderFactor' ? [0, 200] as const : null;
-  let observedMinimum = Number.POSITIVE_INFINITY;
-  let observedMaximum = Number.NEGATIVE_INFINITY;
-  for (const value of domainValues) {
-    if (value < observedMinimum) observedMinimum = value;
-    if (value > observedMaximum) observedMaximum = value;
+  const domainValues = sourceRecords.map((hole) => variableValue(hole, variable, key));
+  const finiteDomain = domainValues.filter((value): value is number => value !== null);
+  let observedMinimum: number | null = null;
+  let observedMaximum: number | null = null;
+  for (const value of finiteDomain) {
+    if (observedMinimum === null || value < observedMinimum) observedMinimum = value;
+    if (observedMaximum === null || value > observedMaximum) observedMaximum = value;
   }
-  const minimum = fixedBounds?.[0] ?? (domainValues.length ? observedMinimum : null);
-  const maximum = fixedBounds?.[1] ?? (domainValues.length ? observedMaximum : null);
+  const fixedRange = FIXED_RANGES[variable];
+  let minimum: number | null;
+  let maximum: number | null;
+  if (manualRange) [minimum, maximum] = manualRange;
+  else if (rangeMode === 'legacy' && fixedRange) [minimum, maximum] = fixedRange;
+  else [minimum, maximum] = [observedMinimum, observedMaximum];
   const palette = options.palette ?? 'Turbo';
   const stops = PLOTLY_SCALES[palette] as readonly ScaleStop[];
   const colorAt = (value: number): string => {
-    const normalized = minimum === null || maximum === null || minimum === maximum
-      ? 0.5
-      : (value - minimum) / (maximum - minimum);
-    return interpolateScale(stops, normalized);
+    if (minimum === null || maximum === null || minimum === maximum) return interpolateScale(stops, 0.5);
+    return interpolateScale(stops, normalizedPosition(value, minimum, maximum));
   };
-  holes.forEach((hole, index) => colorsByRowId.set(hole.row_id, values[index] === null ? MISSING_COLOR : colorAt(values[index]!)));
+  holes.forEach((hole, index) => {
+    const value = values[index];
+    colorsByRowId.set(hole.row_id, value === null ? MISSING_COLOR : colorAt(value));
+  });
+  let belowCount = 0;
+  let aboveCount = 0;
+  let missingCount = 0;
+  for (const value of domainValues) {
+    if (value === null) {
+      missingCount += 1;
+      continue;
+    }
+    if (minimum !== null && value < minimum) belowCount += 1;
+    if (maximum !== null && value > maximum) aboveCount += 1;
+  }
   const legendStops = stops.map(([position, color]) => ({
-    label: minimum === null || maximum === null ? '—' : formatValue(minimum + (maximum - minimum) * position),
+    label: minimum === null || maximum === null ? '—' : formatValue(convexValue(position, minimum, maximum)),
     color: hexColor(color),
     position,
   }));
@@ -267,6 +350,13 @@ export function mapBlastHoleColors(
       palette,
       stops: legendStops,
       missing: { label: missingLabel, color: MISSING_COLOR },
+      sourceKey: key,
+      unit: VARIABLE_UNITS[variable],
+      belowCount,
+      aboveCount,
+      missingCount,
+      observedMin: observedMinimum,
+      observedMax: observedMaximum,
     },
   };
 }
