@@ -145,7 +145,7 @@ Note: CI does **not** run frontend `npm run test` (vitest) or Playwright e2e (`w
 
 All defaults in `core/config.py` — frozen dataclasses (`Tolerances`, `DetectionDefaults`, `PipelineDefaults`, `VisualizationDefaults`, `RampDetection`, `DeployDefaults`, `ExplosiveEnergy`, `PowderFactor`, `BlastAdvisorDefaults`, `StabilityDefaults`, `SectorDeviationDefaults`). Singleton instances (`DEFAULTS`, `DETECTION`, `TOLERANCES`, `VISUALIZATION`, `RAMP`, `DEPLOY`, `EXPLOSIVE`, `POWDER_FACTOR`, `ADVISOR`, `STABILITY`, `SECTOR_DEVIATION`).
 
-Key detection defaults: `face_threshold=40°`, `berm_threshold=20°`, `max_berm_width=50m`, `simplify_epsilon=0.05m`, `profile_resolution=0.1m`, `match_threshold=5.0m`, `spill_angle_solid=52°`, `spill_angle_pile=48°`.
+Key detection defaults: `face_threshold=30°`, `berm_threshold=10°`, `max_berm_width=50m`, `simplify_epsilon=0.05m`, `profile_resolution=0.1m`, `match_threshold=5.0m`, `spill_angle_solid=52°`, `spill_angle_pile=48°`.
 
 `.streamlit/config.toml` sets `maxUploadSize = 500MB` + `fileWatcherType = "poll"`.
 

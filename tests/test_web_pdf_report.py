@@ -115,10 +115,10 @@ def _sample_data():
     return build_report_data(rows, SETTINGS, ReportFilters(), META, plan_inputs=PLAN_INPUTS)
 
 
-def _text(pdf_bytes):
+def _text(pdf_bytes, *, layout=True):
     if PDFTOTEXT:
         proc = subprocess.run(
-            [PDFTOTEXT, "-layout", "-", "-"],
+            [PDFTOTEXT, *(["-layout"] if layout else []), "-", "-"],
             input=pdf_bytes,
             capture_output=True,
             check=True,
@@ -354,7 +354,7 @@ def test_design_surface_collar_elevation_is_labeled_as_estimated():
             "tolerance": {"neg": 1.0, "pos": 1.0},
         },
     )
-    text = _text(build_pdf_report(data).getvalue())
+    text = " ".join(_text(build_pdf_report(data).getvalue(), layout=False).split())
     assert "Advertencia sobre la cota" in text
     assert "estimada desde la superficie de diseño" in text
     assert "no es una medición de terreno" in text
@@ -632,7 +632,7 @@ def test_ambiguous_section_sector_warning_is_visible_in_the_pdf():
     ]
     data = build_report_data(rows, SETTINGS, ReportFilters(), META)
 
-    text = _text(build_pdf_report(data).getvalue())
+    text = " ".join(_text(build_pdf_report(data).getvalue(), layout=False).split())
 
     assert "estos nombres aparecen asociados a más de una identidad de sector" in text
     assert "no se pueden atribuir a un sector de forma inequívoca" in text

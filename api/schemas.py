@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
+from core.config import DETECTION, TOLERANCES
 from core.geometry_contract import GEOMETRY_CONFIGURATION_VERSION
 
 
@@ -58,14 +59,14 @@ class SectionFromFileParams(BaseModel):
 
 class ProcessSettings(BaseModel):
     resolution: float = 0.1
-    face_threshold: float = 40.0
-    berm_threshold: float = 20.0
+    face_threshold: float = DETECTION.face_threshold
+    berm_threshold: float = DETECTION.berm_threshold
 
 
 class TolerancesSchema(BaseModel):
-    bench_height: Dict[str, float] = Field(default={"neg": 1.0, "pos": 1.5})
+    bench_height: Dict[str, float] = Field(default_factory=lambda: dict(TOLERANCES.bench_height))
     face_angle: Dict[str, float] = Field(default={"neg": 5.0, "pos": 5.0})
-    berm_width: Dict[str, float] = Field(default={"min": 6.0})
+    berm_width: Dict[str, float] = Field(default_factory=lambda: dict(TOLERANCES.berm_width))
     inter_ramp_angle: Dict[str, float] = Field(default={"neg": 3.0, "pos": 2.0})
     overall_angle: Dict[str, float] = Field(default={"neg": 2.0, "pos": 2.0})
     crest_toe_deviation: Dict[str, float] = Field(default={"neg": 1.0, "pos": 1.0})

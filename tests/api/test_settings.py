@@ -24,13 +24,13 @@ def _default_payload() -> Dict[str, Any]:
     return {
         "process": {
             "resolution": 0.1,
-            "face_threshold": 40.0,
-            "berm_threshold": 20.0,
+            "face_threshold": 30.0,
+            "berm_threshold": 10.0,
         },
         "tolerances": {
-            "bench_height": {"neg": 1.0, "pos": 1.5},
+            "bench_height": {"neg": 2.0, "pos": 2.0},
             "face_angle": {"neg": 5.0, "pos": 5.0},
-            "berm_width": {"min": 6.0},
+            "berm_width": {"min": 7.0},
             "inter_ramp_angle": {"neg": 3.0, "pos": 2.0},
             "overall_angle": {"neg": 2.0, "pos": 2.0},
             "crest_toe_deviation": {"neg": 1.0, "pos": 1.0},
@@ -46,6 +46,26 @@ def _default_payload() -> Dict[str, Any]:
 # ===========================================================================
 # GET /settings
 # ===========================================================================
+
+
+def test_settings_schema_defaults_and_partial_process():
+    from api.schemas import ProcessSettings, SettingsUpdate, TolerancesSchema
+
+    expected = _default_payload()
+    assert ProcessSettings().model_dump() == expected["process"]
+    partial = SettingsUpdate.model_validate({"process": {"resolution": 0.5}})
+    assert partial.process is not None
+    assert partial.process.model_dump() == {**expected["process"], "resolution": 0.5}
+    assert TolerancesSchema().model_dump() == expected["tolerances"]
+
+
+@pytest.mark.parametrize("tolerances", [{}, {"bench_height": {}}, {"bench_height": {"pos": 1.0}}])
+def test_reconciliation_gap_uses_default_height_for_missing_tolerances(tolerances):
+    from core.profile_extract import BenchParams, _emit_reconciliation_gaps
+
+    design = BenchParams(1, 10, 0, 0, 5, 10, 60, 7)
+    topo = BenchParams(1, 10, 0, -1.75, 5, 11.75, 60, 7)
+    assert _emit_reconciliation_gaps([topo], [design], tolerances, "S-1", "A") == []
 
 
 class TestGetSettings:
