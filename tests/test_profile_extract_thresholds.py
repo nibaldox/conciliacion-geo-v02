@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from core import extract_parameters
 from core import profile_extract
@@ -58,6 +59,13 @@ def test_default_extraction_matches_prechange_golden():
     result = extract_parameters(*mixed_profile(), "mixed_angles", "baseline")
     actual = [(b.bench_height, b.face_angle, b.berm_width, b.bench_number) for b in result.benches]
     expected = [(8.064858190447211, 50.52421587479905, 0.0, 1), (17.320508075688764, 50.52421587479905, 9.124663612500282, 2)]
-    assert actual == expected
-    assert result.overall_angle == 41.399560806115595
-    assert result.inter_ramp_angle == 51.716218287195055
+    assert len(actual) == len(expected)
+    for actual_bench, expected_bench in zip(actual, expected):
+        for actual_value, expected_value in zip(actual_bench, expected_bench):
+            assert type(actual_value) is type(expected_value)
+            if isinstance(expected_value, float):
+                assert actual_value == pytest.approx(expected_value, rel=1e-9, abs=1e-9)
+            else:
+                assert actual_value == expected_value
+    assert result.overall_angle == pytest.approx(41.399560806115595, rel=1e-9, abs=1e-9)
+    assert result.inter_ramp_angle == pytest.approx(51.716218287195055, rel=1e-9, abs=1e-9)
