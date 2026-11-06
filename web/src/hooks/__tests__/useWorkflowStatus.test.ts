@@ -49,7 +49,7 @@ describe('computeWorkflowStatus', () => {
     expect(result.projectStatus).toBe('surfaces');
   });
 
-  it('moves to process when sections exist but are not processed', () => {
+  it('moves to parameters when sections exist but are not processed', () => {
     const result = computeWorkflowStatus({
       ...base,
       designMeshId: 'd1',
@@ -62,10 +62,10 @@ describe('computeWorkflowStatus', () => {
     expect(result.steps).toEqual({
       surfaces: 'done',
       sections: 'done',
-      parameters: 'done',
-      process: 'current',
+      parameters: 'current',
+      process: 'pending',
     });
-    expect(result.nextStep).toBe('process');
+    expect(result.nextStep).toBe('parameters');
     expect(result.projectStatus).toBe('ready');
   });
 
@@ -76,6 +76,7 @@ describe('computeWorkflowStatus', () => {
       topoMeshId: 't1',
       sectionCount: 3,
       processStatus: 'processing',
+      parametersConfirmed: true,
     });
     expect(result.isProcessing).toBe(true);
     expect(result.isComplete).toBe(false);

@@ -131,7 +131,7 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
 
   if (isDemo) {
     return (
-      <section role="status" className="rounded-lg border border-border p-4 text-sm text-text-muted">
+      <section role="status" className="text-sm text-text-muted">
         {tx('demoUnavailable')}
       </section>
     );
@@ -146,7 +146,7 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
       data-slot="design-achievement"
       aria-labelledby="design-achievement-title"
       aria-busy={isPending || (isFetching && !data) || undefined}
-      className="min-w-0 space-y-4 rounded-lg border border-border bg-surface-raised p-4 text-sm"
+      className="min-w-0 space-y-4 text-sm"
     >
       <h3 id="design-achievement-title" className="ui-section-title m-0">
         {tx('title')}

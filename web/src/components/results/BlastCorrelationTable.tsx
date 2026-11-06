@@ -26,7 +26,7 @@ export function BlastCorrelationTable({ rows }: { rows: BlastCorrelationRow[] })
   const { t } = useTranslation();
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
+    <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
           <tr className="border-b border-border">

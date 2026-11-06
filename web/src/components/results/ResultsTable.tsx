@@ -315,7 +315,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
           <option value="level">{t('table.order_by_level', { defaultValue: 'Por Nivel' })}</option>
         </select>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             {table.getHeaderGroups().map((headerGroup) => (

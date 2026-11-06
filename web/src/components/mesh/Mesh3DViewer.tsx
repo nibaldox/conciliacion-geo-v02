@@ -766,7 +766,7 @@ export function Mesh3DViewer() {
 
   if (hasNoData) {
     return (
-      <div data-slot="mesh-3d-viewer" className="flex items-center justify-center h-full min-h-0 rounded-xl" style={{ backgroundColor: 'var(--color-surface-muted)', border: '1px solid var(--color-border)' }}>
+      <div data-slot="mesh-3d-viewer" className="flex items-center justify-center h-full min-h-0">
         <div className="flex flex-col items-center gap-3" style={{ color: 'var(--color-text-muted)' }}>
           <p className="text-sm text-center">{t('step1.view3d_no_data')}</p>
         </div>

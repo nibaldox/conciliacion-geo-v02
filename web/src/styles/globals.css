@@ -131,15 +131,15 @@
   --color-hdev-overbreak-severe: #818cf8;
   --color-hdev-unmeasured: #94a3b8;
 
-  /* Surfaces — deep dark, near-black with a faint cool tint */
-  --color-surface: #07090c;
-  --color-surface-raised: #0e1217;
-  --color-surface-muted: #161b22;
-  --color-surface-sunken: #050608;
+  /* Surfaces — deep dark, neutral near-black, matte (no cool tint) */
+  --color-surface: #0a0a0b;
+  --color-surface-raised: #101011;
+  --color-surface-muted: #18181b;
+  --color-surface-sunken: #060607;
 
   /* Borders — subtle, using low-opacity white for that HUD look */
-  --color-border: #1f262f;
-  --color-border-strong: rgba(255, 255, 255, 0.08);
+  --color-border: #1d1d20;
+  --color-border-strong: rgba(255, 255, 255, 0.07);
   --color-border-dashed: rgba(255, 255, 255, 0.14);
 
   /* Text — off-white, every level meets WCAG AA on all dark surfaces */
@@ -153,10 +153,10 @@
   --color-accent-fg: #ffffff;
   --color-accent-bright: #6db3f2;
   --color-accent-bg: rgba(109, 179, 242, 0.12);
-  --color-viewer-bg: #05070a;
+  --color-viewer-bg: #060607;
   --color-viewer-topo: #cccccc;
-  --color-viewer-grid: #1c2430;
-  --color-viewer-grid-minor: #10161d;
+  --color-viewer-grid: #1a1a1d;
+  --color-viewer-grid-minor: #111113;
 
   /* Status colors (semi-transparent bg + bright fg) */
   --status-ok-bg: rgba(57, 171, 96, 0.12);
@@ -176,14 +176,14 @@
   --font-sans: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-  /* Shadows — matching GeotRadarSim HUD glow effects */
-  --shadow-glow-accent: 0 2px 6px rgba(0, 0, 0, 0.15);
-  --shadow-glow-ok: 0 0 16px rgba(57, 171, 96, 0.20);
-  --shadow-glow-warn: 0 0 16px rgba(230, 143, 25, 0.20);
-  --shadow-glow-nok: 0 0 16px rgba(232, 49, 73, 0.20);
+  /* Shadows — matte: flat surfaces, depth reserved for floating layers */
+  --shadow-glow-accent: none;
+  --shadow-glow-ok: none;
+  --shadow-glow-warn: none;
+  --shadow-glow-nok: none;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.55);
+  --shadow-sm: none;
+  --shadow-md: none;
   --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.6);
 
   --radius-sm: 4px;
@@ -338,9 +338,9 @@ body {
 }
 
 .dark .gradient-title {
-  background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  background: none;
+  color: var(--color-text-primary);
+  -webkit-text-fill-color: currentColor;
 }
 
 /* ── Scrollbar — light ───────────────────────────────────────── */

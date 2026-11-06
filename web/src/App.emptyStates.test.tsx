@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
@@ -16,7 +16,6 @@ vi.mock('./components/layout/AppLayout', () => ({
   AppLayout: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('./components/ErrorBoundary', () => ({ ErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</> }));
-vi.mock('./hooks/useHotkeys', () => ({ useHotkeys: () => undefined }));
 vi.mock('./api/hooks', () => ({
   useSections: () => ({ data: apiState.sections }),
   useProcessStatus: () => ({ data: apiState.status }),
@@ -35,7 +34,7 @@ vi.mock('./components/results/SectionSelector', () => ({ SectionSelector: () => 
 vi.mock('./components/export/ExportPanel', () => ({ ExportPanel: () => <div data-testid="export-panel" /> }));
 
 import App from './App';
-import { useSession } from './stores/session';
+import { DEMO_MESH_IDS, useSession, type DemoData } from './stores/session';
 
 const testI18n = i18n.createInstance();
 void testI18n.use(initReactI18next).init({ lng: 'es', resources: { es: { translation: es } }, initAsync: false });
@@ -105,6 +104,86 @@ describe('App workspace empty states', () => {
     await user.click(screen.getByRole('button', { name: 'Ir a procesar' }));
     expect(useSession.getState().openWorkflowStep).toBe('process');
     expect(useSession.getState().activeWorkspaceView).toBe('dashboard');
+  });
+
+  it('opens dashboard once processing completes without reclaiming 3D afterward', async () => {
+    apiState.sections = [{ id: 'section-1' }];
+    apiState.status = { status: 'processing' };
+    useSession.setState({ activeWorkspaceView: '3d', designMeshId: 'design', topoMeshId: 'topo' });
+    const view = renderApp();
+    expect(screen.getByTestId('mesh-viewer')).toBeInTheDocument();
+    apiState.status = { status: 'complete' };
+    view.rerender(<I18nextProvider i18n={testI18n}><App /></I18nextProvider>);
+    expect(await screen.findByTestId('dashboard')).toBeInTheDocument();
+    act(() => useSession.getState().setActiveWorkspaceView('3d'));
+    expect(screen.getByTestId('mesh-viewer')).toBeInTheDocument();
+  });
+
+  it('opens dashboard for a recovered complete session', async () => {
+    apiState.sections = [{ id: 'section-1' }];
+    apiState.status = { status: 'complete' };
+    useSession.setState({ activeWorkspaceView: '3d', designMeshId: 'design', topoMeshId: 'topo' });
+    renderApp();
+    expect(await screen.findByTestId('dashboard')).toBeInTheDocument();
+  });
+
+  it('opens an explicitly selected profile in detail mode', async () => {
+    apiState.sections = [{ id: 'section-1' }];
+    apiState.status = { status: 'complete' };
+    useSession.setState({ activeWorkspaceView: 'dashboard', designMeshId: 'design', topoMeshId: 'topo' });
+    renderApp();
+    act(() => {
+      useSession.getState().setSelectedSection('section-1');
+      useSession.getState().setProfilesMode('detail');
+      useSession.getState().setActiveWorkspaceView('profiles');
+    });
+    expect(await screen.findByTestId('profile')).toBeInTheDocument();
+    expect(useSession.getState().selectedSection).toBe('section-1');
+    expect(useSession.getState().activeWorkspaceView).toBe('profiles');
+  });
+
+  it('preserves another selected view when processing finishes', async () => {
+    apiState.sections = [{ id: 'section-1' }];
+    apiState.status = { status: 'processing' };
+    useSession.setState({ activeWorkspaceView: 'profiles', designMeshId: 'design', topoMeshId: 'topo' });
+    const view = renderApp();
+    apiState.status = { status: 'complete' };
+    view.rerender(<I18nextProvider i18n={testI18n}><App /></I18nextProvider>);
+    expect(await screen.findByTestId('profiles-grid')).toBeInTheDocument();
+  });
+
+  it('shows the dashboard for a loaded virtual demo even if the API status is idle', async () => {
+    apiState.sections = [{ id: 'section-1' }];
+    apiState.status = { status: 'idle' };
+    useSession.setState({ activeWorkspaceView: 'dashboard', demoMode: true, demoData: { sections: [] } as unknown as DemoData, designMeshId: DEMO_MESH_IDS.design, topoMeshId: DEMO_MESH_IDS.topo });
+    renderApp();
+    expect(await screen.findByTestId('dashboard')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="empty-no-process"]')).not.toBeInTheDocument();
+  });
+
+  it('shows blast workspace for a loaded virtual demo', async () => {
+    apiState.sections = [{ id: 'section-1' }];
+    apiState.status = { status: 'idle' };
+    useSession.setState({ activeWorkspaceView: 'blast', demoMode: true, demoData: { sections: [] } as unknown as DemoData, designMeshId: DEMO_MESH_IDS.design, topoMeshId: DEMO_MESH_IDS.topo });
+    renderApp();
+    expect(await screen.findByTestId('blast')).toBeInTheDocument();
+  });
+
+  it('does not treat a mixed demo and real session as complete', () => {
+    apiState.sections = [{ id: 'section-1' }];
+    apiState.status = { status: 'idle' };
+    useSession.setState({ activeWorkspaceView: 'dashboard', demoMode: true, demoData: { sections: [] } as unknown as DemoData, designMeshId: DEMO_MESH_IDS.design, topoMeshId: 'real' });
+    renderApp();
+    expect(document.querySelector('[data-slot="empty-no-process"]')).toBeInTheDocument();
+  });
+
+  it('maps numeric shortcuts to the visible tab order', async () => {
+    const user = userEvent.setup();
+    renderApp();
+    for (const [key, view] of [['1', 'dashboard'], ['2', 'profiles'], ['3', '3d'], ['4', 'blast'], ['5', 'export-ai']]) {
+      await user.keyboard(key);
+      expect(useSession.getState().activeWorkspaceView).toBe(view);
+    }
   });
 
   it('titles the dashboard detail table with the translated heading', async () => {

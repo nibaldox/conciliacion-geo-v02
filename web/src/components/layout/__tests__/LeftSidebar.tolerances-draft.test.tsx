@@ -123,6 +123,29 @@ describe('LeftSidebar — edición rápida de tolerancias (draft + debounce)', (
     useSession.setState({ designMeshId: 'design-1', topoMeshId: 'topo-1' });
   });
 
+  it('mantiene el cambio automático a 3D para mallas reales tras usar demo', () => {
+    useSession.setState({ demoMode: true, demoData: null, activeWorkspaceView: 'dashboard' });
+    renderSidebar();
+    expect(useSession.getState().activeWorkspaceView).toBe('3d');
+  });
+
+  it('mantiene Dashboard al cargar datos demo con el panel lateral montado', async () => {
+    useSession.getState().reset();
+    renderSidebar();
+    useSession.setState({ demoData: { sections: [] } as never });
+    await act(async () => { await useSession.getState().loadDemo(); });
+    expect(useSession.getState().activeWorkspaceView).toBe('dashboard');
+  });
+
+  it('mantiene Dashboard al cargar demo desde un estado vacío con secciones abiertas', async () => {
+    useSession.getState().reset();
+    useSession.setState({ openWorkflowStep: 'sections', activeWorkspaceView: 'dashboard' });
+    renderSidebar();
+    useSession.setState({ demoData: { sections: [] } as never });
+    await act(async () => { await useSession.getState().loadDemo(); });
+    expect(useSession.getState().activeWorkspaceView).toBe('dashboard');
+  });
+
   it('mantiene ambos valores tecleados: dos ediciones antes del debounce preservan neg y pos', async () => {
     const user = userEvent.setup();
     renderSidebar();

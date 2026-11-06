@@ -178,7 +178,7 @@ function OverlayButton({
         'absolute top-1/2 -translate-y-1/2 z-10',
         'flex items-center gap-2',
         isLeft ? 'left-2' : 'right-2',
-        'px-3 py-2 rounded-full shadow-md',
+        'px-3 py-2 rounded-full shadow-lg',
         'transition-all duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
         disabled

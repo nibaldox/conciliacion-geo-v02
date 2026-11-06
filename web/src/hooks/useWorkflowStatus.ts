@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useProcessStatus, useSections } from '../api/hooks';
-import { useSession, type WorkflowStepKey } from '../stores/session';
+import { DEMO_MESH_IDS, useSession, type WorkflowStepKey } from '../stores/session';
 
 export type WorkflowStepState = 'done' | 'current' | 'pending' | 'locked';
 
@@ -10,6 +10,7 @@ export interface WorkflowStatusInput {
   designMeshId: string | null;
   topoMeshId: string | null;
   sectionCount: number;
+  parametersConfirmed?: boolean;
   processStatus: 'idle' | 'processing' | 'complete' | 'error' | null | undefined;
 }
 
@@ -40,7 +41,7 @@ export function computeWorkflowStatus(input: WorkflowStatusInput): WorkflowStatu
   const done: Record<WorkflowStepKey, boolean> = {
     surfaces: surfacesDone,
     sections: sectionsDone,
-    parameters: sectionsDone,
+    parameters: isComplete || (sectionsDone && Boolean(input.parametersConfirmed)),
     process: isComplete,
   };
   const locked: Record<WorkflowStepKey, boolean> = {
@@ -88,13 +89,17 @@ export function computeWorkflowStatus(input: WorkflowStatusInput): WorkflowStatu
 export function useWorkflowStatus(): WorkflowStatus {
   const designMeshId = useSession((s) => s.designMeshId);
   const topoMeshId = useSession((s) => s.topoMeshId);
+  const parametersConfirmed = useSession((s) => s.parametersConfirmed);
+  const demoMode = useSession((s) => s.demoMode);
+  const demoData = useSession((s) => s.demoData);
   const { data: sections } = useSections();
   const { data: status } = useProcessStatus();
   const sectionCount = sections?.length ?? 0;
-  const processStatus = status?.status;
+  const isLoadedDemo = demoMode && Boolean(demoData) && designMeshId === DEMO_MESH_IDS.design && topoMeshId === DEMO_MESH_IDS.topo;
+  const processStatus = isLoadedDemo ? 'complete' : status?.status;
 
   return useMemo(
-    () => computeWorkflowStatus({ designMeshId, topoMeshId, sectionCount, processStatus }),
-    [designMeshId, topoMeshId, sectionCount, processStatus],
+    () => computeWorkflowStatus({ designMeshId, topoMeshId, sectionCount, processStatus, parametersConfirmed }),
+    [designMeshId, topoMeshId, sectionCount, processStatus, parametersConfirmed],
   );
 }

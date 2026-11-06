@@ -7,6 +7,9 @@ import type { ComparisonResult } from '../../../api/types';
 const mocks = vi.hoisted(() => ({
   rows: [] as unknown[],
   tolerances: null as Record<string, Record<string, number>> | null,
+  setSelectedSection: vi.fn(),
+  setProfilesMode: vi.fn(),
+  setActiveWorkspaceView: vi.fn(),
   filters: { sector: [], section: [], level: [], bench: [] } as {
     sector: string[];
     section: string[];
@@ -17,6 +20,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../api/hooks', () => ({
   useResults: () => ({ data: mocks.rows }),
+  useSections: () => ({ data: [{ id: '0', name: 'S-001' }] }),
+  useProfile: () => ({ data: null, isPending: false, isError: false }),
   useSettings: () => ({
     data: mocks.tolerances === null ? undefined : { tolerances: mocks.tolerances },
   }),
@@ -26,6 +31,9 @@ vi.mock('../../../stores/session', () => ({
   useSession: (selector: (s: unknown) => unknown) =>
     selector({
       filters: mocks.filters,
+      setSelectedSection: mocks.setSelectedSection,
+      setProfilesMode: mocks.setProfilesMode,
+      setActiveWorkspaceView: mocks.setActiveWorkspaceView,
       setFilters: (f: Record<string, unknown>) => {
         mocks.filters = { ...mocks.filters, ...f } as typeof mocks.filters;
       },
@@ -33,7 +41,7 @@ vi.mock('../../../stores/session', () => ({
 }));
 
 vi.mock('../CompliancePlanView', () => ({
-  CompliancePlanView: () => null,
+  CompliancePlanView: (props: { variant?: string; colorBy?: string; visibleStatuses?: Set<string>; onSelectSection?: (name: string) => void }) => <button data-testid="plan" data-variant={props.variant} data-color={props.colorBy} data-statuses={[...(props.visibleStatuses ?? [])].join(',')} onClick={() => props.onSelectSection?.('S-001')}>Select plan</button>,
 }));
 
 vi.mock('../DesignAchievementPanel', () => ({
@@ -97,7 +105,7 @@ function collectHistogramBands(): number[][] {
   for (const label of HISTOGRAM_SEGMENTS) {
     selectHistogram(label);
     const plots = plotData();
-    const histogram = plots[plots.length - 1]!;
+    const histogram = plots.find((plot) => (plot.layout.shapes?.length ?? 0) > 0)!;
     for (const shape of histogram.layout.shapes ?? []) bands.push([shape.x0, shape.x1]);
   }
   return bands;
@@ -140,6 +148,30 @@ describe('buildHistogram (bandas de tolerancia)', () => {
     const chart = buildHistogram([0, 2, 0], 't', 'x', { neg: 1, pos: 1 }, 'frecuencia');
     const trace = chart.data[0] as { x: number[] };
     expect(trace.x).toEqual([0, 2, 0]);
+  });
+});
+
+describe('Dashboard layout B', () => {
+  it('connects hero, color, selection, filters and profile id', () => {
+    mocks.rows = [makeRow(), makeRow({ bench_num: 2 })];
+    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+    const { container } = render(<Dashboard />);
+    const plan = screen.getByTestId('plan');
+    expect(plan.getAttribute('data-variant')).toBe('hero');
+    expect(container.querySelector('[data-slot="dashboard-rail"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="dashboard-rail"] .bg-surface-raised.rounded-lg')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Puntaje' }));
+    expect(plan.getAttribute('data-color')).toBe('score');
+    fireEvent.click(plan);
+    expect(container.querySelector('[data-slot="selected-section"]')?.textContent).toContain('S-001');
+    expect(screen.getByRole('button', { name: /Abrir perfil/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Abrir perfil/ }));
+    expect(mocks.setSelectedSection).toHaveBeenCalledWith('0');
+    expect(mocks.setProfilesMode).toHaveBeenCalledWith('detail');
+    expect(mocks.setActiveWorkspaceView).toHaveBeenCalledWith('profiles');
+    fireEvent.click(screen.getByRole('button', { name: 'Cumple', pressed: true }));
+    expect(plan.getAttribute('data-statuses')?.split(',')).not.toContain('CUMPLE');
+    expect(screen.queryByRole('button', { name: /Abrir perfil/ })).toBeNull();
   });
 });
 
@@ -234,12 +266,28 @@ describe('Dashboard distribución de desviaciones con selector', () => {
   });
 
   it('recurre a DEFAULT_TOLERANCES sin configuración', () => {
-    mocks.rows = [makeRow({ berm_real: 6.5 })];
+    mocks.rows = [makeRow({ berm_real: 8 })];
     mocks.tolerances = null;
     mocks.filters = { sector: [], section: [], level: [], bench: [] };
     render(<Dashboard />);
     const bands = collectHistogramBands();
-    expect(bands.some(([x0, x1]) => x0 === -1 && x1 === 1.5)).toBe(true);
-    expect(bands.some(([x0, x1]) => x0 === 6 && x1 > 6)).toBe(true);
+    expect(bands.some(([x0, x1]) => x0 === -2 && x1 === 2)).toBe(true);
+    expect(bands.some(([x0, x1]) => x0 === 7 && x1 > 7)).toBe(true);
+  });
+});
+
+
+describe('Dashboard rail parameter detail', () => {
+  it('places compact parameter details immediately after bars and before selection', () => {
+    mocks.rows = [makeRow()];
+    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+    const { container } = render(<Dashboard />);
+    const rail = container.querySelector('[data-slot="dashboard-rail"]')!;
+    const bars = rail.querySelector('[data-slot="parameter-bars"]')!;
+    const details = rail.querySelector('details')!;
+    expect(bars.nextElementSibling).toBe(details);
+    expect(details.nextElementSibling).toHaveAttribute('data-slot', 'selected-section');
+    expect(details.className).toContain('[&_.overflow-x-auto]:overflow-visible');
+    expect(details.querySelectorAll('[data-parameter]')).toHaveLength(3);
   });
 });

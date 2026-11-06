@@ -17,7 +17,7 @@ test('summary plan shows topography and processed profiles with canonical compli
   await page.getByRole('button', { name: /Probar con datos/i }).click();
   await page.getByRole('button', { name: 'Salir del demo' }).waitFor();
   await page.locator('canvas').waitFor();
-  await page.getByRole('tab', { name: 'Resumen', exact: true }).click();
+  await page.getByRole('tab', { name: 'Dashboard', exact: true }).click();
   const plan = page.locator('[data-slot="compliance-plan-view"]');
   await expect(plan.locator('image')).toHaveAttribute('href', /^data:image\/png;base64,/);
   await expect(plan.locator('polyline')).toHaveCount(5);
@@ -52,7 +52,7 @@ test('clustered profiles open at the evaluated area and keep their labels separa
   await page.getByRole('button', { name: /Probar con datos/i }).click();
   await page.getByRole('button', { name: 'Salir del demo' }).waitFor();
   await page.locator('canvas').waitFor();
-  await page.getByRole('tab', { name: 'Resumen', exact: true }).click();
+  await page.getByRole('tab', { name: 'Dashboard', exact: true }).click();
   const plan = page.locator('[data-slot="compliance-plan-view"]');
   await expect(plan.locator('polyline')).toHaveCount(32);
   const focused = (await plan.getAttribute('data-extent'))!.split(',').map(Number);

@@ -223,7 +223,7 @@ function BlastHistogramChart({ carga, descarga }: { carga: number[]; descarga: n
 
   return (
     <section
-      className="flex min-w-0 flex-col gap-3 rounded-lg border border-border p-4"
+      className="flex min-w-0 flex-col gap-3"
       data-testid="blast-histogram-chart"
     >
       <BlastSectionHeader

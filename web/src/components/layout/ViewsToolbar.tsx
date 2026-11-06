@@ -11,9 +11,9 @@ interface ViewsToolbarProps {
 }
 
 const VIEWS = [
-  { key: '3d', icon: Icon3D, text: 'workspace.view3d', hotkey: '1', requiresComplete: false },
+  { key: 'dashboard', icon: IconDashboard, text: 'workspace.summary', hotkey: '1', requiresComplete: true },
   { key: 'profiles', icon: IconProfiles, text: 'workspace.profiles', hotkey: '2', requiresComplete: true },
-  { key: 'dashboard', icon: IconDashboard, text: 'workspace.summary', hotkey: '3', requiresComplete: true },
+  { key: '3d', icon: Icon3D, text: 'workspace.view3d', hotkey: '3', requiresComplete: false },
   { key: 'blast', icon: IconLightning, text: 'workspace.blast', hotkey: '4', requiresComplete: true },
   { key: 'export-ai', icon: IconExport, text: 'workspace.export', hotkey: '5', requiresComplete: true },
 ] as const;

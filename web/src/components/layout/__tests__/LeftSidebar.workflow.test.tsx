@@ -1,22 +1,27 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import es from '../../../locales/es.json';
+import en from '../../../locales/en.json';
+import { DEFAULT_SETTINGS, DEFAULT_TOLERANCES } from '../../../utils/constants';
 import { useSession } from '../../../stores/session';
 import { LeftSidebar } from '../LeftSidebar';
 
 const sectionsState = vi.hoisted(() => ({ data: [] as Array<{ id: string }> }));
+const saveState = vi.hoisted(() => ({ autoComplete: true, onSuccess: undefined as (() => void) | undefined }));
 const processState = vi.hoisted(() => ({ data: undefined as { status: string } | undefined }));
+
+const settingsData = { process: DEFAULT_SETTINGS, tolerances: DEFAULT_TOLERANCES };
 
 vi.mock('../../../api/hooks', () => {
   const mutationStub = () => ({ mutate: vi.fn(), isPending: false });
   return {
-    useSettings: () => ({ data: undefined }),
+    useSettings: () => ({ data: settingsData }),
     useProcessStatus: () => ({ data: processState.data }),
     useSections: () => ({ data: sectionsState.data }),
-    useUpdateSettings: mutationStub,
+    useUpdateSettings: () => ({ ...mutationStub(), mutate: (_payload: unknown, options?: { onSuccess?: () => void }) => { saveState.onSuccess = options?.onSuccess; if (saveState.autoComplete) options?.onSuccess?.(); } }),
   };
 });
 
@@ -63,7 +68,14 @@ describe('LeftSidebar — flujo de trabajo vertical', () => {
   beforeEach(() => {
     sectionsState.data = [];
     processState.data = undefined;
+    saveState.autoComplete = true;
+    saveState.onSuccess = undefined;
     useSession.getState().reset();
+  });
+
+  it('incluye la confirmación traducida en ambos idiomas', () => {
+    expect(es.ux.confirm_parameters).toBe('Usar estos parámetros');
+    expect(en.ux.confirm_parameters).toBe('Use these parameters');
   });
 
   it('renderiza los cuatro pasos en orden con el título del flujo', () => {
@@ -125,6 +137,55 @@ describe('LeftSidebar — flujo de trabajo vertical', () => {
     });
     expect(useSession.getState().openWorkflowStep).toBe('sections');
     expect(useSession.getState().activeWorkspaceView).toBe('3d');
+  });
+
+  it('abre parámetros al definir secciones y confirma antes de avanzar', async () => {
+    const user = userEvent.setup();
+    useSession.setState({ designMeshId: 'design-1', topoMeshId: 'topo-1', openWorkflowStep: 'sections' });
+    const { rerender } = renderSidebar();
+    sectionsState.data = [{ id: 's-1' }];
+    rerender(<I18nextProvider i18n={i18n}><LeftSidebar /></I18nextProvider>);
+    expect(stepButton('parameters')).toHaveAttribute('data-state', 'current');
+    expect(stepButton('parameters')).toHaveAttribute('aria-expanded', 'true');
+    expect(stepButton('process')).toHaveAttribute('aria-expanded', 'false');
+    await user.click(screen.getByRole('button', { name: 'Usar estos parámetros' }));
+    expect(stepButton('parameters')).toHaveAttribute('data-state', 'done');
+    expect(stepButton('process')).toHaveAttribute('aria-expanded', 'true');
+    expect(useSession.getState().parametersConfirmed).toBe(true);
+    await user.click(stepButton('parameters'));
+    const resolution = document.getElementById('process-resolution') as HTMLInputElement;
+    await user.clear(resolution);
+    await user.type(resolution, '0.5');
+    expect(useSession.getState().parametersConfirmed).toBe(true);
+    expect(stepButton('parameters')).toHaveAttribute('data-state', 'done');
+    act(() => useSession.getState().reset());
+    expect(useSession.getState().parametersConfirmed).toBe(false);
+  });
+
+  it('restaura los valores de detección por defecto al vaciar los campos', () => {
+    useSession.setState({ designMeshId: 'design-1', topoMeshId: 'topo-1', openWorkflowStep: 'parameters' });
+    renderSidebar();
+    for (const [key, expected] of [['face_threshold', 30], ['berm_threshold', 10]] as const) {
+      const input = document.getElementById(`process-${key}`) as HTMLInputElement;
+      fireEvent.change(input, { target: { value: '45' } });
+      expect(input).toHaveValue(45);
+      fireEvent.change(input, { target: { value: '' } });
+      expect(input).toHaveValue(expected);
+    }
+  });
+
+  it('espera el guardado antes de confirmar y abrir procesar', async () => {
+    const user = userEvent.setup();
+    useSession.setState({ designMeshId: 'design-1', topoMeshId: 'topo-1', openWorkflowStep: 'parameters' });
+    sectionsState.data = [{ id: 's-1' }];
+    saveState.autoComplete = false;
+    renderSidebar();
+    await user.click(screen.getByRole('button', { name: 'Usar estos parámetros' }));
+    expect(stepButton('parameters')).toHaveAttribute('aria-expanded', 'true');
+    expect(useSession.getState().parametersConfirmed).toBe(false);
+    act(() => saveState.onSuccess?.());
+    expect(useSession.getState().parametersConfirmed).toBe(true);
+    expect(stepButton('process')).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('contrae el paso abierto cuando el último paso se completa', () => {

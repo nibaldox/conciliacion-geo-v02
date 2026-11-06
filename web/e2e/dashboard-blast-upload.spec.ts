@@ -19,7 +19,7 @@ test('bench selection recalculates the whole summary and the plan scores', async
   await page.getByRole('button', { name: /Probar con datos/i }).click();
   await page.getByRole('button', { name: 'Salir del demo' }).waitFor();
   await page.locator('canvas').waitFor();
-  await page.getByRole('tab', { name: 'Resumen', exact: true }).click();
+  await page.getByRole('tab', { name: 'Dashboard', exact: true }).click();
   const filter = page.locator('[data-slot="dashboard-bench-filter"]');
   const plan = page.locator('[data-slot="compliance-plan-view"]');
   await filter.locator('summary').click();

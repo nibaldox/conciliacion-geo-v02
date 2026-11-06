@@ -72,7 +72,7 @@ export function SummaryPanel({ title, info, actions, slot, className, children, 
   'data-extent'?: string;
 }) {
   return (
-    <section data-slot={slot} {...rest} className={`min-w-0 space-y-3 rounded-lg border border-border bg-surface-raised p-4 ${className ?? ''}`}>
+    <section data-slot={slot} {...rest} className={`min-w-0 space-y-3 ${className ?? ''}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-1.5">
           <h3 className="ui-section-title">{title}</h3>

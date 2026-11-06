@@ -71,9 +71,11 @@ interface SessionState {
   // Wizard navigation
   currentStep: number;
   openWorkflowStep: WorkflowStepKey | null;
+  parametersConfirmed: boolean;
 
   // Workspace views and layout state
   activeWorkspaceView: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai';
+  profilesMode: 'grid' | 'detail';
   sidebarCollapsed: boolean;
 
   mapClickHandler: ((anchor: CurveAnchor) => void) | null;
@@ -106,9 +108,11 @@ interface SessionState {
   // Actions
   setStep: (step: number) => void;
   setOpenWorkflowStep: (step: WorkflowStepKey | null) => void;
+  setParametersConfirmed: (confirmed: boolean) => void;
   nextStep: () => void;
   prevStep: () => void;
   setActiveWorkspaceView: (view: '3d' | 'profiles' | 'dashboard' | 'blast' | 'export-ai') => void;
+  setProfilesMode: (mode: 'grid' | 'detail') => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   setMapClickHandler: (handler: ((anchor: CurveAnchor) => void) | null) => void;
   dispatchCurveSelection: (action: CurveSelectionAction) => void;
@@ -126,7 +130,9 @@ interface SessionState {
 const initialState = {
   currentStep: 1,
   openWorkflowStep: 'surfaces' as WorkflowStepKey | null,
+  parametersConfirmed: false,
   activeWorkspaceView: '3d' as const,
+  profilesMode: 'grid' as const,
   sidebarCollapsed: false,
   mapClickHandler: null,
   curveSelection: createCurveSelectionState(null),
@@ -153,9 +159,11 @@ export const useSession = create<SessionState>((set, get) => ({
 
   setStep: (step) => set({ currentStep: step }),
   setOpenWorkflowStep: (step) => set({ openWorkflowStep: step }),
+  setParametersConfirmed: (confirmed) => set({ parametersConfirmed: confirmed }),
   nextStep: () => set((s) => ({ currentStep: Math.min(s.currentStep + 1, 4) })),
   prevStep: () => set((s) => ({ currentStep: Math.max(s.currentStep - 1, 1) })),
   setActiveWorkspaceView: (view) => set({ activeWorkspaceView: view }),
+  setProfilesMode: (mode) => set({ profilesMode: mode }),
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   setMapClickHandler: (handler) => set({ mapClickHandler: handler }),
   dispatchCurveSelection: (action) =>
@@ -184,7 +192,7 @@ export const useSession = create<SessionState>((set, get) => ({
         designMeshId: DEMO_MESH_IDS.design,
         topoMeshId: DEMO_MESH_IDS.topo,
         currentStep: 4,            // skip straight to results
-        activeWorkspaceView: 'profiles',
+        activeWorkspaceView: 'dashboard',
         curveSelection: createCurveSelectionState(null),
         selectedSection: existing.sections[0]?.section_name ?? null,
         selectedBlastHoleRowId: null,
@@ -209,7 +217,7 @@ export const useSession = create<SessionState>((set, get) => ({
         designMeshId: DEMO_MESH_IDS.design,
         topoMeshId: DEMO_MESH_IDS.topo,
         currentStep: 4,
-        activeWorkspaceView: 'profiles',
+        activeWorkspaceView: 'dashboard',
         curveSelection: createCurveSelectionState(null),
         selectedSection: data.sections[0]?.section_name ?? null,
         selectedBlastHoleRowId: null,
@@ -224,6 +232,7 @@ export const useSession = create<SessionState>((set, get) => ({
 
   exitDemo: () =>
     set({
+      parametersConfirmed: false,
       demoMode: false,
       demoData: null,
       demoLoading: false,

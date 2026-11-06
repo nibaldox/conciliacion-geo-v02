@@ -904,8 +904,8 @@
     "berm": "Berm width"
   },
   "tooltip": {
-    "face_threshold": "Minimum angle (degrees) for a segment to be classified as a bench face. Default 40°. Lower values detect gentler faces.",
-    "berm_threshold": "Maximum angle (degrees) for a segment to be classified as a berm. Default 20°. Higher values allow steeper berms.",
+    "face_threshold": "Minimum angle (degrees) for a segment to be classified as a bench face. Default 30°. Lower values detect gentler faces.",
+    "berm_threshold": "Maximum angle (degrees) for a segment to be classified as a berm. Default 10°. Higher values allow steeper berms.",
     "simplify_epsilon": "RDP simplification tolerance. Higher = smoother profile. Default 0.1 m.",
     "max_berm_width": "Anti-noise filter: ignore berms wider than this (m). Default 50 m.",
     "tol_bench_height": "Allowed deviation in bench height (m). COMPLIES if |deviation| ≤ tolerance.",
@@ -1130,6 +1130,37 @@
     "resolution_high": "High"
   },
   "dashboard": {
+    "rail": {
+      "profile_preview": "Profile preview", "profile_design": "Design", "profile_topo": "Actual topography",
+      "color_by": "Color by",
+      "color_status": "Status",
+      "color_score": "Score",
+      "color_height": "Height",
+      "color_angle": "Angle",
+      "color_berm": "Berm",
+      "filter_status": "Filter by status",
+      "status_cumple": "Pass",
+      "status_fuera": "Outside",
+      "status_no_cumple": "Fail",
+      "status_unknown": "No data",
+      "parameters": "Compliance by parameter",
+      "denominator": "Percentage of all benches, including other statuses and missing data.",
+      "bar_counts": "Pass: {{ok}}; outside: {{warn}}; fail: {{nok}}; other or no data: {{unknown}}",
+      "selected": "Selected section",
+      "score": "Score",
+      "status": "Status",
+      "height_dev": "Δ height",
+      "angle_dev": "Δ angle",
+      "delta_crest": "Δ crest",
+      "delta_toe": "Δ toe",
+      "bench": "Bench",
+      "elevation": "Elevation",
+      "open_profile": "Open profile",
+      "clear": "Clear selection",
+      "parameter_detail": "Parameter detail",
+      "no_sectors": "No sectors assigned",
+      "count": "{{sections}} sections · {{benches}} benches"
+    },
     "filters": {
       "no_matching_results": "No results match the active filter combination. Adjust or reset the sector, section, elevation, or bench filters."
     },
@@ -1275,7 +1306,7 @@
     "sections": "Sections",
     "profiles": "Profiles",
     "view3d": "3D view",
-    "summary": "Summary",
+    "summary": "Dashboard",
     "blast": "Blasting",
     "export": "Export",
     "curves": "From curves",
@@ -1296,6 +1327,11 @@
     "outside": "Outside tolerance",
     "failing": "Non-compliant",
     "evaluated_area": "Evaluated area",
+    "score": "Score",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "zoom_reset": "Reset zoom",
+    "color_scale": "Color scale",
     "full_surface": "Full surface"
   },
   "project_input": {
@@ -1347,6 +1383,7 @@
     "neighbours": "Blue: active profile · gray: neighbouring profiles"
   },
   "ux": {
+    "confirm_parameters": "Use these parameters",
     "profiles_mode": "Display mode",
     "step_surfaces": "Surfaces",
     "step_sections": "Sections",

@@ -86,8 +86,8 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
   return (
     <div
       className={[
-        'overflow-hidden rounded-lg border bg-surface-raised transition-colors',
-        isSelected ? 'border-accent-bright' : 'border-border hover:border-border-strong',
+        'border-b border-border transition-colors',
+        isSelected ? 'border-accent-bright' : '',
       ].join(' ')}
     >
       <button
@@ -177,7 +177,7 @@ export function ProfilesGrid({ onSectionSelect }: ProfilesGridProps) {
 
   if (!sections || sections.length === 0) {
     return (
-      <div className="flex items-center justify-center rounded-lg border border-dashed border-border py-16 text-text-muted">
+      <div className="flex items-center justify-center py-16 text-text-muted">
         <p className="text-sm">{t('profilesGrid.empty', { defaultValue: 'No hay secciones procesadas.' })}</p>
       </div>
     );

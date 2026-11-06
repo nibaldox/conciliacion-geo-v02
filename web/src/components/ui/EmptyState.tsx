@@ -26,7 +26,7 @@ export function EmptyState({
   return (
     <div
       data-slot={dataSlot}
-      className="ui-card mx-auto flex w-full max-w-md flex-col items-center gap-4 px-8 py-10 text-center"
+      className="mx-auto flex w-full max-w-md flex-col items-center gap-4 px-8 py-10 text-center"
     >
       <div
         aria-hidden="true"

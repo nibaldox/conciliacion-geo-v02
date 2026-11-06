@@ -98,7 +98,7 @@ function ResultCard({
 
   return (
     <div
-      className="flex flex-col gap-3 rounded-lg border border-border p-4 sm:p-5"
+      className="flex flex-col gap-3"
       data-testid="ai-reporter-result"
     >
       <div className="flex flex-wrap items-center justify-between gap-3">

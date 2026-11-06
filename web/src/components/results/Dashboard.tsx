@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BenchFilter } from './BenchFilter';
 import { CompliancePlanView } from './CompliancePlanView';
 import { ResultFilters } from './ResultFilters';
@@ -7,7 +7,9 @@ import { filterResults, type ResultFilterState } from './resultFilters.utils';
 import { useTranslation } from 'react-i18next';
 import Plot from '../charts/Plot';
 import type { Data, Layout, Config, Shape } from 'plotly.js';
-import { useResults, useSettings } from '../../api/hooks';
+import { useResults, useSections, useSettings } from '../../api/hooks';
+import type { PlanColorBy, PlanStatusKey } from './planColors';
+import { ParameterBars, SelectedSectionPanel } from './dashboard/DashboardRail';
 import { DEFAULT_TOLERANCES } from '../../utils/constants';
 import { useSession } from '../../stores/session';
 import type { ComparisonResult } from '../../api/types';
@@ -552,6 +554,12 @@ export function Dashboard() {
   const isDark = useTheme((s) => s.isDark);
   const { data: results } = useResults();
   const { data: settings } = useSettings();
+  const { data: sections } = useSections();
+  const setSelectedProfile = useSession((s) => s.setSelectedSection);
+  const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
+  const [colorBy, setColorBy] = useState<PlanColorBy>('status');
+  const [visibleStatuses, setVisibleStatuses] = useState<Set<PlanStatusKey>>(() => new Set(['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN']));
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const filters = useSession((s) => s.filters);
   const setFilters = useSession((s) => s.setFilters);
   const [histogramKey, setHistogramKey] = useState<HistogramKey>('height');
@@ -588,6 +596,13 @@ export function Dashboard() {
     () => computeProfileStatuses(filteredResults),
     [filteredResults],
   );
+
+  const selectedVisible = selectedSection != null && filteredResults.some((row) => row.section === selectedSection) && visibleStatuses.has(profileStatuses.get(selectedSection) ?? 'UNKNOWN');
+  useEffect(() => {
+    if (selectedSection && !selectedVisible) setSelectedSection(null);
+  }, [selectedSection, selectedVisible]);
+  const selectedMatches = sections?.filter((section) => section.name === selectedSection) ?? [];
+  const selectedId = selectedMatches.length === 1 ? selectedMatches[0]!.id : null;
 
   const parameterBreakdown = useMemo(
     () => computeParameterBreakdown(filteredResults),
@@ -686,61 +701,40 @@ export function Dashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      {filteredResults.length > 0 ? (
-        <KpiHeader globalScore={globalScore} counts={profileCounts} t={t} />
-      ) : (
-        <p role="status" className="text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p>
-      )}
-
-      <div data-slot="dashboard-filters" className="flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-border py-2">
+    <div className="min-w-0 space-y-6">
+      <div data-slot="dashboard-filters" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border pb-2">
+        <span className="text-xs text-text-muted">{t('dashboard.rail.color_by')}</span>
+        <SegmentedControl label={t('dashboard.rail.color_by')} options={(['status', 'score', 'height', 'angle', 'berm'] as const).map((value) => ({ value, label: t(`dashboard.rail.color_${value}`) }))} value={colorBy} onChange={setColorBy} />
+        <div role="group" aria-label={t('dashboard.rail.filter_status')} className="flex flex-wrap gap-1">
+          {(['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN'] as const).map((status) => <button key={status} type="button" aria-pressed={visibleStatuses.has(status)} className="border border-border px-2 py-1 text-xs aria-pressed:text-text-primary text-text-muted" onClick={() => setVisibleStatuses((current) => { const next = new Set(current); if (next.has(status)) next.delete(status); else next.add(status); return next; })}>{t(`dashboard.rail.status_${status.toLowerCase()}`)}</button>)}
+        </div>
         <BenchFilter available={benchNumbers} selected={filters.bench} onChange={(bench) => setFilters({ bench })} />
         <ResultFilters results={results} filters={filters} onChange={setScenarioFilters} />
-        <span className="ml-auto text-xs tabular-nums text-text-muted">
-          {t('dashboard.summary.bench_section', { benches: totalBenches, sections: nSections })}
-        </span>
+        <span className="ml-auto text-xs tabular-nums text-text-muted">{t('dashboard.rail.count', { benches: totalBenches, sections: nSections })}</span>
       </div>
-
-      {filteredResults.length > 0 && (
-        <>
-          <SummaryPanel slot="parameter-breakdown" title={t('dashboard.section.parameters', { defaultValue: 'Desglose por parámetro' })}>
-            <ParameterTable breakdown={parameterBreakdown} t={t} />
-          </SummaryPanel>
-
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            {sectorCompliance.length > 0 && (
-              <SummaryPanel slot="sector-compliance" title={t('dashboard.section.by_sector', { defaultValue: 'Cumplimiento por sector' })}>
-                <Plot data={sectorChartData} layout={sectorChartLayout} config={plotConfig} style={{ width: '100%' }} />
-              </SummaryPanel>
-            )}
-            <CompliancePlanView results={filteredResults} statuses={profileStatuses} />
+      {filteredResults.length === 0 ? <p role="status" className="text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p> : <>
+        <div className="grid min-w-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+          <div data-slot="dashboard-plan" className="min-w-0 h-[60vh] min-h-[390px] xl:h-[calc(100vh-350px)] xl:min-h-[400px]">
+            <CompliancePlanView results={filteredResults} statuses={profileStatuses} variant="hero" colorBy={colorBy} visibleStatuses={visibleStatuses} selectedSection={selectedVisible ? selectedSection : null} onSelectSection={setSelectedSection} />
           </div>
-
-          <SummaryPanel
-            slot="deviation-distribution"
-            title={t('dashboard.section.deviation_distribution', { defaultValue: 'Distribución de desviaciones' })}
-            actions={(
-              <SegmentedControl
-                label={t('dashboard.histogram.selector', { defaultValue: 'Variable del histograma' })}
-                options={histogramOptions}
-                value={histogramKey}
-                onChange={setHistogramKey}
-              />
-            )}
-          >
+          <aside data-slot="dashboard-rail" className="min-w-0 px-4 pt-5 [&_[class$=bubble]]:max-w-48! xl:h-[calc(100vh-350px)] xl:min-h-[400px] xl:overflow-y-auto xl:border-l xl:border-border">
+            <KpiHeader globalScore={globalScore} counts={profileCounts} t={t} />
+            <ParameterBars rows={filteredResults} />
+            <details className="border-t border-border py-4 [&_.overflow-x-auto]:overflow-visible [&_table]:table-fixed [&_table]:text-xs [&_th]:pr-1 [&_td]:pr-1 [&_span[aria-hidden]]:hidden [&_td_span]:w-auto [&_td_div]:gap-0" onToggle={(event) => { if (event.currentTarget.open) event.currentTarget.scrollIntoView?.({ block: 'nearest' }); }}><summary className="cursor-pointer text-sm">{t('dashboard.rail.parameter_detail')}</summary><ParameterTable breakdown={parameterBreakdown} t={t} /></details>
+            <SelectedSectionPanel name={selectedVisible ? selectedSection : null} sectionId={selectedVisible ? selectedId : null} rows={filteredResults} statuses={profileStatuses} canOpen={selectedId != null} onClear={() => setSelectedSection(null)} onOpen={() => { if (selectedId != null) { setSelectedProfile(selectedId); setActiveWorkspaceView('profiles'); } }} />
+          </aside>
+        </div>
+        <div className="grid min-w-0 gap-6 border-t border-border pt-6 xl:grid-cols-2">
+          <SummaryPanel slot="deviation-distribution" title={t('dashboard.section.deviation_distribution')} actions={<SegmentedControl label={t('dashboard.histogram.selector')} options={histogramOptions} value={histogramKey} onChange={setHistogramKey} />}>
             <p className="text-xs text-text-muted">{histogramTitle(histogramKey, t)}</p>
-            <div className="h-[280px]">
-              {histogramHasData ? (
-                <Plot data={themedHistogramData} layout={activeHistogram.layout} config={plotConfig} style={{ width: '100%' }} />
-              ) : (
-                <p className="flex h-full items-center justify-center text-xs text-text-muted">{t('dashboard.histogram.no_data')}</p>
-              )}
-            </div>
+            <div className="h-[280px]">{histogramHasData ? <Plot data={themedHistogramData} layout={activeHistogram.layout} config={plotConfig} style={{ width: '100%' }} /> : <p className="flex h-full items-center justify-center text-xs text-text-muted">{t('dashboard.histogram.no_data')}</p>}</div>
           </SummaryPanel>
-
-          <DesignAchievementPanel filters={filters} />
-        </>
-      )}
+          <SummaryPanel slot="sector-compliance" title={t('dashboard.section.by_sector')}>
+            {sectorCompliance.some((sector) => sector.sector?.trim()) ? <Plot data={sectorChartData} layout={sectorChartLayout} config={plotConfig} style={{ width: '100%' }} /> : <p className="text-xs text-text-muted">{t('dashboard.rail.no_sectors')}</p>}
+          </SummaryPanel>
+        </div>
+        <DesignAchievementPanel filters={filters} />
+      </>}
     </div>
   );
 }

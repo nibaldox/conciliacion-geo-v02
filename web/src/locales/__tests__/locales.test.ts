@@ -72,7 +72,7 @@ describe('Mission Control redesign i18n keys', () => {
     'step1.launch_waiting',
     'step4.footer_status',
     'profileView.header.eyebrow',
-    'profileView.header.last_run',
+    'profileView.header.last_run_short',
     'profileView.summary.title',
     'profileView.summary.aria',
     'profileView.summary.headline',

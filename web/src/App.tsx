@@ -1,6 +1,6 @@
 import { applyTheme } from './utils/theme';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AppLayout } from './components/layout/AppLayout';
@@ -8,7 +8,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { useHotkeys } from './hooks/useHotkeys';
 import { DEMO_MESH_IDS, useSession } from './stores/session';
 import { useTheme } from './stores/theme';
-import { useSections, useProcessStatus } from './api/hooks';
+import { useSections } from './api/hooks';
+import { useWorkflowStatus } from './hooks/useWorkflowStatus';
 
 // Workspace Views
 import {
@@ -40,7 +41,8 @@ function WorkspaceEmptyState(props: EmptyStateProps) {
 function ProfilesWorkspace() {
   const { t } = useTranslation();
   const setSelectedSection = useSession((s) => s.setSelectedSection);
-  const [mode, setMode] = useState<'grid' | 'detail'>('grid');
+  const mode = useSession((s) => s.profilesMode);
+  const setMode = useSession((s) => s.setProfilesMode);
 
   const handleGridSelect = (id: string) => {
     setSelectedSection(id);
@@ -102,7 +104,8 @@ function WorkspaceRouter() {
   const topoMeshId = useSession((s) => s.topoMeshId);
   const isVirtualDemoSession = designMeshId === DEMO_MESH_IDS.design || topoMeshId === DEMO_MESH_IDS.topo;
   const { data: sections } = useSections();
-  const { data: status } = useProcessStatus();
+  const { isComplete } = useWorkflowStatus();
+  const wasComplete = useRef(false);
   const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
   const setOpenWorkflowStep = useSession((s) => s.setOpenWorkflowStep);
   const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
@@ -117,7 +120,12 @@ function WorkspaceRouter() {
 
   const bothUploaded = !!designMeshId && !!topoMeshId;
   const hasSections = sections && sections.length > 0;
-  const isComplete = status?.status === 'complete';
+  useEffect(() => {
+    if (isComplete && !wasComplete.current && useSession.getState().activeWorkspaceView === '3d') {
+      setActiveWorkspaceView('dashboard');
+    }
+    wasComplete.current = isComplete;
+  }, [isComplete, setActiveWorkspaceView]);
 
   if (!bothUploaded && activeWorkspaceView !== '3d') {
     return (
@@ -224,9 +232,9 @@ function App() {
   // Workspace view hotkeys
   useHotkeys(['1', '2', '3', '4', '5'], (e) => {
     const target = e.key;
-    if (target === '1') setActiveWorkspaceView('3d');
+    if (target === '1') setActiveWorkspaceView('dashboard');
     if (target === '2') setActiveWorkspaceView('profiles');
-    if (target === '3') setActiveWorkspaceView('dashboard');
+    if (target === '3') setActiveWorkspaceView('3d');
     if (target === '4') setActiveWorkspaceView('blast');
     if (target === '5') setActiveWorkspaceView('export-ai');
   });

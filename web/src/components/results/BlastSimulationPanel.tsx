@@ -558,8 +558,7 @@ function TensorEditor({
 
   return (
     <fieldset
-      className="flex flex-col gap-2 rounded-lg border p-3"
-      style={{ borderColor: 'var(--color-border)' }}
+      className="flex flex-col gap-2"
       data-testid="sim-tensor-editor"
     >
       <div className="flex items-center justify-between">
@@ -854,7 +853,7 @@ function SliceHeatmap({
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-lg border p-3"
+      className="flex flex-col gap-2"
       style={{ borderColor: 'var(--color-border)' }}
       data-testid="sim-slice-heatmap"
     >
@@ -1039,7 +1038,7 @@ function ProfileChart({ profile }: { profile: ProfileResponse }) {
 
   return (
     <div
-      className="flex flex-col gap-2 rounded-lg border p-3"
+      className="flex flex-col gap-2"
       style={{ borderColor: 'var(--color-border)' }}
       data-testid="sim-profile-chart"
     >

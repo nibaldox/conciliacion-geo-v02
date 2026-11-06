@@ -28,7 +28,7 @@ const UNAVAILABLE_PROFILE_CODES = new Set([
   'section_processing_error',
 ]);
 
-const CARD_CLASS = 'min-w-0 overflow-hidden rounded-lg border border-border bg-surface-raised';
+const FRAME_CLASS = 'min-w-0 overflow-hidden';
 
 export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileViewProps) {
   const { t } = useTranslation();
@@ -134,90 +134,94 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
         </Notice>
       )}
 
-      <div data-slot="profile-chart-frame" className={`flex flex-col ${CARD_CLASS}`}>
-        <FilterBar
-          filter={filter}
-          blastDataAvailable={blastDataAvailable}
-          horizontalDeviationAvailable={!!viewModel.horizontalDeviation}
-        />
-        {viewModel.horizontalDeviation && filter.state.showHorizontalDeviation && (
-          <div
-            data-slot="profile-horizontal-deviation-summary"
-            className="flex flex-col gap-2 border-b border-border px-4 py-2.5 sm:flex-row sm:items-start"
-          >
-            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-              <HorizontalDeviationOverview summary={viewModel.horizontalDeviation.summary} compact />
-              <p className="text-xs leading-relaxed text-text-secondary">
-                {t('horizontalDeviation.method_caption')} · {t('horizontalDeviation.direction_caption')}
-              </p>
-              <p className="text-xs leading-relaxed text-text-secondary">
-                {t('horizontalDeviation.sample_hint')}
-              </p>
-              {viewModel.horizontalDeviation.warnings.slice(0, 3).map((warning, index) => {
-                const message = horizontalDeviationWarning(warning);
-                return (
-                  <p key={`${index}-${warning}`} className="text-xs leading-relaxed text-text-secondary">
-                    {t(message.key, message.options)}
-                  </p>
-                );
-              })}
-            </div>
-            <HorizontalDeviationLegend compact />
-          </div>
-        )}
-        <div data-slot="profile-chart-canvas" className="h-[440px] shrink-0 md:h-[480px]">
-          <ProfileChart viewModel={viewModel} filterState={filter.state} crossLink={crossLink} />
-        </div>
-        <BenchInspector bench={selectedBench} />
-      </div>
-
-      <div className={`grid min-w-0 grid-cols-1 items-start gap-4 ${isPlanOpen ? 'xl:grid-cols-[minmax(0,1fr)_400px]' : ''}`}>
-        <section data-slot="bench-table-frame" className={CARD_CLASS}>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2.5">
-            <h3 className="text-sm font-medium text-text-primary">{t('profileView.table.title')}</h3>
-            <p className="min-w-0 flex-1 truncate text-xs text-text-muted">{t('profileView.table.comparison')}</p>
-            <button
-              type="button"
-              aria-expanded={isPlanOpen}
-              aria-controls="profile-plan-content"
-              onClick={() => setIsPlanOpen((open) => !open)}
-              data-slot="profile-plan-toggle"
-              className={[
-                'inline-flex h-7 shrink-0 items-center rounded-md border px-2.5 text-xs transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                isPlanOpen
-                  ? 'border-accent bg-accent-bg text-text-primary'
-                  : 'border-border text-text-secondary hover:bg-surface-muted hover:text-text-primary',
-              ].join(' ')}
+      <div
+        data-slot="profile-layout"
+        className={`grid min-w-0 grid-cols-1 gap-4 ${isPlanOpen ? 'xl:grid-cols-[minmax(0,1fr)_minmax(260px,min(30%,420px))]' : ''}`}
+      >
+        <div data-slot="profile-chart-frame" className={`flex min-w-0 flex-col ${FRAME_CLASS}`}>
+          <FilterBar
+            filter={filter}
+            blastDataAvailable={blastDataAvailable}
+            horizontalDeviationAvailable={!!viewModel.horizontalDeviation}
+          />
+          {viewModel.horizontalDeviation && filter.state.showHorizontalDeviation && (
+            <div
+              data-slot="profile-horizontal-deviation-summary"
+              className="flex flex-col gap-2 border-b border-border px-4 py-2.5 sm:flex-row sm:items-start"
             >
-              {planToggleLabel}
-            </button>
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <HorizontalDeviationOverview summary={viewModel.horizontalDeviation.summary} compact />
+                <p className="text-xs leading-relaxed text-text-secondary">
+                  {t('horizontalDeviation.method_caption')} · {t('horizontalDeviation.direction_caption')}
+                </p>
+                <p className="text-xs leading-relaxed text-text-secondary">
+                  {t('horizontalDeviation.sample_hint')}
+                </p>
+                {viewModel.horizontalDeviation.warnings.slice(0, 3).map((warning, index) => {
+                  const message = horizontalDeviationWarning(warning);
+                  return (
+                    <p key={`${index}-${warning}`} className="text-xs leading-relaxed text-text-secondary">
+                      {t(message.key, message.options)}
+                    </p>
+                  );
+                })}
+              </div>
+              <HorizontalDeviationLegend compact />
+            </div>
+          )}
+          <div data-slot="profile-chart-canvas" className="h-[440px] shrink-0 md:h-[480px]">
+            <ProfileChart viewModel={viewModel} filterState={filter.state} crossLink={crossLink} />
           </div>
-          <BenchTable
-            benches={viewModel.benches}
-            crossLink={crossLink}
-            selectedDesignBenchNumbers={selectedDesignBenches}
-            comparisonBenchStatuses={selectedDesignStatuses}
-          />
-          <ComplianceSummary
-            benches={viewModel.benches}
-            statuses={selectedDesignStatuses.length || selectedDesignBenches.length
-              ? selectedDesignStatuses.map((bench) => bench.status)
-              : undefined}
-            filtered={selectedDesignBenches.length > 0}
-          />
-        </section>
+          <BenchInspector bench={selectedBench} />
+        </div>
+
         <aside
           data-slot="profile-plan-panel"
           aria-label={planToggleLabel}
           hidden={!isPlanOpen}
-          className={`w-full max-w-[400px] p-3 ${CARD_CLASS}`}
+          className={`flex h-full w-full min-w-0 max-w-[400px] flex-col xl:max-w-none ${FRAME_CLASS}`}
         >
-          <div id="profile-plan-content" hidden={!isPlanOpen}>
-            {isPlanOpen && <ProfilePlanThumbnail sectionId={selectedSectionId} showTitle={false} />}
+          <div id="profile-plan-content" hidden={!isPlanOpen} className="flex min-h-0 flex-1 flex-col">
+            {isPlanOpen && <ProfilePlanThumbnail sectionId={selectedSectionId} showTitle={false} fill />}
           </div>
         </aside>
       </div>
+
+      <section data-slot="bench-table-frame" className={FRAME_CLASS}>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2.5">
+          <h3 className="text-sm font-medium text-text-primary">{t('profileView.table.title')}</h3>
+          <p className="min-w-0 flex-1 truncate text-xs text-text-muted">{t('profileView.table.comparison')}</p>
+          <button
+            type="button"
+            aria-expanded={isPlanOpen}
+            aria-controls="profile-plan-content"
+            onClick={() => setIsPlanOpen((open) => !open)}
+            data-slot="profile-plan-toggle"
+            className={[
+              'inline-flex h-7 shrink-0 items-center rounded-md border px-2.5 text-xs transition-colors',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              isPlanOpen
+                ? 'border-accent bg-accent-bg text-text-primary'
+                : 'border-border text-text-secondary hover:bg-surface-muted hover:text-text-primary',
+            ].join(' ')}
+          >
+            {planToggleLabel}
+          </button>
+        </div>
+        <BenchTable
+          benches={viewModel.benches}
+          crossLink={crossLink}
+          selectedDesignBenchNumbers={selectedDesignBenches}
+          comparisonBenchStatuses={selectedDesignStatuses}
+        />
+        <ComplianceSummary
+          benches={viewModel.benches}
+          statuses={selectedDesignStatuses.length || selectedDesignBenches.length
+            ? selectedDesignStatuses.map((bench) => bench.status)
+            : undefined}
+          filtered={selectedDesignBenches.length > 0}
+        />
+      </section>
     </div>
   );
 }

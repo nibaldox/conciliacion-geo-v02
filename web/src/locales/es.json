@@ -902,8 +902,8 @@
     "berm": "Ancho de berma"
   },
   "tooltip": {
-    "face_threshold": "Ángulo mínimo (grados) para que un segmento sea clasificado como cara de banco. Por defecto 40°. Valores menores detectan caras más tendidas.",
-    "berm_threshold": "Ángulo máximo (grados) para que un segmento sea clasificado como berma. Por defecto 20°. Valores mayores admiten bermas más empinadas.",
+    "face_threshold": "Ángulo mínimo (grados) para que un segmento sea clasificado como cara de banco. Por defecto 30°. Valores menores detectan caras más tendidas.",
+    "berm_threshold": "Ángulo máximo (grados) para que un segmento sea clasificado como berma. Por defecto 10°. Valores mayores admiten bermas más empinadas.",
     "simplify_epsilon": "Tolerancia de simplificación RDP. Mayor = perfil más suavizado. Por defecto 0.1 m.",
     "max_berm_width": "Filtro anti-ruido: ignora bermas más anchas que esto (m). Por defecto 50 m.",
     "tol_bench_height": "Desviación permitida en altura de banco (m). CUMPLE si |desviación| ≤ tolerancia.",
@@ -1128,6 +1128,37 @@
     "resolution_high": "Alta"
   },
   "dashboard": {
+    "rail": {
+      "profile_preview": "Vista previa del perfil", "profile_design": "Diseño", "profile_topo": "Topografía real",
+      "color_by": "Colorear por",
+      "color_status": "Estado",
+      "color_score": "Puntaje",
+      "color_height": "Altura",
+      "color_angle": "Ángulo",
+      "color_berm": "Berma",
+      "filter_status": "Filtrar por estado",
+      "status_cumple": "Cumple",
+      "status_fuera": "Fuera",
+      "status_no_cumple": "No cumple",
+      "status_unknown": "Sin dato",
+      "parameters": "Cumplimiento por parámetro",
+      "denominator": "Porcentaje sobre todos los bancos, incluidos otros estados y sin dato.",
+      "bar_counts": "Cumple: {{ok}}; fuera: {{warn}}; no cumple: {{nok}}; otros o sin dato: {{unknown}}",
+      "selected": "Sección seleccionada",
+      "score": "Puntaje",
+      "status": "Estado",
+      "height_dev": "Δ altura",
+      "angle_dev": "Δ ángulo",
+      "delta_crest": "Δ cresta",
+      "delta_toe": "Δ pata",
+      "bench": "Banco",
+      "elevation": "Cota",
+      "open_profile": "Abrir perfil",
+      "clear": "Limpiar selección",
+      "parameter_detail": "Detalle por parámetro",
+      "no_sectors": "Sin sectores asignados",
+      "count": "{{sections}} secciones · {{benches}} bancos"
+    },
     "filters": {
       "no_matching_results": "Ningún resultado coincide con la combinación de filtros activa. Ajusta o restablece los filtros de sector, sección, cota o banco."
     },
@@ -1273,7 +1304,7 @@
     "sections": "Secciones",
     "profiles": "Perfiles",
     "view3d": "Vista 3D",
-    "summary": "Resumen",
+    "summary": "Dashboard",
     "blast": "Tronadura",
     "export": "Exportar",
     "curves": "Por curvas",
@@ -1294,6 +1325,11 @@
     "outside": "Fuera de tolerancia",
     "failing": "No cumple",
     "evaluated_area": "Zona evaluada",
+    "score": "Puntaje",
+    "zoom_in": "Acercar",
+    "zoom_out": "Alejar",
+    "zoom_reset": "Restablecer zoom",
+    "color_scale": "Escala de color",
     "full_surface": "Superficie completa"
   },
   "project_input": {
@@ -1345,6 +1381,7 @@
     "neighbours": "Azul: perfil activo · gris: perfiles vecinos"
   },
   "ux": {
+    "confirm_parameters": "Usar estos parámetros",
     "profiles_mode": "Modo de visualización",
     "step_surfaces": "Superficies",
     "step_sections": "Secciones",

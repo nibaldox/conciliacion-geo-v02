@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { useSession, type WorkflowStepKey } from '../../stores/session';
+import { DEMO_MESH_IDS, useSession, type WorkflowStepKey } from '../../stores/session';
 import { DropZone } from '../mesh/MeshUpload';
 import { TryDemoButton } from '../demo/TryDemoButton';
 import { SectionCurveForm } from '../sections/SectionCurveForm';
@@ -25,9 +25,9 @@ import { LanguageToggle } from './LanguageToggle';
 type SectionTab = 'curves' | 'file';
 
 const PROCESS_FIELDS = [
-  { key: 'resolution',     labelKey: 'sidebar.resolution',     step: 0.1, min: 0.1, max: undefined, fallback: 0.1 },
-  { key: 'face_threshold', labelKey: 'sidebar.face_threshold', step: 1,   min: 1,   max: 90,        fallback: 40 },
-  { key: 'berm_threshold', labelKey: 'sidebar.berm_threshold', step: 1,   min: 1,   max: 90,        fallback: 20 },
+  { key: 'resolution',     labelKey: 'sidebar.resolution',     step: 0.1, min: 0.1, max: undefined, fallback: DEFAULT_SETTINGS.resolution },
+  { key: 'face_threshold', labelKey: 'sidebar.face_threshold', step: 1,   min: 1,   max: 90,        fallback: DEFAULT_SETTINGS.face_threshold },
+  { key: 'berm_threshold', labelKey: 'sidebar.berm_threshold', step: 1,   min: 1,   max: 90,        fallback: DEFAULT_SETTINGS.berm_threshold },
 ] as const;
 
 const STEP_ORDER: readonly WorkflowStepKey[] = ['surfaces', 'sections', 'parameters', 'process'];
@@ -82,10 +82,12 @@ export function LeftSidebar() {
   const setMapClickHandler = useSession((s) => s.setMapClickHandler);
   const openWorkflowStep = useSession((s) => s.openWorkflowStep);
   const setOpenWorkflowStep = useSession((s) => s.setOpenWorkflowStep);
+  const setParametersConfirmed = useSession((s) => s.setParametersConfirmed);
 
   const workflow = useWorkflowStatus();
   const { steps, nextStep, isProcessing } = workflow;
   const bothUploaded = !!designMeshId && !!topoMeshId;
+  const isVirtualDemo = designMeshId === DEMO_MESH_IDS.design && topoMeshId === DEMO_MESH_IDS.topo;
 
   const [sectionTab, setSectionTab] = useState<SectionTab>('curves');
 
@@ -149,9 +151,9 @@ export function LeftSidebar() {
   useEffect(() => {
     if (!didAutoSwitchTo3D.current && designMeshId && topoMeshId) {
       didAutoSwitchTo3D.current = true;
-      setActiveWorkspaceView('3d');
+      if (!isVirtualDemo) setActiveWorkspaceView('3d');
     }
-  }, [designMeshId, topoMeshId, setActiveWorkspaceView]);
+  }, [designMeshId, topoMeshId, isVirtualDemo, setActiveWorkspaceView]);
 
   const previousStepsRef = useRef(steps);
   useEffect(() => {
@@ -159,8 +161,8 @@ export function LeftSidebar() {
     previousStepsRef.current = steps;
     if (previous === steps) return;
     const becameDone = STEP_ORDER.some((key) => steps[key] === 'done' && previous[key] !== 'done');
-    if (becameDone) setOpenWorkflowStep(nextStep);
-  }, [steps, nextStep, setOpenWorkflowStep]);
+    if (becameDone && !isVirtualDemo) setOpenWorkflowStep(nextStep);
+  }, [steps, nextStep, isVirtualDemo, setOpenWorkflowStep]);
 
   const toggleStep = (key: WorkflowStepKey) => {
     setOpenWorkflowStep(openWorkflowStep === key ? null : key);
@@ -331,6 +333,27 @@ export function LeftSidebar() {
             onChange={handleToleranceChange}
           />
         )}
+        <Button
+          variant="secondary"
+          size="sm"
+          fullWidth
+          onClick={() => {
+            if (!settings) return;
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+            updateSettings.mutate({
+              process: processSettings,
+              tolerances: tolerancesDraftRef.current ?? settings.tolerances,
+            }, {
+              onSuccess: () => {
+                setParametersConfirmed(true);
+                setOpenWorkflowStep('process');
+              },
+            });
+          }}
+          disabled={!settings || isProcessing || updateSettings.isPending}
+        >
+          {t('ux.confirm_parameters')}
+        </Button>
       </div>
     ),
     process: (

@@ -35,7 +35,10 @@ export function SectionHeader({ section, benchCount, floorElevation, crestElevat
   }
 
   return (
-    <header data-slot="section-header" className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+    <header
+      data-slot="section-header"
+      className="sticky -top-3 z-20 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-surface py-2 md:-top-6"
+    >
       <h2 className="truncate text-base font-semibold text-text-primary" title={section.id}>
         {section.name}
       </h2>

@@ -239,7 +239,7 @@ export function BlastUploader({ onUploaded, collapsible = false }: BlastUploader
 
   if (hasVirtualMesh) {
     return (
-      <section className="flex flex-col gap-2 rounded-lg border border-border p-4 text-left" data-testid="blast-uploader">
+      <section className="flex flex-col gap-2 text-left" data-testid="blast-uploader">
         <h3 className="ui-section-title">
           {t('blast.upload_title')}
         </h3>
@@ -456,7 +456,7 @@ export function BlastUploader({ onUploaded, collapsible = false }: BlastUploader
               <input type="number" min="0" step="0.1" value={state.benchHeightM} onChange={(e) => update('benchHeightM', e.target.value)} data-testid="bench-height" className={PROJECT_INPUT_CLASS} />
             </label>
           ) : (
-            <div className="flex flex-col gap-2 rounded-md border border-border p-3 sm:col-span-2" data-testid="design-surface-elevation">
+            <div className="flex flex-col gap-2 sm:col-span-2" data-testid="design-surface-elevation">
               <p>{t('blast.design_surface_help', { defaultValue: 'La cota del collar se estimará desde la superficie de diseño. El factor de carga volumétrico puede quedar indisponible o ser aproximado; no se infiere la altura real del banco.' })}</p>
               <label className="flex items-start gap-2 text-text-secondary">
                 <input type="checkbox" checked={state.spatialReferenceConfirmed} onChange={(e) => update('spatialReferenceConfirmed', e.target.checked)} data-testid="spatial-reference-confirmed" />
@@ -619,9 +619,9 @@ export function BlastUploader({ onUploaded, collapsible = false }: BlastUploader
 
   if (collapsible) {
     return (
-      <section className="rounded-lg border border-border text-left" data-testid="blast-uploader" data-collapsible="true">
+      <section className="text-left" data-testid="blast-uploader" data-collapsible="true">
         <details className="group">
-          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 [&::-webkit-details-marker]:hidden">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-x-4 gap-y-1 py-3 [&::-webkit-details-marker]:hidden">
             <span className="flex items-center gap-2">
               <svg aria-hidden="true" viewBox="0 0 12 12" className="h-3 w-3 text-text-muted transition-transform group-open:rotate-90" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M4.5 2.5 8 6l-3.5 3.5" />
@@ -630,14 +630,14 @@ export function BlastUploader({ onUploaded, collapsible = false }: BlastUploader
             </span>
             {persistedCount}
           </summary>
-          <div className="border-t border-border px-4 py-4">{body}</div>
+          <div className="border-t border-border py-4">{body}</div>
         </details>
       </section>
     );
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-border p-4 text-left" data-testid="blast-uploader">
+    <section className="flex flex-col gap-3 text-left" data-testid="blast-uploader">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h3 className="flex items-center gap-2">{title}</h3>
         {persistedCount}
