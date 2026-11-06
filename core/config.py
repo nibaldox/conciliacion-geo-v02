@@ -334,6 +334,10 @@ class HorizontalDeviationDefaults:
     heatmap_max_cells: int = 25000
     heatmap_max_section_gap_m: float = 500.0
     heatmap_max_azimuth_delta_deg: float = 45.0
+    drape_max_step_m: float = 1.0
+    drape_max_subdivisions: int = 4
+    drape_lift_m: float = 0.05
+    drape_version: int = 2
 
 
 @dataclass(frozen=True)

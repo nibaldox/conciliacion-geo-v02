@@ -355,6 +355,76 @@ def _point_at_distance(section: SectionLine, distance: float, elevation: float) 
     )
 
 
+def _horizontal_drape_index(topo_mesh):
+    from scipy.spatial import cKDTree
+
+    triangles = topo_mesh.vertices[topo_mesh.faces, :2]
+    centers = (triangles.min(axis=1) + triangles.max(axis=1)) / 2
+    radius = np.linalg.norm((triangles.max(axis=1) - triangles.min(axis=1)) / 2, axis=1)
+    buckets = np.floor(np.log2(np.maximum(radius, 1e-12))).astype(np.int64)
+    result = []
+    for bucket in np.unique(buckets):
+        indices = np.flatnonzero(buckets == bucket)
+        result.append((cKDTree(centers[indices]), indices, float(radius[indices].max())))
+    return result
+
+
+def _drape_horizontal_cell(topo_mesh, corners, spatial_index=None):
+    points = np.asarray(corners, dtype=float)
+    step = HORIZONTAL_DEVIATION.drape_max_step_m
+    cap = HORIZONTAL_DEVIATION.drape_max_subdivisions
+    nx = min(cap, max(1, math.ceil(max(
+        np.linalg.norm(points[1, :2] - points[0, :2]),
+        np.linalg.norm(points[2, :2] - points[3, :2]),
+    ) / step)))
+    ny = min(cap, max(1, math.ceil(max(
+        np.linalg.norm(points[3, :2] - points[0, :2]),
+        np.linalg.norm(points[2, :2] - points[1, :2]),
+    ) / step)))
+    grid = []
+    for j in range(ny + 1):
+        v = j / ny
+        for i in range(nx + 1):
+            u = i / nx
+            grid.append((1 - v) * ((1 - u) * points[0] + u * points[1])
+                        + v * ((1 - u) * points[3] + u * points[2]))
+    grid = np.asarray(grid)
+    trees = spatial_index if spatial_index is not None else _horizontal_drape_index(topo_mesh)
+    heights = np.full(len(grid), np.nan)
+    candidates_by_point = [[] for _ in grid]
+    for tree, indices, radius in trees:
+        for candidates, local in zip(candidates_by_point, tree.query_ball_point(grid[:, :2], radius + 1e-8)):
+            candidates.extend(indices[local])
+    for index, candidates in enumerate(candidates_by_point):
+        if not candidates:
+            continue
+        triangles = topo_mesh.vertices[topo_mesh.faces[candidates]]
+        a = triangles[:, 0, :2]
+        ab = triangles[:, 1, :2] - a
+        ac = triangles[:, 2, :2] - a
+        ap = grid[index, :2] - a
+        denominator = ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0]
+        nondegenerate = np.abs(denominator) > 1e-12
+        safe = np.where(nondegenerate, denominator, 1.0)
+        u = (ap[:, 0] * ac[:, 1] - ap[:, 1] * ac[:, 0]) / safe
+        v = (ab[:, 0] * ap[:, 1] - ab[:, 1] * ap[:, 0]) / safe
+        inside = nondegenerate & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1 + 1e-9)
+        if np.any(inside):
+            z = triangles[:, 0, 2] + u * (triangles[:, 1, 2] - triangles[:, 0, 2]) + v * (triangles[:, 2, 2] - triangles[:, 0, 2])
+            heights[index] = np.max(z[inside])
+    covered = np.isfinite(heights)
+    grid[covered, 2] = heights[covered] + HORIZONTAL_DEVIATION.drape_lift_m
+    faces = []
+    for j in range(ny):
+        for i in range(nx):
+            a = j * (nx + 1) + i
+            b = a + 1
+            d = a + nx + 1
+            c = d + 1
+            faces.extend(((a, b, c), (a, c, d)))
+    return grid.tolist(), faces, int(np.count_nonzero(~covered))
+
+
 def _build_horizontal_deviation_payload(
     topo_id: str,
     design_mesh_id: str,
@@ -401,6 +471,9 @@ def _build_horizontal_deviation_payload(
     station_offset = 0.0
     cut_count = 0
     total_cells = 0
+    drape_outside_topo_count = 0
+    drape_index = None
+    drape_mesh = None
     effective_longitudinal_steps: list[float] = []
     effective_vertical_steps: list[float] = []
 
@@ -635,19 +708,22 @@ def _build_horizontal_deviation_payload(
 
                     if is_measured:
                         base_index = len(vertices["x"])
-                        ordered_points = (
-                            corner_points[0], corner_points[1], corner_points[2],
-                            corner_points[3],
-                        )
-                        for point_index in (0, 1, 2, 0, 2, 3):
-                            point = ordered_points[point_index]
+                        if drape_index is None:
+                            viewer = _get_decimated_vertices_cached(topo_id, 150000)
+                            drape_mesh = trimesh.Trimesh(
+                                vertices=np.column_stack((viewer["x"], viewer["y"], viewer["z"])),
+                                faces=np.asarray(viewer["faces"], dtype=np.int64).reshape((-1, 3)),
+                                process=False,
+                            )
+                            drape_index = _horizontal_drape_index(drape_mesh)
+                        draped, local_faces, outside = _drape_horizontal_cell(drape_mesh, corner_points, drape_index)
+                        drape_outside_topo_count += outside
+                        for point in draped:
                             vertices["x"].append(point[0])
                             vertices["y"].append(point[1])
                             vertices["z"].append(point[2])
-                        faces.append([base_index, base_index + 1, base_index + 2])
-                        faces.append([base_index + 3, base_index + 4, base_index + 5])
-                        cell_idx = len(cells) - 1
-                        cell_index_by_face.extend([cell_idx, cell_idx])
+                        faces.extend([[base_index + index for index in face] for face in local_faces])
+                        cell_index_by_face.extend([len(cells) - 1] * len(local_faces))
 
         station_offset += section_gap
 
@@ -658,6 +734,8 @@ def _build_horizontal_deviation_payload(
     )
     if not cells:
         warnings.append("no_design_faces_intersected_the_selected_sector")
+    if drape_outside_topo_count:
+        warnings.append(f"drape_outside_topo_count:{drape_outside_topo_count}")
 
     effective = {
         "longitudinal_step_min": min(effective_longitudinal_steps) if effective_longitudinal_steps else None,

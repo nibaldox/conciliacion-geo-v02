@@ -9,6 +9,13 @@ from api.routers import meshes
 from core import HorizontalFaceGeometry
 
 
+@pytest.fixture(autouse=True)
+def clear_decimated_cache():
+    meshes._get_decimated_vertices_cached.cache_clear()
+    yield
+    meshes._get_decimated_vertices_cached.cache_clear()
+
+
 def _surface(x_values, y_values, elevation):
     vertices = []
     for y in y_values:
@@ -66,7 +73,8 @@ def _stub_heatmap_geometry(monkeypatch):
         np.asarray([110.0, 105.0, 100.0, 95.0, 90.0, 80.0]),
     )
     face = HorizontalFaceGeometry(1, 0.0, 110.0, 20.0, 90.0, 20.0)
-    monkeypatch.setattr(db, "get_trimesh_by_id", lambda mesh_id: mesh_id)
+    surface = _surface((0.0, 60.0), (-1.0, 141.0), lambda x: 110.0 - x)
+    monkeypatch.setattr(db, "get_trimesh_by_id", lambda mesh_id: surface)
     monkeypatch.setattr(meshes, "_crop_mesh_to_sections", lambda mesh, sections: mesh)
     monkeypatch.setattr(
         meshes,
@@ -133,7 +141,7 @@ def test_heatmap_uses_raw_topo_crossing_and_design_face_direction(
         "overbreak_severe" if expected > 0 else "underbreak_severe"
     }
     assert max(cell["elevation_m"] for cell in measured) <= 100.0
-    assert len(payload["faces"]) == 2 * len(measured)
+    assert len(payload["faces"]) >= 2 * len(measured)
     assert len(payload["cell_index_by_face"]) == len(payload["faces"])
     assert payload["summary"]["measured"] == len(measured)
     assert payload["summary"]["total"] == len(payload["cells"])
@@ -223,7 +231,8 @@ def test_valid_center_with_missing_topo_corners_does_not_close_surface_hole(monk
 
 
 def test_heatmap_midpoint_lookup_uses_same_float_formula_as_station_grid(monkeypatch):
-    monkeypatch.setattr(db, "get_trimesh_by_id", lambda mesh_id: mesh_id)
+    surface = _surface((0.0, 60.0), (-1.0, 141.0), lambda x: 110.0 - x)
+    monkeypatch.setattr(db, "get_trimesh_by_id", lambda mesh_id: surface)
     monkeypatch.setattr(meshes, "_crop_mesh_to_sections", lambda mesh, sections: mesh)
     monkeypatch.setattr(
         meshes,
@@ -258,7 +267,8 @@ def test_heatmap_midpoint_lookup_uses_same_float_formula_as_station_grid(monkeyp
 
 
 def test_recoverable_profile_warning_does_not_invalidate_heatmap_measurements(monkeypatch):
-    monkeypatch.setattr(db, "get_trimesh_by_id", lambda mesh_id: mesh_id)
+    surface = _surface((0.0, 60.0), (-1.0, 141.0), lambda x: 110.0 - x)
+    monkeypatch.setattr(db, "get_trimesh_by_id", lambda mesh_id: surface)
     monkeypatch.setattr(meshes, "_crop_mesh_to_sections", lambda mesh, sections: mesh)
     profile = (np.array([0.0, 10.0]), np.array([110.0, 100.0]))
     monkeypatch.setattr(
@@ -266,7 +276,7 @@ def test_recoverable_profile_warning_does_not_invalidate_heatmap_measurements(mo
         "_profile_data_with_diagnostics",
         lambda mesh, section: (
             profile,
-            ("minor_profile_reversal_normalized",) if mesh == "topo" else (),
+            ("minor_profile_reversal_normalized",),
         ),
     )
     face = HorizontalFaceGeometry(1, 0.0, 110.0, 10.0, 100.0, 10.0)
