@@ -11,14 +11,11 @@ from typing import Any
 
 import pandas as pd
 
-from core.calculo_tronadura import procesar_pozos
 from core.drill_compliance import compute_drill_compliance
 from core.drill_hardness_processor import (
     enrich_blast_with_hardness,
     load_drilling_csv,
 )
-from core.blast_correlation import compute_powder_factor
-from core.blast_metrics import enrich_blast_dataframe
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +38,7 @@ def run_process_holes(df: pd.DataFrame, progress=None) -> tuple:
             progress.progress(0.1, text="Calculando trayectorias (toe)…")
         except Exception:
             pass
+    from core.calculo_tronadura import procesar_pozos
     result = procesar_pozos(df)
     if progress is not None:
         try:
@@ -61,7 +59,10 @@ def enrich_processed(
     ``pf_vol_kgm3``, ``pf_area_kgm2``, ``energy_mj``, …) so the processed
     dataframe and hover tooltips can surface the g(exp)/ton values.
     """
-    df_clean = compute_powder_factor(df_clean)
+    if "pf_voronoi_bench_status" not in df_clean.columns:
+        from core.blast_correlation import compute_powder_factor
+        df_clean = compute_powder_factor(df_clean)
+    from core.blast_metrics import enrich_blast_dataframe
     df_clean = enrich_blast_dataframe(df_clean)
 
     if hardness_bytes is not None:

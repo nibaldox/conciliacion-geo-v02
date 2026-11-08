@@ -208,7 +208,7 @@ def compute_bench_correlation(
         avg_dev_toe_under = float(np.mean(dev_toe_under_list)) if dev_toe_under_list else 0.0
 
         num_pozos = 0
-        total_kg = 0.0
+        total_kg = None
         pf_vol_avg = float("nan")
         energy_total = 0.0
         pf_area_avg = float("nan")
@@ -224,10 +224,10 @@ def compute_bench_correlation(
             pozos_lvl = blast_df[mask_pozos]
 
             projected_count = 0
-            charge_sum = 0.0
+            charge_sum = None
             pf_pool = []
             pf_area_pool = []
-            energy_sum = 0.0
+            energy_sum = None
 
             for sec in sections:
                 proj = proyectar_pozos_en_seccion(
@@ -241,7 +241,15 @@ def compute_bench_correlation(
                 if not proj.empty:
                     projected_count += len(proj)
                     if kg_col:
-                        charge_sum += proj[kg_col].fillna(0).sum()
+                        proj_charge = pd.to_numeric(proj[kg_col], errors="coerce").sum(
+                            min_count=1
+                        )
+                        if not pd.isna(proj_charge):
+                            charge_sum = (
+                                float(proj_charge)
+                                if charge_sum is None
+                                else charge_sum + float(proj_charge)
+                            )
                     proj_labeled = proj.copy()
                     proj_labeled["level"] = str(lvl)
                     pf_row = aggregate_powder_factor_by_group(
@@ -253,7 +261,10 @@ def compute_bench_correlation(
                     pa_val = pf_row.get("pf_area_avg")
                     if pa_val is not None and not (isinstance(pa_val, float) and np.isnan(pa_val)):
                         pf_area_pool.append(pa_val)
-                    energy_sum += pf_row.get("energy_total_mj", 0.0)
+                    energy_val = pf_row.get("energy_total_mj")
+                    if isinstance(energy_val, (int, float)) and not isinstance(energy_val, bool) \
+                            and np.isfinite(energy_val):
+                        energy_sum = energy_val if energy_sum is None else energy_sum + energy_val
 
             num_pozos = projected_count
             total_kg = charge_sum
@@ -334,7 +345,7 @@ def compute_malla_correlation(
     comparison_results: list,
     fecha_corte: str | None = None,
     achievement_tolerances: dict | None = None,
-) -> Tuple[pd.DataFrame, int]:
+) -> Tuple[pd.DataFrame, int | None]:
     """Aggregate blast data and deviations per malla / polígono.
 
     ``achievement_tolerances`` (optional dict ``{'neg': float, 'pos':
@@ -351,12 +362,16 @@ def compute_malla_correlation(
 
     for mal in mallas:
         df_mal_pozos = blast_df[blast_df[malla_col] == mal]
-        total_kg = df_mal_pozos[kg_col].fillna(0).sum() if kg_col else 0.0
+        if kg_col:
+            charge = pd.to_numeric(df_mal_pozos[kg_col], errors="coerce").sum(min_count=1)
+            total_kg = None if pd.isna(charge) else float(charge)
+        else:
+            total_kg = None
         num_pozos = len(df_mal_pozos)
 
         intersected_sections = []
         pf_pool = []
-        energy_sum = 0.0
+        energy_sum = None
         for sec in sections:
             proj = proyectar_pozos_en_seccion(
                 df_mal_pozos,
@@ -376,7 +391,10 @@ def compute_malla_correlation(
                 pf_val = pf_row.get("pf_vol_avg")
                 if pf_val is not None and not (isinstance(pf_val, float) and np.isnan(pf_val)):
                     pf_pool.append(pf_val)
-                energy_sum += pf_row.get("energy_total_mj", 0.0)
+                energy_val = pf_row.get("energy_total_mj")
+                if isinstance(energy_val, (int, float)) and not isinstance(energy_val, bool) \
+                        and np.isfinite(energy_val):
+                    energy_sum = energy_val if energy_sum is None else energy_sum + energy_val
 
         malla_to_section[str(mal)] = list(intersected_sections)
 
@@ -448,10 +466,11 @@ def compute_malla_correlation(
             malla_to_section=malla_to_section,
             **tol_kwargs,
         )
-        df_out["score_pct"] = df_out["malla"].map(score.get("per_malla") or {}).fillna(0).astype(int)
-        global_score = int(score.get("global", 0))
+        per_malla = score.get("per_malla") or {}
+        df_out["score_pct"] = [per_malla.get(str(malla)) for malla in df_out["malla"]]
+        global_score = score.get("global")
     else:
-        df_out["score_pct"] = 0
-        global_score = 0
+        df_out["score_pct"] = None
+        global_score = None
 
     return df_out, global_score

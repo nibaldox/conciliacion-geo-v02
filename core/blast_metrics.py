@@ -131,7 +131,7 @@ def compute_altura_carga_m(
       - stemming_real: stemming (taco) at the top of the hole
       - altura_carga = longitud_real - stemming_real (the explosive column)
 
-    Negative values (stemming > drilled) indicate data error; clamp to 0.
+    Negative values (stemming > drilled) indicate data error and are NaN.
     NaN inputs propagate as NaN.
 
     Parameters
@@ -147,7 +147,7 @@ def compute_altura_carga_m(
         Charge height per well in metres (>= 0, or NaN if inputs NaN).
     """
     out = longitud_real_m.astype(float) - stemming_real_m.astype(float)
-    return out.clip(lower=0.0)
+    return out.where((out >= 0) & (longitud_real_m > 0) & (stemming_real_m >= 0))
 
 
 def compute_decoupling_ratio(
@@ -945,8 +945,35 @@ def enrich_blast_dataframe(
 
     has_kilos = first_present_column(out, KILOS_CANDIDATES) is not None
     has_len = first_present_column(out, _LENGTH_CANDIDATES) is not None
+    length = _col_or_nan(out, _LENGTH_CANDIDATES)
+    stemming = _col_or_nan(out, _TACO_CANDIDATES).copy()
+    inconsistent = pd.Series(False, index=out.index)
+    if 'decks' in out:
+        for idx, decks in out['decks'].items():
+            if not isinstance(decks, list) or not decks:
+                continue
+            values = []
+            for deck in decks:
+                if isinstance(deck, dict):
+                    value = pd.to_numeric(deck.get('taco_m'), errors='coerce')
+                    if pd.notna(value) and np.isfinite(value) and value >= 0:
+                        values.append(float(value))
+            if len(set(values)) > 1:
+                inconsistent.loc[idx] = True
+                stemming.loc[idx] = np.nan
+            elif values:
+                stemming.loc[idx] = values[0]
     if has_kilos and has_len:
         out["kg_per_meter"] = compute_kg_per_meter(out)
+        mass = _col_or_nan(out, KILOS_CANDIDATES)
+        valid = np.isfinite(mass) & np.isfinite(length) & np.isfinite(stemming) & (mass >= 0) & (stemming >= 0) & (length > stemming)
+        out["kg_per_meter_loaded_column"] = (mass / (length - stemming)).where(valid)
+        loaded_warning = np.where(inconsistent, 'inconsistent_deck_stemming', np.where(stemming > length, 'stemming_exceeds_length', ''))
+        out['kg_per_meter_loaded_column_warning'] = loaded_warning
+        loaded_status = pd.Series([None] * len(out), index=out.index, dtype=object)
+        loaded_status.loc[inconsistent] = 'inconsistent_deck_stemming'
+        loaded_status.loc[~inconsistent & (stemming > length)] = 'stemming_exceeds_length'
+        out['kg_per_meter_loaded_column_status'] = loaded_status
 
     if first_present_column(out, _DIAM_CANDIDATES) is not None:
         decoupling = compute_decoupling_ratio(out)
@@ -979,11 +1006,9 @@ def enrich_blast_dataframe(
 
     has_len = first_present_column(out, _LENGTH_CANDIDATES) is not None
     has_taco = first_present_column(out, _TACO_CANDIDATES) is not None
-    if has_len and has_taco:
-        out["altura_carga_m"] = compute_altura_carga_m(
-            pd.to_numeric(out[first_present_column(out, _LENGTH_CANDIDATES)], errors="coerce"),
-            pd.to_numeric(out[first_present_column(out, _TACO_CANDIDATES)], errors="coerce"),
-        )
+    if has_len and (has_taco or 'decks' in out):
+        out["altura_carga_m"] = compute_altura_carga_m(length, stemming)
+        out['altura_carga_warning'] = np.where(inconsistent, 'inconsistent_deck_stemming', np.where(stemming > length, 'stemming_exceeds_length', ''))
 
     _add_explosive_provenance(out)
 

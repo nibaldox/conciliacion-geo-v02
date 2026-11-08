@@ -5,8 +5,22 @@ import re
 from typing import Any, Mapping, Sequence
 
 
+def blast_data_status(settings: Mapping[str, Any]) -> dict[str, Any]:
+    try:
+        from core.blast_hole_consolidation import BLAST_ALGORITHM_VERSION
+    except ImportError:
+        BLAST_ALGORITHM_VERSION = None
+    version = settings.get("blast_algorithm_version")
+    if not isinstance(version, str):
+        version = None
+    return {
+        "data_status": "current" if BLAST_ALGORITHM_VERSION is not None and version == BLAST_ALGORITHM_VERSION else "legacy_reimport_required",
+        "algorithm_version": version,
+    }
+
+
 def blast_hole_id(record: Mapping[str, Any], fallback: Any) -> str:
-    for key in ("hole_id", "label_pozo", "id_pozo", "uniqid", "Hole_ID", "pozo"):
+    for key in ("id_pozo", "hole_id", "label_pozo", "uniqid", "Hole_ID", "pozo"):
         value = record.get(key)
         if value is not None and not (isinstance(value, (float,)) and math.isnan(value)) and str(value) != "":
             return str(value)

@@ -48,6 +48,10 @@ vi.mock('../DesignAchievementPanel', () => ({
   DesignAchievementPanel: () => <div data-testid="design-achievement-panel" />,
 }));
 
+vi.mock('../ProposalSummaryCard', () => ({
+  ProposalSummaryCard: () => <div data-testid="proposal-summary-card" />,
+}));
+
 vi.mock('../../charts/Plot', () => ({
   default: (props: { data?: unknown; layout?: unknown }) => (
     <div

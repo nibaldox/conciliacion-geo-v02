@@ -2,6 +2,7 @@ import Plot from '../charts/Plot';
 import type { Data, Layout, Config } from 'plotly.js';
 import { useTranslation } from 'react-i18next';
 import { useBlastDamageModel } from '../../api/hooks';
+import { BlastLegacyNotice } from './BlastLegacyNotice';
 import {
   BlastSectionHeader,
   BLAST_PLOT_AXIS_BASE,
@@ -36,10 +37,11 @@ export function buildDamageTraces(
   fit: BlastDamageModelFit | null,
   colors: BlastChartColors = readBlastChartColors(),
 ): Partial<Data>[] {
-  if (!points || points.length === 0) return [];
+  points = points.filter((p) => p.pf_g_per_ton != null && Number.isFinite(p.pf_g_per_ton) && p.over_break != null && Number.isFinite(p.over_break));
+  if (points.length === 0) return [];
 
-  const xs = points.map((p) => p.pf_g_per_ton);
-  const ys = points.map((p) => p.over_break);
+  const xs = points.map((p) => p.pf_g_per_ton as number);
+  const ys = points.map((p) => p.over_break as number);
   const names = points.map((p) => p.section_name);
 
   const scatter: Partial<Data> = {
@@ -55,7 +57,7 @@ export function buildDamageTraces(
 
   const traces: Partial<Data>[] = [scatter];
 
-  if (fit && points.length >= DAMAGE_MODEL_MIN_SAMPLES) {
+  if (fit && fit.beta0 != null && Number.isFinite(fit.beta0) && fit.beta1 != null && Number.isFinite(fit.beta1) && points.length >= DAMAGE_MODEL_MIN_SAMPLES) {
     const xMin = Math.min(...xs);
     const xMax = Math.max(...xs);
     const yMin = fit.beta0 + fit.beta1 * xMin;
@@ -87,22 +89,23 @@ export function buildDamageTraces(
  * matches the established Dashboard Plotly pattern (transparent bg, CSS
  * variable font color, compact margins).
  */
-export function PowderFactorDamagePanel({ surveyDate }: { surveyDate?: string } = {}) {
+export function PowderFactorDamagePanel({ surveyDate, totalSections, onData }: { surveyDate?: string; totalSections?: number; onData?: () => void } = {}) {
   const { t } = useTranslation();
   const { data } = useBlastDamageModel(surveyDate);
   const colors = useBlastChartColors();
 
-  const points = data?.points ?? [];
+  const allPoints = data?.points ?? [];
+  const points = allPoints.filter((p) => p.pf_g_per_ton != null && Number.isFinite(p.pf_g_per_ton) && p.over_break != null && Number.isFinite(p.over_break));
   const fit = data?.fit ?? null;
 
-  if (points.length === 0) return null;
+  if (points.length === 0) return data?.data_status === 'legacy_reimport_required' && onData ? <BlastLegacyNotice onData={onData} /> : null;
 
   const traces = buildDamageTraces(points, fit, colors);
-  const showFit = Boolean(fit) && points.length >= DAMAGE_MODEL_MIN_SAMPLES;
+  const showFit = traces.length > 1;
   const insufficient =
     points.length < DAMAGE_MODEL_MIN_SAMPLES || !fit;
 
-  const r2Text = fit
+  const r2Text = fit?.r_squared != null && Number.isFinite(fit.r_squared)
     ? `R² = ${fit.r_squared.toFixed(2)} · ${fit.confidence} · n = ${fit.n}`
     : '';
 
@@ -111,6 +114,7 @@ export function PowderFactorDamagePanel({ surveyDate }: { surveyDate?: string } 
       className="flex min-w-0 flex-col gap-3"
       data-testid="blast-damage-chart"
     >
+      {data?.data_status === 'legacy_reimport_required' && onData && <BlastLegacyNotice onData={onData} />}
       <BlastSectionHeader
         title={t('blast.damage_title', {
           defaultValue: 'Factor de carga vs Sobre-excavación',
@@ -121,6 +125,7 @@ export function PowderFactorDamagePanel({ surveyDate }: { surveyDate?: string } 
           </span>
         ) : undefined}
       />
+      <p className="text-xs text-text-muted">{t('blast.damage_counts', { used: points.length, excluded: totalSections == null ? t('blast.missing_value') : Math.max(0, totalSections - points.length) })}</p>
       <Plot
         data={traces as Data[]}
         layout={{

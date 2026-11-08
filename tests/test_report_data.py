@@ -41,6 +41,16 @@ def _f(**kw):
     )
 
 
+def test_effective_berm_status_is_kept_separate_from_raw_verdict():
+    row = {"section": "S", "type": "MATCH", "berm_real": 8,
+           "berm_dev": None, "berm_status": "CUMPLE", "effective_berm": 1,
+           "effective_berm_status": "NO CUMPLE"}
+    data = build_report_data([row], {}, ReportFilters(), {})
+    assert data.rows[0].berm_dev is None
+    assert data.rows[0].berm_status == "CUMPLE"
+    assert data.rows[0].effective_berm_status == "NO CUMPLE"
+
+
 def test_parse_and_worst_match_web_semantics():
     assert parse_bench_status(None) == "UNKNOWN"
     assert parse_bench_status("FUERA") == "FUERA"
@@ -463,4 +473,4 @@ def test_blast_empty_payload_is_explicit_exclusion_and_none_keeps_settings_fallb
     assert excluded.blast is None
 
     fallback = build_report_data(rows, settings, ReportFilters(), {})
-    assert fallback.blast == {"holes": holes, "tolerance": None}
+    assert fallback.blast == {"holes": holes, "tolerance": None, "data_status": "legacy_reimport_required"}

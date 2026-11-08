@@ -109,30 +109,21 @@ def _summary_for_rows(
 ) -> Dict[str, Any]:
     neg, pos = tol["neg"], tol["pos"]
 
-    evaluable = [r for r in rows if isinstance(r, dict) and _is_evaluable(r)]
-    if evaluable:
-        scored_rows: List[dict] = []
-        for r in evaluable:
-            row_copy = dict(r)
-            for key in ("delta_crest", "delta_toe"):
-                if not _finite(row_copy.get(key)):
-                    row_copy[key] = None
-            scored_rows.append(row_copy)
-        score = compute_design_achievement_score(
-            scored_rows,
-            crest_tolerance_neg_m=neg,
-            crest_tolerance_pos_m=pos,
-            toe_tolerance_neg_m=neg,
-            toe_tolerance_pos_m=pos,
-        )
-        global_score: Optional[int] = score["global"]
-    else:
-        global_score = None
+    score = compute_design_achievement_score(
+        rows,
+        crest_tolerance_neg_m=neg,
+        crest_tolerance_pos_m=pos,
+        toe_tolerance_neg_m=neg,
+        toe_tolerance_pos_m=pos,
+    )
+    global_score = score["global"]
+    evaluable = [r for r, detail in zip(rows, score["rows"]) if detail["score"] is not None]
+    measurement_rows = [r for r in rows if r.get("type") not in {"EXTRA", "MISSING"}]
 
-    crest_vals = [r.get("delta_crest") for r in rows if _finite(r.get("delta_crest"))]
-    toe_vals = [r.get("delta_toe") for r in rows if _finite(r.get("delta_toe"))]
+    crest_vals = [r.get("delta_crest") for r in measurement_rows if _finite(r.get("delta_crest"))]
+    toe_vals = [r.get("delta_toe") for r in measurement_rows if _finite(r.get("delta_toe"))]
     berm_rows = [
-        r for r in rows
+        r for r in measurement_rows
         if isinstance(r, dict)
         and isinstance(r.get("berm_status"), str)
         and r["berm_status"] in _TIER_STATUSES
@@ -158,6 +149,8 @@ def _summary_for_rows(
 
     return {
         "global_score": global_score,
+        "coverage": score["coverage"],
+        "rows": score["rows"],
         "n_total": len(rows),
         "n_evaluable": len(evaluable),
         "crest_cumple": crest_cumple,

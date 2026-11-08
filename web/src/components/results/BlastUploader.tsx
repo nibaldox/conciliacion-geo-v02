@@ -1,3 +1,4 @@
+import type { BlastConsolidationReport, BlastFootprintReport } from '../../api/types';
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -130,6 +131,42 @@ function buildGeometry(state: GeometryState, columnMap: Record<string, string>):
       ? { collar_elevation_source: 'design_surface' as const, spatial_reference_confirmed: true }
       : {}),
   };
+}
+
+export function ConsolidationReport({ report }: { report: BlastConsolidationReport }) {
+  const { t } = useTranslation();
+  return <section data-testid="blast-consolidation-report" className="mt-2 space-y-1">
+    <p>{t('blast.consolidation_rows', { n: report.rows_in })}</p>
+    <p>{t('blast.consolidation_holes', { n: report.holes_out })}</p>
+    <p>{t('blast.consolidation_copies', { n: report.exact_copies_removed })}</p>
+    <p>{t('blast.consolidation_decks', { n: report.holes_with_decks })}</p>
+    <p>{t('blast.consolidation_conflicts', { n: report.conflicts.length })}</p>
+    <details><summary>{t('blast.consolidation_by_malla')}</summary><ul>{Object.entries(report.copies_by_malla).map(([name, count]) => <li key={name}>{name}: {count}</li>)}</ul></details>
+  </section>;
+}
+
+export function FootprintReport({ report }: { report: BlastFootprintReport }) {
+  const { t } = useTranslation();
+  const missingReasons = Object.entries(report.missing_reasons ?? {});
+  return (
+    <section data-testid="blast-footprint-report" className="mt-2 space-y-1">
+      <p className="font-medium text-text-primary">{t('blast.footprint_report_title')}</p>
+      <p>{t('blast.footprint_report_mode', { mode: report.mode })}</p>
+      <p>{t('blast.footprint_report_mallas', { n: report.n_mallas })}</p>
+      <p data-testid="footprint-report-estimated">{t('blast.footprint_report_estimated', { n: report.n_estimated })}</p>
+      <p data-testid="footprint-report-user">{t('blast.footprint_report_user', { n: report.n_user })}</p>
+      <p data-testid="footprint-report-missing">{t('blast.footprint_report_missing', { n: report.n_missing })}</p>
+      {report.mode === 'estimated_hull' && <p>{t('blast.footprint_report_buffer', { factor: report.buffer_factor ?? 0.5 })}</p>}
+      <p className="text-text-muted">{t('blast.footprint_report_method', { method: report.method })}</p>
+      {report.mode === 'estimated_hull' && <p className="text-text-muted">{t('blast.footprint_report_estimated_note')}</p>}
+      {missingReasons.length > 0 && (
+        <details>
+          <summary>{t('blast.footprint_report_missing_reasons')}</summary>
+          <ul>{missingReasons.map(([name, reason]) => <li key={name}>{name}: {reason}</li>)}</ul>
+        </details>
+      )}
+    </section>
+  );
 }
 
 export function BlastUploader({ onUploaded, collapsible = false }: BlastUploaderProps) {
@@ -645,6 +682,14 @@ export function BlastUploader({ onUploaded, collapsible = false }: BlastUploader
     </div>
   );
 
+  const consolidationReport = blastSummary.data?.consolidation_report ?? upload.data?.consolidation_report;
+  const persistedReport = consolidationReport && Object.keys(consolidationReport).length > 0
+    ? <ConsolidationReport report={consolidationReport} /> : null;
+
+  const footprintReport = blastSummary.data?.footprint_report ?? upload.data?.footprint_report;
+  const persistedFootprintReport = footprintReport && Object.keys(footprintReport).length > 0
+    ? <FootprintReport report={footprintReport} /> : null;
+
   const persistedCount = blastSummary.data ? (
     <p className="text-xs tabular-nums text-text-muted" data-testid="blast-hole-count">
       {t('blast.persisted_count', { n: blastSummary.data.n_holes })}
@@ -664,7 +709,7 @@ export function BlastUploader({ onUploaded, collapsible = false }: BlastUploader
             </span>
             {persistedCount}
           </summary>
-          <div className="border-t border-border py-4">{body}</div>
+          <div className="border-t border-border py-4">{persistedReport}{persistedFootprintReport}{body}</div>
         </details>
       </section>
     );
@@ -676,6 +721,8 @@ export function BlastUploader({ onUploaded, collapsible = false }: BlastUploader
         <h3 className="flex items-center gap-2">{title}</h3>
         {persistedCount}
       </div>
+      {persistedReport}
+      {persistedFootprintReport}
       {body}
     </section>
   );

@@ -45,6 +45,8 @@ class ProcessingResult:
     legacy_rejection_summary: dict[str, str] = field(default_factory=dict)
     accepted_dataframe: Optional[Any] = None  # pandas DataFrame kept for back-compat
     scatter_lines: tuple = ((), (), ())  # (x_lines, y_lines, z_lines)
+    consolidation_report: dict[str, Any] = field(default_factory=dict)
+    footprint_report: dict[str, Any] = field(default_factory=dict)
 
     def processing_summary(self) -> dict[str, Any]:
         """Stable summary with explicit, non-overlapping counts.
@@ -79,6 +81,8 @@ class ProcessingResult:
             "blocking_errors": self.blocking_errors,
             "processing_summary": self.processing_summary(),
             "spatial_diagnostics": self.spatial_diagnostics,
+            "consolidation_report": self.consolidation_report,
+            "footprint_report": self.footprint_report,
         }
         if include_dataframe:
             out["accepted_dataframe"] = self.accepted_dataframe

@@ -52,8 +52,8 @@ def _is_evaluable(row: dict) -> bool:
     return _finite(row.get("delta_crest")) or _finite(row.get("delta_toe")) or _has_berm_status(row)
 
 
-def _signed_mean(values: List[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
+def _signed_mean(values: List[float]) -> Optional[float]:
+    return sum(values) / len(values) if values else None
 
 
 def build_achievement_summary(results: List[dict], ct_tol: Optional[dict]) -> Optional[Dict[str, Any]]:
@@ -95,6 +95,7 @@ def build_achievement_summary(results: List[dict], ct_tol: Optional[dict]) -> Op
     return {
         "global": score["global"],
         "n_evaluable": len(rows),
+        "coverage": score.get("coverage"),
         "crest_pct": int(round(n_crest / d_crest * 100)) if d_crest else 0,
         "crest_denom": d_crest,
         "toe_pct": int(round(n_toe / d_toe * 100)) if d_toe else 0,
@@ -123,16 +124,16 @@ def build_parameter_breakdown_rows(results: List[dict], ct_tol: Optional[dict]) 
         valid = [r for r in (results or []) if r.get(key) and r[key] != "-"]
         total = len(valid)
         cumple = sum(1 for r in valid if r[key] == STATUS_CUMPLE)
-        pct = (cumple / total * 100) if total > 0 else 0
-        real_values = [r[real_field] for r in valid if r.get(real_field) is not None]
+        pct_txt = f"{cumple / total * 100:.0f}%" if total > 0 else "sin dato"
+        real_values = [r[real_field] for r in valid if _finite(r.get(real_field))]
         avg_real = _signed_mean(real_values)
         rows.append({
             "Parámetro": label,
             "Total Evaluado": total,
             "Cumple": cumple,
             "No Cumple": total - cumple,
-            "% Cumplimiento": f"{pct:.0f}%",
-            "Promedio Real": f"{avg_real:.1f} {unit}",
+            "% Cumplimiento": pct_txt,
+            "Promedio Real": f"{avg_real:.1f} {unit}" if avg_real is not None else "sin dato",
         })
 
     for key, label in [("delta_crest", "Desviación Cresta"), ("delta_toe", "Desviación Pata")]:
@@ -140,15 +141,15 @@ def build_parameter_breakdown_rows(results: List[dict], ct_tol: Optional[dict]) 
                 if isinstance(r, dict) and _finite(r.get(key))]
         total = len(vals)
         cumple = sum(1 for v in vals if classify_achievement_delta(v, neg, pos) == STATUS_CUMPLE)
-        pct = (cumple / total * 100) if total > 0 else 0
+        pct_txt = f"{cumple / total * 100:.0f}%" if total > 0 else "sin dato"
         avg = _signed_mean(vals)
         rows.append({
             "Parámetro": label,
             "Total Evaluado": total,
             "Cumple": cumple,
             "No Cumple": total - cumple,
-            "% Cumplimiento": f"{pct:.0f}%",
-            "Promedio Real": f"{avg:+.1f} m",
+            "% Cumplimiento": pct_txt,
+            "Promedio Real": f"{avg:+.1f} m" if avg is not None else "sin dato",
         })
     return rows
 

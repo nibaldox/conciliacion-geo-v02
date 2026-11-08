@@ -97,6 +97,13 @@ def add_area_traces(fig, d_i, z_ref_i, z_eval_i, a_over, a_under):
             showlegend=False))
 
 
+def _finite_m(value) -> bool:
+    try:
+        return bool(np.isfinite(float(value)))
+    except (TypeError, ValueError):
+        return False
+
+
 def add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
     dx = 0.1
     hover_x, hover_y, hover_text, hover_colors, hover_symbols = [], [], [], [], []
@@ -131,7 +138,7 @@ def add_bench_annotations(fig, sec_comps, d_i, z_ref_i, z_eval_i):
         bt = comp.get('bench_real')
 
         start_dist = bd.toe_distance
-        end_dist = bd.crest_distance + bd.berm_width
+        end_dist = bd.crest_distance + (bd.berm_width if _finite_m(bd.berm_width) else 0.0)
         idx_start = np.searchsorted(d_i, start_dist)
         idx_end = np.searchsorted(d_i, end_dist)
 
@@ -243,7 +250,7 @@ def add_berm_width_indicators(fig, benches, comparison_results):
         design_num = bt_to_design[bench_id]
 
         berm = bench.berm_width
-        if berm <= 0:
+        if not _finite_m(berm) or berm <= 0:
             continue
 
         if j == 0:

@@ -166,7 +166,7 @@ def _coerce_typed_columns(df_work: pd.DataFrame) -> None:
             df_work[col] = pd.to_numeric(df_work[col], errors="coerce").astype("Int64")
     for col in ("uniqid", "id_pozo"):
         if col in df_work.columns:
-            df_work[col] = df_work[col].astype(str)
+            df_work[col] = df_work[col].map(lambda value: str(value) if pd.notna(value) else None)
 
 
 def _hole_id_for_row(df_work: pd.DataFrame, idx) -> str:
@@ -234,7 +234,7 @@ def _collect_rejected_rows(
         seen[key] = 1
         rejections.append({
             "hole_id": _hole_id_for_row(df_work, idx),
-            "source_row_index": int(idx) if isinstance(idx, (np.integer, int)) else str(idx),
+            "source_row_index": int(df_work.at[idx, 'source_row_index']),
             "source_column": column,
             "original_value": _sanitized(original),
             "error_code": error_code,
@@ -423,6 +423,90 @@ def _build_scatter_lines(
     return x_lines, y_lines, z_lines
 
 
+def _malla_group_column(df: pd.DataFrame) -> str | None:
+    for cand in ("Nombre_Malla_Original", "holes_polygon", "Malla"):
+        if cand in df.columns:
+            return cand
+    return None
+
+
+def _resolve_malla_footprints(
+    df_work: pd.DataFrame,
+    footprint_mode: str,
+    boundary_polygons: dict | None,
+) -> tuple[dict, dict]:
+    if footprint_mode not in ("estimated_hull", "none"):
+        raise ValueError(
+            f"footprint_mode inválido: {footprint_mode!r} "
+            "(use 'estimated_hull' o 'none')"
+        )
+    report = {
+        "mode": footprint_mode,
+        "n_mallas": 0,
+        "n_estimated": 0,
+        "n_user": 0,
+        "n_missing": 0,
+        "buffer_factor": 0.5 if footprint_mode == "estimated_hull" else 0.0,
+        "method": (
+            "convex hull of unique collar sites buffered by 0.5×median "
+            "nearest-neighbour spacing"
+        ),
+        "missing_reasons": {},
+    }
+    if df_work is None or df_work.empty:
+        return {}, report
+    group_col = _malla_group_column(df_work)
+    if group_col is None:
+        return {}, report
+
+    user_entries: dict[str, dict] = {}
+    for name, entry in (boundary_polygons or {}).items():
+        polygon = entry.get("polygon") if isinstance(entry, dict) else entry
+        if not polygon:
+            continue
+        source = entry.get("source") if isinstance(entry, dict) else None
+        user_entries[str(name)] = {
+            "polygon": polygon,
+            "source": source or "user_polygon",
+        }
+
+    names = list(dict.fromkeys(df_work[group_col].astype(str)))
+    report["n_mallas"] = len(names)
+
+    estimated_entries: dict[str, dict] = {}
+    if footprint_mode == "estimated_hull":
+        from core.blast_correlation import estimate_malla_footprints
+        frame = df_work[[group_col, "X", "Y"]].copy()
+        frame[group_col] = frame[group_col].astype(str)
+        estimated_entries = {
+            str(key): value
+            for key, value in estimate_malla_footprints(frame, group_col).items()
+        }
+
+    polygons: dict[str, dict] = {}
+    for name in names:
+        if name in user_entries:
+            polygons[name] = user_entries[name]
+            report["n_user"] += 1
+            continue
+        entry = estimated_entries.get(name) or {}
+        if entry.get("polygon"):
+            polygons[name] = {
+                "polygon": entry["polygon"],
+                "source": entry.get("source") or "estimated_hull",
+            }
+            report["n_estimated"] += 1
+            continue
+        report["n_missing"] += 1
+        if entry.get("reason"):
+            report["missing_reasons"][name] = str(entry["reason"])
+        elif footprint_mode == "none":
+            report["missing_reasons"][name] = "footprint_mode_none"
+        else:
+            report["missing_reasons"][name] = "no_footprint_available"
+    return polygons, report
+
+
 def procesar_pozos(
     df: pd.DataFrame,
     column_map: dict[str, str | None] | None = None,
@@ -442,6 +526,9 @@ def procesar_pozos(
     design_surface_samples: tuple[DesignSurfaceSample, ...] | None = None,
     design_surface_mesh_id: str | None = None,
     design_surface_sha256: str | None = None,
+    footprint_mode: str = "estimated_hull",
+    boundary_polygons: dict | None = None,
+    rock_density_tm3: float | None = None,
 ):
     """Process a blast-hole report DataFrame into collar/toe 3D coordinates.
 
@@ -483,6 +570,14 @@ def procesar_pozos(
         affected_calculations / recommended_action / row_processing_status.
     """
     df_work = df.copy()
+    if 'source_row_index' in df_work.columns:
+        if 'source_row_index_user' in df_work.columns:
+            name = 'source_row_index_user'
+            while name in df_work.columns:
+                name += '_user'
+            df_work.rename(columns={'source_row_index_user': name}, inplace=True)
+        df_work.rename(columns={'source_row_index': 'source_row_index_user'}, inplace=True)
+    df_work['source_row_index'] = np.arange(len(df_work))
 
     drop_present = [c for c in COLS_DROP if c in df_work.columns]
     df_work.drop(columns=drop_present, inplace=True)
@@ -590,9 +685,7 @@ def procesar_pozos(
         incl_src = cfg_incl_col
         az_src = cfg_az_col
 
-    # Trazabilidad pozos→bancos en conciliación geométrica:
-    if "uniqid" not in df_work.columns:
-        df_work["uniqid"] = (df_work.index + 1).astype(str)
+    generated_uniqid = "uniqid" not in df_work.columns
 
     if design_surface_samples is not None:
         if len(design_surface_samples) != len(df_work) or not design_surface_mesh_id or not design_surface_sha256:
@@ -837,6 +930,12 @@ def procesar_pozos(
     df_work = df_work.dropna(subset=["X", "Y", "Z_collar", "Incl", "Az", "Len"])
     df_work = df_work[df_work["Len"] > 0]
 
+    from core.blast_hole_consolidation import BLAST_ALGORITHM_VERSION, consolidate_blast_holes
+    df_work, consolidation_report = consolidate_blast_holes(df_work)
+    df_work['blast_algorithm_version'] = BLAST_ALGORITHM_VERSION
+    if generated_uniqid:
+        df_work["uniqid"] = (df_work.index + 1).astype(str)
+
     _compute_hole_toes(df_work)
     if _Z_TRANSFORM_BLOCKED:
         blocked = df_work["Z_collar_semantic"] == "bench_elevation_untransformed"
@@ -852,7 +951,15 @@ def procesar_pozos(
     if return_result:
         from core.blast_correlation import compute_powder_factor
         from core.blast_metrics import enrich_blast_dataframe
-        df_work = compute_powder_factor(df_work, bench_height_m=bench_height_m)
+        footprint_polygons, footprint_report = _resolve_malla_footprints(
+            df_work, footprint_mode, boundary_polygons
+        )
+        df_work = compute_powder_factor(
+            df_work,
+            rock_density_tm3=rock_density_tm3,
+            bench_height_m=bench_height_m,
+            boundary_polygons=footprint_polygons or None,
+        )
         df_work = enrich_blast_dataframe(df_work)
         accepted_rows = _df_to_accepted_records(df_work)
         event_warnings = _collect_structured_warnings(df_work)
@@ -875,6 +982,8 @@ def procesar_pozos(
             rows_received=len(df),
             scatter_lines=_build_scatter_lines(df_work),
         )
+        result.consolidation_report = consolidation_report
+        result.footprint_report = footprint_report
         return result
     if return_rejections:
         return df_work, *_build_scatter_lines(df_work), rejected_rows
@@ -961,9 +1070,9 @@ def _df_to_accepted_records(df_work: pd.DataFrame) -> list[dict]:
         # Derived metrics required by BlastHoleSummary downstream.
         carga_val = carga_series.loc[idx] if idx in carga_series.index else float("nan")
         descarga_val = descarga_series.loc[idx] if idx in descarga_series.index else float("nan")
-        record["carga"] = float(carga_val) if pd.notna(carga_val) else 0.0
-        record["descarga"] = float(descarga_val) if pd.notna(descarga_val) else 0.0
-        record["source_row_index"] = int(idx) if isinstance(idx, (np.integer, int)) else str(idx)
+        record["carga"] = float(carga_val) if pd.notna(carga_val) and math.isfinite(float(carga_val)) else None
+        record["descarga"] = float(descarga_val) if pd.notna(descarga_val) and math.isfinite(float(descarga_val)) else None
+        record["source_row_index"] = int(record['source_row_index']) if 'source_row_index' in record else (int(idx) if isinstance(idx, (np.integer, int)) else str(idx))
         record["row_processing_status"] = "accepted"
         out.append(record)
     return out

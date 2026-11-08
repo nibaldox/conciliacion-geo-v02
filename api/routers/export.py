@@ -378,7 +378,19 @@ def _build_excel_payload_sync(
     }
 
     tmp = os.path.join(tempfile.gettempdir(), f"conciliacion_{session_id[:8]}.xlsx")
-    export_results(results, params_design, params_topo, tolerances, tmp, project_info)
+    import inspect
+    import pandas as pd
+
+    holes = settings.get("blast_holes") if export_filters.show_blast_holes else None
+    kwargs = {
+        "df_pozos": pd.DataFrame(holes) if holes else None,
+        "sections": [_section_from_dict(section) for section in sections_raw],
+        "consolidation_report": (settings.get("blast_upload_meta") or {}).get("consolidation_report") if holes else None,
+    }
+    parameters = inspect.signature(export_results).parameters
+    if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+        kwargs = {key: value for key, value in kwargs.items() if key in parameters}
+    export_results(results, params_design, params_topo, tolerances, tmp, project_info, **kwargs)
 
     return tmp, export_filters
 
@@ -497,8 +509,13 @@ def _build_word_payload_sync(
         "phase": phase or "",
     }
     tmp = os.path.join(tempfile.gettempdir(), f"report_{session_id[:8]}.docx")
+    import pandas as pd
+    holes = settings.get("blast_holes") if export_filters.show_blast_holes else None
     generate_word_report(
         filtered, all_data, tmp, project_info,
+        df_pozos=pd.DataFrame(holes) if holes else None,
+        consolidation_report=(settings.get("blast_upload_meta") or {}).get("consolidation_report") if holes else None,
+        crest_toe_tolerance=(settings.get("tolerances") or {}).get("crest_toe_deviation"),
         sections=[_section_from_dict(section) for section in sections_raw],
         mesh_topo=mesh_topo,
         grid_ref=settings.get("grid_ref", 0.0),
@@ -861,8 +878,13 @@ def _build_pdf_payload_sync(
         "phase": phase or "N/A",
     }
     tmp = os.path.join(tempfile.gettempdir(), f"Conciliacion_PDF_{session_id[:8]}.pdf")
+    import pandas as pd
+    holes = settings.get("blast_holes") if export_filters.show_blast_holes else None
     _import_pdf_report()(
         filtered, all_data, tmp, project_info=project_info,
+        df_pozos=pd.DataFrame(holes) if holes else None,
+        consolidation_report=(settings.get("blast_upload_meta") or {}).get("consolidation_report") if holes else None,
+        crest_toe_tolerance=(settings.get("tolerances") or {}).get("crest_toe_deviation"),
         sections=[_section_from_dict(section) for section in sections_raw],
         mesh_topo=mesh_topo,
         grid_ref=settings.get("grid_ref", 0.0),

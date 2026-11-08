@@ -24,8 +24,8 @@ const TEXT = {
     en: 'Design achievement weights: crest 40 % · toe 30 % · berm 30 %, with partial credit per element.',
   },
   weighingNote: {
-    es: 'Nota: en la fila evaluable los elementos faltantes aportan 0 al puntaje global; los porcentajes y medias de cada elemento excluyen las ausencias de su propio denominador. Una fila parcial no equivale a una medición completa.',
-    en: 'Note: on an evaluable row missing elements contribute 0 to the global score; each element’s percentages and means exclude absences from its own denominator. A partial row is not a complete measurement.',
+    es: 'Los pesos disponibles se renormalizan por fila; una fila parcial no equivale a una medición completa.',
+    en: 'Available weights are renormalized per row; a partial row is not a complete measurement.',
   },
   evaluableCounts: { es: 'evaluables', en: 'evaluable' },
   crest: { es: 'Cresta', en: 'Crest' },
@@ -123,7 +123,7 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
     useDesignAchievement(activeFilters);
   const { t, i18n } = useTranslation();
   const lang: 'es' | 'en' = i18n.resolvedLanguage?.toLowerCase().startsWith('en') ? 'en' : 'es';
-  const tx = (key: TextKey) => t(`designAchievement.${key}`, { defaultValue: TEXT[key][lang] });
+  const tx = (key: TextKey) => t(`designAchievement.${key === 'weighingNote' ? 'weighingNoteCorrective' : key}`, { defaultValue: TEXT[key][lang] });
   const tw = (code: string) =>
     t(`designAchievement.warning_${code}`, {
       defaultValue: WARNING_TEXT[code]?.[lang] ?? code,
@@ -137,6 +137,7 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
     );
   }
 
+  const summary = data?.summary;
   const unit = data?.units.corrections ?? 'm';
   const provenance = data?.metadata;
   const isNoData = data != null && (data.metadata?.status ?? 'computed') === 'no_data';
@@ -205,6 +206,8 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
             </div>
           </div>
 
+          {summary?.coverage && <p className="text-xs text-text-muted">{t('designAchievement.coverage', { defaultValue: lang === 'es' ? 'Evaluables: {{evaluable}} · completos: {{complete}} · peso disponible medio: {{weight}}' : 'Evaluable: {{evaluable}} · complete: {{complete}} · mean available weight: {{weight}}', evaluable: summary.coverage.n_evaluable, complete: summary.coverage.n_complete, weight: summary.coverage.weight_available_mean == null ? tx('noData') : `${fmtNumber(summary.coverage.weight_available_mean * 100, lang)} %` })}</p>}
+          {summary?.rows?.some((row) => row.components_missing.length > 0 && row.score != null) && <details className="text-xs text-text-muted"><summary>{t('designAchievement.partialRows', { defaultValue: lang === 'es' ? 'Puntajes parciales' : 'Partial scores' })}</summary><ul>{summary.rows.map((row, index) => row.score != null && row.components_missing.length > 0 ? <li key={index}>{fmtNumber(row.score, lang)} · {t('designAchievement.onlyComponents', { defaultValue: lang === 'es' ? 'solo {{components}}' : 'only {{components}}', components: row.components_available.map((key) => tx(key).toLocaleLowerCase()).join(', ') })}</li> : null)}</ul></details>}
           <details className="text-xs text-text-muted">
             <summary className="cursor-pointer select-none text-text-secondary hover:text-text-primary">
               {t('dashboard.kpi.how_calculated', { defaultValue: '¿Cómo se calcula?' })}
@@ -251,7 +254,7 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
                     </th>
                     <td className="py-2 pr-4 text-right tabular-nums text-text-secondary">{row.n_evaluable}</td>
                     <td className="py-2 text-right tabular-nums text-text-secondary">
-                      {row.global_score == null ? '—' : fmtNumber(row.global_score, lang)}
+                      {row.global_score == null ? tx('noData') : fmtNumber(row.global_score, lang)}
                     </td>
                   </tr>
                 ))}

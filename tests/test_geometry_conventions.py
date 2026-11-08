@@ -224,6 +224,7 @@ class TestParidadBackendAPI:
         with client:
             resp = client.post(
                 "/api/v1/blast/upload",
+                headers={"X-Session-ID": "parity-1"},
                 files={"file": ("p.csv", io.BytesIO(csv.encode()), "text/csv")},
                 data={
                     "session_id": "parity-1",
@@ -238,7 +239,7 @@ class TestParidadBackendAPI:
                 },
             )
             assert resp.status_code == 200, resp.text
-            holes_resp = client.get("/api/v1/blast/parity-1/holes")
+            holes_resp = client.get("/api/v1/blast/parity-1/holes", headers={"X-Session-ID": "parity-1"})
             assert holes_resp.status_code == 200, holes_resp.text
             api_hole = holes_resp.json()["holes"][0]
 

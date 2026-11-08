@@ -13,6 +13,22 @@ from ui.filter_cache import _ensure_filter_values
 from ui.tabs.blast_correlation import backbreak, blocks, data, energy, multivariate, powder_factor, state, temporal
 
 
+def _finite_sum(series: pd.Series) -> float | None:
+    total = pd.to_numeric(series, errors="coerce").sum(min_count=1)
+    return None if pd.isna(total) else float(total)
+
+
+def _finite_mean(series: pd.Series) -> float | None:
+    mean = pd.to_numeric(series, errors="coerce").mean()
+    return None if pd.isna(mean) else float(mean)
+
+
+def _pct_or_sin_dato(value) -> str:
+    if isinstance(value, bool) or not isinstance(value, (int, float, np.number)):
+        return "sin dato"
+    return f"{value}%" if np.isfinite(float(value)) else "sin dato"
+
+
 def render_tab_blast_correlation(config: dict) -> None:
     blast_df = state.get_blast_df()
     comparison_results = state.get_comparison_results()
@@ -124,9 +140,9 @@ def render_tab_blast_correlation(config: dict) -> None:
     st.markdown("---")
 
     col_metrics = st.columns(4)
-    tot_pozos = int(df_filtered_sections["num_pozos"].sum())
-    tot_charge = df_filtered_sections["total_kg"].sum()
-    avg_overbreak = df_filtered_sections["area_over"].mean()
+    tot_pozos = _finite_sum(df_filtered_sections["num_pozos"])
+    tot_charge = _finite_sum(df_filtered_sections["total_kg"])
+    avg_overbreak = _finite_mean(df_filtered_sections["area_over"])
 
     use_pf_axis = (
         "pf_vol_avg_kgm3" in df_filtered_sections.columns
@@ -140,19 +156,20 @@ def render_tab_blast_correlation(config: dict) -> None:
     r_label = "Correlación Carga vs Daño"
     if len(df_filtered_sections) > 1:
         if use_pf_axis:
-            x_vals = (
-                pd.to_numeric(df_filtered_sections["pf_vol_avg_kgm3"], errors="coerce")
-                .fillna(0)
-                .values.astype(float)
+            x_vals = pd.to_numeric(
+                df_filtered_sections["pf_vol_avg_kgm3"], errors="coerce"
             )
             x_label = "Powder Factor (kg/m³)"
         else:
-            x_vals = df_filtered_sections["total_kg"].values.astype(float)
+            x_vals = pd.to_numeric(df_filtered_sections["total_kg"], errors="coerce")
             x_label = "Carga Explosiva (Kg crudo)"
             r_label = "Correlación Carga (kg) vs Daño"
-        y_vals = df_filtered_sections["area_over"].values.astype(float)
-        if np.var(x_vals) > 0 and np.var(y_vals) > 0:
-            r_coef = np.corrcoef(x_vals, y_vals)[0, 1]
+        y_vals = pd.to_numeric(df_filtered_sections["area_over"], errors="coerce")
+        pairs = pd.DataFrame({"x": x_vals, "y": y_vals}).dropna()
+        x_fin = pairs["x"].values.astype(float)
+        y_fin = pairs["y"].values.astype(float)
+        if len(pairs) > 1 and np.var(x_fin) > 0 and np.var(y_fin) > 0:
+            r_coef = np.corrcoef(x_fin, y_fin)[0, 1]
             if r_coef > 0.6:
                 r_text = f"Fuerte Positiva (r={r_coef:.2f}) ⚠️"
             elif r_coef > 0.3:
@@ -162,9 +179,17 @@ def render_tab_blast_correlation(config: dict) -> None:
             else:
                 r_text = f"Débil / Nula (r={r_coef:.2f})"
 
-    col_metrics[0].metric("Pozos Proyectados", f"{tot_pozos}")
-    col_metrics[1].metric("Carga Proyectada Total", f"{tot_charge:,.0f} Kg")
-    col_metrics[2].metric("Sobre-excavación Media", f"{avg_overbreak:.1f} m²")
+    col_metrics[0].metric(
+        "Pozos Proyectados", "sin dato" if tot_pozos is None else f"{int(tot_pozos)}"
+    )
+    col_metrics[1].metric(
+        "Carga Proyectada Total",
+        "sin dato" if tot_charge is None else f"{tot_charge:,.0f} Kg",
+    )
+    col_metrics[2].metric(
+        "Sobre-excavación Media",
+        "sin dato" if avg_overbreak is None else f"{avg_overbreak:.1f} m²",
+    )
     col_metrics[3].metric(r_label, r_text)
 
     if not df_filtered_sections.empty and bool(df_filtered_sections["_pf_unavailable"].iloc[0]):
@@ -280,7 +305,7 @@ def _render_section_tab(
 
         x_for_var = (
             pd.to_numeric(df_filtered_sections[x_axis], errors="coerce")
-            .fillna(0)
+            .dropna()
             .values.astype(float)
         )
         try:
@@ -291,7 +316,7 @@ def _render_section_tab(
             _HAS_STATSMODELS = False
         trendline = (
             "ols"
-            if _HAS_STATSMODELS and len(df_filtered_sections) > 2 and np.var(x_for_var) > 0
+            if _HAS_STATSMODELS and len(x_for_var) > 2 and np.var(x_for_var) > 0
             else None
         )
         fig_scatter = px.scatter(
@@ -533,7 +558,7 @@ def _render_malla_tab(
         "energy_total_mj": "Energía (MJ)",
         "score_pct": "Logro Diseño (%)",
     }
-    st.metric("Logro Diseño Global", f"{global_score_pct}%")
+    st.metric("Logro Diseño Global", _pct_or_sin_dato(global_score_pct))
     st.caption(format_achievement_caption(ct_tol))
     df_m_disp = df_malla_corr[col_list_m].rename(columns=display_map_m)
     st.dataframe(df_m_disp, width="stretch", height=300)

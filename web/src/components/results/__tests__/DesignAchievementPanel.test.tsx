@@ -1,3 +1,4 @@
+import i18n from '../../../i18n';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesignAchievementPanel } from '../DesignAchievementPanel';
@@ -70,12 +71,21 @@ function hookResult(o: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  void i18n.changeLanguage('es');
   lastFilters = undefined;
   useDesignAchievementMock.mockReset();
   useDesignAchievementMock.mockReturnValue(hookResult());
 });
 
 describe('DesignAchievementPanel', () => {
+  it('reports coverage and marks partial component scores', () => {
+    const summary: DesignAchievementSummary = { ...makeSummary({ global_score: 100, n_evaluable: 1 }), coverage: { n_rows: 1, n_evaluable: 1, n_complete: 0, weight_available_mean: 0.3, n_available: { crest: 0, toe: 0, berm: 1 } }, rows: [{ score: 100, components_available: ['berm'], components_missing: ['crest', 'toe'], weight_available: 0.3 }] };
+    useDesignAchievementMock.mockReturnValue(hookResult({ data: makeResponse(summary) }));
+    render(<DesignAchievementPanel />);
+    expect(screen.getByText(/completos: 0/i)).toBeTruthy();
+    expect(screen.getByText(/solo berma/i)).toBeTruthy();
+  });
+
   it('estado de carga sin inventar datos', () => {
     useDesignAchievementMock.mockReturnValue(hookResult({ isPending: true }));
     render(<DesignAchievementPanel />);
@@ -110,7 +120,7 @@ describe('DesignAchievementPanel', () => {
     expect(screen.getByText('Sin datos')).toBeTruthy();
     expect(screen.getByText(/10\s*filas/i)).toBeTruthy();
     expect(screen.getByText(/0\s*\/\s*10/)).toBeTruthy();
-    expect(screen.getByText(/evaluables?/i)).toBeTruthy();
+    expect(screen.getAllByText(/evaluables?/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/mediciones|predeterminad|tolerancia de sesión|invalid/i).length).toBeGreaterThan(0);
     expect(screen.queryByText(/no_evaluable_rows/)).toBeNull();
     expect(screen.queryByText(/session_tolerance_invalid/)).toBeNull();

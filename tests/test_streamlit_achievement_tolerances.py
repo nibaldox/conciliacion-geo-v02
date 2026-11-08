@@ -120,7 +120,7 @@ class TestComputeMallaCorrelationPropagation:
             "Nombre_Malla_Original",
             [],
         )
-        assert score == 0
+        assert score is None
 
 
 class TestAchievementCaption:

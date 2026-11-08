@@ -7,9 +7,11 @@ import { BenchInspector } from './BenchInspector';
 import { ProfilePlanThumbnail } from '../../ProfilePlanThumbnail';
 import { BenchTable } from './BenchTable';
 import { ComplianceSummary } from './ComplianceSummary';
+import { ProposalPanel } from './ProposalPanel';
 import { HorizontalDeviationLegend } from '../../HorizontalDeviationLegend';
 import { HorizontalDeviationOverview } from '../../HorizontalDeviationOverview';
 import { useFilterState, useCrossLinkState, useProfileViewModel } from '../application';
+import { hasProposalData } from '../domain';
 import { useSession } from '../../../../stores/session';
 import { Spinner } from '../../../ui/Spinner';
 import { horizontalDeviationWarning } from '../../../../utils/horizontalDeviationMessages';
@@ -83,6 +85,8 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
 
   const selectedBench = viewModel.benches.find((bench) => bench.benchNumber === crossLink.selected) ?? null;
   const planToggleLabel = t('profile_plan.title');
+  const proposalLayerAvailable =
+    (viewModel.designBenches?.length ?? 0) > 0 && hasProposalData(viewModel.comparisons ?? []);
 
   return (
     <div data-slot="profile-view" data-section-id={selectedSectionId} className="flex flex-col gap-4">
@@ -143,6 +147,7 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
             filter={filter}
             blastDataAvailable={blastDataAvailable}
             horizontalDeviationAvailable={!!viewModel.horizontalDeviation}
+            proposalLayerAvailable={proposalLayerAvailable}
           />
           {viewModel.horizontalDeviation && filter.state.showHorizontalDeviation && (
             <div
@@ -213,6 +218,10 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
           crossLink={crossLink}
           selectedDesignBenchNumbers={selectedDesignBenches}
           comparisonBenchStatuses={selectedDesignStatuses}
+        />
+        <ProposalPanel
+          comparisons={viewModel.comparisons ?? []}
+          chartLayerAvailable={proposalLayerAvailable}
         />
         <ComplianceSummary
           benches={viewModel.benches}

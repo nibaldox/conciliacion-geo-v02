@@ -278,11 +278,11 @@ class BenchParams:
     toe_distance: float
     bench_height: float
     face_angle: float
-    berm_width: float
+    berm_width: Optional[float]
     is_ramp: bool = False
     group_break: bool = False
     spill_width: float = 0.0
-    effective_berm_width: float = 0.0
+    effective_berm_width: Optional[float] = 0.0
     spill_start_distance: float = 0.0
     spill_start_elevation: float = 0.0
     overhang_m: float = 0.0
@@ -290,6 +290,7 @@ class BenchParams:
     rock_bridge_height_m: float = 0.0
     catch_bench_adequate: bool = False
     catch_bench_ratio: float = 0.0
+    catch_bench_status: Optional[str] = None
     wedge_risk: bool = False
     toppling_risk: bool = False
     face_angle_inconsistent: bool = False
@@ -785,7 +786,10 @@ def _finalize_ramp_angles(result: ExtractionResult, benches: list[BenchParams]) 
         dx = abs(top.crest_distance - bot.toe_distance)
         if dx > 1e-3:
             result.overall_angle = float(np.degrees(np.arctan2(abs(dz), dx)))
-        ramp_horiz = sum(b.berm_width for b in benches if b.is_ramp)
+        ramp_horiz = sum(
+            b.berm_width for b in benches
+            if b.is_ramp and b.berm_width is not None
+        )
         ir_horiz = max(dx - ramp_horiz, dx * 0.05)
         if ir_horiz > 1e-3:
             result.inter_ramp_angle = float(np.degrees(np.arctan2(abs(dz), ir_horiz)))

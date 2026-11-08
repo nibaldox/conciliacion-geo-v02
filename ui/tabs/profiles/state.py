@@ -15,7 +15,7 @@ def get_profile_controls():
     Returns a dict with the same keys used by the original tab so the
     orchestrator stays thin.
     """
-    ctrl_cols = st.columns(5)
+    ctrl_cols = st.columns(6)
 
     with ctrl_cols[0]:
         show_reconciled = st.checkbox(
@@ -64,6 +64,12 @@ def get_profile_controls():
             key="profile_grid_cols",
             help="Ajusta el número de columnas para optimizar el espacio")
 
+    with ctrl_cols[5]:
+        show_proposal_layer = st.checkbox(
+            "🧪 Pata guiada y piso (propuesta)",
+            value=False, key="show_proposal_layer",
+            help="Marca en el perfil la pata sólida guiada y el piso local de la propuesta")
+
     return {
         "show_reconciled": show_reconciled,
         "show_areas": show_areas,
@@ -73,6 +79,7 @@ def get_profile_controls():
         "show_pozos": show_pozos,
         "blast_tolerance": blast_tolerance,
         "num_cols": num_cols,
+        "show_proposal_layer": show_proposal_layer,
     }
 
 
@@ -81,6 +88,7 @@ def get_profile_figure_inputs():
     return {
         "area_fill_design": st.session_state.get('area_fill_design') or [],
         "params_topo": st.session_state.get('params_topo') or [],
+        "params_design": st.session_state.get('params_design') or [],
         "comparison_results": st.session_state.get('comparison_results') or [],
         "reconciled_design": st.session_state.get('reconciled_design') or [],
         "reconciled_topo": st.session_state.get('reconciled_topo') or [],

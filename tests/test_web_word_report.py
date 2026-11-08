@@ -119,6 +119,44 @@ def _table_with_header(doc, header):
     return None
 
 
+def test_word_labels_missing_berm_deviation_as_sin_dato():
+    row = _rows(n=1)[0]
+    row["berm_dev"] = None
+    row["effective_berm_status"] = "NO CUMPLE"
+    doc = _document(build_word_report(_data([row])).getvalue())
+    table = _table_with_header(doc, "Desv. berma (m)")
+    assert table is not None
+    header, data_row = table[:2]
+    assert data_row[header.index("Desv. berma (m)")] == "sin dato"
+    assert data_row[header.index("Estado berma efectiva")] == "NO CUMPLE"
+    assert data_row[header.index("Estado berma")] == "CUMPLE"
+
+
+def test_word_blast_annex_exposes_pf_and_consolidation():
+    settings = {"blast_holes": [{"pf_voronoi_bench_g_per_ton": None,
+                                   "pf_voronoi_bench_status": "MISSING_FOOTPRINT"}],
+                "blast_upload_meta": {"consolidation_report": {"holes_out": 1, "exact_copies_removed": 2, "deck_rows_merged": 1}}}
+    data = build_report_data([], settings, ReportFilters(), META)
+    doc = _document(build_word_report(data).getvalue())
+    text = " ".join(_paragraphs(doc) + [" ".join(row) for row in _tables(doc)])
+    assert "1000*Q/(A*H*rho)" in text
+    assert "Q/(B*S*H)" in text
+    assert "MISSING_FOOTPRINT" in text
+    assert "sin dato" in text
+    assert "copias" in text.lower()
+
+
+def test_word_shows_achievement_coverage_for_partial_rows():
+    rows = [{"section": "S", "sector": "A", "bench_num": 1, "type": "MATCH",
+             "delta_crest": 0.0, "berm_status": None}]
+    doc = _document(build_word_report(_data(rows)).getvalue())
+    text = " ".join(_paragraphs(doc) + [" ".join(row) for row in _tables(doc)]).lower()
+    assert "cobertura" in text
+    assert "completos" in text
+    assert "peso medio" in text
+    assert "componentes faltantes" in text
+
+
 def _xml(doc):
     return doc.element.body.xml
 

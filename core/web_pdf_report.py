@@ -492,6 +492,20 @@ def _summary_section(story: list, data: ReportData, styles: dict) -> None:
             f"registros con algún componente disponible {achievement.get('n_evaluable', 0)}",
         ]
         story.append(Paragraph(" · ".join(parts) + ".", styles["body"]))
+        coverage = achievement.get("coverage") or {}
+        weight = coverage.get("weight_available_mean")
+        weight_text = "sin dato" if weight is None else f"{weight:.2f}"
+        story.append(Paragraph(
+            f"Cobertura: evaluables {coverage.get('n_evaluable', 0)} de {coverage.get('n_rows', 0)}; "
+            f"completos {coverage.get('n_complete', 0)}; peso medio disponible {weight_text}.", styles["body"]
+        ))
+        for row, detail in zip(data.rows, achievement.get("rows") or []):
+            missing = detail.get("components_missing") or []
+            if missing:
+                story.append(Paragraph(
+                    f"{_esc(row.section)}, banco {_esc(row.bench_num)}: componentes faltantes: {_esc(', '.join(missing))}.",
+                    styles["note"],
+                ))
         story.append(Paragraph(
             "Cada porcentaje de componente usa su propio n disponible. Los registros "
             "contados como evaluables pueden tener solo uno de los componentes.",
@@ -749,6 +763,30 @@ def _parameters_section(story: list, data: ReportData, styles: dict) -> None:
     if donuts:
         story.append(Spacer(1, 0.4 * cm))
         story.append(_image(donuts, max_width=CONTENT_WIDTH))
+
+
+def _berm_details(story: list, data: ReportData, styles: dict) -> None:
+    if not data.rows:
+        return
+    story.append(Paragraph("Detalle de berma por banco", styles["h2"]))
+    story.append(Paragraph(
+        "La berma efectiva es un indicador separado y no modifica el estado de la berma bruta.",
+        styles["note"],
+    ))
+    for row in data.rows:
+        bench = "sin dato" if row.bench_num is None else f"{'T' if row.type == 'EXTRA' else 'D'}{row.bench_num}"
+        real = _fmt_length(row.berm_real) or "sin dato"
+        effective = _fmt_length(row.effective_berm) or "sin dato"
+        deviation = _fmt_number(row.berm_dev, 2)
+        deviation = "sin dato" if deviation is None else f"{float(deviation):+.2f} m"
+        gross_status = row.berm_status or "sin dato"
+        effective_status = row.effective_berm_status or "sin dato"
+        text = (
+            f"Sección {row.section} · Banco {bench}: berma real {real}; "
+            f"estado berma {gross_status}; desviación berma {deviation}; "
+            f"berma efectiva {effective}; estado berma efectiva {effective_status}."
+        )
+        story.append(Paragraph(_esc(text), styles["note"]))
 
 
 def _sector_available(data: ReportData) -> bool:
@@ -1131,6 +1169,7 @@ def _build_pdf_report_unlocked(data: ReportData) -> io.BytesIO:
     story.append(PageBreak())
     story.append(Paragraph(f"{number}. Cumplimiento por parámetro", styles["h1"]))
     _parameters_section(story, data, styles)
+    _berm_details(story, data, styles)
     number += 1
 
     if _sector_available(data):
@@ -1168,6 +1207,32 @@ def _build_pdf_report_unlocked(data: ReportData) -> io.BytesIO:
                 align_center_from=1,
             )
         )
+        from core.blast_correlation import PF_DEFINITIONS
+
+        story.append(Paragraph("PF principal (g/t): 1000*Q/(A*H*rho), área de Voronoi por huella y altura de banco.", styles["body"]))
+        for name, definition in PF_DEFINITIONS.items():
+            story.append(Paragraph(_esc(f"{name} ({definition['unit']}): {definition['formula']}"), styles["note"]))
+        blast = data.blast or {}
+        if blast.get("data_status") == "legacy_reimport_required":
+            story.append(Paragraph("datos de pozos importados con una versión anterior: reimportar", styles["body"]))
+        consolidation = blast.get("consolidation_report")
+        if isinstance(consolidation, dict) and consolidation:
+            story.append(Paragraph(_esc(
+                f"Consolidación: pozos {consolidation.get('holes_out', 'sin dato')}; "
+                f"copias eliminadas {consolidation.get('exact_copies_removed', 'sin dato')}; "
+                f"filas de decks fusionadas {consolidation.get('deck_rows_merged', 'sin dato')}."
+            ), styles["body"]))
+        holes = blast.get("holes") or []
+        story.append(Paragraph(f"Detalle PF principal: primeros {min(len(holes), 60)} de {len(holes)} pozos.", styles["body"]))
+        for index, hole in enumerate(holes[:60]):
+            if not isinstance(hole, dict):
+                continue
+            value = _fmt_number(hole.get("pf_voronoi_bench_g_per_ton"), 2) or "sin dato"
+            name = hole.get("id_pozo") or hole.get("hole_id") or hole.get("label_pozo") or "sin dato"
+            status = hole.get("pf_voronoi_bench_status") or "sin dato"
+            story.append(Paragraph(_esc(f"Pozo {name}: {value} g/t; estado {status}."), styles["note"]))
+            if hole.get("decks"):
+                story.append(Paragraph(_esc(f"Decks {hole['decks']}; mezcla {hole.get('explosive_mix', {})}; filas {hole.get('source_row_indices', [])}; copias eliminadas {hole.get('duplicate_rows_removed', 0)}."), styles["note"]))
         number += 1
 
     story.append(Spacer(1, 0.6 * cm))

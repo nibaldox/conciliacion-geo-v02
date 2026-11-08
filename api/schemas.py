@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Literal
 from enum import Enum
 
 from core.config import DETECTION, TOLERANCES
@@ -128,6 +128,7 @@ class ProfileData(BaseModel):
     reconciled_design_legacy: Optional[Dict[str, List[float]]] = None
     reconciled_topo_legacy: Optional[Dict[str, List[float]]] = None
     benches_topo: Optional[List[BenchParamsSchema]] = None
+    benches_design: Optional[List[BenchParamsSchema]] = None
     horizontal_deviation: Optional[Dict[str, Any]] = None
     profile_warnings: Optional[Dict[str, List[str]]] = None
 
@@ -153,6 +154,121 @@ class ComparisonResult(BaseModel):
     berm_status: str
     delta_crest: Optional[float] = None
     delta_toe: Optional[float] = None
+    guided_delta_crest: Optional[float] = None
+    guided_delta_crest_status: Optional[str] = None
+    guided_delta_toe: Optional[float] = None
+    guided_delta_toe_status: Optional[str] = None
+    guided_height: Optional[float] = None
+    guided_height_status: Optional[str] = None
+    guided_angle: Optional[float] = None
+    guided_angle_status: Optional[str] = None
+    guided_berm: Optional[float] = None
+    guided_berm_status: Optional[str] = None
+    guided_floor_offset_m: Optional[float] = None
+    guided_floor_offset_status: Optional[str] = None
+    guided_remaining_thickness_mean_m: Optional[float] = None
+    guided_remaining_thickness_max_m: Optional[float] = None
+    guided_excavation_debt_area_m2: Optional[float] = None
+    design_bench_state: Optional[str] = None
+    split_bench: Optional[bool] = None
+    split_of: Optional[int] = None
+    proposed_source: Optional[str] = None
+    proposed_height: Optional[float] = None
+    proposed_angle: Optional[float] = None
+    proposed_delta_crest: Optional[float] = None
+    proposed_delta_toe: Optional[float] = None
+    proposed_berm: Optional[float] = None
+    proposed_height_source: Optional[str] = None
+    proposed_angle_source: Optional[str] = None
+    proposed_crest_source: Optional[str] = None
+    proposed_toe_source: Optional[str] = None
+    proposed_berm_source: Optional[str] = None
+    proposed_height_status: Optional[str] = None
+    proposed_angle_status: Optional[str] = None
+    proposed_crest_status: Optional[str] = None
+    proposed_toe_status: Optional[str] = None
+    proposed_berm_status: Optional[str] = None
+    proposed_bench_score: Optional[float] = None
+    proposed_evaluable: Optional[bool] = None
+    proposed_exclusion_reason: Optional[str] = None
+    floor_offset_m: Optional[float] = None
+    floor_status: Optional[str] = None
+    excavation_debt_thickness_mean_m: Optional[float] = None
+    excavation_debt_thickness_max_m: Optional[float] = None
+    excavation_debt_area_m2: Optional[float] = None
+    proposal_status: Optional[str] = None
+    proposal_error: Optional[str] = None
+    height_score: Optional[float] = None
+    angle_score: Optional[float] = None
+    berm_score: Optional[float] = None
+    bench_score: Optional[float] = None
+    section_score: Optional[float] = None
+    section_status: Optional[str] = None
+    spill_width: Optional[float] = None
+    effective_berm: Optional[float] = None
+    effective_berm_status: Optional[str] = None
+    berm_dev: Optional[float] = None
+    berm_remnant_max_m: Optional[float] = None
+    berm_remnant_area_m2: Optional[float] = None
+    guided_berm_remnant_max_m: Optional[float] = None
+    guided_berm_remnant_area_m2: Optional[float] = None
+    guided_warnings: Optional[List[str]] = None
+    floor_tolerance_used: Optional[Dict[str, float]] = None
+
+
+class ProposedCoverageSchema(BaseModel):
+    n_evaluable: int
+    n_design_benches: int
+    ratio: Optional[float] = None
+
+
+class ProposedSectionSummarySchema(BaseModel):
+    section: Optional[str] = None
+    proposed_section_score: Optional[float] = None
+    proposed_section_status: Optional[str] = None
+    n_rows: int = 0
+    n_evaluable: int = 0
+    n_not_excavated: int = 0
+    n_section_truncated: int = 0
+    n_unmeasured: int = 0
+    n_split_fragments: int = 0
+    n_split_benches: int = 0
+    excavation_debt_area_m2: float = 0.0
+    floor_status_counts: Dict[str, int] = Field(default_factory=dict)
+
+
+class ProposedSummarySchema(BaseModel):
+    section: Optional[str] = None
+    proposed_global_score: Optional[float] = None
+    n_rows: int = 0
+    n_evaluable: int = 0
+    n_not_excavated: int = 0
+    n_section_truncated: int = 0
+    n_unmeasured: int = 0
+    n_split_fragments: int = 0
+    n_split_benches: int = 0
+    excavation_debt_area_m2: float = 0.0
+    floor_status_counts: Dict[str, int] = Field(default_factory=dict)
+    coverage: ProposedCoverageSchema = Field(
+        default_factory=lambda: ProposedCoverageSchema(n_evaluable=0, n_design_benches=0))
+    by_section: Dict[str, ProposedSectionSummarySchema] = Field(default_factory=dict)
+
+
+class ProposedComplianceResponse(BaseModel):
+    session_id: str
+    proposal_status: str  # "current" | "not_computed" | "partial"
+    n_total_rows: int = 0
+    n_proposal_rows: int = 0
+    n_failed_rows: int = 0
+    n_not_computed_rows: int = 0
+    summary: Optional[ProposedSummarySchema] = None
+    floor_tolerance: Dict[str, float]
+    floor_tolerance_used: Optional[Dict[str, float]] = None
+    floor_tolerance_source: str  # "session" | "core_default"
+    filters: Dict[str, List[str]] = Field(default_factory=dict)
+    status_model: str = ""
+    assumptions: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
 
 
 class ProcessStatus(BaseModel):
@@ -250,8 +366,8 @@ class BlastHoleOnProfile(BaseModel):
     hole_id: str
     distance: float
     elevation: float
-    burden: float
-    spacing: float
+    burden: Optional[float]
+    spacing: Optional[float]
     is_within_tolerance: bool
     section_relation: Optional[str] = None
     profile_point_kind: str
@@ -263,6 +379,8 @@ class BlastHoleOnProfile(BaseModel):
 
 
 class BlastHolesOnProfileResponse(BaseModel):
+    data_status: Literal["current", "legacy_reimport_required"] = "legacy_reimport_required"
+    algorithm_version: Optional[str] = None
     section_id: str
     mesh_id: str
     tolerance: float
@@ -270,36 +388,113 @@ class BlastHolesOnProfileResponse(BaseModel):
 
 
 class BlastCorrelationRowSchema(BaseModel):
-    """One row of blast↔geotech correlation for a single section.
-
-    Mirrors :class:`core.blast_correlation.BlastCorrelationRow`. Numeric metrics
-    default to ``0.0`` so empty / no-data sections serialise cleanly. Floats are
-    rounded to 3 decimals at the mapping site (matching ``BlastHoleOnProfile``).
-    ``sector`` echoes the section's geotechnical-domain label
-    (:class:`SectionLine.sector`) so the UI can group rows without re-joining.
-    ``rock_density_used`` is the effective ρ (ton/m³) applied for this row —
-    the per-sector override when present, otherwise the global ``rock_density_tm3``.
-    """
-
     section_name: str
     num_wells: int = 0
-    total_kg: float = 0.0
-    mean_abs_deviation: float = 0.0
-    avg_over_break: float = 0.0
-    avg_under_break: float = 0.0
+    total_kg: Optional[float] = None
+    mean_abs_deviation: Optional[float] = None
+    avg_over_break: Optional[float] = None
+    avg_under_break: Optional[float] = None
     n_over: int = 0
     n_under: int = 0
-    pf_vol_avg_kgm3: float = 0.0
-    pf_area_avg_kgm2: float = 0.0
-    pf_g_per_ton_avg: float = 0.0
-    pf_g_per_ton_net_avg: float = 0.0
-    energy_total_mj: float = 0.0
+    pf_vol_avg_kgm3: Optional[float] = None
+    pf_area_avg_kgm2: Optional[float] = None
+    pf_g_per_ton_avg: Optional[float] = None
+    pf_g_per_ton_net_avg: Optional[float] = None
+    pf_g_per_ton_inf_avg: Optional[float] = None
+    pf_voronoi_bench_g_per_ton_section: Optional[float] = None
+    n_pf_voronoi_bench_valid: int = 0
+    pf_voronoi_bench_status_counts: Dict[str, int] = Field(default_factory=dict)
+    pf_voronoi_bench_source_counts: Dict[str, int] = Field(default_factory=dict)
+    pf_voronoi_bench_source_dominant: Optional[str] = None
+    energy_total_mj: Optional[float] = None
+    energy_known_mj: Optional[float] = None
+    n_kg_known: int = 0
+    n_kg_missing: int = 0
+    energy_coverage_kg_fraction: Optional[float] = None
     n_pf_valid: int = 0
     sector: str = ""
-    rock_density_used: float = 0.0
+    rock_density_used: Optional[float] = None
 
 
-class BlastCorrelationResponse(BaseModel):
+class BlastDataStatus(BaseModel):
+    data_status: Literal["current", "legacy_reimport_required"] = "legacy_reimport_required"
+    algorithm_version: Optional[str] = None
+
+
+class BlastConsolidationIssue(BaseModel):
+    reason: str
+    source_row_indices: List[int] = Field(default_factory=list)
+    malla: Optional[str] = None
+    id_pozo: Optional[str] = None
+
+
+class BlastConsolidationReport(BaseModel):
+    key_columns: List[str] = Field(default_factory=list)
+    rows_in: int = 0
+    holes_out: int = 0
+    exact_copies_removed: int = 0
+    copies_by_malla: Dict[str, int] = Field(default_factory=dict)
+    holes_with_decks: int = 0
+    deck_rows_merged: int = 0
+    conflicts: List[BlastConsolidationIssue] = Field(default_factory=list)
+    unmerged_missing_identity: int = 0
+    version: Optional[str] = None
+    warnings: List[BlastConsolidationIssue] = Field(default_factory=list)
+
+
+class BlastFootprintReport(BaseModel):
+    mode: str = "estimated_hull"
+    n_mallas: int = 0
+    n_estimated: int = 0
+    n_user: int = 0
+    n_missing: int = 0
+    buffer_factor: Optional[float] = 0.5
+    method: str = ""
+    missing_reasons: Dict[str, str] = Field(default_factory=dict)
+
+
+class BlastSessionSummary(BlastDataStatus):
+    n_holes: int = 0
+    consolidation_report: Optional[BlastConsolidationReport] = None
+    footprint_report: Optional[BlastFootprintReport] = None
+
+
+class BlastDeck(BaseModel):
+    kg: Optional[float] = None
+    explosive: Optional[str] = None
+    taco_m: Optional[float] = None
+    source_row_index: Optional[int] = None
+
+
+class BlastHoleDetail(BlastDataStatus):
+    hole_id: str
+    row_id: str
+    decks: List[BlastDeck] = Field(default_factory=list)
+    explosive_mix: Dict[str, float] = Field(default_factory=dict)
+    source_row_indices: List[int] = Field(default_factory=list)
+    source_row_index_user: Optional[List[int]] = None
+    duplicate_rows_removed: int = 0
+    area_influence_m2: Optional[float] = None
+    area_status: Optional[str] = None
+    pf_voronoi_bench_area_m2: Optional[float] = None
+    pf_voronoi_bench_area_status: Optional[str] = None
+    pf_voronoi_bench_domain_area_m2: Optional[float] = None
+    pf_voronoi_bench_g_per_ton: Optional[float] = None
+    pf_voronoi_bench_status: Optional[str] = None
+    pf_voronoi_bench_source: Optional[str] = None
+    pf_voronoi_bench_unit: Optional[str] = None
+    pf_voronoi_bench_assumptions: List[str] = Field(default_factory=list)
+    pf_voronoi_bench_warnings: List[str] = Field(default_factory=list)
+    bench_height_status: Optional[str] = None
+    altura_carga_warning: Optional[str] = None
+    energy_total_mj: Optional[float] = None
+    energy_known_mj: Optional[float] = None
+    energy_coverage_kg_fraction: Optional[float] = None
+    kg_per_meter_loaded_column: Optional[float] = None
+    kg_per_meter_loaded_column_status: Optional[str] = None
+
+
+class BlastCorrelationResponse(BlastDataStatus):
     """Response envelope for ``GET /process/blast-correlation``.
 
     ``rows`` is empty (never an error) when the session has no blast holes, no
@@ -313,6 +508,8 @@ class BlastCorrelationResponse(BaseModel):
     temporal_filter: Dict[str, Any] = Field(default_factory=dict)
     carga: List[float] = Field(default_factory=list)
     descarga: List[float] = Field(default_factory=list)
+    kg_per_meter: List[float] = Field(default_factory=list)
+    kg_per_meter_loaded_column: List[float] = Field(default_factory=list)
 
 
 class BlastDamagePointSchema(BaseModel):
@@ -324,8 +521,8 @@ class BlastDamagePointSchema(BaseModel):
     """
 
     section_name: str
-    pf_g_per_ton: float = 0.0
-    over_break: float = 0.0
+    pf_g_per_ton: Optional[float] = None
+    over_break: Optional[float] = None
 
 
 class BlastDamageModelFitSchema(BaseModel):
@@ -338,17 +535,17 @@ class BlastDamageModelFitSchema(BaseModel):
     fields the web chart actually renders.
     """
 
-    beta0: float = 0.0
-    beta1: float = 0.0
-    r_squared: float = 0.0
-    p_value: float = 0.0
+    beta0: Optional[float] = None
+    beta1: Optional[float] = None
+    r_squared: Optional[float] = None
+    p_value: Optional[float] = None
     n: int = 0
     confidence: str = "INSUFFICIENT"
-    ci_beta1_low: float = 0.0
-    ci_beta1_high: float = 0.0
+    ci_beta1_low: Optional[float] = None
+    ci_beta1_high: Optional[float] = None
 
 
-class BlastDamageModelResponse(BaseModel):
+class BlastDamageModelResponse(BlastDataStatus):
     """Response envelope for ``GET /process/blast-correlation/damage-model``.
 
     ``points`` carries one entry per section (PF, overbreak). ``fit`` is the
@@ -373,21 +570,20 @@ class BlastHoleSummary(BaseModel):
     ``carga`` maps to the charge density (kg of explosive per metre of hole)
     when the source CSV includes a kilogram column; ``descarga`` maps to the
     explosive column length (``altura_carga_m`` = drilled length - stemming).
-    Both fields default to ``0.0`` when the source data does not provide the
-    required columns.
+    Missing numeric fields are represented as null.
     """
 
     hole_id: str
-    x: float
-    y: float
-    z: float
-    carga: float = 0.0
-    descarga: float = 0.0
+    x: Optional[float] = None
+    y: Optional[float] = None
+    z: Optional[float] = None
+    carga: Optional[float] = None
+    descarga: Optional[float] = None
     hardness: Optional[str] = None
     bench: Optional[str] = None
-    length: float = 0.0
-    inclination: float = 0.0
-    azimuth: float = 0.0
+    length: Optional[float] = None
+    inclination: Optional[float] = None
+    azimuth: Optional[float] = None
     z_collar_semantic: Optional[str] = None
     surface_sample_status: Optional[str] = None
     surface_sample_reason: Optional[str] = None
@@ -398,7 +594,7 @@ class BlastHoleSummary(BaseModel):
     surface_sample_assumption: Optional[str] = None
 
 
-class BlastHolesResponse(BaseModel):
+class BlastHolesResponse(BlastDataStatus):
     """Response envelope for ``GET /api/v1/blast/{session_id}/holes``."""
 
     session_id: str
@@ -409,6 +605,7 @@ class BlastHole3D(BaseModel):
     row_id: str
     hole_id: str
     source_row_index: Optional[int] = None
+    source_row_index_user: Optional[List[int]] = None
     collar: Optional[List[float]] = None
     toe: Optional[List[float]] = None
     geometry_status: str
@@ -427,7 +624,7 @@ class BlastHoles3DSummary(BaseModel):
     rejected: int = 0
 
 
-class BlastHoles3DResponse(BaseModel):
+class BlastHoles3DResponse(BlastDataStatus):
     session_id: str
     section_id: Optional[int] = None
     corridor_m: Optional[float] = None
@@ -487,7 +684,7 @@ class BlockingErrorSchema(BaseModel):
     recommended_action: str = ""
 
 
-class BlastUploadResponse(BaseModel):
+class BlastUploadResponse(BlastDataStatus):
     """Response envelope for ``POST /api/v1/blast/upload``.
 
     Remediación 3.2/4.2 + integración 3.6: the structured
@@ -501,13 +698,15 @@ class BlastUploadResponse(BaseModel):
     n_holes: int
     n_rows_loaded: int
     n_rows_skipped: int
-    carga_mean: float
-    descarga_mean: float
+    carga_mean: Optional[float]
+    descarga_mean: Optional[float]
     hardness_distribution: Dict[str, int] = Field(default_factory=dict)
     # Structured processing output — single canonical contract across API,
     # backend, persistence and export (integración §3.6/4.6).
     data_warnings: str = ""
     processing_summary: Dict[str, Any] = Field(default_factory=dict)
+    consolidation_report: BlastConsolidationReport = Field(default_factory=BlastConsolidationReport)
+    footprint_report: BlastFootprintReport = Field(default_factory=BlastFootprintReport)
     accepted_rows: List[Dict[str, Any]] = Field(default_factory=list)
     rejected_rows: List[Dict[str, Any]] = Field(default_factory=list)
     event_warnings: List[Dict[str, Any]] = Field(default_factory=list)

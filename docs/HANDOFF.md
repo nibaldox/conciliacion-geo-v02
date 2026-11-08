@@ -1,5 +1,51 @@
 # Continuidad para agentes de codificación
 
+## Continuación — 8 de noviembre de 2026: medición guiada por diseño y propuesta en validación
+
+Estado: rama `feat/tronadura-auditable`, **sin commit al momento de escribir**. Verificado antes de redactar: `git log --oneline -3` con HEAD `415e21f` (el mismo merge de main) y `git status --short` con 155 entradas sin commit, de ellas 44 sin seguimiento; el trabajo de la rama vive íntegramente como cambios en el árbol de trabajo. Cierre técnico documental; no es validación operacional con datos reales de operación.
+
+### Qué se construyó (respecto de main `415e21f`)
+
+1. **Olas correctivas de Tronadura auditables**: consolidación de pozos 20.939 → 14.204 (33 decks), identidad de evento, `source_row_index` posicional + `source_row_index_user`, contrato `blast-auditable.v1`, `data_status` `legacy_reimport_required`, energía/densidad/masa con procedencia y nulos honestos; PF principal con huella estimada por convex hull — 14.196/14.204 pozos con PF válido, mediana 132,4 g/t.
+2. **Medición guiada por diseño** (`core/design_guided_measurement.py`): estados `excavated` / `not_excavated` / `section_truncated` / `unmeasured` / `out_of_profile` / `ambiguous`; banco partido medido completo; banco desplazado (`bench_offset`); berma remanente (`berm_remnant_max_m` / `berm_remnant_area_m2`); pata sólida y piso local.
+3. **Propuesta de cumplimiento** (`core/guided_compliance.py`): aditiva, al lado de los valores oficiales; `proposed_*` por magnitud con origen por magnitud (`proposed_height_source`, `proposed_angle_source`, `proposed_crest_source`, `proposed_toe_source`, `proposed_berm_source`: `guided` / `current` / None) y `proposed_source` guiada / actual / mixta.
+4. **Contrato API**: `GET /api/v1/process/proposed-compliance` con `proposal_status` (`current` / `not_computed` / `partial`), `floor_tolerance_used` y `reprocess_required`; `benches_design` en `GET /api/v1/process/profiles/{id}`.
+5. **Web**: tarjeta «Propuesta (en validación)», tabla oficial/propuesta, panel por perfil y capa «Pata guiada y piso» (apagada por defecto; piso desde la pata guiada hacia la berma, recortado a la cresta del banco inferior y al rango del perfil, con separadores nulos — fixture S-46: B1 [−16,18; ≈0] @3080,9 y B2 [5,67; 10] @3064,79).
+6. **Streamlit equivalente** en `ui/tabs/profiles/proposal.py` + `tab.py`, con dashboard y tabla.
+
+### Resultados con la sesión real `c83435ee`
+
+Copia reprocesada, no la BD del usuario: puntaje oficial 43,6 → propuesta 54,1; evaluables 139/180 (cobertura 0,772); `not_excavated` 9; deuda de excavación 187,34 m²; piso: 46 CUMPLE, 20 FUERA, 96 NO CUMPLE, 28 sin medir; 25 bancos truncados (banco superior, por ventana de sección corta).
+
+### Reglas aprobadas por el usuario
+
+- El banco partido se mide completo.
+- El banco no excavado queda fuera del puntaje y se informa como deuda de excavación.
+- El piso alto se evalúa aparte con tolerancia de 0,5 m; a 1,5× (0,75 m) queda FUERA.
+- Lo no evaluable nunca vale 0.
+- La propuesta se muestra primero, al lado del oficial, y **no** reemplaza valores oficiales ni exportaciones.
+
+### Invariantes
+
+- Los valores oficiales quedan intactos: la propuesta es un canal separado que vive al lado.
+- Las exportaciones oficiales no cambian.
+- Los nulos nunca se convierten en 0.
+- La propuesta usa tolerancia de piso de 0,5 m, declarada en `floor_tolerance_used`.
+
+### Verificación
+
+- Backend: **3.265 aprobadas, 7 omitidas** (`pytest tests/ -q --ignore=tests/test_openblast.py --skip-electron`), Python 3.14, `MemoryMax=6G` sin swap; `test_pipeline.py` OK.
+- Web: **1.385 pruebas en 124 archivos**; dominio ProfileView/domain 100 % (184 pruebas); `npx tsc -b`, `npm run lint` (1 advertencia preexistente en `e2e/blast-colors.spec.ts`) y `npm run build` OK.
+- Dos revisiones adversariales del delta con dictamen **APPROVE** (36/36 y 17/17 verificaciones); los hallazgos M/L/OBS quedaron cerrados.
+
+### Pendientes
+
+- Reimportar pozos de sesiones antiguas (`data_status` `legacy_reimport_required`).
+- Extender secciones hacia arriba (30–40 m) para medir los 25 bancos truncados.
+- Decidir si la propuesta pasa a ser oficial.
+- ZIP Windows v0.2.0 sin probar en máquina real.
+- Vulnerabilidades moderadas de `npm audit` en Electron.
+
 ## Continuación — 5 de noviembre de 2026: memoria de la API
 
 Estado: **medición cerrada** de las tres correcciones de memoria de la API (P1 caché por bytes, P2 caché de settings, P3 semáforo de `/blast/*`). Trabajo **sin commit ni push**; rama `codex/continuidad-tronadura-20261104`. No valida rendimiento con archivos reales de operación.

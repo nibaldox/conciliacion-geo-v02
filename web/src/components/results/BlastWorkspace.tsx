@@ -9,6 +9,7 @@ import { useBlastView, type BlastWorkspaceTab } from '../../stores/blastView';
 import { BlastCorrelation } from './BlastCorrelation';
 import { BlastSimulationPanel } from './BlastSimulationPanel';
 import { BlastUploader } from './BlastUploader';
+import { BlastLegacyNotice } from './BlastLegacyNotice';
 
 const Mesh3DViewer = lazy(() =>
   import('../mesh/Mesh3DViewer').then((m) => ({ default: m.Mesh3DViewer })),
@@ -105,7 +106,7 @@ export function BlastWorkspace() {
       );
     }
   } else if (activeTab === 'analysis') {
-    panel = <BlastCorrelation presentation="analysis" />;
+    panel = <BlastCorrelation presentation="analysis" onData={() => selectTab('data', true)} />;
   } else if (activeTab === 'simulation') {
     panel = (
       <Suspense fallback={<PanelFallback />}>
@@ -121,6 +122,7 @@ export function BlastWorkspace() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
+      {summary.data?.data_status === 'legacy_reimport_required' && <BlastLegacyNotice onData={() => selectTab('data', true)} />}
       <div
         role="tablist"
         aria-label={t('blast.workspace.tabsLabel')}

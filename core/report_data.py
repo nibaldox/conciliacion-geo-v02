@@ -170,6 +170,7 @@ class BenchRow:
     berm_status: Optional[str]
     spill_width: Optional[float]
     effective_berm: Optional[float]
+    effective_berm_status: Optional[str]
     worst_status: str
     status_label: str
 
@@ -284,6 +285,7 @@ def _to_bench_row(row: Mapping[str, Any]) -> BenchRow:
         berm_status=b_status if b_status is None else str(b_status),
         spill_width=_as_float(row.get("spill_width")),
         effective_berm=_as_float(row.get("effective_berm")),
+        effective_berm_status=row.get("effective_berm_status"),
         worst_status=worst,
         status_label=_status_label(row_type, worst),
     )
@@ -676,7 +678,18 @@ def build_report_data(
             "holes": settings["blast_holes"],
             "tolerance": tolerances.get("crest_toe_deviation"),
         }
-    if not blast_data:
+    if blast_data:
+        blast_data = dict(blast_data)
+        try:
+            from core.blast_hole_consolidation import BLAST_ALGORITHM_VERSION
+        except ImportError:
+            BLAST_ALGORITHM_VERSION = None
+        version = settings.get("blast_algorithm_version")
+        blast_data["data_status"] = "current" if BLAST_ALGORITHM_VERSION is not None and version == BLAST_ALGORITHM_VERSION else "legacy_reimport_required"
+        consolidation = (settings.get("blast_upload_meta") or {}).get("consolidation_report")
+        if consolidation:
+            blast_data.setdefault("consolidation_report", consolidation)
+    else:
         blast_data = None
 
     return ReportData(

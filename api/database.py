@@ -695,6 +695,7 @@ def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
     # key read by GET /blast/{id}/holes. Both point at the SAME list.
     accepted = payload.get("accepted_rows") or payload.get("holes", [])
     settings["blast_holes"] = accepted
+    settings["blast_algorithm_version"] = payload.get("blast_algorithm_version")
     settings["accepted_rows"] = accepted
     settings["rejected_rows"] = payload.get("rejected_rows", [])
     settings["processing_summary"] = payload.get("processing_summary", {})
@@ -710,6 +711,8 @@ def save_blast_upload(session_id: str, payload: Dict[str, object]) -> None:
         "n_rows_skipped": payload.get("n_rows_skipped", 0),
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
         "design_surface": payload.get("design_surface"),
+        "consolidation_report": payload.get("consolidation_report", {}),
+        "footprint_report": payload.get("footprint_report", {}),
     }
     save_settings(session_id, settings)
 

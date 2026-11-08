@@ -93,6 +93,7 @@ describe('BlastCorrelationRow type mapping', () => {
 
 vi.mock('../../../api/hooks', () => ({
   useBlastCorrelation: vi.fn(),
+  useBlastDefinitions: vi.fn(() => ({ data: undefined })),
   useBlastDamageModel: vi.fn(() => ({
     data: { points: [], fit: null, x_metric: 'pf_g_per_ton', y_metric: 'over_break' },
     isLoading: false,
@@ -216,7 +217,7 @@ describe('<BlastCorrelation /> empty-rows state', () => {
     render(<BlastCorrelation />);
     // Primary column header
     expect(
-      screen.getByText('Factor de carga (g/ton)'),
+      screen.getByText('PF principal (g/t)'),
     ).toBeInTheDocument();
     // Section name cell
     expect(screen.getByText('S-001')).toBeInTheDocument();

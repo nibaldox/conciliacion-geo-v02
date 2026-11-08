@@ -25,6 +25,7 @@ const FILTER_PARAM_KEYS = {
   showSemaphore: 'f.sm',
   showHorizontalDeviation: 'f.hd',
   showBlastHoles: 'f.bh',
+  showProposalLayer: 'f.pl',
   blastTolerance: 'f.bt',
 } as const satisfies Record<keyof Omit<FilterState, 'statusFilter'>, string>;
 

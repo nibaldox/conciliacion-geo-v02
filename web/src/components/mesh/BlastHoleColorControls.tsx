@@ -29,7 +29,7 @@ export interface BlastHoleColorControlsProps {
 
 type ColorState = Partial<BlastViewColorConfig>;
 
-const FIXED_RANGE_VARIABLES: readonly BlastHoleVariable[] = ['charge', 'powderFactor', 'powderFactorGeometry'];
+const FIXED_RANGE_VARIABLES: readonly BlastHoleVariable[] = ['charge', 'powderFactor', 'powderFactorGeometry', 'powderFactorPrimary'];
 const ERROR_COLOR = 'var(--status-error, #b91c1c)';
 
 function isValidRange(min: number | null | undefined, max: number | null | undefined): min is number {
@@ -171,6 +171,14 @@ export function BlastHoleColorControls({
       : labelForVariable(shownVariable)
     : undefined;
 
+  const provenanceCounts = new Map<string, number>();
+  for (const record of filteredRecords) {
+    const source = record.attributes.burden_spacing_source;
+    if (source === 'mixed' || source === 'design_column' || source === 'knn_proxy') {
+      provenanceCounts.set(source, (provenanceCounts.get(source) ?? 0) + 1);
+    }
+  }
+
   return (
     <section className="flex min-w-0 flex-col gap-2 border-t border-border pt-2" aria-label={t('blast.colors.title', { defaultValue: 'Colores de pozos' })}>
       <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))' }}>
@@ -295,6 +303,7 @@ export function BlastHoleColorControls({
           {t('blast.colors.manualNeedsValues', { defaultValue: 'Para usar rango manual define mínimo y máximo distintos.' })}
         </p>
       )}
+      {provenanceCounts.size > 0 && <p className="text-xs text-text-secondary">{t('blast.spacing_source_title', { defaultValue: 'Procedencia de burden y espaciamiento (pozos visibles)' })}: {[...provenanceCounts].map(([source, count]) => `${t(`blast.source_${source}`, { defaultValue: source === 'mixed' ? 'mixta' : source === 'design_column' ? 'columna de diseño' : 'estimación por vecinos' })} (${count})`).join(', ')}</p>}
       {showLegend && legend && <BlastHoleColorLegendView legend={legend} sourceLabel={legendSourceLabel} />}
       {showLegend && kind === 'variable' && rangeMode === 'legacy' && activeVariable !== undefined && FIXED_RANGE_VARIABLES.includes(activeVariable)
         && legend?.kind === 'variable' && legend.min !== null && legend.max !== null && (

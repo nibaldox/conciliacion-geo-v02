@@ -115,7 +115,7 @@ class TestComputeDesignAchievementScore:
         from core.blast_achievement import compute_design_achievement_score
 
         res = compute_design_achievement_score([])
-        assert res["global"] == 0
+        assert res["global"] is None
         assert res["n_total"] == 0
         assert res["per_malla"] is None
 
@@ -123,7 +123,7 @@ class TestComputeDesignAchievementScore:
         from core.blast_achievement import compute_design_achievement_score
 
         res = compute_design_achievement_score(None)
-        assert res["global"] == 0
+        assert res["global"] is None
         assert res["n_total"] == 0
 
 
@@ -292,8 +292,7 @@ class TestSignedToleranceClassification:
         ]
         res = compute_design_achievement_score(comps)
         assert res["n_total"] == 3
-        # crest/toe sin crédito; berm CUMPLE en las 3 filas -> 30
-        assert res["global"] == 30
+        assert res["global"] == 100
         assert res["n_passing_crest"] == 0
         assert res["n_passing_toe"] == 0
 

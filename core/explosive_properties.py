@@ -12,13 +12,14 @@ Spec §4.4: every known product stores
 - validation status
 
 Unknown products resolve to ``None`` / status ``UNKNOWN`` — never a
-silent ANFO fallback. Family matches (e.g. ``Pirex-930 Heavy``) resolve
-to the base grade with ``is_exact=False`` so callers can warn the value
-is an approximation of the base grade.
+silent ANFO fallback. Only explicitly listed aliases are recognized.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+import math
+import re
+from numbers import Real
 from typing import Optional
 
 from core.config import EXPLOSIVE
@@ -87,71 +88,44 @@ EXPLOSIVE_PRODUCTS: dict[str, ExplosiveProduct] = {
     "Enaline": _product("Enaline", 1.10, 2.85),
 }
 
-# Config values (core.config.EXPLOSIVE) — still referenced by legacy code;
-# the registry above is the authoritative per-product source.
-_PIREX_GRADES = {"920", "930", "950", "970"}
-_FAMILY_KEYS = ("Pirex-", "Enaline", "ANFO", "Heavy ANFO", "H-ANFO", "Emulsion", "Bulk Emulsion", "Emuline")
+EXPLOSIVE_ALIAS_VERSION = "1"
+EXPLOSIVE_ALIASES: dict[str, tuple[str, ...]] = {
+    "Pirex-920": ("Pirex-920",),
+    "Pirex-930": ("Pirex-930",),
+    "Pirex-950": ("Pirex-950",),
+    "Pirex-970": ("Pirex-970",),
+    "ANFO": ("ANFO",),
+    "Heavy ANFO": ("Heavy ANFO", "H-ANFO"),
+    "Bulk Emulsion": ("Bulk Emulsion", "Emulsion"),
+    "Enaline": ("Enaline", "Enaline 1 1/4 12", "Enaline 1 1/4*12"),
+}
 
 
 def _normalize(name: str) -> str:
-    return (name or "").strip().lower()
+    return re.sub(r"[\s_-]+", " ", name.strip().upper())
+
+
+_ALIAS_LOOKUP = {
+    _normalize(alias): product
+    for product, aliases in EXPLOSIVE_ALIASES.items()
+    for alias in aliases
+}
+
+
+def _missing_name(name: object) -> bool:
+    return (
+        name is None
+        or isinstance(name, str) and not name.strip()
+        or isinstance(name, Real) and math.isnan(name)
+    )
 
 
 def resolve_explosive(explosive_name: str) -> Optional[ExplosiveProduct]:
-    """Resolve a product name to its full record, or None if unknown.
-
-    Matching order:
-      1. exact (case-insensitive) key in the registry
-      2. ``Pirex-<grade>`` prefix with a known grade (suffixes allowed),
-         flagged ``is_exact=False``
-      3. ``Enaline`` prefix (suffixes allowed), flagged ``is_exact=False``
-      4. family substrings (ANFO / Heavy ANFO / Emulsion) — exact keys
-         already cover these; substrings only match when the registry
-         key is a prefix of the input name (e.g. ``Emuline 8000``)
-
-    Anything else returns None (explicit UNKNOWN, never ANFO).
-    """
-    if not explosive_name:
+    """Resolve only explicit aliases, preserving the legacy product return type."""
+    if not isinstance(explosive_name, str):
         return None
-    n = explosive_name.strip()
-
-    key = _normalize(n)
-    for k, prod in EXPLOSIVE_PRODUCTS.items():
-        if _normalize(k) == key:
-            return prod
-
-    for grade, prod in (
-        (g, EXPLOSIVE_PRODUCTS[f"Pirex-{g}"]) for g in sorted(_PIREX_GRADES, key=lambda g: -len(g))
-    ):
-        prefix = f"pirex-{grade}"
-        if key.startswith(prefix):
-            return _family_copy(prod)
-
-    if key.startswith("enaline"):
-        return _family_copy(EXPLOSIVE_PRODUCTS["Enaline"])
-
-    for family in ("heavy anfo", "h-anfo"):
-        if family in key:
-            return EXPLOSIVE_PRODUCTS["Heavy ANFO"]
-    if "emul" in key:
-        return EXPLOSIVE_PRODUCTS["Bulk Emulsion"]
-    if "anfo" in key:
-        return EXPLOSIVE_PRODUCTS["ANFO"]
-    return None
-
-
-def _family_copy(prod: ExplosiveProduct) -> ExplosiveProduct:
-    return ExplosiveProduct(
-        normalized_name=prod.normalized_name,
-        density_g_cm3=prod.density_g_cm3,
-        energy_mj_kg=prod.energy_mj_kg,
-        rws=prod.rws,
-        vod_m_s=prod.vod_m_s,
-        source=prod.source,
-        datasheet_version=prod.datasheet_version,
-        validation_status=prod.validation_status,
-        is_exact=False,
-    )
+    key = _ALIAS_LOOKUP.get(_normalize(explosive_name))
+    return EXPLOSIVE_PRODUCTS.get(key) if key is not None else None
 
 
 def get_explosive_density_g_cm3(explosive_name: str) -> Optional[float]:
@@ -167,16 +141,11 @@ def get_explosive_energy_mj_kg(explosive_name: str) -> Optional[float]:
 
 
 def get_explosive_status(explosive_name: str) -> str:
-    """Explicit validation state: VALIDATED | UNVALIDATED_REFERENCE |
-    FAMILY_MATCH | UNKNOWN | MISSING."""
-    if not explosive_name:
+    """Return the product validation state or UNKNOWN / MISSING."""
+    if _missing_name(explosive_name):
         return "MISSING"
     prod = resolve_explosive(explosive_name)
-    if prod is None:
-        return "UNKNOWN"
-    if not prod.is_exact:
-        return "FAMILY_MATCH"
-    return prod.validation_status
+    return prod.validation_status if prod else "UNKNOWN"
 
 
 def get_explosive_rws(explosive_name: str) -> Optional[float]:

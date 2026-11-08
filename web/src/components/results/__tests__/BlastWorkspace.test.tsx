@@ -77,6 +77,14 @@ beforeEach(() => {
   useBlastView.setState({ workspaceTab: 'explore', surveyDate: '' });
 });
 
+it('warns about legacy data and opens Datos', () => {
+  summaryMock.mockReturnValue({ data: { n_holes: 3, data_status: 'legacy_reimport_required' }, isLoading: false, error: null } as unknown as ReturnType<typeof useBlastSessionSummary>);
+  renderWorkspace();
+  expect(screen.getByText(/Estos pozos se importaron con una versión anterior/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /ir a datos/i }));
+  expect(tab('data')).toHaveAttribute('aria-selected', 'true');
+});
+
 describe('<BlastWorkspace /> tablist', () => {
   it('exposes an accessible tablist with four tabs labelled in Spanish', () => {
     setHoles(3);

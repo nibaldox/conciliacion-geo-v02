@@ -6,11 +6,14 @@ Design principles:
 - Clear KPIs: % cumplimiento por parámetro + promedio real.
 - Map: dónde se cumple y dónde no (por sector).
 """
+import math
+
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 import streamlit as st
 
+from core import summarize_proposed
 from ui.filter_cache import _ensure_filter_values
 from ui.filters import apply_comparison_filters, collect_active_filters_from_session_state
 from ui.tabs.blast_correlation.data import resolve_achievement_tolerances
@@ -22,6 +25,17 @@ from ui.tabs.dashboard_achievement import (
     build_parameter_breakdown_rows,
     build_sector_rows,
 )
+from ui.tabs.profiles.proposal import PROPOSAL_UNAVAILABLE_MESSAGE, has_proposal
+
+
+def _finite_number(value) -> bool:
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(number)
 
 
 def render_tab_dashboard(config: dict) -> None:
@@ -53,6 +67,7 @@ def render_tab_dashboard(config: dict) -> None:
         (config or {}).get('tolerances', {}).get('crest_toe_deviation'))
 
     _render_global_kpi(filtered_results)
+    _render_proposal_kpi(filtered_results)
     _render_achievement_kpi(filtered_results, ct_tol)
     st.divider()
     _render_parameter_breakdown(filtered_results, ct_tol)
@@ -77,12 +92,16 @@ def _render_global_kpi(results) -> None:
     """
     # Agrupar scores por sección
     section_scores: dict[str, list[float]] = {}
+    n_bench_match = 0
     for r in results:
         sec_name = r.get('section', '')
         if sec_name not in section_scores:
             section_scores[sec_name] = []
         if r.get('type') == 'MATCH':
-            section_scores[sec_name].append(r.get('bench_score', 0))
+            n_bench_match += 1
+            bench_score = r.get('bench_score')
+            if _finite_number(bench_score):
+                section_scores[sec_name].append(float(bench_score))
 
     # Score por sección = promedio de bench_score de sus bancos
     per_section_scores: list[float] = []
@@ -92,8 +111,9 @@ def _render_global_kpi(results) -> None:
 
     # Score global = promedio simple de los scores por sección
     global_score = (sum(per_section_scores) / len(per_section_scores)
-                    if per_section_scores else 0)
+                    if per_section_scores else None)
     pct = global_score  # Ya está en escala 0-100
+    n_bench_evaluable = sum(len(scores) for scores in section_scores.values())
 
     # Contadores binarios para las tarjetas (cumple/no cumple por perfil)
     total_cumple = sum(1 for s in per_section_scores if s >= 70)
@@ -101,18 +121,21 @@ def _render_global_kpi(results) -> None:
 
     st.subheader("📊 Cumplimiento Global")
     st.caption(f"Promedio ponderado de {len(per_section_scores)} perfiles "
-               f"(berma=60, ángulo=20, altura=20)")
+               f"(berma=60, ángulo=20, altura=20) · "
+               f"{n_bench_evaluable} de {n_bench_match} bancos evaluables")
 
     cols = st.columns([1, 1, 1])
-    color = "green" if pct >= 70 else "orange" if pct >= 50 else "red"
+    has_score = pct is not None
+    color = ("#888888" if not has_score
+             else "green" if pct >= 70 else "orange" if pct >= 50 else "red")
+    card_value = f"{pct:.1f}" if has_score else "sin dato"
 
     with cols[0]:
         st.markdown(
             f"<div style='text-align:center; padding:1.2rem; "
-            f"background:rgba({0 if pct < 70 else 0},{153 if pct >= 70 else 140},{0 if pct >= 70 else 60},0.1); "
-            f"border-radius:12px; border:2px solid {color};'>"
-            f"<div style='font-size:3rem; font-weight:800; color:{color};'>"
-            f"{pct:.1f}</div>"
+            f"background:rgba(0,140,60,0.1); border-radius:12px; border:2px solid {color};'>"
+            f"<div style='font-size:{'3rem' if has_score else '1.6rem'}; font-weight:800; color:{color};'>"
+            f"{card_value}</div>"
             f"<div style='font-size:0.9rem; color:#888;'>Score Global / 100</div>"
             f"</div>",
             unsafe_allow_html=True,
@@ -139,6 +162,67 @@ def _render_global_kpi(results) -> None:
             f"</div>",
             unsafe_allow_html=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Section 1a: Propuesta (en validación) — guided measurement, parallel KPI
+# ---------------------------------------------------------------------------
+
+def _render_proposal_kpi(results) -> None:
+    """KPI «Propuesta (en validación)» junto al oficial, nunca 0 sin datos."""
+    st.subheader("🧪 Propuesta (en validación)")
+    if not has_proposal(results):
+        st.info(PROPOSAL_UNAVAILABLE_MESSAGE)
+        return
+
+    summary = summarize_proposed(results)
+    coverage = summary.get('coverage') or {}
+    score = summary.get('proposed_global_score')
+    n_evaluable = coverage.get('n_evaluable', 0)
+    n_design = coverage.get('n_design_benches', 0)
+    debt = summary.get('excavation_debt_area_m2')
+    floor_counts = summary.get('floor_status_counts') or {}
+
+    def _card(label, value, color="#888888"):
+        st.markdown(
+            f"<div style='text-align:center; padding:0.9rem; "
+            f"background:rgba(123,31,162,0.08); border-radius:12px;'>"
+            f"<div style='font-size:1.7rem; font-weight:700; color:{color};'>"
+            f"{value}</div>"
+            f"<div style='font-size:0.85rem; color:#888;'>{label}</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    score_color = ("#888888" if score is None
+                   else "green" if score >= 70
+                   else "orange" if score >= 50 else "#B22222")
+    cols = st.columns(4)
+    with cols[0]:
+        _card("Puntaje global propuesta / 100",
+              "sin dato" if score is None else f"{score:.1f}", score_color)
+    with cols[1]:
+        _card("Cobertura", f"{n_evaluable} de {n_design}", "#1565C0")
+    with cols[2]:
+        _card("Bancos partidos", f"{summary.get('n_split_benches', 0)}", "#6A1B9A")
+    with cols[3]:
+        debt_value = "sin dato" if debt is None else f"{float(debt):.1f}"
+        _card("Deuda de excavación (m² en sección)", debt_value, "#E65100")
+
+    floor_parts = []
+    for status, label in (("CUMPLE", "CUMPLE"),
+                          ("FUERA DE TOLERANCIA", "FUERA DE TOLERANCIA"),
+                          ("NO CUMPLE", "NO CUMPLE"),
+                          ("-", "sin medir")):
+        n = floor_counts.get(status, 0)
+        if n:
+            floor_parts.append(f"{label}: {n}")
+    floor_text = " · ".join(floor_parts) if floor_parts else "sin dato"
+    st.caption(
+        f"Cobertura: {n_evaluable} de {n_design} bancos de diseño evaluables · "
+        f"Piso local (tolerancia ±0,5 m): {floor_text} · "
+        "Los valores oficiales no cambian; la propuesta está en validación."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +261,28 @@ def _render_achievement_kpi(results, ct_tol: dict) -> None:
         _card("Pata CUMPLE estricto", summary["toe_pct"], summary["toe_denom"], achievement_pct_color(summary["toe_pct"], summary["toe_denom"]))
     with cols[3]:
         _card("Berma CUMPLE estricto", summary["berm_pct"], summary["berm_denom"], achievement_pct_color(summary["berm_pct"], summary["berm_denom"]))
+
+    coverage = summary.get("coverage") or {}
+    n_available = coverage.get("n_available") or {}
+    weight = coverage.get("weight_available_mean")
+    weight_value = None
+    if weight is not None:
+        try:
+            weight_value = float(weight)
+        except (TypeError, ValueError):
+            weight_value = None
+    with_data = [label for key, label in (("crest", "cresta"), ("toe", "pata"), ("berm", "berma"))
+                 if n_available.get(key)]
+    without_data = [label for key, label in (("crest", "cresta"), ("toe", "pata"), ("berm", "berma"))
+                    if not n_available.get(key)]
+    partes = [f"{coverage.get('n_evaluable', 0)} de {coverage.get('n_rows', 0)} bancos evaluables"]
+    if weight_value is not None:
+        partes.append(f"peso disponible {weight_value:.2f} de 1.00")
+    if with_data:
+        partes.append("con dato: " + ", ".join(with_data))
+    if without_data:
+        partes.append("sin dato: " + ", ".join(without_data))
+    st.caption("Cobertura logro diseño · " + " · ".join(partes))
 
     st.caption(
         format_achievement_caption(summary["ct_tol"])

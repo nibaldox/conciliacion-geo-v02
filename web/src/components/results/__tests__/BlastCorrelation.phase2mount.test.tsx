@@ -10,6 +10,7 @@ beforeAll(async () => {
 
 vi.mock('../../../api/hooks', () => ({
   useBlastCorrelation: vi.fn(),
+  useBlastDefinitions: vi.fn(() => ({ data: undefined })),
   useBlastDamageModel: vi.fn(() => ({
     data: { points: [], fit: null, x_metric: 'pf_g_per_ton', y_metric: 'over_break' },
     isLoading: false,

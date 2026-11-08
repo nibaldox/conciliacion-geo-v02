@@ -6,7 +6,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from core.blast_correlation import compute_powder_factor
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.profile_compliance import compute_sector_deviations
 from core.section_cutter import cut_both_surfaces
@@ -77,15 +76,25 @@ def project_blast_to_sections(
 
     Returns the list of kernel rows used for geotechnical correlation.
     """
-    df_filtered_pf = compute_powder_factor(df_filtered)
-    return project_powder_factor_per_section(
-        df_filtered,
+    from core.blast_correlation import aggregate_powder_factor_by_group, compute_powder_factor
+
+    df_filtered_pf = df_filtered if "area_influence_m2" in df_filtered else compute_powder_factor(df_filtered)
+    rows = project_powder_factor_per_section(
+        df_filtered_pf,
         df_filtered_pf,
         sections,
         kg_col=kg_col,
         tolerance=tolerance,
         fecha_corte=fecha_corte,
     )
+    for row in rows:
+        projected = row["projected_df"].copy()
+        projected["section_name"] = row["section_name"]
+        aggregate = aggregate_powder_factor_by_group(df_filtered_pf, "section_name", row["section_name"], projected)
+        row["energy_total_mj"] = aggregate.get("energy_total_mj")
+        row["energy_coverage_kg_fraction"] = aggregate.get("energy_coverage_kg_fraction")
+        row["pf_voronoi_bench_g_per_ton_section"] = aggregate.get("pf_voronoi_bench_g_per_ton_section")
+    return rows
 
 
 def project_holes_onto_section(

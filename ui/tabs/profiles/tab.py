@@ -3,9 +3,15 @@
 All Plotly construction lives in the sibling pure modules; this file only
 reads Streamlit state and calls the pure builders.
 """
+import pandas as pd
 import streamlit as st
 
 from ui.tabs.profiles.figure import build_profile_figure
+from ui.tabs.profiles.proposal import (
+    PROPOSAL_UNAVAILABLE_MESSAGE,
+    build_proposed_rows,
+    has_proposal,
+)
 from ui.tabs.profiles.state import (
     get_pozos_cache,
     get_profile_controls,
@@ -47,6 +53,7 @@ def render_tab_profiles(config: dict) -> None:
                 controls["show_reconciled"], controls["show_pozos"], controls["blast_tolerance"],
                 controls["show_sector_areas"],
                 controls["num_cols"],
+                controls["show_proposal_layer"],
                 "cota_labels_v1",
             )
             cached = fig_cache.get(i)
@@ -63,6 +70,7 @@ def render_tab_profiles(config: dict) -> None:
                     blast_tolerance=controls["blast_tolerance"],
                     config=config,
                     show_sector_areas=controls["show_sector_areas"],
+                    show_proposal=controls["show_proposal_layer"],
                     **figure_inputs,
                     pozos_cache=pozos_cache,
                 )
@@ -84,3 +92,24 @@ def render_tab_profiles(config: dict) -> None:
                         )
                 if controls["show_sector_areas"]:
                     render_face_angle_suggestion(section, i)
+                _render_proposal_table(section)
+
+
+def _render_proposal_table(section) -> None:
+    """Compacta Oficial vs Propuesta por banco para una sección."""
+    sec_rows = [
+        c for c in (st.session_state.get('comparison_results') or [])
+        if c.get('section') == section.name
+    ]
+    if not sec_rows:
+        return
+    with st.expander("🧪 Propuesta (en validación) — Oficial vs Propuesta",
+                     expanded=False):
+        if has_proposal(sec_rows):
+            st.dataframe(
+                pd.DataFrame(build_proposed_rows(sec_rows)),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info(PROPOSAL_UNAVAILABLE_MESSAGE)

@@ -9,6 +9,7 @@ Endpoints:
 """
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -27,16 +28,18 @@ from fastapi import APIRouter, HTTPException, Query, Request
 import api.database as db
 import api.schemas as schemas
 from api._async_db import run_blast_limited
-from api.blast_identity import blast_hole_id, blast_row_ids
+from api.blast_identity import blast_data_status, blast_hole_id, blast_row_ids
 from core import (
     load_mesh,
     SectionLine,
     cut_mesh_with_section_diagnostics,
     extract_parameters,
     compare_design_vs_asbuilt,
+    compare_design_vs_asbuilt_guided,
     build_reconciled_profile,
     build_reconciled_profile_v2,
     compute_horizontal_deviation,
+    summarize_proposed,
 )
 from core.param_extractor import (
     BenchParams,
@@ -44,7 +47,7 @@ from core.param_extractor import (
     ReconciledPoint,
 )
 from core.calculo_tronadura import proyectar_pozos_en_seccion
-from core.blast_correlation import compute_blast_geotech_correlation
+from core.blast_correlation import compute_blast_geotech_correlation, compute_powder_factor
 from core.blast_model import fit_powder_factor_damage_model
 from core.column_utils import KILOS_CANDIDATES, first_present_column
 from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
@@ -73,12 +76,12 @@ def _run_in_executor(func, *args):
 # ---------------------------------------------------------------------------
 
 
-def _safe_float(value, ndigits: int = 3) -> float:
-    """Coerce to a JSON-safe rounded float; NaN/None -> 0.0."""
-    if value is None:
-        return 0.0
-    f = float(value)
-    return round(f, ndigits) if math.isfinite(f) else 0.0
+def _safe_float(value, ndigits: int = 3) -> Optional[float]:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(f, ndigits) if math.isfinite(f) else None
 
 
 def _load_mesh_from_db(session_id: str, mesh_type: str) -> trimesh.Trimesh:
@@ -238,6 +241,114 @@ def _legacy_reconciled_to_dict(
 
 
 # ---------------------------------------------------------------------------
+# Proposed compliance (wave 10) — additive guided_* / proposed_* row fields
+# ---------------------------------------------------------------------------
+
+PROPOSED_ROW_KEYS = frozenset({
+    "guided_delta_crest", "guided_delta_crest_status",
+    "guided_delta_toe", "guided_delta_toe_status",
+    "guided_height", "guided_height_status",
+    "guided_angle", "guided_angle_status",
+    "guided_berm", "guided_berm_status",
+    "guided_floor_offset_m", "guided_floor_offset_status",
+    "guided_remaining_thickness_mean_m", "guided_remaining_thickness_max_m",
+    "guided_excavation_debt_area_m2",
+    "guided_berm_remnant_max_m", "guided_berm_remnant_area_m2",
+    "guided_warnings",
+    "design_bench_state", "split_bench", "split_of",
+    "proposed_source", "proposed_height", "proposed_angle",
+    "proposed_delta_crest", "proposed_delta_toe", "proposed_berm",
+    "proposed_height_source", "proposed_angle_source",
+    "proposed_crest_source", "proposed_toe_source", "proposed_berm_source",
+    "proposed_height_status", "proposed_angle_status",
+    "proposed_crest_status", "proposed_toe_status", "proposed_berm_status",
+    "proposed_bench_score", "proposed_evaluable", "proposed_exclusion_reason",
+    "floor_offset_m", "floor_status",
+    "excavation_debt_thickness_mean_m", "excavation_debt_thickness_max_m",
+    "excavation_debt_area_m2",
+    "berm_remnant_max_m", "berm_remnant_area_m2",
+    "height_score", "angle_score", "berm_score",
+    "bench_score", "section_score", "section_status",
+    "spill_width", "effective_berm", "effective_berm_status", "berm_dev",
+    "floor_tolerance_used",
+    "proposal_status", "proposal_error",
+})
+
+_PROPOSAL_ERROR_MAXLEN = 200
+
+
+def _json_safe(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _finalize_proposal_rows(
+    rows: List[Dict[str, Any]], ok: bool, error: Optional[str],
+    floor_tolerance_used: Optional[Dict[str, float]] = None,
+) -> List[Dict[str, Any]]:
+    """Stamp ``proposal_status`` on comparison rows and make them JSON-strict.
+
+    ``ok=True`` rows come straight from
+    :func:`core.compare_design_vs_asbuilt_guided` (they already carry the
+    guided/proposed fields); ``ok=False`` rows are the untouched official
+    rows of :func:`core.compare_design_vs_asbuilt` and only gain
+    ``proposal_status='failed'`` plus a summarized ``proposal_error``.
+    Non-finite floats among the additive keys are replaced with ``None`` so
+    strict JSON never sees NaN/Infinity. ``floor_tolerance_used`` records
+    the floor tolerance in effect when the row's ``floor_status`` (and the
+    persisted counts derived from it) were computed, so a later settings
+    change cannot be mistaken for a re-evaluation.
+    """
+    error_text = None
+    if error is not None:
+        error_text = str(error)[:_PROPOSAL_ERROR_MAXLEN] or "guided comparison failed"
+    stamp = dict(floor_tolerance_used) if floor_tolerance_used else None
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        new = dict(row)
+        for key in PROPOSED_ROW_KEYS:
+            if key in new:
+                new[key] = _json_safe(new[key])
+        new["floor_tolerance_used"] = dict(stamp) if stamp else None
+        new["proposal_status"] = "current" if ok else "failed"
+        if not ok:
+            new["proposal_error"] = error_text
+        out.append(new)
+    return out
+
+
+def _guided_comparison(
+    p_design, p_topo, tolerances, asbuilt_profile,
+):
+    """Run the guided comparison, falling back to the official one per section.
+
+    ``asbuilt_profile`` is ``(distances, elevations)`` from the section's
+    already-computed as-built :class:`~core.section_cutter.ProfileResult`, or
+    ``None`` when no profile is available. Returns the finalized rows
+    (official values always present; ``proposal_status`` per row).
+    """
+    used_floor_tolerance = _resolved_floor_tolerance(tolerances)[0]
+    reason = None
+    if asbuilt_profile is not None:
+        distances, elevations = asbuilt_profile
+        try:
+            rows = compare_design_vs_asbuilt_guided(
+                p_design, p_topo, tolerances, distances, elevations,
+            )
+            return _finalize_proposal_rows(
+                rows, True, None, used_floor_tolerance,
+            )
+        except Exception as exc:
+            logger.warning("Guided comparison failed: %s", exc)
+            reason = str(exc) or exc.__class__.__name__
+    else:
+        reason = "asbuilt profile unavailable"
+    rows = compare_design_vs_asbuilt(p_design, p_topo, tolerances)
+    return _finalize_proposal_rows(rows, False, reason, used_floor_tolerance)
+
+
+# ---------------------------------------------------------------------------
 # POST /process — Run full pipeline
 # ---------------------------------------------------------------------------
 
@@ -330,7 +441,10 @@ def _run_pipeline_sync(
             else:
                 p_t = ExtractionResult(section_name=sec.name, sector=sec.sector)
             if pd_prof is not None and pt_prof is not None:
-                comps = compare_design_vs_asbuilt(p_d, p_t, tolerances)
+                comps = _guided_comparison(
+                    p_d, p_t, tolerances,
+                    (pt_prof.distances, pt_prof.elevations),
+                )
             else:
                 comps = []
             profile_warnings = {
@@ -584,6 +698,7 @@ def _build_profile_payload_sync(
                 floor_elevation=design_floor,
             )
             result["reconciled_design"] = _reconciled_profile_to_dict(prof_d)
+            result["benches_design"] = [_bench_to_dict(b) for b in benches_d]
             floor_points = [p for p in prof_d.points if p.segment_type == "floor"]
             floor_point = floor_points[-1] if floor_points else None
             result["reconciled_design_legacy"] = _legacy_reconciled_to_dict(
@@ -730,6 +845,24 @@ def _update_reconciled_sync(
     # Re-run comparison for this section
     settings = db.get_settings(session_id) or {}
     tolerances = settings.get("tolerances", {})
+    if not tolerances:
+        tolerances = {
+            "bench_height": DEFAULT_TOLERANCES.bench_height,
+            "face_angle": DEFAULT_TOLERANCES.face_angle,
+            "berm_width": DEFAULT_TOLERANCES.berm_width,
+            "inter_ramp_angle": DEFAULT_TOLERANCES.inter_ramp_angle,
+            "overall_angle": DEFAULT_TOLERANCES.overall_angle,
+        }
+
+    asbuilt_profile = None
+    try:
+        sec = _section_from_dict(sections_raw[section_id])
+        mesh_topo = _load_mesh_from_db(session_id, "topo")
+        topo_cut = cut_mesh_with_section_diagnostics(mesh_topo, sec)
+        if topo_cut.profile is not None:
+            asbuilt_profile = (topo_cut.profile.distances, topo_cut.profile.elevations)
+    except Exception as exc:
+        logger.warning("As-built profile unavailable for %s: %s", sec_name, exc)
 
     design_extraction = db.get_extraction(session_id, sec_name, "design")
     if design_extraction:
@@ -744,7 +877,7 @@ def _update_reconciled_sync(
             sector=sections_raw[section_id].get("sector", ""),
             benches=benches,
         )
-        new_comps = compare_design_vs_asbuilt(p_design, p_topo, tolerances)
+        new_comps = _guided_comparison(p_design, p_topo, tolerances, asbuilt_profile)
 
         # Remove old comparisons for this section, add new ones
         existing = db.get_results(session_id)
@@ -845,7 +978,7 @@ def _projected_to_holes(
     …) when present.
 
     ``spacing`` falls back to the nearest-neighbour collar distance when the
-    ``Esp`` column is missing. ``burden`` defaults to 0 when absent.
+    ``Esp`` column is missing. Missing burden is null.
     """
     if projected is None or projected.empty:
         return []
@@ -875,19 +1008,13 @@ def _projected_to_holes(
         row_data = projected.iloc[i].to_dict()
         d_perp = float(getattr(row, "dist_perp", 0.0))
 
-        if has_burden:
-            burden_raw = getattr(row, "Burden", 0.0)
-            burden = float(burden_raw) if pd.notna(burden_raw) else 0.0
-        else:
-            burden = 0.0
-
+        burden = _safe_float(getattr(row, "Burden", None)) if has_burden else None
         if has_esp:
-            esp_raw = getattr(row, "Esp", None)
-            spacing = float(esp_raw) if esp_raw is not None and pd.notna(esp_raw) else 0.0
+            spacing = _safe_float(getattr(row, "Esp", None))
         elif spacing_fallback is not None:
-            spacing = spacing_fallback[i]
+            spacing = _safe_float(spacing_fallback[i])
         else:
-            spacing = 0.0
+            spacing = None
 
         profile_elevation = row_data.get("_profile_elevation", np.nan)
         if pd.notna(profile_elevation) and math.isfinite(float(profile_elevation)):
@@ -900,7 +1027,7 @@ def _projected_to_holes(
         else:
             continue
 
-        hole_id = blast_hole_id(row_data, i)
+        hole_id = blast_hole_id(row_data, "sin dato")
         row_id = row_data.get("_blast_row_id")
         if not row_id:
             row_id = blast_row_ids(session_id, [row_data])[0]
@@ -919,8 +1046,8 @@ def _projected_to_holes(
             hole_id=hole_id,
             distance=round(float(getattr(row, "dist_along", 0.0)), 3),
             elevation=round(elevation, 3),
-            burden=round(burden, 3),
-            spacing=round(spacing, 3),
+            burden=burden,
+            spacing=spacing,
             is_within_tolerance=bool(d_perp <= tolerance + 1e-9),
             section_relation=section_relation,
             profile_point_kind=profile_point_kind,
@@ -1031,9 +1158,11 @@ def _project_blast_holes_sync(
     CPU-bound (pandas + numpy hypot), so we keep them off the event loop
     by routing this through ``run_in_executor``.
     """
+    status = blast_data_status(db.get_settings(session_id) or {})
     sections_raw = db.get_sections(session_id)
     if section_id < 0 or section_id >= len(sections_raw):
         return schemas.BlastHolesOnProfileResponse(
+            **status,
             section_id="",
             mesh_id=mesh_id,
             tolerance=tolerance,
@@ -1045,6 +1174,7 @@ def _project_blast_holes_sync(
     df_holes = _load_session_blast_holes(session_id)
     if df_holes is None or df_holes.empty:
         return schemas.BlastHolesOnProfileResponse(
+            **status,
             section_id=sec.name,
             mesh_id=mesh_id,
             tolerance=tolerance,
@@ -1077,6 +1207,7 @@ def _project_blast_holes_sync(
     )
     holes = _projected_to_holes(projected, float(tolerance), session_id)
     return schemas.BlastHolesOnProfileResponse(
+        **status,
         section_id=sec.name,
         mesh_id=mesh_id,
         tolerance=tolerance,
@@ -1201,12 +1332,33 @@ def _resolve_blast_correlation_rows(
         height_fallback_m=height_fallback_m,
         sector_density=sector_density,
     )
+    for row, sec in zip(rows, sections):
+        projected = proyectar_pozos_en_seccion(
+            df_holes, origin=sec.origin, azimuth=float(sec.azimuth),
+            length=float(sec.length), tolerance=resolved_tolerance,
+        )
+        if not projected.empty and "area_influence_m2" not in projected.columns:
+            sec_rho = (sector_density or {}).get(sec.sector or "", rock_density_tm3)
+            projected = compute_powder_factor(projected, rock_density_tm3=sec_rho, height_fallback_m=height_fallback_m)
+        if "pf_voronoi_bench_status" in projected:
+            statuses = projected["pf_voronoi_bench_status"].fillna("UNKNOWN").astype(str).replace("", "UNKNOWN")
+            row.pf_voronoi_bench_status_counts = {key: int(value) for key, value in statuses.value_counts().items()}
+        else:
+            row.pf_voronoi_bench_status_counts = {"UNKNOWN": len(projected)} if len(projected) else {}
+        if "pf_voronoi_bench_source" in projected:
+            sources = projected["pf_voronoi_bench_source"].fillna("").astype(str).replace("", "none")
+            counts = {key: int(value) for key, value in sources.value_counts().items()}
+            row.pf_voronoi_bench_source_counts = counts
+            row.pf_voronoi_bench_source_dominant = max(counts, key=counts.get) if counts else None
+        else:
+            row.pf_voronoi_bench_source_counts = {}
+            row.pf_voronoi_bench_source_dominant = None
     return rows, sections_raw, resolved_tolerance, temporal_filter, _blast_histogram_values(df_holes)
 
 
-def _blast_histogram_values(df_holes: Optional[pd.DataFrame]) -> tuple[list[float], list[float]]:
+def _blast_histogram_values(df_holes: Optional[pd.DataFrame]) -> tuple[list[float], list[float], list[float]]:
     if df_holes is None or df_holes.empty:
-        return [], []
+        return [], [], []
     if "kg_per_meter" in df_holes.columns:
         carga = pd.to_numeric(df_holes["kg_per_meter"], errors="coerce")
     else:
@@ -1230,12 +1382,22 @@ def _blast_histogram_values(df_holes: Optional[pd.DataFrame]) -> tuple[list[floa
         if length_column is not None and taco_column is not None:
             length = pd.to_numeric(df_holes[length_column], errors="coerce")
             taco = pd.to_numeric(df_holes[taco_column], errors="coerce")
-            descarga = (length - taco).clip(lower=0.0)
+            descarga = (length - taco).where((length > 0) & (taco >= 0) & (taco <= length))
         else:
             descarga = pd.Series(dtype=float)
+    loaded = pd.to_numeric(df_holes["kg_per_meter_loaded_column"], errors="coerce") if "kg_per_meter_loaded_column" in df_holes else pd.Series(dtype=float)
+    length_column = first_present_column(df_holes, ("Len", "longitud_real", "Longitud", "Length", "Profundidad"))
+    taco_column = first_present_column(df_holes, ("Taco_m", "Taco", "Stemming"))
+    if length_column is not None and taco_column is not None:
+        length = pd.to_numeric(df_holes[length_column], errors="coerce")
+        taco = pd.to_numeric(df_holes[taco_column], errors="coerce")
+        invalid = (length <= 0) | (taco < 0) | (taco > length)
+        descarga = descarga.mask(invalid)
+        loaded = loaded.mask(invalid | ((length == taco) & length.notna()))
     return (
         [float(value) for value in carga if pd.notna(value) and np.isfinite(value)],
         [float(value) for value in descarga if pd.notna(value) and np.isfinite(value)],
+        [float(value) for value in loaded if pd.notna(value) and np.isfinite(value)],
     )
 
 
@@ -1325,21 +1487,34 @@ def _build_blast_correlation_sync(
             pf_area_avg_kgm2=_safe_float(r.pf_area_avg_kgm2),
             pf_g_per_ton_avg=_safe_float(r.pf_g_per_ton_avg),
             pf_g_per_ton_net_avg=_safe_float(r.pf_g_per_ton_net_avg),
+            pf_g_per_ton_inf_avg=_safe_float(r.pf_g_per_ton_inf_avg),
+            pf_voronoi_bench_g_per_ton_section=_safe_float(r.pf_voronoi_bench_g_per_ton_section),
+            n_pf_voronoi_bench_valid=int(r.n_pf_voronoi_bench_valid),
+            pf_voronoi_bench_status_counts=getattr(r, "pf_voronoi_bench_status_counts", {}),
+            pf_voronoi_bench_source_counts=getattr(r, "pf_voronoi_bench_source_counts", {}),
+            pf_voronoi_bench_source_dominant=getattr(r, "pf_voronoi_bench_source_dominant", None),
+            energy_coverage_kg_fraction=_safe_float(r.energy_coverage_kg_fraction),
             energy_total_mj=_safe_float(r.energy_total_mj),
+            energy_known_mj=_safe_float(getattr(r, "energy_known_mj", None)),
+            n_kg_known=int(getattr(r, "n_kg_known", 0)),
+            n_kg_missing=int(getattr(r, "n_kg_missing", 0)),
             n_pf_valid=int(r.n_pf_valid),
             sector=str(getattr(r, "sector", "") or ""),
-            rock_density_used=_safe_float(getattr(r, "rock_density_used", 0.0)),
+            rock_density_used=_safe_float(getattr(r, "rock_density_used", None)),
         )
         for r in rows
     ]
 
     return schemas.BlastCorrelationResponse(
+        **blast_data_status(db.get_settings(session_id) or {}),
         rows=schema_rows,
         tolerance=resolved_tolerance,
         n_sections=len(sections_raw),
         temporal_filter=temporal_filter,
         carga=histogram_values[0],
         descarga=histogram_values[1],
+        kg_per_meter=histogram_values[0],
+        kg_per_meter_loaded_column=histogram_values[2] if len(histogram_values) > 2 else [],
     )
 
 
@@ -1430,16 +1605,19 @@ def _build_damage_model_sync(
     pf_values_list: List[float] = []
     dmg_values_list: List[float] = []
     for r in rows:
-        pf = float(r.pf_g_per_ton_avg)
-        over = float(r.avg_over_break)
+        try:
+            pf = float(r.pf_g_per_ton_avg)
+            over = float(r.avg_over_break)
+        except (TypeError, ValueError):
+            continue
         if not math.isfinite(pf) or not math.isfinite(over):
             continue
         if pf <= 0.0:
             continue
         points.append(schemas.BlastDamagePointSchema(
             section_name=str(r.section_name),
-            pf_g_per_ton=_safe_float(pf),
-            over_break=_safe_float(over),
+            pf_g_per_ton=pf,
+            over_break=over,
         ))
         pf_values_list.append(pf)
         dmg_values_list.append(over)
@@ -1452,17 +1630,18 @@ def _build_damage_model_sync(
         confidence = str(model.get("confidence", "INSUFFICIENT"))
         if confidence != "INSUFFICIENT":
             fit_schema = schemas.BlastDamageModelFitSchema(
-                beta0=_safe_float(model.get("beta0", 0.0)),
-                beta1=_safe_float(model.get("beta1", 0.0)),
-                r_squared=_safe_float(model.get("r_squared", 0.0)),
+                beta0=_safe_float(model.get("beta0")),
+                beta1=_safe_float(model.get("beta1")),
+                r_squared=_safe_float(model.get("r_squared")),
                 p_value=_safe_float(model.get("p_value", float("nan"))),
                 n=int(model.get("n", 0)),
                 confidence=confidence,
-                ci_beta1_low=_safe_float(model.get("ci_beta1_low", 0.0)),
-                ci_beta1_high=_safe_float(model.get("ci_beta1_high", 0.0)),
+                ci_beta1_low=_safe_float(model.get("ci_beta1_low")),
+                ci_beta1_high=_safe_float(model.get("ci_beta1_high")),
             )
 
     return schemas.BlastDamageModelResponse(
+        **blast_data_status(db.get_settings(session_id) or {}),
         points=points,
         fit=fit_schema,
         x_metric="pf_g_per_ton",
@@ -1529,12 +1708,12 @@ async def get_blast_correlation_damage_model(
 
 
 _ACHIEVEMENT_STATUS_MODEL = (
-    "CUMPLE=1, FUERA DE TOLERANCIA=0.5, others=0 for the global score; "
+    "CUMPLE=1, FUERA DE TOLERANCIA=0.5, NO CUMPLE=0 for the global score; "
     "strict percentages count CUMPLE only"
 )
 _ACHIEVEMENT_ASSUMPTIONS = (
-    "global score = 0.4 * crest + 0.3 * toe + 0.3 * berma per evaluable row",
-    "partial credit: CUMPLE=1.0, FUERA DE TOLERANCIA=0.5, others=0",
+    "global score = mean of evaluable row scores; available weights 0.4 crest, 0.3 toe, 0.3 berma are renormalized per row",
+    "partial credit: CUMPLE=1.0, FUERA DE TOLERANCIA=0.5, NO CUMPLE=0",
     "missing deltas or non-tier berm_status are excluded without inference",
 )
 
@@ -1694,3 +1873,166 @@ async def get_design_achievement(
     except Exception as exc:
         logger.exception("Get design achievement failed")
         raise HTTPException(500, detail=f"Get design achievement failed: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /process/proposed-compliance — Proposal summary (wave 10)
+# ---------------------------------------------------------------------------
+
+_PROPOSED_STATUS_MODEL = (
+    "proposal_status per row: 'current' (guided proposal computed), "
+    "'failed' (guided failed, official row kept), missing on legacy rows "
+    "(reported as not_computed)"
+)
+_PROPOSED_ASSUMPTIONS = (
+    "official values never change: proposed_* fields are shown alongside for validation",
+    "the proposal measures design benches against the raw as-built profile of each section",
+    "floor compliance: |floor_offset_m| <= floor_tolerance.max per design bench",
+    "split/missing benches use guided measurements when both crest and toe are measurable",
+    "rows with proposal_status='failed' keep the official row and are excluded from the summary",
+    "legacy rows without guided fields are not_computed and require reprocessing",
+)
+
+
+def _resolved_floor_tolerance(session_tolerances: Optional[dict]) -> tuple:
+    """Resolve the floor tolerance actually used by the guided proposal.
+
+    Mirrors ``core.guided_compliance._floor_max``: the session's
+    ``tolerances.floor_vertical.max`` when it is a finite number, otherwise
+    the core default. Returns ``({'max': float}, 'session'|'core_default')``.
+    """
+    floor = (session_tolerances or {}).get("floor_vertical")
+    if isinstance(floor, dict):
+        raw = floor.get("max")
+        try:
+            value = float(raw) if raw is not None else float("nan")
+        except (TypeError, ValueError):
+            value = float("nan")
+        if math.isfinite(value):
+            return {"max": value}, "session"
+    default = DEFAULT_TOLERANCES.floor_vertical
+    return {"max": float(default["max"])}, "core_default"
+
+
+def _build_proposed_compliance_sync(
+    session_id: str,
+    sectors: Optional[List[str]],
+    sections: Optional[List[str]],
+    levels: Optional[List[str]],
+    benches: Optional[List[str]],
+) -> schemas.ProposedComplianceResponse:
+    """Assemble the proposed-compliance summary off the event loop."""
+    unfiltered = db.get_results(session_id)
+    rows = _filter_comparisons(unfiltered, sectors, sections, levels, benches)
+
+    proposal_rows: List[dict] = []
+    n_failed = 0
+    n_not_computed = 0
+    for row in rows:
+        status = row.get("proposal_status")
+        if status == "current":
+            proposal_rows.append(row)
+        elif status == "failed":
+            n_failed += 1
+        else:
+            n_not_computed += 1
+
+    warnings: List[str] = []
+    if not unfiltered:
+        warnings.append("no_results")
+    elif not rows:
+        warnings.append("all_rows_filtered_out")
+    if n_not_computed:
+        warnings.append("reprocess_required")
+    if n_failed:
+        warnings.append("proposal_failed_rows")
+
+    if proposal_rows:
+        proposal_status = "current" if (n_failed == 0 and n_not_computed == 0) else "partial"
+    elif n_failed:
+        proposal_status = "partial"
+    else:
+        proposal_status = "not_computed"
+
+    summary = summarize_proposed(proposal_rows) if proposal_rows else None
+    summary_schema = (
+        schemas.ProposedSummarySchema(**summary) if summary is not None else None
+    )
+
+    used_candidates = {}
+    for row in proposal_rows:
+        value = row.get("floor_tolerance_used")
+        if isinstance(value, dict) and value:
+            used_candidates[json.dumps(value, sort_keys=True)] = value
+    floor_tolerance_used = None
+    if len(used_candidates) == 1:
+        floor_tolerance_used = next(iter(used_candidates.values()))
+    elif len(used_candidates) > 1:
+        warnings.append("floor_tolerance_used_mixed")
+    elif proposal_rows:
+        warnings.append("floor_tolerance_used_unknown")
+
+    settings = db.get_settings(session_id) or {}
+    floor_tolerance, floor_tolerance_source = _resolved_floor_tolerance(
+        settings.get("tolerances")
+    )
+
+    return schemas.ProposedComplianceResponse(
+        session_id=session_id,
+        proposal_status=proposal_status,
+        n_total_rows=len(rows),
+        n_proposal_rows=len(proposal_rows),
+        n_failed_rows=n_failed,
+        n_not_computed_rows=n_not_computed,
+        summary=summary_schema,
+        floor_tolerance=floor_tolerance,
+        floor_tolerance_used=floor_tolerance_used,
+        floor_tolerance_source=floor_tolerance_source,
+        filters={
+            "sector": list(sectors or []),
+            "section": list(sections or []),
+            "level": list(levels or []),
+            "bench": list(benches or []),
+        },
+        status_model=_PROPOSED_STATUS_MODEL,
+        assumptions=list(_PROPOSED_ASSUMPTIONS),
+        warnings=warnings,
+    )
+
+
+@router.get("/proposed-compliance", response_model=schemas.ProposedComplianceResponse)
+async def get_proposed_compliance(
+    request: Request,
+    sector: Optional[List[str]] = Query(None, alias="sector"),
+    section: Optional[List[str]] = Query(None, alias="section"),
+    level: Optional[List[str]] = Query(None, alias="level"),
+    bench: Optional[List[str]] = Query(None, alias="bench"),
+):
+    """Proposed compliance summary (guided proposal) for the request's session.
+
+    Wraps :func:`core.guided_compliance.summarize_proposed` over the
+    persisted comparison rows of THIS session. Only rows with
+    ``proposal_status='current'`` feed the summary; rows whose guided
+    computation failed keep their official values and are counted in
+    ``n_failed_rows``; legacy rows without guided fields are counted in
+    ``n_not_computed_rows`` (reprocess to obtain the proposal). Filters
+    (``?sector=``/``?section=``/``?level=``/``?bench=``, repeatable) follow
+    the same AND/OR semantics as ``GET /process/design-achievement``.
+    """
+    try:
+        session_id = await _run_in_executor(
+            db.get_or_create_session, request.state.session_id
+        )
+        return await _run_in_executor(
+            _build_proposed_compliance_sync,
+            session_id,
+            sector,
+            section,
+            level,
+            bench,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Get proposed compliance failed")
+        raise HTTPException(500, detail=f"Get proposed compliance failed: {exc}")

@@ -29,6 +29,31 @@ def render_tab_table() -> None:
         highlight_status, subset=['Cumpl. H', 'Cumpl. Á', 'Cumpl. B'])
     st.dataframe(styled, width="stretch", height=400)
 
+    _render_proposal_expander(df)
+
+
+def _render_proposal_expander(df: pd.DataFrame) -> None:
+    from ui.tabs.profiles.proposal import (
+        PROPOSAL_UNAVAILABLE_MESSAGE,
+        build_proposed_rows,
+        has_proposal,
+    )
+
+    rows = df.drop(columns=['sort_level'], errors='ignore').to_dict(
+        orient="records")
+    if not rows:
+        return
+    with st.expander("🧪 Propuesta (en validación) — Oficial vs Propuesta",
+                     expanded=False):
+        if has_proposal(rows):
+            st.dataframe(
+                pd.DataFrame(build_proposed_rows(rows, include_section=True)),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info(PROPOSAL_UNAVAILABLE_MESSAGE)
+
 
 # ---------------------------------------------------------------------------
 # Private helpers

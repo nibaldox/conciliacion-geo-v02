@@ -29,6 +29,12 @@ from core.profile_compliance import (
     build_reconciled_profile,
     build_reconciled_profile_v2,
     compare_design_vs_asbuilt,
+    compare_design_vs_asbuilt_guided,
+)
+from core.guided_compliance import (
+    apply_proposed_rules,
+    summarize_proposed,
+    summarize_proposed_section,
 )
 from core.profile_extract import (
     BenchParams,
@@ -62,5 +68,6 @@ __all__ = [
     "_angle_between_segments", "_detect_wedge_shape_in_face",
     "_detect_toppling_potential", "_evaluate_angle_consistency",
     "_evaluate_status", "build_reconciled_profile", "build_reconciled_profile_v2",
-    "compare_design_vs_asbuilt",
+    "compare_design_vs_asbuilt", "compare_design_vs_asbuilt_guided",
+    "apply_proposed_rules", "summarize_proposed", "summarize_proposed_section",
 ]

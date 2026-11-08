@@ -22,17 +22,19 @@ _COLLAR_HOVERTEMPLATE = (
     "Z (collar): %{z:.1f}<br>"
     "<b>📊 Datos del Pozo</b><br>"
     "Explosivo: %{customdata[1]}<br>"
-    "Kilos cargados: %{customdata[2]:.0f} kg<br>"
-    "Diámetro: %{customdata[3]:.0f} mm / %{customdata[10]:.1f} pulg<br>"
-    "Longitud real: %{customdata[4]:.2f} m<br>"
-    "Stemming: %{customdata[5]:.2f} m<br>"
-    "Altura de carga: %{customdata[6]:.2f} m<br>"
-    "Densidad lineal: %{customdata[7]:.1f} kg/m<br>"
-    "Inclinación: %{customdata[8]:.1f}°<br>"
-    "Azimut: %{customdata[9]:.0f}°<br>"
+    "Kilos cargados: %{customdata[2]} kg<br>"
+    "Diámetro: %{customdata[3]} mm / %{customdata[10]} pulg<br>"
+    "Longitud real: %{customdata[4]} m<br>"
+    "Stemming: %{customdata[5]} m<br>"
+    "Altura de carga: %{customdata[6]} m<br>"
+    "Densidad lineal por metro perforado: %{customdata[7]} kg/m<br>"
+    "Inclinación: %{customdata[8]}°<br>"
+    "Azimut: %{customdata[9]}°<br>"
     "%{customdata[11]}<br>"
     "%{customdata[12]}<br>"
     "%{customdata[14]}<br>"
+    "%{customdata[15]}<br>"
+    "%{customdata[16]}<br>"
     "<extra></extra>"
 )
 
@@ -84,7 +86,7 @@ def _build_collar_customdata(df: pd.DataFrame, kg_col: str | None):
     """Return customdata array for collar hovertemplate enrichment."""
     n = len(df)
     if n == 0:
-        return np.empty((0, 15), dtype=object)
+        return np.empty((0, 17), dtype=object)
 
     malla_col = find_df_column(df, ["Nombre_Malla_Original", "malla"], raise_error=False)
 
@@ -99,44 +101,44 @@ def _build_collar_customdata(df: pd.DataFrame, kg_col: str | None):
         else np.array(["?"] * n, dtype=object)
     )
     kilos = (
-        _safe_numeric(df[kg_col]).values
+        pd.to_numeric(df[kg_col], errors="coerce").values
         if kg_col and kg_col in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     diam = (
-        _safe_numeric(df["Diam_mm"]).values
+        pd.to_numeric(df["Diam_mm"], errors="coerce").values
         if "Diam_mm" in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     length = (
-        _safe_numeric(df["Len"]).values
+        pd.to_numeric(df["Len"], errors="coerce").values
         if "Len" in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     taco = (
-        _safe_numeric(df["Taco_m"]).values
+        pd.to_numeric(df["Taco_m"], errors="coerce").values
         if "Taco_m" in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     altura = (
-        _safe_numeric(df["altura_carga_m"]).values
+        pd.to_numeric(df["altura_carga_m"], errors="coerce").values
         if "altura_carga_m" in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     kgpm = (
-        _safe_numeric(df["kg_per_meter"]).values
+        pd.to_numeric(df["kg_per_meter"], errors="coerce").values
         if "kg_per_meter" in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     incl = (
-        _safe_numeric(df["Incl"]).values
+        pd.to_numeric(df["Incl"], errors="coerce").values
         if "Incl" in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     az = (
-        _safe_numeric(df["Az"]).values
+        pd.to_numeric(df["Az"], errors="coerce").values
         if "Az" in df.columns
-        else np.zeros(n, dtype=float)
+        else np.full(n, np.nan, dtype=float)
     )
     diam_inch = diam / 25.4
 
@@ -173,15 +175,29 @@ def _build_collar_customdata(df: pd.DataFrame, kg_col: str | None):
     if "pf_g_per_ton_inf" in df.columns:
         pf_inf = pd.to_numeric(df["pf_g_per_ton_inf"], errors="coerce")
         pf_strings = np.array([
-            "PF (área inf.): " + (f"{float(v):.0f} g/ton" if pd.notna(v) else "—")
+            "PF secundario (área de influencia × largo vertical × densidad): " + (f"{float(v):.0f} g/ton" if pd.notna(v) else "sin dato")
             for v in pf_inf
         ], dtype=object)
     else:
         pf_strings = np.array([""] * n, dtype=object)
 
+    def fmt(values, digits):
+        return np.array([f"{v:.{digits}f}" if pd.notna(v) and np.isfinite(v) else "sin dato" for v in values], dtype=object)
+
+    principal = pd.to_numeric(df.get("pf_voronoi_bench_g_per_ton", pd.Series(np.nan, index=df.index)), errors="coerce")
+    statuses = df.get("pf_voronoi_bench_status", pd.Series(None, index=df.index, dtype=object))
+    principal_strings = np.array([
+        "PF principal (huella × altura de banco × densidad): " +
+        (f"{value:.2f} g/t" if pd.notna(value) and np.isfinite(value) else "sin dato") +
+        " — " + ("sin huella de malla" if status == "MISSING_FOOTPRINT" else str(status) if pd.notna(status) else "sin dato")
+        for value, status in zip(principal, statuses)
+    ], dtype=object)
+    loaded = pd.to_numeric(df.get("kg_per_meter_loaded_column", pd.Series(np.nan, index=df.index)), errors="coerce")
+    loaded_strings = np.array(["Densidad lineal por metro de columna cargada: " + v + " kg/m" for v in fmt(loaded, 1)], dtype=object)
     return np.column_stack([
-        label, expl, kilos, diam, length, taco, altura, kgpm,
-        incl, az, diam_inch, dureza_strings, tasa_strings, malla, pf_strings,
+        label, expl, fmt(kilos, 0), fmt(diam, 0), fmt(length, 2), fmt(taco, 2), fmt(altura, 2), fmt(kgpm, 1),
+        fmt(incl, 1), fmt(az, 0), fmt(diam_inch, 1), dureza_strings, tasa_strings, malla, pf_strings,
+        principal_strings, loaded_strings,
     ])
 
 
@@ -372,22 +388,22 @@ def build_three_d_figure(
             colors = df[kg_col].values.astype(float)
             title = "kg"
             charge_bounds = dict(cmin=0.0, cmax=1000.0)
-        elif color_by == "Factor de Carga (g/ton)":
-            pf_col = "pf_g_per_ton_inf" if "pf_g_per_ton_inf" in df.columns else "pf_g_per_ton"
-            colors = pd.to_numeric(df[pf_col], errors="coerce").fillna(0).astype(float).values
+        elif color_by.startswith("PF principal:") or color_by.startswith("PF secundario:"):
+            pf_col = ("pf_voronoi_bench_g_per_ton" if color_by.startswith("PF principal:") else "pf_g_per_ton_inf" if "área de influencia" in color_by else "pf_g_per_ton")
+            colors = pd.to_numeric(df[pf_col], errors="coerce").astype(float).values
             title = "g/ton"
             charge_bounds = dict(cmin=0.0, cmax=200.0)
         elif color_by == "Diámetro (mm)" and "Diam_mm" in df.columns:
             colors = df["Diam_mm"].values.astype(float)
             title = "mm"
         elif color_by == "Dureza" and "dureza" in df.columns:
-            colors = df["dureza"].map(_DUREZA_MAP).fillna(0).astype(float).values
+            colors = df["dureza"].map(_DUREZA_MAP).astype(float).values
             title = "Dureza (1-4)"
         elif color_by == "Índice de Dureza" and "indice_dureza" in df.columns:
-            colors = pd.to_numeric(df["indice_dureza"], errors="coerce").fillna(0).astype(float).values
+            colors = pd.to_numeric(df["indice_dureza"], errors="coerce").astype(float).values
             title = "Índice (0-100)"
         elif color_by == "Tasa de Penetración" and "tasa_penetracion" in df.columns:
-            colors = pd.to_numeric(df["tasa_penetracion"], errors="coerce").fillna(0).astype(float).values
+            colors = pd.to_numeric(df["tasa_penetracion"], errors="coerce").astype(float).values
             title = "m/min"
         elif color_by == "Profundidad (m)":
             colors = df["Len"].values
@@ -522,17 +538,21 @@ def build_energy_grid(
     grid_ny: int,
     grid_nz: int,
     search_radius: float,
-) -> dict:
+) -> dict | None:
     """Compute the IDW energy grid from collar-toe segments.
 
     Returns a dict with ``X, Y, Z, Energy_kg_m2`` arrays plus helper
     fields ``xs, ys, Z_collar_mean, E_xy, E_max`` needed by the surface
     trace builder.
     """
-    if kg_col and kg_col in df.columns:
-        values = df[kg_col].fillna(0).values
-    else:
-        values = np.ones(len(df))
+    if not kg_col or kg_col not in df.columns:
+        return None
+    numeric = pd.to_numeric(df[kg_col], errors="coerce")
+    valid = np.isfinite(numeric)
+    df = df.loc[valid]
+    if df.empty:
+        return None
+    values = numeric.loc[valid].to_numpy(dtype=float)
     field = _idw_field(df, values, grid_nx, grid_ny, grid_nz, search_radius)
     field["Energy_kg_m2"] = field.pop("values")
     return field
@@ -568,6 +588,10 @@ def build_pf_halo_rings_3d_trace(
     if df is None or df.empty or not value_col or value_col not in df.columns:
         return None
 
+    values = pd.to_numeric(df[value_col], errors="coerce")
+    df = df[np.isfinite(values)]
+    if df.empty:
+        return None
     if len(df) > max_holes:
         idx = np.linspace(0, len(df) - 1, max_holes).astype(int)
         df = df.iloc[idx]
@@ -662,6 +686,10 @@ def build_pf_halo_rings_trace(
     if df is None or df.empty or not value_col or value_col not in df.columns:
         return None
 
+    values = pd.to_numeric(df[value_col], errors="coerce")
+    df = df[np.isfinite(values)]
+    if df.empty:
+        return None
     if len(df) > max_holes:
         idx = np.linspace(0, len(df) - 1, max_holes).astype(int)
         df = df.iloc[idx]
@@ -909,8 +937,12 @@ def build_color_options(df: pd.DataFrame) -> list[str]:
 
     if kg_col:
         options.append("Carga Explosiva (Kg)")
-    if "pf_g_per_ton_inf" in df.columns or "pf_g_per_ton" in df.columns:
-        options.append("Factor de Carga (g/ton)")
+    if "pf_voronoi_bench_g_per_ton" in df.columns:
+        options.append("PF principal: huella × altura de banco × densidad (g/t)")
+    if "pf_g_per_ton_inf" in df.columns:
+        options.append("PF secundario: área de influencia × largo vertical × densidad (g/t)")
+    if "pf_g_per_ton" in df.columns:
+        options.append("PF secundario: burden × espaciamiento × largo vertical × densidad (g/t)")
     if malla_col:
         options.append("Mallas de Tronadura (Grid)")
     if poligono_col:

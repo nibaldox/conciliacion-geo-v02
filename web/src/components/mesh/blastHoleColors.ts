@@ -12,6 +12,7 @@ export type BlastHoleRangeMode = 'legacy' | 'data' | 'manual';
 export type BlastHoleVariable =
   | 'charge'
   | 'powderFactor'
+  | 'powderFactorPrimary'
   | 'powderFactorGeometry'
   | 'collarElevation'
   | 'hardness'
@@ -24,8 +25,9 @@ export type BlastHoleVariable =
 
 export const BLAST_HOLE_VARIABLE_OPTIONS: readonly { value: BlastHoleVariable; label: string }[] = [
   { value: 'charge', label: 'Carga Explosiva (Kg)' },
-  { value: 'powderFactor', label: 'Factor de Carga (g/ton)' },
-  { value: 'powderFactorGeometry', label: 'Factor de Carga geométrico (g/ton)' },
+  { value: 'powderFactorPrimary', label: 'PF principal (huella Voronoi · banco, g/t)' },
+  { value: 'powderFactor', label: 'PF g/t (área de influencia · largo vertical · densidad)' },
+  { value: 'powderFactorGeometry', label: 'PF g/t (B·S·largo vertical·densidad)' },
   { value: 'collarElevation', label: 'Cota Collar' },
   { value: 'hardness', label: 'Dureza' },
   { value: 'diameter', label: 'Diámetro (mm)' },
@@ -101,10 +103,11 @@ export const BLAST_HOLE_CATEGORY_OPTIONS: readonly { value: BlastHoleCategory; l
 ];
 
 const CHARGE_KEYS = ['Kilos_Cargados_real', 'Kilos_Cargados', 'Carga_kg', 'Explosivo_kg'];
-const POWDER_FACTOR_KEYS = ['pf_g_per_ton_inf', 'pf_g_per_ton'];
+const POWDER_FACTOR_KEYS = ['pf_g_per_ton_inf'];
 const GEOMETRY_POWDER_FACTOR_KEYS = ['pf_g_per_ton'];
 const VARIABLE_UNITS: Partial<Record<BlastHoleVariable, string>> = {
   charge: 'kg',
+  powderFactorPrimary: 'g/t',
   powderFactor: 'g/t',
   powderFactorGeometry: 'g/t',
   collarElevation: 'm',
@@ -114,10 +117,11 @@ const VARIABLE_UNITS: Partial<Record<BlastHoleVariable, string>> = {
 };
 const FIXED_RANGES: Partial<Record<BlastHoleVariable, readonly [number, number]>> = {
   charge: [0, 1000],
+  powderFactorPrimary: [0, 200],
   powderFactor: [0, 200],
   powderFactorGeometry: [0, 200],
 };
-const VARIABLE_ATTRIBUTE_KEYS: Partial<Record<Exclude<BlastHoleVariable, 'charge' | 'powderFactor' | 'collarElevation' | 'hardness' | 'attribute'>, readonly string[]>> = {
+const VARIABLE_ATTRIBUTE_KEYS: Partial<Record<Exclude<BlastHoleVariable, 'charge' | 'powderFactor' | 'powderFactorPrimary' | 'collarElevation' | 'hardness' | 'attribute'>, readonly string[]>> = {
   diameter: ['Diam_mm', 'Diametro', 'Diameter', 'Diametro_mm', 'diameter_mm'],
   hardnessIndex: ['indice_dureza', 'Indice_Dureza', 'hardness_index'],
   penetrationRate: ['tasa_penetracion', 'Tasa_Penetracion', 'penetration_rate'],
@@ -151,6 +155,7 @@ export function getAvailableBlastHoleVariables(holes: readonly BlastHole3DRecord
   const available: BlastHoleVariable[] = conditional
     .filter(([variable, keys]) => hasResolvableValue(holes, variable, keys))
     .map(([variable]) => variable);
+  if (holes.some((hole) => Object.prototype.hasOwnProperty.call(hole.attributes, 'pf_voronoi_bench_g_per_ton'))) available.unshift('powderFactorPrimary');
   if (holes.some((hole) => hole.collar && hole.collar.length >= 3 && numericValue(hole.collar[2]) !== null)) {
     available.push('collarElevation');
   }
@@ -259,6 +264,7 @@ function validateManualRange(min: number | undefined, max: number | undefined): 
 
 function variableKeysFor(variable: BlastHoleVariable, attributeKey: string | undefined): readonly string[] {
   if (variable === 'charge') return CHARGE_KEYS;
+  if (variable === 'powderFactorPrimary') return ['pf_voronoi_bench_g_per_ton'];
   if (variable === 'powderFactor') return POWDER_FACTOR_KEYS;
   if (variable === 'powderFactorGeometry') return GEOMETRY_POWDER_FACTOR_KEYS;
   if (variable === 'hardness') return ['dureza', 'Dureza', 'hardness'];

@@ -400,20 +400,9 @@ class TestBackwardsCompat:
         assert signed[1] == 5
         assert signed[2] == 1000.0
         assert signed[3] == 0.5
-        # Campos nuevos deben estar en 0 (defaults)
-        assert signed[4] == 0.0  # avg_over_break
-        assert signed[5] == 0.0  # avg_under_break
-        assert signed[6] == 0   # n_over
-        assert signed[7] == 0   # n_under
-        assert signed[8] == 0.0  # pf_vol_avg_kgm3
-        assert signed[9] == 0.0  # pf_area_avg_kgm2
-        assert signed[10] == 0.0  # pf_g_per_ton_avg
-        assert signed[11] == 0.0  # pf_g_per_ton_net_avg
-        assert signed[12] == 0.0  # pf_g_per_ton_inf_avg
-        assert signed[13] == 0.0  # energy_total_mj
-        assert signed[14] == 0    # n_pf_valid
-        assert signed[15] == ""   # sector (default empty)
-        assert signed[16] == 0.0  # rock_density_used (default 0)
+        assert all(np.isnan(signed[i]) for i in (4, 5, 8, 9, 10, 11, 12, 13, 16))
+        assert signed[6] == signed[7] == signed[14] == 0
+        assert signed[15] == ""
 
     def test_explosive_energy_handles_unknown_types_gracefully(self):
         """EXPLOSIVE.energy_mj_per_kg nunca lanza; productos desconocidos → None (spec §4.4)."""

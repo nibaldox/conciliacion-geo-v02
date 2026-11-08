@@ -12,6 +12,7 @@
 
 import type { ComparisonResultDto, ProfileDataDto, SectionResponseDto } from './types';
 import type { Bench, ComparisonBenchStatus, DesignBenchStatus, ProfileLine, ProfilePoint, ProfileViewModel, ProfileWarnings, SectionMeta } from './types';
+import type { ProposalDesignBench } from './proposal';
 import { classifyComparisonBenchStatus, parseBenchStatus, resolveBenchScore } from './status';
 
 // ─── Section meta ───────────────────────────────────────────
@@ -257,6 +258,18 @@ function roundedFingerprint(height: number | null, angle: number | null, berm: n
 
 // ─── Top-level view model ───────────────────────────────────
 
+function toProposalDesignBenches(
+  rawBenches: readonly RawBench[] | null | undefined,
+): ProposalDesignBench[] {
+  return (rawBenches ?? []).map((bench) => ({
+    benchNumber: bench.bench_number,
+    crestDistance: bench.crest_distance,
+    toeDistance: bench.toe_distance,
+    toeElevation: bench.toe_elevation,
+    bermWidth: Number.isFinite(bench.berm_width) ? bench.berm_width : null,
+  }));
+}
+
 export function toProfileViewModel(
   profile: ProfileDataDto,
   section: SectionResponseDto,
@@ -274,5 +287,7 @@ export function toProfileViewModel(
     } satisfies ProfileWarnings,
     floorElevation: profile.floor_elevation ?? null,
     crestElevationMax: profile.crest_elevation_max ?? null,
+    comparisons: comparisons ?? [],
+    designBenches: toProposalDesignBenches(profile.benches_design ?? null),
   };
 }

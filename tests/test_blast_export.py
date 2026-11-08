@@ -81,6 +81,74 @@ def _full_payload(*, n_accepted: int = 2, n_rejected: int = 1) -> dict:
     }
 
 
+def test_excel_route_passes_blast_holes_to_writer(monkeypatch):
+    from api.routers import export
+    from tests.test_excel_writer import _match_comp
+
+    monkeypatch.setattr(export.db, "get_results", lambda sid: [_match_comp()])
+    monkeypatch.setattr(export.db, "get_settings", lambda sid: {"blast_holes": [{"X": 1.0}], "blast_upload_meta": {"consolidation_report": {"exact_copies_removed": 2}}})
+    monkeypatch.setattr(export.db, "get_sections", lambda sid: [])
+    captured = {}
+    def writer(*args, **kwargs):
+        captured.update(kwargs)
+    monkeypatch.setattr(export, "export_results", writer)
+    export._build_excel_payload_sync("synthetic", None, None, None, None, None)
+    assert captured["df_pozos"].iloc[0]["X"] == 1.0
+    assert captured["consolidation_report"]["exact_copies_removed"] == 2
+
+
+def test_excel_keeps_raw_and_effective_berm_as_separate_indicators(tmp_path):
+    import openpyxl
+    from core.excel_writer import export_results
+    from tests.test_excel_writer import _match_comp, _tolerances
+
+    row = _match_comp(berm_dev=None, berm_status="CUMPLE", effective_berm=1.0,
+                      effective_berm_status="NO CUMPLE")
+    path = tmp_path / "berm.xlsx"
+    export_results([row], [], [], _tolerances(), str(path))
+    sheet = openpyxl.load_workbook(path)["Bancos"]
+    header = [cell.value for cell in sheet[1]]
+    values = [cell.value for cell in sheet[2]]
+    assert values[header.index("Desv. berma bruta (m)")] == "sin dato"
+    assert values[header.index("Berma efectiva (m)")] == 1.0
+    assert values[header.index("Estado berma efectiva")] == "NO CUMPLE"
+    assert values[header.index("Cumpl. B")] == "CUMPLE"
+
+
+def test_excel_reports_achievement_coverage_and_missing_components(tmp_path):
+    import openpyxl
+    from core.excel_writer import export_results
+    from tests.test_excel_writer import _match_comp, _tolerances
+
+    rows = [_match_comp(delta_crest=0.0, delta_toe=None, berm_status=None)]
+    path = tmp_path / "report.xlsx"
+    export_results(rows, [], [], _tolerances(), str(path))
+    workbook = openpyxl.load_workbook(path)
+    values = " ".join(str(cell.value) for sheet in workbook for row in sheet for cell in row if cell.value is not None).lower()
+    assert "cobertura" in values
+    assert "completos" in values
+    assert "peso medio" in values
+    assert "componentes faltantes" in values
+
+
+def test_tronadura_sheet_keeps_missing_charge_and_exposes_pf_definitions(monkeypatch):
+    import numpy as np
+    import openpyxl
+    import pandas as pd
+    from core.excel_writer import _write_tronadura_sheet
+
+    monkeypatch.setattr("core.excel_writer.compute_blast_geotech_correlation", lambda **kw: [])
+    frame = pd.DataFrame([{"X": 0., "Y": 0., "Z_collar": 10., "X_toe": 0.,
+                           "Y_toe": 0., "Z_toe": 0., "Incl": 0., "Az": 0.,
+                           "Len": 10., "Kilos": np.nan}])
+    workbook = openpyxl.Workbook()
+    _write_tronadura_sheet(workbook, frame, [], [])
+    values = [cell.value for row in workbook["Tronadura"] for cell in row if cell.value is not None]
+    assert "sin dato" in values
+    assert any("Q/(B*S*H)" in str(value) for value in values)
+    assert any("1000*Q/(A*H*rho)" in str(value) for value in values)
+
+
 class TestProcessingDiagnosticsExcel:
     def test_full_export_has_all_sheets(self, tmp_path: Path):
         out = export_processing_diagnostics_excel(_full_payload(), tmp_path / "diag.xlsx")

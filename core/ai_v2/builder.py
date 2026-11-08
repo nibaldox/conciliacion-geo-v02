@@ -1,6 +1,8 @@
 """Build the analysis prompt that will be sent to the LLM."""
 from __future__ import annotations
 
+import math
+
 from core.ai_v2.prompts import load_prompt_template, render_prompt
 from core.ai_v2.sanitization import (
     looks_like_instruction,
@@ -148,7 +150,7 @@ def _render_compliance_table(results: list[dict]) -> str:
         return "_Sin datos._"
     # Binary compliance (Track D-2): FUERA DE TOLERANCIA is folded into
     # NO CUMPLE so the LLM never sees the intermediate category.
-    rows = ["| Parámetro | CUMPLE | NO CUMPLE |", "|---|---|---|"]
+    rows = ["| Parámetro | CUMPLE | NO CUMPLE | Sin dato |", "|---|---|---|---|"]
     for param in ("height", "angle", "berm"):
         status_key = f"{param}_status"
         cumple = sum(1 for r in results if r.get(status_key) == STATUS_CUMPLE)
@@ -156,7 +158,8 @@ def _render_compliance_table(results: list[dict]) -> str:
             1 for r in results
             if r.get(status_key) in (STATUS_NO_CUMPLE, STATUS_FUERA)
         )
-        rows.append(f"| {param.upper()} | {cumple} | {no_cumple} |")
+        sin_dato = len(results) - cumple - no_cumple
+        rows.append(f"| {param.upper()} | {cumple} | {no_cumple} | {sin_dato} |")
     return "\n".join(rows)
 
 
@@ -341,6 +344,19 @@ def _coerce_bench_params(value) -> BenchParams | None:
                 return float(v) if v is not None else float(default)
             except (TypeError, ValueError):
                 return float(default)
+
+        def _optional(key, *fallbacks):
+            for candidate in (key, *fallbacks):
+                raw = value.get(candidate)
+                if raw is None:
+                    continue
+                try:
+                    number = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(number):
+                    return number
+            return None
         return BenchParams(
             bench_number=int(value.get("bench_number", 0) or 0),
             crest_elevation=_f("crest_elevation"),
@@ -350,10 +366,10 @@ def _coerce_bench_params(value) -> BenchParams | None:
             bench_height=_f("bench_height", _f("height_real")),
             face_angle=_f("face_angle", _f("angle_real", _DEFAULT_FACE_ANGLE_DEG))
             or _DEFAULT_FACE_ANGLE_DEG,
-            berm_width=_f("berm_width", _f("berm_real")),
+            berm_width=_optional("berm_width", "berm_real"),
             is_ramp=bool(value.get("is_ramp", False)),
             spill_width=_f("spill_width"),
-            effective_berm_width=_f("effective_berm_width", _f("effective_berm")),
+            effective_berm_width=_optional("effective_berm_width", "effective_berm"),
             overhang_m=_f("overhang_m"),
             rock_bridge_thickness_m=_f("rock_bridge_thickness_m"),
             rock_bridge_height_m=_f("rock_bridge_height_m"),
@@ -449,7 +465,19 @@ def _render_stability_summary(results: list[dict]) -> str:
                     f"Ángulo de cara inconsistente | detectado | WARNING | "
                     f"Re-medir cara de banco |"
                 )
-            if not assessment.catch_bench_adequate and assessment.catch_bench_ratio > 0:
+            if (
+                b.berm_width is None
+                or b.effective_berm_width is None
+                or assessment.catch_bench_ratio is None
+            ):
+                rows.append(
+                    f"| {section} | {assessment.bench_number} | Catch bench | "
+                    f"sin dato | sin dato | Medir ancho de berma antes de evaluar |"
+                )
+            elif (
+                assessment.catch_bench_adequate is False
+                and assessment.catch_bench_ratio > 0
+            ):
                 rows.append(
                     f"| {section} | {assessment.bench_number} | Catch bench | "
                     f"ratio={assessment.catch_bench_ratio:.2f} | WARNING | "
@@ -523,6 +551,10 @@ def _render_blast_recommendations(blast_trend: dict | None) -> str:
         template,
         pf_promedio=blast_trend.get("pf_promedio", "N/A"),
         pf_desviacion=blast_trend.get("pf_desviacion", "N/A"),
+        pf_unit=blast_trend.get("pf_unit") or "unidad sin dato",
+        pf_formula=blast_trend.get("pf_formula") or "sin dato",
+        pf_coverage=blast_trend.get("pf_coverage", "sin dato"),
+        consolidation=blast_trend.get("consolidation", "sin dato"),
         n_pozos=blast_trend.get("n_pozos_total", "N/A"),
         trend_slope=blast_trend.get("trend_slope_pf_per_month", "N/A"),
         trend_direction=blast_trend.get("trend_direction", "estable"),
@@ -638,7 +670,8 @@ def _render_action_plan(results: list[dict], blast_trend: dict | None) -> str:
 
     # Cross-signal: high PF + overbreak correlation (only when we have
     # both pieces of context).
-    if blast_trend and isinstance(blast_trend.get("pf_promedio"), (int, float)):
+    if (blast_trend and blast_trend.get("pf_unit") in {"kg/m³", "kg/m3"}
+            and isinstance(blast_trend.get("pf_promedio"), (int, float))):
         pf = float(blast_trend["pf_promedio"])
         over_rows = [
             r for r in results
@@ -717,4 +750,21 @@ def build_analysis_prompt(
         flags_seguridad=_render_safety_flags(results),
         plan_accion_priorizado=_render_action_plan(results, blast_trend),
     )
+    from core.design_achievement import build_design_achievement_summary
+    tolerance = ((settings or {}).get("tolerances") or {}).get("crest_toe_deviation")
+    achievement = build_design_achievement_summary(results, tolerance)
+    coverage = achievement["coverage"]
+    weight = coverage["weight_available_mean"]
+    weight_text = "sin dato" if weight is None else f"{weight:.2f}"
+    user += (
+        f"\n\nCobertura del logro: evaluables {coverage['n_evaluable']} de {coverage['n_rows']}; "
+        f"completos {coverage['n_complete']}; peso medio disponible {weight_text}. "
+        "Los puntajes con componentes faltantes son parciales, no completos.\n"
+    )
+    for row, detail in zip(results, achievement["rows"]):
+        if detail["components_missing"]:
+            user += f"- {row.get('section', 'sin dato')} banco {row.get('bench_num', 'sin dato')}: componentes faltantes {', '.join(detail['components_missing'])}.\n"
+    consolidation = ((settings or {}).get("blast_upload_meta") or {}).get("consolidation_report") or {}
+    if consolidation:
+        user += f"Pozos tras consolidación: {consolidation.get('holes_out', 'sin dato')}; copias eliminadas: {consolidation.get('exact_copies_removed', 'sin dato')}.\n"
     return system, user

@@ -112,7 +112,7 @@ class TestComputeBlastGeotechCorrelation:
         comps = [{"section": "S1", "height_status": "CUMPLE"}]  # no delta_crest
         rows = compute_blast_geotech_correlation(df, sections, comps)
         assert len(rows) == 1
-        assert rows[0].mean_abs_deviation == 0.0
+        assert np.isnan(rows[0].mean_abs_deviation)
 
 
 class TestComputeSignedDeviations:
@@ -133,9 +133,10 @@ class TestComputeSignedDeviations:
         assert r["avg_under"] == pytest.approx(-0.8)
 
     def test_empty_or_missing_section(self):
-        assert compute_signed_deviations([], "S1") == {
-            "avg_over": 0.0, "avg_under": 0.0, "n_over": 0, "n_under": 0,
-        }
+        result = compute_signed_deviations([], "S1")
+        assert np.isnan(result["avg_over"]) and np.isnan(result["avg_under"])
+        assert result["n_over"] == result["n_under"] == 0
+        assert result["source"] is None
         assert compute_signed_deviations([{"section": "X", "delta_crest": 1.0}], "S1")["n_over"] == 0
 
     def test_falls_back_to_delta_toe(self):
@@ -172,7 +173,7 @@ class TestBlastCorrelationRowBackwardsCompat:
         assert signed[9] == 2.1
         assert signed[10] == 120.0
         assert signed[11] == 130.0  # pf_g_per_ton_net_avg
-        assert signed[12] == 0.0  # pf_g_per_ton_inf_avg (default)
+        assert np.isnan(signed[12])
         assert signed[13] == 400.0  # energy_total_mj
         assert signed[14] == 3  # n_pf_valid
         assert signed[15] == "Principal"  # sector
@@ -180,8 +181,8 @@ class TestBlastCorrelationRowBackwardsCompat:
 
     def test_new_fields_default_to_zero(self):
         row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
-        assert row.avg_over_break == 0.0
-        assert row.avg_under_break == 0.0
+        assert np.isnan(row.avg_over_break)
+        assert np.isnan(row.avg_under_break)
         assert row.n_over == 0 and row.n_under == 0
 
     def test_correlation_rows_carry_signed_fields(self):
@@ -218,7 +219,7 @@ class TestExplosiveEnergy:
         assert EXPLOSIVE.energy_mj_per_kg("H-ANFO") == pytest.approx(3.40)
         assert EXPLOSIVE.energy_mj_per_kg("Emulsion") == pytest.approx(3.05)
         assert EXPLOSIVE.energy_mj_per_kg("Bulk Emulsion") == pytest.approx(3.05)
-        assert EXPLOSIVE.energy_mj_per_kg("Emuline 8000") == pytest.approx(3.05)
+        assert EXPLOSIVE.energy_mj_per_kg("Emuline 8000") is None
 
     def test_pirex_grades_known(self):
         """Pirex grades must resolve to their own values (spec §4.4), not ANFO."""
@@ -381,9 +382,9 @@ class TestAggregatePowderFactorByGroup:
 class TestBlastCorrelationRowPF:
     def test_pf_fields_default_to_zero(self):
         row = BlastCorrelationRow("S1", 0, 0.0, 0.0)
-        assert row.pf_vol_avg_kgm3 == 0.0
-        assert row.pf_area_avg_kgm2 == 0.0
-        assert row.energy_total_mj == 0.0
+        assert np.isnan(row.pf_vol_avg_kgm3)
+        assert np.isnan(row.pf_area_avg_kgm2)
+        assert np.isnan(row.energy_total_mj)
         assert row.n_pf_valid == 0
 
     def test_as_signed_tuple_includes_pf(self):
@@ -400,7 +401,7 @@ class TestBlastCorrelationRowPF:
         assert signed[9] == 2.5
         assert signed[10] == 110.0
         assert signed[11] == 115.0  # pf_g_per_ton_net_avg
-        assert signed[12] == 0.0  # pf_g_per_ton_inf_avg (default)
+        assert np.isnan(signed[12])
         assert signed[13] == 900.0  # energy_total_mj
         assert signed[14] == 5  # n_pf_valid
         assert signed[15] == "Norte"  # sector
@@ -755,7 +756,7 @@ class TestComputePowderFactorGPerTonNet:
         assert out["pf_g_per_ton_net"].iloc[0] == pytest.approx(100000.0 / (4.0 * 5.0 * 15.0 * 2.7), rel=1e-6)
 
     def test_fallback_equals_full_when_collar_toe_missing(self):
-        """No Z_collar/Z_toe → pasadura = 0 → pf_g_per_ton_net == pf_g_per_ton."""
+        """Missing collar or toe blocks net height and PF."""
         df = pd.DataFrame([{
             "Kilos_Cargados_real": 100.0,
             "Burden": 4.0,
@@ -767,15 +768,11 @@ class TestComputePowderFactorGPerTonNet:
             "bench_height_m": 15.0,
         }])
         out = compute_powder_factor(df)
-        assert out["height_net_m"].iloc[0] == pytest.approx(out["height_real_m"].iloc[0])
-        assert out["pf_g_per_ton_net"].iloc[0] == pytest.approx(out["pf_g_per_ton"].iloc[0])
+        assert pd.isna(out["height_net_m"].iloc[0])
+        assert pd.isna(out["pf_g_per_ton_net"].iloc[0])
 
     def test_negative_pasadura_falls_back_to_zero(self):
-        """If pasadura computes negative (Z_toe below floor), treat as 0.
-
-        Z_collar=1015, bench=15 → floor=1000; Z_toe=1001 → pasadura = -1
-        (toe is above floor, not sub-drill) → clamp to 0 → H_net = H_real.
-        """
+        """A toe above the bench floor cannot define a full-bench net PF."""
         df = pd.DataFrame([{
             "Kilos_Cargados_real": 100.0,
             "Burden": 4.0,
@@ -789,8 +786,8 @@ class TestComputePowderFactorGPerTonNet:
             "bench_height_m": 15.0,
         }])
         out = compute_powder_factor(df)
-        assert out["height_net_m"].iloc[0] == pytest.approx(15.0)
-        assert out["pf_g_per_ton_net"].iloc[0] == pytest.approx(out["pf_g_per_ton"].iloc[0])
+        assert pd.isna(out["height_net_m"].iloc[0])
+        assert pd.isna(out["pf_g_per_ton_net"].iloc[0])
 
     def test_pf_g_per_ton_net_in_aggregate(self):
         """aggregate_powder_factor_by_group exposes pf_g_per_ton_net_avg."""
@@ -807,9 +804,7 @@ class TestComputePowderFactorGPerTonNet:
         agg = aggregate_powder_factor_by_group(out, "section_name", "S1", proj_labeled)
         assert "pf_g_per_ton_net_avg" in agg
         assert "pf_g_per_ton_net_weighted" in agg
-        # procesar_pozos derives Z_collar/Z_toe, so net is finite and > 0.
-        assert not pd.isna(agg["pf_g_per_ton_net_avg"])
-        assert agg["pf_g_per_ton_net_avg"] > 0
+        assert pd.isna(agg["pf_g_per_ton_net_avg"])
 
 
 class TestPowderFactorInfluenceArea:

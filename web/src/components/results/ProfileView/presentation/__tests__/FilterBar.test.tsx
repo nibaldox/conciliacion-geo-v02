@@ -16,6 +16,7 @@ vi.mock('../../application', async () => {
     showSemaphore: false,
     showHorizontalDeviation: true,
     showBlastHoles: true,
+    showProposalLayer: false,
     blastTolerance: 10,
     statusFilter: [],
   };
@@ -33,6 +34,7 @@ vi.mock('../../application', async () => {
         showSemaphore: false,
         showHorizontalDeviation: true,
         showBlastHoles: true,
+        showProposalLayer: false,
         blastTolerance: 10,
         statusFilter: [],
       };

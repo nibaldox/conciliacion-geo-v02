@@ -158,7 +158,13 @@ def test_blast_holes_summary_returns_only_persisted_count(client, session_id):
     )
 
     assert response.status_code == 200
-    assert response.json() == {"n_holes": 3}
+    body = response.json()
+    assert body["n_holes"] == 3
+    assert body["consolidation_report"] == uploaded.json()["consolidation_report"]
+    assert body["footprint_report"] == uploaded.json()["footprint_report"]
+    assert body["footprint_report"]["mode"] == "estimated_hull"
+    assert body["data_status"] == "current"
+    assert body["algorithm_version"] == "blast-auditable.v1"
 
 
 def test_blast_holes_summary_rejects_a_different_active_session(client, session_id):
@@ -380,7 +386,7 @@ def test_get_holes_returns_persisted_holes(client, session_id):
     upload_resp = _upload_csv(client, session_id, VALID_CSV)
     assert upload_resp.status_code == 200
 
-    resp = client.get(f"/api/v1/blast/{session_id}/holes")
+    resp = client.get(f"/api/v1/blast/{session_id}/holes", headers={"X-Session-ID": session_id})
     assert resp.status_code == 200
 
     data = resp.json()

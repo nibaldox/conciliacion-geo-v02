@@ -14,9 +14,21 @@ LLM como contexto estructurado.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pandas as pd
+
+
+def _rounded_or_none(value: Any, decimals: int) -> float | None:
+    """Round ``value`` when it is a finite number; ``None`` otherwise."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(number, decimals) if math.isfinite(number) else None
 
 
 def build_unified_dataframe(
@@ -96,8 +108,8 @@ def build_unified_dataframe(
             row["cota_crest_real"] = round(float(bt.crest_elevation), 1)
             row["cota_toe_real"] = round(float(bt.toe_elevation), 1)
             row["cota_piso"] = round(float(getattr(bt, "floor_elevation", 0)), 1)
-            row["berm_width_real"] = round(float(bt.berm_width), 2)
-            row["effective_berm"] = round(float(bt.effective_berm_width), 2)
+            row["berm_width_real"] = _rounded_or_none(bt.berm_width, 2)
+            row["effective_berm"] = _rounded_or_none(bt.effective_berm_width, 2)
             row["is_ramp"] = bool(bt.is_ramp)
 
         # Tolerancias
@@ -124,11 +136,11 @@ def build_unified_dataframe(
             for br in blast_rows:
                 blast_map[br.section_name] = {
                     "n_pozos": br.num_wells,
-                    "pf_vol_kgm3": round(br.pf_vol_avg_kgm3, 3) if br.pf_vol_avg_kgm3 else None,
-                    "pf_g_ton": round(br.pf_g_per_ton_avg, 1) if br.pf_g_per_ton_avg else None,
-                    "kg_total": round(br.total_kg, 0) if br.total_kg else None,
-                    "over_break_m": round(br.avg_over_break, 2) if br.avg_over_break else None,
-                    "under_break_m": round(br.avg_under_break, 2) if br.avg_under_break else None,
+                    "pf_vol_kgm3": round(br.pf_vol_avg_kgm3, 3) if pd.notna(br.pf_vol_avg_kgm3) else None,
+                    "pf_g_ton": round(br.pf_g_per_ton_avg, 1) if pd.notna(br.pf_g_per_ton_avg) else None,
+                    "kg_total": round(br.total_kg, 0) if pd.notna(br.total_kg) else None,
+                    "over_break_m": round(br.avg_over_break, 2) if pd.notna(br.avg_over_break) else None,
+                    "under_break_m": round(br.avg_under_break, 2) if pd.notna(br.avg_under_break) else None,
                 }
             # Mergear al DataFrame por sección
             for sec_name, blast_data in blast_map.items():

@@ -43,9 +43,7 @@ class TestRegistry:
 
     def test_resolve_exact_and_family(self):
         assert resolve_explosive("Pirex-930").normalized_name == "Pirex-930"
-        fam = resolve_explosive("Pirex-930 Heavy")
-        assert fam.normalized_name == "Pirex-930"
-        assert fam.is_exact is False
+        assert resolve_explosive("Pirex-930 Heavy") is None
 
     def test_resolve_unknown_grade_is_none(self):
         assert resolve_explosive("Pirex-999") is None
@@ -64,8 +62,8 @@ class TestExplosiveDensity:
     def test_pirex_unknown_grade_returns_none(self):
         assert get_explosive_density_g_cm3("Pirex-999") is None
 
-    def test_pirex_family_suffix_keeps_grade_values(self):
-        assert get_explosive_density_g_cm3("Pirex-930 Heavy") == pytest.approx(1.20)
+    def test_pirex_family_suffix_is_not_an_alias(self):
+        assert get_explosive_density_g_cm3("Pirex-930 Heavy") is None
 
     def test_enaline(self):
         assert get_explosive_density_g_cm3("Enaline 1 1/4*12") == ENALINE_DENSITY_G_CM3
@@ -102,7 +100,7 @@ class TestExplosiveStatus:
     def test_status_values(self):
         assert get_explosive_status("ANFO") == "VALIDATED"
         assert get_explosive_status("Pirex-930") == "UNVALIDATED_REFERENCE"
-        assert get_explosive_status("Pirex-930 Heavy") == "FAMILY_MATCH"
+        assert get_explosive_status("Pirex-930 Heavy") == "UNKNOWN"
         assert get_explosive_status("Pirex-999") == "UNKNOWN"
         assert get_explosive_status("") == "MISSING"
         assert get_explosive_status(None) == "MISSING"

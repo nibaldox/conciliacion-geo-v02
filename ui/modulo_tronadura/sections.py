@@ -7,7 +7,7 @@ import streamlit as st
 from core.geometry_contract import GEOMETRY_CONFIGURATION_VERSION
 from ui.modulo_tronadura.state import get_blast_processed
 from ui.modulo_tronadura.three_d import render_three_d_tab
-from ui.modulo_tronadura.tabular import render_correlation_tab
+from ui.modulo_tronadura.tabular import render_correlation_tab, render_metric_definitions
 from ui.modulo_tronadura.energy_simulation import render_energy_simulation_section
 
 
@@ -15,6 +15,8 @@ def render_tabs_section(df_clean: pd.DataFrame) -> None:
     """Render the analysis tabs after a file has been processed."""
     if not get_blast_processed():
         return
+
+    render_metric_definitions(df_clean)
 
     tab_3d, tab_corr, tab_sim = st.tabs(
         [
