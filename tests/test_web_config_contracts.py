@@ -66,6 +66,34 @@ def _render_env_entries() -> dict[str, str]:
     return entries
 
 
+def _render_env_comment(key: str) -> str:
+    lines = _read("render.yaml").splitlines()
+    for index, line in enumerate(lines):
+        if not re.match(rf"\s*-\s*key:\s*{re.escape(key)}\s*$", line):
+            continue
+        block: list[str] = []
+        for above in reversed(lines[:index]):
+            comment = re.match(r"\s*#\s*(.*?)\s*$", above)
+            if not comment:
+                break
+            block.append(comment.group(1))
+        return "\n".join(reversed(block))
+    return ""
+
+
+def _core_default_max_upload_mb() -> int:
+    core_src = _read("core/config.py")
+    match = re.search(
+        r'_env_max_upload_mb\(\s*"CONCILIACION_MAX_UPLOAD_MB"\s*,\s*(\d+)',
+        core_src,
+    )
+    assert match, (
+        "core/config.py no longer passes a literal default to "
+        '_env_max_upload_mb("CONCILIACION_MAX_UPLOAD_MB", ...); update this helper'
+    )
+    return int(match.group(1))
+
+
 def _probe(overrides: dict[str, str], with_api: bool = False) -> dict[str, object]:
     env = {key: value for key, value in os.environ.items() if not key.startswith("CONCILIACION_")}
     env.update(overrides)
@@ -167,8 +195,41 @@ class TestRenderContract:
             "Dockerfile-api must consume the same var render.yaml declares"
         )
 
-    def test_max_upload_mb_declared_value_matches_default(self):
-        assert _render_env_entries().get("CONCILIACION_MAX_UPLOAD_MB") == "500"
+    def test_max_upload_mb_capped_at_or_below_default(self):
+        """The deployed upload cap may be lowered, never raised, vs the code.
+
+        render.yaml deliberately declares a low CONCILIACION_MAX_UPLOAD_MB
+        for the Render free demo (0.1 CPU / 512 MB RAM: large uploads OOM
+        the instance); the code default in core/config.py stays 500 MiB.
+        If the plan moves to 1c-2g, 128 is the right cap. The invariant
+        guarded here: the deployed value stays a positive integer at or
+        below the code default, and keeps a justification comment next to
+        it so a value change is visible in review.
+        """
+        declared = _render_env_entries().get("CONCILIACION_MAX_UPLOAD_MB")
+        assert declared is not None, (
+            "render.yaml must declare CONCILIACION_MAX_UPLOAD_MB explicitly; "
+            "the demo instance cannot inherit the code default"
+        )
+        assert re.fullmatch(r"\d+", declared), (
+            f"CONCILIACION_MAX_UPLOAD_MB must be a plain integer in MiB; got {declared!r}"
+        )
+        value = int(declared)
+        assert value > 0, f"CONCILIACION_MAX_UPLOAD_MB must be positive; got {value}"
+        default = _core_default_max_upload_mb()
+        assert value <= default, (
+            f"render.yaml declares CONCILIACION_MAX_UPLOAD_MB={value} MiB, above the "
+            f"core/config.py default ({default} MiB): the deployed cap may sit below "
+            "the code default, never above it"
+        )
+        comment = _render_env_comment("CONCILIACION_MAX_UPLOAD_MB")
+        assert comment and re.search(
+            r"(?i)\b(mb|mib|gb|gib|oom|memory|memoria|plan)\b", comment
+        ), (
+            "keep a justification comment next to CONCILIACION_MAX_UPLOAD_MB citing "
+            "the memory budget or plan; a value change without a stated reason "
+            "slips past review"
+        )
 
 
 class TestImportTimeConfigCaptures:
