@@ -27,6 +27,7 @@ Herramienta de código abierto para comparar el diseño de taludes con su constr
 
 - [Funciones y actualizaciones](#funciones-y-actualizaciones)
 - [Cómo se calcula el cumplimiento](#cómo-se-calcula-el-cumplimiento)
+- [Propuesta de cumplimiento guiada](#propuesta-de-cumplimiento-guiada)
 - [Flujo de trabajo](#flujo-de-trabajo)
 - [Instalación y ejecución local](#instalación-y-ejecución-local)
 - [Arquitectura y API](#arquitectura-y-api)
@@ -106,6 +107,31 @@ Se distinguen los estados por parámetro del puntaje agregado:
 La desviación horizontal tiene su propia clasificación en metros: hasta 1 m dentro de tolerancia; hasta 1,8 m menor; hasta 3 m moderada; sobre 3 m severa. **dH no es el puntaje de cumplimiento ni la diferencia de cresta/pata**: se calcula a igual elevación y exige una intersección única.
 
 Las reglas canónicas están en `core/profile_compliance.py`, `core/reconciliation_summary.py` y `core/config.py`.
+
+## Propuesta de cumplimiento guiada
+
+En la rama `feat/tronadura-auditable` se añadió una medición **guiada por diseño** (`core/design_guided_measurement.py`) y, sobre ella, una **propuesta de cumplimiento** (`core/guided_compliance.py`). La propuesta es **aditiva y está en validación**: se muestra al lado de los valores oficiales, que permanecen intactos, y **no reemplaza** los valores oficiales ni las exportaciones oficiales.
+
+La medición guiada clasifica cada banco con estados explícitos (`excavated`, `not_excavated`, `section_truncated`, `unmeasured`, `out_of_profile`, `ambiguous`) e informa pata sólida y piso local, banco desplazado (`bench_offset`) y berma remanente (`berm_remnant_max_m` / `berm_remnant_area_m2`). Cada magnitud propuesta declara su origen (`proposed_height_source`, `proposed_angle_source`, `proposed_crest_source`, `proposed_toe_source`, `proposed_berm_source`: `guided`, `current` o sin valor), con un resumen en `proposed_source` (guiada, actual o mixta).
+
+**Contrato de API:**
+
+| Elemento | Contenido |
+|---|---|
+| `GET /api/v1/process/proposed-compliance` | Propuesta de cumplimiento con `proposal_status` (`current`, `not_computed` o `partial`), `floor_tolerance_used` y `reprocess_required` |
+| `GET /api/v1/process/profiles/{section_id}` | Incluye `benches_design`, la geometría de diseño por banco |
+
+**Dónde verla:** en la web, la tarjeta «Propuesta (en validación)» con tabla oficial/propuesta, el panel por perfil y la capa «Pata guiada y piso» (apagada por defecto); en Streamlit, la pestaña equivalente (`ui/tabs/profiles/proposal.py` + `tab.py`) con dashboard y tabla.
+
+**Reglas aprobadas por el usuario:**
+
+- El banco partido se mide completo.
+- El banco no excavado queda fuera del puntaje y se informa como deuda de excavación.
+- El piso alto se evalúa aparte con tolerancia de 0,5 m; a 1,5× (0,75 m) queda FUERA DE TOLERANCIA.
+- Lo no evaluable nunca vale 0.
+- La propuesta se muestra primero, al lado del oficial, y no altera los valores oficiales ni las exportaciones.
+
+Las reglas canónicas de la propuesta están en `core/design_guided_measurement.py` y `core/guided_compliance.py`; el detalle de estado, resultados y pendientes en [HANDOFF.md](docs/HANDOFF.md).
 
 ## Flujo de trabajo
 
@@ -279,6 +305,18 @@ En la continuación de interfaz, una ejecución posterior tuvo 778 pruebas aprob
 El 3 de noviembre se añadieron pruebas de selección y filtros de perfil; la suite completa no se repitió tras ese cambio. Pasaron 72 pruebas focalizadas de perfil y mapeo y, después de añadir un caso de transición, el archivo de selección pasó 16/16; también aprobaron TypeScript, ESLint dirigido y build PWA.
 
 Tras el rediseño inicial de informes, se ejecutaron **167 pruebas** de datos, gráficos, Word, PDF y exportación, usando pypdf del runtime incluido para verificar extracción del PDF. La revisión visual cubrió un PDF sintético; la paginación de Word y la validación con datos reales siguen pendientes.
+
+### Verificación local — 8 de noviembre de 2026
+
+Cierre técnico de la rama `feat/tronadura-auditable` (olas correctivas de Tronadura auditables, medición guiada por diseño y propuesta de cumplimiento en validación). Los números de la propuesta provienen de una copia reprocesada de la sesión real `c83435ee`, no de la base del usuario. **No es validación operacional.**
+
+| Validación | Resultado ejecutado | Alcance |
+|---|---|---|
+| Backend | 3.265 aprobadas, 7 omitidas | Python 3.14; `MemoryMax=6G` sin swap; `pytest tests/ -q --ignore=tests/test_openblast.py --skip-electron`; `test_pipeline.py` OK |
+| Frontend | 1.385 pruebas aprobadas en 124 archivos | Cobertura del dominio ProfileView/domain 100 % (184 pruebas) |
+| TypeScript / ESLint / build | Aprobados | `npx tsc -b`; ESLint con la única advertencia preexistente en `e2e/blast-colors.spec.ts`; `npm run build` OK |
+
+Dos revisiones adversariales del delta con dictamen APPROVE (36/36 y 17/17 verificaciones); los hallazgos M/L/OBS quedaron cerrados. Estado, resultados numéricos y pendientes en [HANDOFF.md](docs/HANDOFF.md).
 
 ### Verificación local — 5 de noviembre de 2026
 
