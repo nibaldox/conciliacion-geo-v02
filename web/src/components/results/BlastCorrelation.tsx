@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import Plot from '../charts/Plot';
 import type { Data, Layout, Config } from 'plotly.js';
-import { useBlastCorrelation, useSections } from '../../api/hooks';
+import { useBlastCorrelation, useBlastDefinitions, useSections } from '../../api/hooks';
 import { getSessionId } from '../../api/client';
 import { BlastUploader } from './BlastUploader';
 import { BlastHoles3DViewer } from './BlastHoles3DViewer';
@@ -11,6 +11,7 @@ import { BlastSimulationPanel } from './BlastSimulationPanel';
 import { PowderFactorDamagePanel } from './PowderFactorDamagePanel';
 import { BlastSectorDensityEditor } from './BlastSectorDensityEditor';
 import { BlastCorrelationTable } from './BlastCorrelationTable';
+import { BlastLegacyNotice } from './BlastLegacyNotice';
 import { GEOMETRY_CONFIGURATION_VERSION } from '../../api/types';
 import { useBlastSettings } from './useBlastSettings';
 import { BlastTemporalFilter } from './BlastTemporalFilter';
@@ -40,7 +41,7 @@ export {
   formatBreakMeters,
   formatDensityShort,
 } from './blastFormatters';
-import type { BlastCorrelationRow } from '../../api/types';
+import type { BlastCorrelationRow, BlastDefinitions } from '../../api/types';
 
 // ─── Histogram overlay helpers (G18) ────────────────────────
 
@@ -107,9 +108,10 @@ export function buildOverlayHistogram(
 
 export interface BlastCorrelationProps {
   presentation?: 'legacy' | 'analysis';
+  onData?: () => void;
 }
 
-export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationProps = {}) {
+export function BlastCorrelation({ presentation = 'legacy', onData }: BlastCorrelationProps = {}) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { designMeshId, topoMeshId } = useSession();
@@ -117,10 +119,14 @@ export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationPr
   const isAnalysis = presentation === 'analysis';
   const [localSurveyDate, setLocalSurveyDate] = useState('');
   const storeSurveyDate = useBlastView((s) => s.surveyDate);
+  const setWorkspaceTab = useBlastView((s) => s.setWorkspaceTab);
+  const openData = onData ?? (() => { setWorkspaceTab('data'); document.querySelector<HTMLDetailsElement>('[data-testid="blast-uploader"] details')?.setAttribute('open', ''); document.querySelector('[data-testid="blast-uploader"]')?.scrollIntoView?.(); });
   const setStoreSurveyDate = useBlastView((s) => s.setSurveyDate);
   const surveyDate = isAnalysis ? storeSurveyDate : localSurveyDate;
   const setSurveyDate = isAnalysis ? setStoreSurveyDate : setLocalSurveyDate;
+  const { data: definitions } = useBlastDefinitions();
   const { data, isLoading, error } = useBlastCorrelation(surveyDate || undefined);
+  const legacyNotice = data?.data_status === 'legacy_reimport_required' ? <BlastLegacyNotice onData={openData} /> : null;
   const temporalControl = <BlastTemporalFilter surveyDate={surveyDate} onApply={setSurveyDate} metadata={data?.temporal_filter} />;
   const refreshAnalysis = () => Promise.all([
     qc.invalidateQueries({ queryKey: ['blast-correlation'] }),
@@ -151,7 +157,7 @@ export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationPr
 
   if (rows.length === 0) {
     return (
-      <div className="space-y-4">{temporalControl}<div className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-6">
+      <div className="space-y-4">{temporalControl}{legacyNotice}<div className="mx-auto flex w-full max-w-2xl flex-col gap-6 py-6">
         <div className="flex flex-col gap-1">
           <h2 className="ui-section-title">
             {emptyAfterCutoff ? t('blast.temporal.emptyTitle') : t('blast.empty_title', { defaultValue: 'Sin datos de tronadura' })}
@@ -181,6 +187,7 @@ export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationPr
   return (
     <div className="flex flex-col gap-6" data-slot="blast-correlation">
       {temporalControl}
+      {legacyNotice}
       <BlastSectionHeader
         as="h2"
         title={t('blast.summary_title', { defaultValue: 'Correlación de Tronadura' })}
@@ -202,12 +209,12 @@ export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationPr
         <BlastSectionHeader
           title={t('blast.table_title', { defaultValue: 'Factor de carga por sección' })}
         />
-        <BlastCorrelationTable rows={rows} />
+        <BlastCorrelationTable rows={rows} definitions={definitions} />
       </section>
 
       <div className="grid grid-cols-1 gap-6 2xl:grid-cols-2">
-        <PowderFactorDamagePanel surveyDate={surveyDate || undefined} />
-        <BlastHistogramChart carga={carga} descarga={descarga} />
+        <PowderFactorDamagePanel surveyDate={surveyDate || undefined} totalSections={rows.length} onData={openData} />
+        <BlastHistogramChart carga={data?.kg_per_meter ?? carga} loadedColumn={data?.kg_per_meter_loaded_column ?? []} descarga={descarga} definitions={definitions} />
       </div>
 
       {!isAnalysis && (
@@ -224,33 +231,29 @@ export function BlastCorrelation({ presentation = 'legacy' }: BlastCorrelationPr
   );
 }
 
-function BlastHistogramChart({ carga, descarga }: { carga: number[]; descarga: number[] }) {
+function BlastHistogramChart({ carga, loadedColumn, descarga, definitions }: { carga: number[]; loadedColumn: number[]; descarga: number[]; definitions?: BlastDefinitions }) {
   const { t } = useTranslation();
   const colors = useBlastChartColors();
-  const hasData = carga.length > 0 || descarga.length > 0;
-  if (!hasData) return null;
+  const [metric, setMetric] = useState<'kg_per_meter' | 'kg_per_meter_loaded_column'>('kg_per_meter');
+  const values = metric === 'kg_per_meter' ? carga : loadedColumn;
+  const label = t(metric === 'kg_per_meter' ? 'blast.charge_density_histogram_title' : 'blast.loaded_column_density');
+  if (carga.length === 0 && loadedColumn.length === 0 && descarga.length === 0) return null;
 
   return (
-    <section
-      className="flex min-w-0 flex-col gap-3"
-      data-testid="blast-histogram-chart"
-    >
-      <BlastSectionHeader title={t('blast.histograms_title', { defaultValue: 'Distribución de carga y longitud cargada' })} />
+    <section className="flex min-w-0 flex-col gap-3" data-testid="blast-histogram-chart">
+      <BlastSectionHeader title={t('blast.histograms_title')} />
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {carga.length > 0 && <HistogramPlot
-          values={carga}
-          title={t('blast.charge_density_histogram_title', { defaultValue: 'Densidad lineal de carga de explosivo' })}
-          xAxisTitle={t('blast.charge_density_histogram_x_axis', { defaultValue: 'Densidad lineal de carga (kg/m)' })}
-          color={colors.primary}
-          testId="blast-charge-density-histogram"
-        />}
-        {descarga.length > 0 && <HistogramPlot
-          values={descarga}
-          title={t('blast.loaded_length_histogram_title', { defaultValue: 'Longitud de columna cargada' })}
-          xAxisTitle={t('blast.loaded_length_histogram_x_axis', { defaultValue: 'Longitud cargada (m)' })}
-          color={colors.secondary}
-          testId="blast-loaded-length-histogram"
-        />}
+        <div className="min-w-0" data-testid="blast-charge-density-histogram">
+          <label htmlFor="charge-density-metric" className="text-xs text-text-secondary">{t('blast.charge_metric_selector')}</label>
+          <select id="charge-density-metric" value={metric} onChange={(event) => setMetric(event.target.value as typeof metric)} className="block max-w-full rounded border border-border bg-surface text-text-primary">
+            <option value="kg_per_meter">{t('blast.charge_density_histogram_title')}</option>
+            <option value="kg_per_meter_loaded_column">{t('blast.loaded_column_density')}</option>
+          </select>
+          <p className="text-xs text-text-secondary">{t('blast.hole_count', { count: values.length })}</p>
+          {definitions?.[metric]?.formula && <p className="text-xs text-text-secondary">{definitions[metric].formula}</p>}
+          {values.length > 0 && <HistogramPlot values={values} title={label} xAxisTitle={label} color={colors.primary} testId="blast-charge-density-plot" />}
+        </div>
+        {descarga.length > 0 && <HistogramPlot values={descarga} title={t('blast.loaded_length_histogram_title')} xAxisTitle={t('blast.loaded_length_histogram_x_axis')} color={colors.secondary} testId="blast-loaded-length-histogram" />}
       </div>
     </section>
   );

@@ -86,7 +86,7 @@ def classify_achievement_delta(
     """
     neg = _validate_tolerance(tolerance_neg_m, "tolerance_neg_m")
     pos = _validate_tolerance(tolerance_pos_m, "tolerance_pos_m")
-    if delta is None:
+    if delta is None or isinstance(delta, bool):
         return None
     try:
         v = float(delta)
@@ -134,61 +134,53 @@ def _score_subset(
     "how many banks fully comply?" — and callers should not expect them
     to match when FUERA rows are present.
     """
-    n_total = 0
-    n_crest_cumple = 0
-    n_toe_cumple = 0
-    n_berm_cumple = 0
-    sum_credit = 0.0
-
+    details = []
+    statuses_by_row = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        crest_st = _delta_status(row.get("delta_crest"), crest_tol_neg, crest_tol_pos)
-        toe_st = _delta_status(row.get("delta_toe"), toe_tol_neg, toe_tol_pos)
-        berm_st = row.get("berm_status")
-
-        crest_credit = _row_credit(crest_st)
-        toe_credit = _row_credit(toe_st)
-        berm_credit = _row_credit(berm_st)
-
-        row_credit = (
-            W_CREST * crest_credit
-            + W_TOE * toe_credit
-            + W_BERM * berm_credit
-        )
-        sum_credit += row_credit
-        if crest_st == STATUS_CUMPLE:
-            n_crest_cumple += 1
-        if toe_st == STATUS_CUMPLE:
-            n_toe_cumple += 1
-        if berm_st == STATUS_CUMPLE:
-            n_berm_cumple += 1
-        n_total += 1
-
-    if n_total == 0:
-        return {
-            "n_total": 0,
-            "n_passing_crest": 0,
-            "n_passing_toe": 0,
-            "n_passing_berm": 0,
-            "breakdown": {"crest": 0, "toe": 0, "berm": 0},
-            "score_0_100": 0,
+        structural = row.get("type") in {"EXTRA", "MISSING"}
+        statuses = {
+            "crest": _delta_status(row.get("delta_crest"), crest_tol_neg, crest_tol_pos),
+            "toe": _delta_status(row.get("delta_toe"), toe_tol_neg, toe_tol_pos),
+            "berm": row.get("berm_status"),
         }
-
-    mean_credit = sum_credit / n_total
-    score_pct = int(round(mean_credit * 100.0))
-
-    crest_pct = int(round((n_crest_cumple / n_total) * 100.0))
-    toe_pct = int(round((n_toe_cumple / n_total) * 100.0))
-    berm_pct = int(round((n_berm_cumple / n_total) * 100.0))
-
+        tiers = (STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE)
+        statuses = {key: value if not structural and value in tiers else None
+                    for key, value in statuses.items()}
+        weights = {"crest": W_CREST, "toe": W_TOE, "berm": W_BERM}
+        available = [key for key, value in statuses.items() if value is not None]
+        missing = [key for key in weights if key not in available]
+        weight = sum(weights[key] for key in available)
+        score = (100 * sum(weights[key] * _row_credit(statuses[key]) for key in available) / weight
+                 if weight else None)
+        details.append({"score": score, "components_available": available,
+                        "components_missing": missing, "weight_available": weight})
+        statuses_by_row.append(statuses)
+    n_total = len(details)
+    scores = [entry["score"] for entry in details if entry["score"] is not None]
+    counts = {key: sum(status[key] is not None for status in statuses_by_row)
+              for key in ("crest", "toe", "berm")}
+    passing = {key: sum(status[key] == STATUS_CUMPLE for status in statuses_by_row)
+               for key in counts}
+    coverage = {
+        "n_rows": n_total,
+        "n_evaluable": len(scores),
+        "n_complete": sum(len(entry["components_available"]) == 3 for entry in details),
+        "weight_available_mean": (sum(entry["weight_available"] for entry in details) / n_total
+                                  if n_total else None),
+        "n_available": counts,
+    }
     return {
         "n_total": n_total,
-        "n_passing_crest": n_crest_cumple,
-        "n_passing_toe": n_toe_cumple,
-        "n_passing_berm": n_berm_cumple,
-        "breakdown": {"crest": crest_pct, "toe": toe_pct, "berm": berm_pct},
-        "score_0_100": score_pct,
+        "n_passing_crest": passing["crest"],
+        "n_passing_toe": passing["toe"],
+        "n_passing_berm": passing["berm"],
+        "breakdown": {key: int(round(100 * passing[key] / counts[key])) if counts[key] else None
+                      for key in counts},
+        "score_0_100": int(round(sum(scores) / len(scores))) if scores else None,
+        "coverage": coverage,
+        "rows": details,
     }
 
 
@@ -252,10 +244,9 @@ def compute_design_achievement_score(
 ) -> Dict[str, Any]:
     """Weighted 0-100 design-achievement score per (per-malla) section.
 
-    Per-row partial credit: ``CUMPLE -> 1.0``, ``FUERA DE TOLERANCIA -> 0.5``,
-    anything else (NO CUMPLE, NO CONSTRUIDO, MISSING, ...) -> ``0.0``. The
-    aggregate is ``0.4 * crest + 0.3 * toe + 0.3 * berm`` averaged across
-    rows.
+    Per-row partial credit is 1 for CUMPLE, 0.5 for FUERA and 0 for
+    NO CUMPLE. Available weights are renormalized per row. The global
+    score is the mean of evaluable row scores; coverage is reported separately.
 
     crest/toe status is derived per row from ``|delta_crest|`` /
     ``|delta_toe|`` against ``crest_tolerance_m`` (default
@@ -267,7 +258,7 @@ def compute_design_achievement_score(
     ----------
     comparisons : list of dict, optional
         Reconciliation rows (output of ``compare_design_vs_asbuilt``).
-        ``None`` or ``[]`` returns the zero-row shape without raising.
+        ``None`` or ``[]`` returns a nullable score without raising.
     malla_to_section : dict, optional
         ``{malla_name: [section_name, ...]}`` mapping produced by the UI
         join. When provided and non-empty, the function returns
@@ -280,7 +271,7 @@ def compute_design_achievement_score(
     Returns
     -------
     dict
-        - ``global``: int 0-100 percentage (weighted average across all rows)
+        - ``global``: nullable int 0-100 percentage (mean of evaluable rows)
         - ``breakdown``: ``{crest, toe, berm}`` percentages 0-100. These
           count **strict CUMPLE only** (FUERA rows do NOT contribute);
           ``global`` uses partial credit (CUMPLE=1.0, FUERA=0.5), so the
@@ -288,7 +279,9 @@ def compute_design_achievement_score(
         - ``n_total``: int, rows scored
         - ``n_passing_crest/toe/berm``: int, rows where the status equals
           ``STATUS_CUMPLE``
-        - ``per_malla``: dict[str, int] or ``None``
+        - ``per_malla``: dict[str, int | None] or ``None``
+        - ``rows``: row scores, available/missing components and available weight
+        - ``coverage``, ``per_malla_coverage``: counts and mean available weight
     """
     tolerances = _resolve_tolerances(
         crest_tolerance_m,
@@ -299,19 +292,7 @@ def compute_design_achievement_score(
         toe_tolerance_pos_m,
     )
 
-    if not comparisons:
-        empty_breakdown = {"crest": 0, "toe": 0, "berm": 0}
-        result = {
-            "global": 0,
-            "breakdown": empty_breakdown,
-            "n_total": 0,
-            "n_passing_crest": 0,
-            "n_passing_toe": 0,
-            "n_passing_berm": 0,
-            "per_malla": None,
-            "tolerances": tolerances,
-        }
-        return result
+    comparisons = list(comparisons or [])
 
     crest_tol_neg = tolerances["crest"]["neg"]
     crest_tol_pos = tolerances["crest"]["pos"]
@@ -323,20 +304,26 @@ def compute_design_achievement_score(
     )
 
     per_malla: Optional[Dict[str, int]] = None
+    per_malla_coverage = None
     if malla_to_section:
         per_malla = {}
+        per_malla_coverage = {}
         for malla, sections in malla_to_section.items():
             if not sections:
                 continue
             section_set = set(sections)
-            sub = [r for r in comparisons if r.get("section") in section_set]
+            sub = [r for r in comparisons if isinstance(r, dict) and r.get("section") in section_set]
             sub_score = _score_subset(
                 sub, crest_tol_neg, crest_tol_pos, toe_tol_neg, toe_tol_pos
             )
             per_malla[str(malla)] = sub_score["score_0_100"]
+            per_malla_coverage[str(malla)] = sub_score["coverage"]
 
     return {
         "global": overall["score_0_100"],
+        "rows": overall["rows"],
+        "coverage": overall["coverage"],
+        "per_malla_coverage": per_malla_coverage,
         "breakdown": overall["breakdown"],
         "n_total": overall["n_total"],
         "n_passing_crest": overall["n_passing_crest"],

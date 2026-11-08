@@ -156,6 +156,29 @@ def test_build_analysis_prompt_includes_banco():
     assert "B-7" in user
 
 
+def test_prompt_exposes_partial_achievement_coverage():
+    rows = [{"section": "S", "type": "MATCH", "delta_crest": 0.0}]
+    _, prompt = build_analysis_prompt(rows, [], {})
+    assert "Cobertura del logro" in prompt
+    assert "completos 0" in prompt
+    assert "peso medio" in prompt
+    assert "componentes faltantes" in prompt
+
+
+def test_blast_action_does_not_compare_g_per_tonne_to_kgm3_threshold():
+    rows = [{"section": "S", "type": "MATCH", "delta_crest": 0.8}]
+    out = _render_action_plan(rows, {"pf_promedio": 150, "pf_unit": "g/t"})
+    assert "Reducir burden" not in out
+    assert "kg/m³" not in out
+
+
+def test_blast_prompt_does_not_label_unspecified_pf_unit_as_kgm3():
+    _, prompt = build_analysis_prompt([], [], {}, blast_trend={"pf_promedio": 150, "pf_unit": "g/t"})
+    assert "150 kg/m³" not in prompt
+    assert "150 g/t" in prompt
+    assert "fórmula" in prompt.lower()
+
+
 def test_build_analysis_prompt_with_blast_trend():
     trend = {
         "pf_promedio": 0.5, "pf_desviacion": 0.1, "n_pozos_total": 20,
@@ -326,6 +349,7 @@ def test_render_action_plan_pf_overbreak_correlation():
          "delta_crest": 0.8, "bench_real": _bench(bench_number=4)},
     ]
     trend = {"pf_promedio": 0.75, "pf_desviacion": 0.1, "n_pozos_total": 20,
+             "pf_unit": "kg/m³",
              "trend_slope_pf_per_month": 0.0, "trend_direction": "estable",
              "ratios": {}, "outliers": []}
     out = _render_action_plan(results, trend)

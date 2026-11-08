@@ -1,13 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import client, { getSessionId } from '../../api/client';
+import type { BlastHole3DAttributes, BlastResponseProvenance } from '../../api/types';
 import type { BlastHole3DRecord } from './BlastHoleFilters';
 
-export interface BlastHoles3DResponse {
+export interface BlastHoles3DResponse extends BlastResponseProvenance {
   session_id: string;
   section_id: number | null;
   corridor_m: number | null;
   data_revision?: string | null;
-  holes: BlastHole3DRecord[];
+  holes: (BlastHole3DRecord & { attributes: BlastHole3DAttributes })[];
   summary: {
     total_loaded: number;
     drawable: number;

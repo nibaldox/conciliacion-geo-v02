@@ -36,9 +36,13 @@ export interface BlastHoles3DViewerProps {
   sectionName?: string | null;
 }
 
+function hasCoordinates(hole: BlastHoleSummary): hole is BlastHoleSummary & { x: number; y: number; z: number } {
+  return hole.x != null && hole.y != null && hole.z != null && Number.isFinite(hole.x) && Number.isFinite(hole.y) && Number.isFinite(hole.z);
+}
+
 /** Convert a flat list of holes to a centered mesh for camera positioning. */
 export function centerHoles(holes: BlastHoleSummary[]): { center: [number, number, number]; radius: number } {
-  const drawable = holes.filter((hole) => Number.isFinite(hole.x) && Number.isFinite(hole.y) && hole.z !== null && Number.isFinite(hole.z));
+  const drawable = holes.filter(hasCoordinates);
   if (drawable.length === 0) return { center: [0, 0, 0], radius: 10 };
   let sx = 0, sy = 0, sz = 0;
   for (const h of drawable) {
@@ -113,9 +117,7 @@ function BlastHolesCanvas({ holes }: { holes: BlastHoleSummary[] }) {
   const [gridColor, gridMinorColor] = useGridColors();
   const { center, radius } = useMemo(() => centerHoles(holes), [holes]);
   const cameraDistance = radius * 2.5;
-  const meshHoles = useMemo<BlastHole3D[]>(() => holes.filter((hole) => (
-    Number.isFinite(hole.x) && Number.isFinite(hole.y) && hole.z !== null && Number.isFinite(hole.z)
-  )).map((hole) => ({
+  const meshHoles = useMemo<BlastHole3D[]>(() => holes.filter(hasCoordinates).map((hole) => ({
     key: hole.hole_id,
     collar: [hole.x, hole.y, hole.z!],
     color: hardnessColors[hole.hardness ?? 'unknown'] ?? hardnessColors.unknown,

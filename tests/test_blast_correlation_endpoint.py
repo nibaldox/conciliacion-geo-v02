@@ -232,7 +232,11 @@ def test_response_schema_is_correct(client):
         "avg_over_break", "avg_under_break", "n_over", "n_under",
         "pf_vol_avg_kgm3", "pf_area_avg_kgm2", "pf_g_per_ton_avg",
         "pf_g_per_ton_net_avg", "energy_total_mj", "n_pf_valid",
-        "sector", "rock_density_used",
+        "sector", "rock_density_used", "pf_g_per_ton_inf_avg",
+        "pf_voronoi_bench_g_per_ton_section", "n_pf_voronoi_bench_valid",
+        "energy_coverage_kg_fraction", "pf_voronoi_bench_status_counts",
+        "pf_voronoi_bench_source_counts", "pf_voronoi_bench_source_dominant",
+        "energy_known_mj", "n_kg_known", "n_kg_missing",
     }
 
 
@@ -323,24 +327,17 @@ def test_nan_powder_factor_returns_200_with_finite_fields(client):
     assert len(data["rows"]) == 1
 
     row = data["rows"][0]
-    numeric_fields = [
-        "total_kg", "mean_abs_deviation", "avg_over_break", "avg_under_break",
-        "pf_vol_avg_kgm3", "pf_area_avg_kgm2", "pf_g_per_ton_avg",
-        "energy_total_mj",
-    ]
-    for f in numeric_fields:
-        assert math.isfinite(row[f]), f"non-finite value for {f}: {row[f]!r}"
-
-    assert row["pf_vol_avg_kgm3"] == 0.0
-    assert row["pf_area_avg_kgm2"] == 0.0
-    assert row["pf_g_per_ton_avg"] == 0.0
+    assert row["pf_vol_avg_kgm3"] is None
+    assert row["pf_area_avg_kgm2"] is None
+    assert row["pf_g_per_ton_avg"] is None
+    assert row["pf_voronoi_bench_g_per_ton_section"] is None
+    assert row["avg_under_break"] is None
     assert row["n_pf_valid"] == 0
 
 
+
 def test_compute_blast_geotech_correlation_never_emits_nan_pf_when_geometry_missing():
-    """Holes that survive procesar_pozos but yield NaN PF (kg missing) must
-    not leak NaN into the BlastCorrelationRow — they become 0.0, with
-    n_pf_valid==0 conveying the no-valid-PF signal."""
+    """Missing mass remains NaN in core; the HTTP boundary converts it to null."""
     raw = pd.DataFrame([
         {"label_pozo": "P-1", "Latitud_Geo": 10.0, "Longitud_Geo": 0.0,
          "Nombre_Banco": 4000.0, "Inclinacion_real": 0.0, "Azimuth_real": 0.0,
@@ -362,6 +359,5 @@ def test_compute_blast_geotech_correlation_never_emits_nan_pf_when_geometry_miss
     for f in ("pf_vol_avg_kgm3", "pf_area_avg_kgm2", "pf_g_per_ton_avg",
               "energy_total_mj"):
         v = getattr(r, f)
-        assert math.isfinite(v), f"non-finite {f}: {v!r}"
-        assert v == 0.0
+        assert math.isnan(v), f"missing {f} became {v!r}"
     assert r.n_pf_valid == 0

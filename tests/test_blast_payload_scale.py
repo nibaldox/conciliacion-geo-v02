@@ -42,8 +42,8 @@ def _iterrows_accepted_records_reference(frame):
             record[col] = value
         load = carga.loc[idx] if idx in carga.index else float("nan")
         height = descarga.loc[idx] if idx in descarga.index else float("nan")
-        record["carga"] = float(load) if pd.notna(load) else 0.0
-        record["descarga"] = float(height) if pd.notna(height) else 0.0
+        record["carga"] = float(load) if pd.notna(load) else None
+        record["descarga"] = float(height) if pd.notna(height) else None
         record["source_row_index"] = int(idx) if isinstance(idx, (np.integer, int)) else str(idx)
         record["row_processing_status"] = "accepted"
         records.append(record)

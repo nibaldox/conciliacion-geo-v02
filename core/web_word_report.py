@@ -128,9 +128,10 @@ _PROFILE_COLUMNS = (
     ("a_dev", "Desv. ángulo (°)", 0.9, lambda r: _fmt_signed(r.angle_dev, 1), "num"),
     ("b_design", "Berma diseño (m)", 0.9, lambda r: _fmt(r.berm_design, 2), "num"),
     ("b_real", "Berma real (m)", 0.9, lambda r: _fmt(r.berm_real, 2), "num"),
-    ("b_dev", "Desv. berma (m)", 0.9, lambda r: _fmt_signed(r.berm_dev, 2), "num"),
+    ("b_dev", "Desv. berma (m)", 0.9, lambda r: "sin dato" if r.berm_dev is None else _fmt_signed(r.berm_dev, 2), "num"),
     ("spill", "Derrame (m)", 0.9, lambda r: _fmt(r.spill_width, 2), "num"),
     ("effective", "Berma efectiva (m)", 0.9, lambda r: _fmt(r.effective_berm, 2), "num"),
+    ("effective_status", "Estado berma efectiva", 0.9, lambda r: _parameter_status_text(r.effective_berm_status), "text"),
     ("h_status", "Estado altura", 0.8, lambda r: _parameter_status_text(r.height_status), "text"),
     ("a_status", "Estado ángulo", 0.8, lambda r: _parameter_status_text(r.angle_status), "text"),
     ("b_status", "Estado berma", 0.8, lambda r: _parameter_status_text(r.berm_status), "text"),
@@ -683,6 +684,20 @@ def _add_design_achievement(doc, data: ReportData) -> None:
         table.rows[0].cells[idx].text = header
 
     global_row = achievement.get("global") or {}
+    coverage = global_row.get("coverage") or {}
+    weight = coverage.get("weight_available_mean")
+    weight_text = "sin dato" if weight is None else f"{weight:.2f}"
+    doc.add_paragraph(
+        f"Cobertura: evaluables {coverage.get('n_evaluable', 0)} de {coverage.get('n_rows', 0)}; "
+        f"completos {coverage.get('n_complete', 0)}; peso medio disponible {weight_text}. "
+        "El puntaje redistribuye los pesos disponibles; las filas parciales no son completas."
+    )
+    for row, detail in zip(data.rows, global_row.get("rows") or []):
+        missing = detail.get("components_missing") or []
+        if missing:
+            doc.add_paragraph(
+                f"{row.section}, banco {row.bench_num}: componentes faltantes: {', '.join(missing)}."
+            )
     ordered = [dict(sector, sector=sector.get("sector") or "(sin sector)") for sector in sectors]
     for sector in [dict(global_row, sector="Global")] + ordered:
         cells = table.add_row().cells
@@ -1275,6 +1290,39 @@ def _add_blast(doc, data: ReportData) -> None:
             "La sesión declara configuración de tronadura pero no pozos registrados."
         )
         return
+
+    from core.blast_correlation import PF_DEFINITIONS
+
+    if blast.get("data_status") == "legacy_reimport_required":
+        doc.add_paragraph("datos de pozos importados con una versión anterior: reimportar")
+    doc.add_paragraph("PF principal (g/t): 1000*Q/(A*H*rho), área de Voronoi por huella y altura de banco.")
+    for name, definition in PF_DEFINITIONS.items():
+        doc.add_paragraph(f"{name} ({definition['unit']}): {definition['formula']}")
+    consolidation = blast.get("consolidation_report")
+    if isinstance(consolidation, Mapping) and consolidation:
+        doc.add_paragraph(
+            f"Consolidación: pozos {consolidation.get('holes_out', 'sin dato')}; "
+            f"copias eliminadas {consolidation.get('exact_copies_removed', 'sin dato')}; "
+            f"filas de decks fusionadas {consolidation.get('deck_rows_merged', 'sin dato')}."
+        )
+    doc.add_paragraph(f"Detalle PF principal: primeros {min(len(holes), 60)} de {len(holes)} pozos.")
+    pf_table = doc.add_table(rows=1, cols=3)
+    for cell, label in zip(pf_table.rows[0].cells, ("Pozo", "PF principal (g/t)", "Estado")):
+        cell.text = label
+    for index, hole in enumerate(holes[:60]):
+        if not isinstance(hole, Mapping):
+            continue
+        cells = pf_table.add_row().cells
+        cells[0].text = str(hole.get("id_pozo") or hole.get("hole_id") or hole.get("label_pozo") or "sin dato")
+        value = hole.get("pf_voronoi_bench_g_per_ton")
+        try:
+            cells[1].text = f"{float(value):.2f}" if math.isfinite(float(value)) else "sin dato"
+        except (TypeError, ValueError):
+            cells[1].text = "sin dato"
+        cells[2].text = str(hole.get("pf_voronoi_bench_status") or "sin dato")
+        if hole.get("decks"):
+            doc.add_paragraph(f"Pozo {cells[0].text}: decks {hole['decks']}; mezcla {hole.get('explosive_mix', {})}; filas {hole.get('source_row_indices', [])}; copias eliminadas {hole.get('duplicate_rows_removed', 0)}.")
+    style_data_table(pf_table)
 
     if any(
         isinstance(hole, Mapping)

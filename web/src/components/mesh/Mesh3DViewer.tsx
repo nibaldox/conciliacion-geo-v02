@@ -976,6 +976,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
           {selectedHole.provenance.z_collar_semantic === 'design_surface_estimate' && <p>{t('blast.estimated')}</p>}
           {selectedHoleRelation && <p>{t('blast.relation')}: {t(`blast.holeFilters.relation.${selectedHoleRelation}`)}</p>}
           {selectedHole.section_distance_m != null && <p>{t('blast.distance')}: {selectedHole.section_distance_m.toFixed(2)} m</p>}
+          {selectedHole.source_row_index_user && selectedHole.source_row_index_user.length > 0 && <p>{t('blast.sourceRowUser')}: {selectedHole.source_row_index_user.join(', ')}</p>}
         </div>}
       </>}
     </div>

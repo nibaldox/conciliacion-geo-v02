@@ -16,7 +16,9 @@ import numpy as np
 from core.blast_correlation import (
     compute_blast_geotech_correlation,
     compute_pasadura_stats,
+    PF_DEFINITIONS,
 )
+from core.design_achievement import build_design_achievement_summary
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.compliance_status import (
     STATUS_CUMPLE,
@@ -35,6 +37,14 @@ PROFILE_IMAGE_MAX_WIDTH = Inches(4.95)
 PROFILE_IMAGE_MAX_HEIGHT = Inches(2.8)
 PLAN_IMAGE_MAX_WIDTH = Inches(USABLE_WIDTH_IN - 0.1)
 PLAN_IMAGE_MAX_HEIGHT = Inches(5.5)
+
+
+def _finite(value) -> bool:
+    """True when ``value`` is a real finite number."""
+    return (isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and bool(np.isfinite(value)))
+
 
 def create_section_plot(params_design, params_topo, distances_d, elevations_d, distances_t, elevations_t,
                         plot_options=None, section=None, df_pozos=None, filtered_bench_nums=None):
@@ -450,9 +460,49 @@ def _add_bounded_picture(paragraph, image_stream, max_width, max_height):
     return run
 
 
+def _corrective_lines(comparisons, crest_toe_tolerance=None):
+    achievement = build_design_achievement_summary(comparisons, crest_toe_tolerance)
+    coverage = achievement['coverage']
+    value = achievement['global_score']
+    weight = coverage['weight_available_mean']
+    lines = [
+        f"Logro de diseño: {value if value is not None else 'sin dato'}",
+        f"Cobertura: evaluables {coverage['n_evaluable']} de {coverage['n_rows']}; completos {coverage['n_complete']}; peso medio disponible {weight if weight is not None else 'sin dato'}.",
+        "El puntaje redistribuye los pesos disponibles; las filas parciales no son completas.",
+    ]
+    for row, detail in zip(comparisons, achievement['rows']):
+        missing = detail['components_missing']
+        if missing:
+            lines.append(f"{row.get('section', 'sin dato')}, banco {row.get('bench_num', 'sin dato')}: componentes faltantes: {', '.join(missing)}.")
+        def display(key):
+            v = row.get(key)
+            if v is None or (isinstance(v, float) and not np.isfinite(v)):
+                return 'sin dato'
+            return str(v)
+        lines.append(f"{row.get('section', 'sin dato')}, banco {row.get('bench_num', 'sin dato')}: desviación berma bruta (m): {display('berm_dev')}; berma bruta: {display('berm_status')}; berma efectiva (m): {display('effective_berm')}; estado berma efectiva: {display('effective_berm_status')}.")
+    return lines
+
+
+def _blast_corrective_lines(df_pozos, consolidation_report=None):
+    if df_pozos is None or df_pozos.empty:
+        return []
+    lines = ["PF principal (g/t): 1000*Q/(A*H*rho), área Voronoi por huella y altura de banco."]
+    lines.extend(f"{name} ({definition['unit']}): {definition['formula']}" for name, definition in PF_DEFINITIONS.items())
+    if consolidation_report:
+        lines.append(f"Consolidación: pozos {consolidation_report.get('holes_out', 'sin dato')}; copias eliminadas {consolidation_report.get('exact_copies_removed', 'sin dato')}; filas de decks fusionadas {consolidation_report.get('deck_rows_merged', 'sin dato')}.")
+    lines.append(f"Detalle PF principal: primeros {min(len(df_pozos), 60)} de {len(df_pozos)} pozos.")
+    for index, hole in enumerate(df_pozos.head(60).to_dict('records')):
+        value = hole.get('pf_voronoi_bench_g_per_ton')
+        if value is None or (isinstance(value, (float, np.floating)) and not np.isfinite(value)):
+            value = 'sin dato'
+        lines.append(f"Pozo {hole.get('hole_id') or hole.get('label_pozo') or index + 1}: PF principal {value} g/t; estado {hole.get('pf_voronoi_bench_status') or 'sin dato'}.")
+    return lines
+
+
 def generate_word_report(comparisons, all_data, output_path, project_info=None,
                          df_pozos=None, sections=None, plot_options=None,
-                         mesh_topo=None, grid_ref=0.0):
+                         mesh_topo=None, grid_ref=0.0, consolidation_report=None,
+                         crest_toe_tolerance=None):
     if project_info is None:
         project_info = {}
 
@@ -471,6 +521,8 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
 
         doc.add_paragraph(f"Se evaluaron {len(match_comps)} bancos emparejados.")
         doc.add_paragraph(f"Cumplimiento General (Ponderado): {section_score:.1f}/100 — {section_status}")
+        for line in _corrective_lines(comparisons, crest_toe_tolerance):
+            doc.add_paragraph(line)
 
         # Profundidad total: cota cresta global (max crest_elevation across all
         # bench_real) menos cota piso global (min floor_elevation > 0 across all
@@ -565,17 +617,20 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         ]
         for key, label, real_field, unit in param_avg_specs:
             row_cells = table.add_row().cells
-            n_ok = sum(1 for c in match_comps if c[key] == STATUS_CUMPLE)
+            evaluable = [c for c in match_comps
+                         if c.get(key) not in (None, '-')]
+            n_ok = sum(1 for c in evaluable if c[key] == STATUS_CUMPLE)
             # Fusionar cualquier estado distinto de CUMPLE (incluyendo
             # el legacy FUERA DE TOLERANCIA) en la columna NO CUMPLE.
             n_nok = sum(
-                1 for c in match_comps if c[key] != STATUS_CUMPLE
+                1 for c in evaluable if c[key] != STATUS_CUMPLE
             )
             total = n_ok + n_nok
             pct = (n_ok / total * 100) if total > 0 else 0
 
-            real_values = [c[real_field] for c in match_comps
-                           if c.get(real_field) is not None]
+            real_values = [float(c[real_field]) for c in match_comps
+                           if c.get(real_field) is not None
+                           and np.isfinite(c[real_field])]
             if real_values:
                 avg_val = sum(real_values) / len(real_values)
                 avg_str = f"{avg_val:.2f} {unit}"
@@ -650,44 +705,45 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
             row_cells[1].text = f"B{b_num} ({b_level})"
 
             row_cells[2].text = (f"{c['height_design']:.1f}"
-                                 if c.get('height_design') is not None else "N/A")
+                                 if _finite(c.get('height_design')) else "N/A")
             row_cells[3].text = (f"{c['height_real']:.1f}"
-                                 if c.get('height_real') is not None else "N/A")
+                                 if _finite(c.get('height_real')) else "N/A")
 
             row_cells[4].text = (f"{c['angle_design']:.1f}"
-                                 if c.get('angle_design') is not None else "N/A")
+                                 if _finite(c.get('angle_design')) else "N/A")
             row_cells[5].text = (f"{c['angle_real']:.1f}"
-                                 if c.get('angle_real') is not None else "N/A")
+                                 if _finite(c.get('angle_real')) else "N/A")
 
             row_cells[6].text = (f"{c['berm_design']:.1f}"
-                                 if c.get('berm_design') is not None else "N/A")
+                                 if _finite(c.get('berm_design')) else "N/A")
             row_cells[7].text = (f"{c['berm_real']:.1f}"
-                                 if c.get('berm_real') is not None else "N/A")
+                                 if _finite(c.get('berm_real')) else "N/A")
 
             row_cells[8].text = (f"{c['height_real']:.1f}"
-                                 if c.get('height_real') is not None else "N/A")
+                                 if _finite(c.get('height_real')) else "N/A")
 
             br = c.get('bench_real')
             fe = getattr(br, 'floor_elevation', None) if br is not None else None
             row_cells[9].text = f"{fe:.1f}" if fe is not None and fe > 0 else "N/A"
 
             # Columna Estado: score + color de fondo verde/rojo
-            bench_score = c.get('bench_score', 0)
-            cumple = bench_score >= 70
-            estado_text = f"{'✓' if cumple else '✗'} {bench_score:.0f}"
+            bench_score = c.get('bench_score')
+            scorable = _finite(bench_score)
+            cumple = scorable and bench_score >= 70
+            estado_text = f"{'✓' if cumple else '✗'} {bench_score:.0f}" if scorable else "sin dato"
             estado_cell = row_cells[10]
             estado_cell.text = estado_text
-            # Aplicar color al texto (verde/rojo)
-            bg_color = "C6EFCE" if cumple else "FFC7CE"  # Excel-style green/red
-            font_color = "006100" if cumple else "9C0006"
-            shading_elm = OxmlElement('w:shd')
-            shading_elm.set(qn('w:fill'), bg_color)
-            estado_cell._tc.get_or_add_tcPr().append(shading_elm)
-            for paragraph in estado_cell.paragraphs:
-                for run in paragraph.runs:
-                    run.font.bold = True
-                    run.font.size = Pt(9)
-                    run.font.color.rgb = RGBColor.from_string(font_color)
+            if scorable:
+                bg_color = "C6EFCE" if cumple else "FFC7CE"  # Excel-style green/red
+                font_color = "006100" if cumple else "9C0006"
+                shading_elm = OxmlElement('w:shd')
+                shading_elm.set(qn('w:fill'), bg_color)
+                estado_cell._tc.get_or_add_tcPr().append(shading_elm)
+                for paragraph in estado_cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.bold = True
+                        run.font.size = Pt(9)
+                        run.font.color.rgb = RGBColor.from_string(font_color)
 
             for cell in row_cells:
                 for paragraph in cell.paragraphs:
@@ -763,8 +819,17 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
     if df_pozos is not None and not df_pozos.empty:
         doc.add_page_break()
         doc.add_heading("4. Análisis de Perforación y Tronadura", level=1)
+        for line in _blast_corrective_lines(df_pozos, consolidation_report):
+            doc.add_paragraph(line)
 
-        stats = compute_pasadura_stats(df_pozos)
+        stats_frame = df_pozos.copy()
+        for column in ('Z_collar', 'Z_toe'):
+            if column not in stats_frame:
+                stats_frame[column] = np.nan
+            else:
+                import pandas as pd
+                stats_frame[column] = pd.to_numeric(stats_frame[column], errors='coerce')
+        stats = compute_pasadura_stats(stats_frame)
         p_mean = stats["mean"]
         p_optimal = stats["optimal_count"]
         p_pct = stats["optimal_pct"]
@@ -772,8 +837,11 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
         p1 = doc.add_paragraph()
         p1.add_run("Estadísticas Generales de Perforación y Voladura:\n").bold = True
         p1.add_run(f"- Total de Pozos Registrados: {stats['total']}\n")
-        p1.add_run(f"- Pasadura Promedio (Sub-drilling): {p_mean:.2f} m\n")
-        p1.add_run(f"- Porcentaje de Pozos en Pasadura Óptima (0.5m a 1.5m): {p_pct:.1f}% ({p_optimal} pozos)\n")
+        if np.isfinite(p_mean):
+            p1.add_run(f"- Pasadura Promedio (Sub-drilling): {p_mean:.2f} m\n")
+            p1.add_run(f"- Porcentaje de Pozos en Pasadura Óptima (0.5m a 1.5m): {p_pct:.1f}% ({p_optimal} pozos)\n")
+        else:
+            p1.add_run("- Pasadura Promedio: sin dato\n- Porcentaje de Pozos en Pasadura Óptima: sin dato\n")
 
         if sections and comparisons:
             doc.add_heading("Cruce de Desviaciones vs Carga de Explosivo", level=2)
@@ -801,8 +869,8 @@ def generate_word_report(comparisons, all_data, output_path, project_info=None,
                     row_cells = table.add_row().cells
                     row_cells[0].text = sec_name
                     row_cells[1].text = str(num_wells)
-                    row_cells[2].text = f"{total_kg:.0f}"
-                    row_cells[3].text = f"{avg_dev:.2f}"
+                    row_cells[2].text = f"{total_kg:.0f}" if total_kg is not None else "sin dato"
+                    row_cells[3].text = f"{avg_dev:.2f}" if avg_dev is not None else "sin dato"
                 style_data_table(table)
 
     doc.save(output_path)

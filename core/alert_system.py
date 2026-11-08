@@ -51,7 +51,7 @@ def evaluate_bench_health(bench: BenchParams) -> List[Alert]:
             'Inspeccionar cara del banco en próximo turno.',
             float(bench.overhang_m),
         ))
-    if not bench.catch_bench_adequate:
+    if bench.catch_bench_adequate is False and bench.catch_bench_ratio is not None:
         alerts.append(Alert(
             'ORANGE', 'CATCH_BENCH_INADEQUATE', bench.bench_number,
             f'Catch bench insuficiente (ratio {bench.catch_bench_ratio:.2f}).',

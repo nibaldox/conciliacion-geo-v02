@@ -45,6 +45,7 @@ NUMBER_FORMAT = NumberFormat()
 from core.blast_correlation import (
     compute_blast_geotech_correlation,
     compute_pasadura_stats,
+    PF_DEFINITIONS,
 )
 from core.column_utils import KILOS_CANDIDATES
 from core.compliance_status import (
@@ -104,6 +105,16 @@ def _apply_status_style(cell: Cell) -> None:
     elif val == STATUS_EXTRA or "ADICIONAL" in str(val) or "RAMPA" in str(val):
         cell.fill = FILL_PURPLE
         cell.font = FONT_PURPLE
+
+
+def _is_evaluable_status(status: Any) -> bool:
+    """True when a per-parameter status was actually evaluated.
+
+    ``'-'`` (not evaluable: missing berm measurement) and the non-measured
+    statuses (``NO CONSTRUIDO``, ``EXTRA``, ``FALTA BANCO``,
+    ``BANCO ADICIONAL``) must stay out of the percentage denominators.
+    """
+    return status in (STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE)
 
 
 def _write_header(ws: Worksheet, row: int, headers: List[str]) -> None:
@@ -193,7 +204,7 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
         row += 1
         _write_header(ws, row,
                       ["Parametro", STATUS_CUMPLE, STATUS_NO_CUMPLE,
-                       "Total", "% Logro"])
+                       "Total", "Evaluables", "% Logro"])
         row += 1
 
         for key, label in [('height_status', 'Altura de banco'),
@@ -204,13 +215,16 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
             # inflate the denominator.
             match_comps = [c for c in comparisons if c.get('type') == 'MATCH']
             total = len(match_comps)
-            n_ok = sum(1 for c in match_comps if c[key] == STATUS_CUMPLE)
+            evaluables = [c for c in match_comps
+                          if _is_evaluable_status(c.get(key))]
+            n_eval = len(evaluables)
+            n_ok = sum(1 for c in evaluables if c[key] == STATUS_CUMPLE)
             # FUERA DE TOLERANCIA → NO CUMPLE (binary compliance).
             n_nok = sum(
-                1 for c in match_comps
+                1 for c in evaluables
                 if c[key] in (STATUS_FUERA, STATUS_NO_CUMPLE)
             )
-            pct = n_ok / total * 100 if total > 0 else 0
+            pct = n_ok / n_eval * 100 if n_eval > 0 else 0
 
             ws.cell(row=row, column=1, value=label).border = THIN_BORDER
             c_ok = ws.cell(row=row, column=2, value=n_ok)
@@ -221,6 +235,8 @@ def _write_summary_sheet(wb: Workbook, comparisons: List[Dict[str, Any]],
             c_nok.fill = FILL_NOK
             ws.cell(row=row, column=4, value=total).border = THIN_BORDER
             ws.cell(row=row, column=5,
+                    value=f"{n_eval} evaluables de {total}").border = THIN_BORDER
+            ws.cell(row=row, column=6,
                     value=f"{pct:.1f}%").border = THIN_BORDER
             row += 1
 
@@ -266,7 +282,8 @@ def _write_bench_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
         "A. Diseno (deg)", "A. Real (deg)", "Desv. A (deg)", "Cumpl. A",
         "B. Diseno (m)", "B. Real (m)", "B. Minima (m)", "Cumpl. B",
         "Delta Cresta (m)", "Delta Pata (m)",
-        "Cota Piso (m)", "Altura Total (m)", "Altura Toe (m)"
+        "Cota Piso (m)", "Altura Total (m)", "Altura Toe (m)",
+        "Desv. berma bruta (m)", "Berma efectiva (m)", "Estado berma efectiva"
     ]
     _write_header(ws, 1, headers)
 
@@ -278,7 +295,7 @@ def _write_bench_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
             comp['angle_design'], comp['angle_real'],
             comp['angle_dev'], comp['angle_status'],
             comp['berm_design'], comp['berm_real'],
-            comp.get('berm_min', 0), comp['berm_status'],
+            comp.get('berm_min'), comp['berm_status'],
             comp.get('delta_crest', ''), comp.get('delta_toe', ''),
         ]
         bt = comp.get('bench_real')
@@ -293,6 +310,9 @@ def _write_bench_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> None:
             round(floor_elevation, 1) if floor_elevation is not None else "N/A",
             round(adjusted_height, 1) if adjusted_height is not None else "N/A",
             round(toe_height, 1) if toe_height is not None else "N/A",
+            comp.get('berm_dev') if comp.get('berm_dev') is not None else "sin dato",
+            comp.get('effective_berm') if comp.get('effective_berm') is not None else "sin dato",
+            comp.get('effective_berm_status') or "sin dato",
         ])
         for col_idx, val in enumerate(values, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
@@ -352,19 +372,24 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
     # CUMPLE / NO CUMPLE binario: FUERA DE TOLERANCIA se fusiona en NO CUMPLE.
     _write_header(ws, row,
                   ["Parametro", STATUS_CUMPLE, STATUS_NO_CUMPLE,
-                   "% Cumplimiento"])
+                   "Evaluables", "% Cumplimiento"])
     row += 1
 
+    evaluables_by_key: dict[str, list[dict]] = {}
     for key, label in [('height_status', 'Altura de banco'),
                        ('angle_status', 'Angulo de cara'),
                        ('berm_status', 'Ancho de berma')]:
-        n_ok = sum(1 for c in comparisons if c[key] == STATUS_CUMPLE)
+        evaluables = [c for c in comparisons
+                      if _is_evaluable_status(c.get(key))]
+        evaluables_by_key[key] = evaluables
+        n_eval = len(evaluables)
+        n_ok = sum(1 for c in evaluables if c[key] == STATUS_CUMPLE)
         # FUERA DE TOLERANCIA → NO CUMPLE (binary compliance).
         n_nok = sum(
-            1 for c in comparisons
+            1 for c in evaluables
             if c[key] in (STATUS_FUERA, STATUS_NO_CUMPLE)
         )
-        pct = n_ok / total * 100 if total > 0 else 0
+        pct = n_ok / n_eval * 100 if n_eval > 0 else 0
 
         ws.cell(row=row, column=1, value=label).border = THIN_BORDER
         c_ok = ws.cell(row=row, column=2, value=n_ok)
@@ -374,18 +399,21 @@ def _write_dashboard_sheet(wb: Workbook, comparisons: List[Dict[str, Any]]) -> N
         c_nok.border = THIN_BORDER
         c_nok.fill = FILL_NOK
         ws.cell(row=row, column=4,
+                value=f"{n_eval} de {total}").border = THIN_BORDER
+        ws.cell(row=row, column=5,
                 value=f"{pct:.1f}%").border = THIN_BORDER
         row += 1
 
     # Score Global / Cumplimiento General (binary: CUMPLE / NO CUMPLE).
     # No es un % plano de parámetros individuales: se calcula sobre el
-    # total de estados CUMPLE / NO CUMPLE (FUERA ya fusionado arriba).
+    # total de estados evaluables CUMPLE / NO CUMPLE (FUERA ya fusionado
+    # arriba); los parámetros sin dato no entran al denominador.
     row += 1
-    n_all = total * 3
+    n_all = sum(len(v) for v in evaluables_by_key.values())
     n_ok_all = sum(
-        1 for c in comparisons
-        for k in ['height_status', 'angle_status', 'berm_status']
-        if c[k] == STATUS_CUMPLE
+        1 for key, evaluables in evaluables_by_key.items()
+        for c in evaluables
+        if c[key] == STATUS_CUMPLE
     )
     pct_global = n_ok_all / n_all * 100 if n_all > 0 else 0
 
@@ -403,7 +431,7 @@ def _write_sector_summary(wb: Workbook, comparisons: List[Dict[str, Any]]) -> No
 
     ws.cell(row=1, column=1, value="RESUMEN EJECUTIVO POR SECTOR").font = Font(bold=True, size=14, color="2F5496")
 
-    headers = ["Sector", "Total Bancos", "Cumplimiento Global", "Cumpl. Altura", "Cumpl. Angulo", "Cumpl. Berma"]
+    headers = ["Sector", "Total Bancos", "Cumplimiento Global", "Cumpl. Altura", "Cumpl. Angulo", "Cumpl. Berma", "Evaluables (H/A/B)"]
     _write_header(ws, 3, headers)
 
     # Group by sector
@@ -418,6 +446,16 @@ def _write_sector_summary(wb: Workbook, comparisons: List[Dict[str, Any]]) -> No
         def count_ok(key):
             return sum(1 for c in sec_comps if is_passing_status(c.get(key)))
 
+        # Only benches whose parameter was actually evaluated enter the
+        # denominator: '-' (sin dato) is not a failure.
+        def evaluables(key):
+            return [c for c in sec_comps
+                    if _is_evaluable_status(c.get(key))]
+
+        ev_h, ev_a, ev_b = (evaluables('height_status'),
+                            evaluables('angle_status'),
+                            evaluables('berm_status'))
+
         ok_h = count_ok('height_status')
         ok_a = count_ok('angle_status')
         ok_b = count_ok('berm_status')
@@ -425,13 +463,13 @@ def _write_sector_summary(wb: Workbook, comparisons: List[Dict[str, Any]]) -> No
         # Calculate percentages
         # Note: Global compliance is average of all parameters? Or average of banks that pass all?
         # Let's use % of total parameters (3 per bank)
-        n_params = total * 3
+        n_params = len(ev_h) + len(ev_a) + len(ev_b)
         n_ok_total = ok_h + ok_a + ok_b
         pct_global = (n_ok_total / n_params * 100) if n_params > 0 else 0
 
-        pct_h = (ok_h / total * 100) if total > 0 else 0
-        pct_a = (ok_a / total * 100) if total > 0 else 0
-        pct_b = (ok_b / total * 100) if total > 0 else 0
+        pct_h = (ok_h / len(ev_h) * 100) if ev_h else 0
+        pct_a = (ok_a / len(ev_a) * 100) if ev_a else 0
+        pct_b = (ok_b / len(ev_b) * 100) if ev_b else 0
 
         ws.cell(row=row, column=1, value=sector).border = THIN_BORDER
         ws.cell(row=row, column=2, value=total).border = THIN_BORDER
@@ -447,6 +485,9 @@ def _write_sector_summary(wb: Workbook, comparisons: List[Dict[str, Any]]) -> No
         ws.cell(row=row, column=4, value=f"{pct_h:.1f}%").border = THIN_BORDER
         ws.cell(row=row, column=5, value=f"{pct_a:.1f}%").border = THIN_BORDER
         ws.cell(row=row, column=6, value=f"{pct_b:.1f}%").border = THIN_BORDER
+        ws.cell(row=row, column=7,
+                value=(f"{len(ev_h)}/{len(ev_a)}/{len(ev_b)} de {total}")
+                ).border = THIN_BORDER
 
         row += 1
 
@@ -457,7 +498,8 @@ def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
                    params_topo: List[Any], tolerances: Dict[str, Any],
                    output_path: str, project_info: Optional[Dict[str, str]] = None,
                    df_pozos: Optional[Any] = None,
-                   sections: Optional[List[Any]] = None) -> None:
+                   sections: Optional[List[Any]] = None,
+                   consolidation_report: Optional[Dict[str, Any]] = None) -> None:
     """Export comparison results to a formatted Excel workbook.
 
     Raises:
@@ -502,8 +544,22 @@ def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
         _write_interramp_sheet(wb, params_design, params_topo)
         _write_dashboard_sheet(wb, comparisons)
 
+        from core.design_achievement import build_design_achievement_summary
+        achievement = build_design_achievement_summary(comparisons, tolerances.get("crest_toe_deviation"))
+        coverage = achievement["coverage"]
+        ws = wb.create_sheet("Logro diseño")
+        ws.append(["Logro de diseño", achievement["global_score"] if achievement["global_score"] is not None else "sin dato"])
+        ws.append(["Cobertura evaluables", coverage["n_evaluable"], "de", coverage["n_rows"]])
+        ws.append(["Completos", coverage["n_complete"], "Peso medio disponible", coverage["weight_available_mean"] if coverage["weight_available_mean"] is not None else "sin dato"])
+        ws.append(["Sección", "Sector", "Banco", "Puntaje", "Peso disponible", "Componentes faltantes"])
+        for comparison, detail in zip(comparisons, achievement["rows"]):
+            ws.append([comparison.get("section"), comparison.get("sector"), comparison.get("bench_num"),
+                       detail["score"] if detail["score"] is not None else "sin dato",
+                       detail["weight_available"], ", ".join(detail["components_missing"]) or "ninguno"])
+        _auto_width(ws)
+
         if df_pozos is not None and not df_pozos.empty:
-            _write_tronadura_sheet(wb, df_pozos, comparisons, sections)
+            _write_tronadura_sheet(wb, df_pozos, comparisons, sections, consolidation_report)
 
         wb.save(output_path)
     except ExcelWriterError:
@@ -515,8 +571,14 @@ def export_results(comparisons: List[Dict[str, Any]], params_design: List[Any],
         ) from exc
 
 
-def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: List[Dict[str, Any]], sections: Optional[List[Any]] = None) -> None:
+def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: List[Dict[str, Any]], sections: Optional[List[Any]] = None, consolidation_report: Optional[Dict[str, Any]] = None) -> None:
     """Write Drill & Blast and Geotechnical correlation results to Excel."""
+    df_pozos = df_pozos.copy()
+    for column in ('X', 'Y', 'Z_collar', 'X_toe', 'Y_toe', 'Z_toe', 'Incl', 'Az', 'Len'):
+        if column not in df_pozos.columns:
+            df_pozos[column] = np.nan
+    for column in ('Z_collar', 'Z_toe'):
+        df_pozos[column] = pd.to_numeric(df_pozos[column], errors='coerce')
     ws = wb.create_sheet("Tronadura")
     ws.views.sheetView[0].showGridLines = True
 
@@ -570,7 +632,7 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
                 seen.append(c["section"])
         corr_rows = [
             type("R", (), {
-                "as_tuple": lambda self, n=s: (n, 0, 0, 0.0)
+                "as_tuple": lambda self, n=s: (n, 0, None, None)
             })() for s in seen
         ]
 
@@ -578,6 +640,7 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     for row in corr_rows:
         sec_name, num_wells, total_kg, avg_dev = row.as_tuple()
         row_vals = [sec_name, num_wells, total_kg, avg_dev]
+        row_vals = ["sin dato" if value is None or (isinstance(value, (float, np.floating)) and not np.isfinite(value)) else value for value in row_vals]
         for col_idx, val in enumerate(row_vals, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
             cell.font = regular_font
@@ -597,7 +660,7 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     ws.cell(row=row_idx, column=1, value="2. Detalle de Pozos de Tronadura y Pasadura").font = section_font
 
     row_idx += 1
-    headers_pozo = ["Pozo", "Collar X", "Collar Y", "Collar Z", "Pata X", "Pata Y", "Pata Z", "Largo (m)", "Inclinación (°)", "Azimut (°)", "Explosivo (Kg)", "Pasadura (m)"]
+    headers_pozo = ["Pozo", "Collar X", "Collar Y", "Collar Z", "Pata X", "Pata Y", "Pata Z", "Largo (m)", "Inclinación (°)", "Azimut (°)", "Explosivo (Kg)", "Pasadura (m)", "PF principal Voronoi banco (g/t)", "Estado PF principal", "PF Q/(B*S*H) (kg/m3)", "Carga Q/(B*S) (kg/m2)", "PF Q/(B*S*L_vertical*rho) (g/t)", "PF Q/(B*S*H_net*rho) (g/t)", "PF Q/(A*L_vertical*rho) (g/t)"]
     for col_idx, h in enumerate(headers_pozo, 1):
         cell = ws.cell(row=row_idx, column=col_idx, value=h)
         cell.font = header_font
@@ -619,7 +682,7 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
     _ = stats["total"], stats["mean"], stats["optimal_pct"]
 
     kg_col = find_df_column(df_pozos, list(KILOS_CANDIDATES), raise_error=False)
-    label_col = find_df_column(df_pozos, ['label_pozo'], raise_error=False)
+    label_col = find_df_column(df_pozos, ['id_pozo', 'label_pozo', 'hole_id'], raise_error=False)
     incl_col = 'Incl'
     az_col = 'Az'
     len_col = 'Len'
@@ -630,7 +693,7 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
         label = (
             str(getattr(row, label_col, None))
             if label_col and pd.notna(getattr(row, label_col, None))
-            else f"P-{idx+1}"
+            else "sin dato"
         )
         x_c = row.X
         y_c = row.Y
@@ -644,11 +707,13 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
         kg = (
             getattr(row, kg_col, None)
             if kg_col and pd.notna(getattr(row, kg_col, None))
-            else 0.0
+            else None
         )
         pas = row.Pasadura
 
-        row_vals = [label, x_c, y_c, z_c, x_t, y_t, z_t, length, incl, az, kg, pas]
+        pf_fields = ("pf_voronoi_bench_g_per_ton", "pf_voronoi_bench_status", "pf_vol_kgm3", "pf_area_kgm2", "pf_g_per_ton", "pf_g_per_ton_net", "pf_g_per_ton_inf")
+        row_vals = [label, x_c, y_c, z_c, x_t, y_t, z_t, length, incl, az, kg, pas] + [getattr(row, field, None) for field in pf_fields]
+        row_vals = ["sin dato" if val is None or (isinstance(val, (float, np.floating)) and not np.isfinite(val)) else val for val in row_vals]
 
         for col_idx, val in enumerate(row_vals, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=val)
@@ -668,5 +733,27 @@ def _write_tronadura_sheet(wb: openpyxl.Workbook, df_pozos: Any, comparisons: Li
                 ws.cell(row=row_idx, column=col_idx).fill = zebra_fill
 
         row_idx += 1
+
+    row_idx += 2
+    try:
+        from core.blast_hole_consolidation import BLAST_ALGORITHM_VERSION
+    except ImportError:
+        BLAST_ALGORITHM_VERSION = None
+    if BLAST_ALGORITHM_VERSION is None or 'blast_algorithm_version' not in df_pozos or not df_pozos['blast_algorithm_version'].eq(BLAST_ALGORITHM_VERSION).all():
+        ws.cell(row=row_idx, column=1, value="datos de pozos importados con una versión anterior: reimportar")
+        row_idx += 1
+    ws.cell(row=row_idx, column=1, value="Definiciones de factores de carga")
+    row_idx += 1
+    ws.cell(row=row_idx, column=1, value="PF principal (g/t): 1000*Q/(A*H*rho), área Voronoi por huella y altura de banco")
+    for name, definition in PF_DEFINITIONS.items():
+        row_idx += 1
+        ws.cell(row=row_idx, column=1, value=f"{name} ({definition['unit']}): {definition['formula']}")
+    if consolidation_report:
+        row_idx += 1
+        ws.cell(row=row_idx, column=1, value=(
+            f"Consolidación: pozos {consolidation_report.get('holes_out', 'sin dato')}; "
+            f"copias eliminadas {consolidation_report.get('exact_copies_removed', 'sin dato')}; "
+            f"filas de decks fusionadas {consolidation_report.get('deck_rows_merged', 'sin dato')}"
+        ))
 
     _auto_width(ws)

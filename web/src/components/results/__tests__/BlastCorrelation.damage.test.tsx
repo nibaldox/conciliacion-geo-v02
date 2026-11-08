@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 // Initialise i18next so useTranslation() returns real Spanish strings.
 import i18n from '../../../i18n';
 import {
@@ -65,11 +65,11 @@ describe('buildDamageTraces', () => {
     expect(line.type).toBe('scatter');
     expect(line.mode).toBe('lines');
     // Line spans the x-range of the points.
-    const xMin = Math.min(...points.map((p) => p.pf_g_per_ton));
-    const xMax = Math.max(...points.map((p) => p.pf_g_per_ton));
+    const xMin = Math.min(...points.map((p) => p.pf_g_per_ton!));
+    const xMax = Math.max(...points.map((p) => p.pf_g_per_ton!));
     expect(line.x).toEqual([xMin, xMax]);
     // y = beta0 + beta1 * x at the endpoints.
-    expect(line.y).toEqual([fit.beta0 + fit.beta1 * xMin, fit.beta0 + fit.beta1 * xMax]);
+    expect(line.y).toEqual([fit.beta0! + fit.beta1! * xMin, fit.beta0! + fit.beta1! * xMax]);
   });
 
   it('does NOT overlay the regression line when points < min_samples even if fit present', () => {
@@ -100,6 +100,7 @@ describe('buildDamageTraces', () => {
 
 vi.mock('../../../api/hooks', () => ({
   useBlastCorrelation: vi.fn(),
+  useBlastDefinitions: vi.fn(() => ({ data: undefined })),
   useBlastDamageModel: vi.fn(),
   useSettings: vi.fn(() => ({ data: undefined })),
   useSections: vi.fn(() => ({ data: [] })),
@@ -190,6 +191,16 @@ describe('<BlastCorrelation /> damage chart', () => {
   });
 
   beforeEach(() => vi.clearAllMocks());
+
+  it('warns when the damage response is legacy even without valid points', () => {
+    mockRows([makeRow('S-01')]);
+    vi.mocked(useBlastDamageModel).mockReturnValue({ data: { points: [], fit: null, x_metric: 'pf_g_per_ton', y_metric: 'over_break', data_status: 'legacy_reimport_required' }, isLoading: false, error: null } as unknown as ReturnType<typeof useBlastDamageModel>);
+    const onData = vi.fn();
+    render(<BlastCorrelation presentation="analysis" onData={onData} />);
+    expect(screen.getByText(/Estos pozos se importaron con una versión anterior/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /ir a datos/i }));
+    expect(onData).toHaveBeenCalled();
+  });
 
   it('renders the insufficient-samples caption when fewer than 5 points', async () => {
     mockRows([makeRow('S-01')]);

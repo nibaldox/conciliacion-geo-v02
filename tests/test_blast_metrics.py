@@ -496,12 +496,11 @@ class TestComputeAlturaCarga:
         assert out.iloc[0] == pytest.approx(10.0)
         assert out.iloc[1] == pytest.approx(8.0)
 
-    def test_negative_clamped(self):
+    def test_negative_blocked(self):
         longitud = pd.Series([5.0, 3.0])
         stemming = pd.Series([6.0, 10.0])
         out = compute_altura_carga_m(longitud, stemming)
-        assert out.iloc[0] == pytest.approx(0.0)
-        assert out.iloc[1] == pytest.approx(0.0)
+        assert out.isna().all()
 
     def test_nan_inputs(self):
         longitud = pd.Series([10.0, float("nan"), 8.0])

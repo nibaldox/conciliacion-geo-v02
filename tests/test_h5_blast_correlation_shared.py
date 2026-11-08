@@ -266,17 +266,17 @@ def test_h5_pre_post_byte_identical():
     pre = _pre_refactor(df, sections, comparison)
     post = _post_refactor(df, sections, comparison)
 
-    pre_kg = pre["Kg_Explosivo"].round(6).tolist()
-    post_kg = post["Kg_Explosivo"].round(6).tolist()
+    pre_kg = [round(v, 6) if pd.notna(v) else None for v in pre["Kg_Explosivo"]]
+    post_kg = [round(v, 6) if pd.notna(v) else None for v in post["Kg_Explosivo"]]
     assert pre_kg == post_kg, f"Kg_Explosivo mismatch: {pre_kg} vs {post_kg}"
 
     pre_pf = [round(v, 6) if pd.notna(v) else None for v in pre["PF_Vol_kgm3"]]
     post_pf = [round(v, 6) if pd.notna(v) else None for v in post["PF_Vol_kgm3"]]
     assert pre_pf == post_pf, f"PF_Vol_kgm3 mismatch: {pre_pf} vs {post_pf}"
 
-    pre_e = pre["Energía_MJ"].round(6).tolist()
-    post_e = post["Energía_MJ"].round(6).tolist()
-    assert pre_e == post_e, f"Energía_MJ mismatch: {pre_e} vs {post_e}"
+    pre_e = [round(v, 6) if pd.notna(v) else None for v in pre["Energía_MJ"]]
+    post_e = [round(v, 6) if pd.notna(v) else None for v in post["Energía_MJ"]]
+    np.testing.assert_equal(pre_e, post_e, err_msg="Energía_MJ mismatch")
 
     pre_n = pre["Pozos_Cercanos"].tolist()
     post_n = post["Pozos_Cercanos"].tolist()

@@ -67,6 +67,7 @@ def set_blast_processed(value: bool) -> None:
 
 
 def reset_blast_processed_state() -> None:
+    _set("blast_consolidation_report", {})
     set_blast_df(None)
     clear_blast_lines()
     set_blast_processed(False)
@@ -102,7 +103,7 @@ def get_last_idw_grid() -> dict | None:
     return _get("last_idw_grid")
 
 
-def set_last_idw_grid(grid: dict) -> None:
+def set_last_idw_grid(grid: dict | None) -> None:
     _set("last_idw_grid", grid)
 
 

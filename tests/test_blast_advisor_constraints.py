@@ -109,7 +109,11 @@ class TestBuildAnalysisPrompt:
         }
         from core.ai_v2.builder import build_analysis_prompt
         system, user = build_analysis_prompt(results, [], {}, blast_trend=trend)
-        assert '0.42 kg/m³' in user
+        assert '0.42 unidad sin dato' in user
+        assert '0.42 kg/m³' not in user
+        trend['pf_unit'] = 'kg/m³'
+        _, user_with_unit = build_analysis_prompt(results, [], {}, blast_trend=trend)
+        assert '0.42 kg/m³' in user_with_unit
         assert 'bajando' in user
         assert 'P-007' in user
 

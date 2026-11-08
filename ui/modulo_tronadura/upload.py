@@ -10,7 +10,6 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from core.calculo_tronadura import procesar_pozos
 from core.column_mapping import apply_mapping, validate_mapping
 from core.geometry_contract import (
     GEOMETRY_CONFIGURATION_VERSION,
@@ -40,6 +39,23 @@ from ui.modulo_tronadura.state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def procesar_pozos(*args, **kwargs):
+    from core.calculo_tronadura import procesar_pozos as process
+    return process(*args, **kwargs)
+
+
+def _render_consolidation_report(report: dict) -> None:
+    if not report:
+        return
+    with st.expander("Informe de consolidación", expanded=True):
+        st.write(f"Filas recibidas: {report.get('rows_received', report.get('rows_in', 'sin dato'))} · Filas para consolidar: {report.get('rows_in', 'sin dato')} · Pozos resultantes: {report.get('holes_out', 'sin dato')}")
+        st.write(f"Copias quitadas: {report.get('exact_copies_removed', 'sin dato')} · Pozos con decks: {report.get('holes_with_decks', 'sin dato')} · Filas de decks fusionadas: {report.get('deck_rows_merged', 'sin dato')}")
+        st.write(f"Copias quitadas por malla: {report.get('copies_by_malla', {})}")
+        st.write(f"Conflictos: {len(report.get('conflicts', []))}")
+        if report.get('conflicts'):
+            st.dataframe(pd.DataFrame(report['conflicts']).fillna('sin dato'), width="stretch")
 
 
 def geometry_contract_fingerprint(contract: dict[str, Any]) -> str:
@@ -471,6 +487,10 @@ def render_upload_section(
             # so the operator sees accepted / rejected / warnings /
             # blocking_errors / summary explicitly.
             summary = proc_result.processing_summary()
+            st.session_state["blast_consolidation_report"] = {
+                **proc_result.consolidation_report,
+                "rows_received": summary["rows_received"],
+            }
             if proc_result.blocking_errors:
                 st.error(
                     f"⛔ {len(proc_result.blocking_errors)} error(es) "
@@ -513,6 +533,7 @@ def render_upload_section(
     if not get_blast_processed():
         return
 
+    _render_consolidation_report(st.session_state.get("blast_consolidation_report", {}))
     df_clean = get_blast_df()
     if df_clean is None:
         return

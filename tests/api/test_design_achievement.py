@@ -82,6 +82,8 @@ class TestContract:
         }
         assert set(body["summary"]) == {
             "global_score",
+            "coverage",
+            "rows",
             "n_total",
             "n_evaluable",
             "crest_cumple",
@@ -112,7 +114,7 @@ class TestContract:
 
         assert body["n_total_rows"] == 3
         assert body["summary"]["n_evaluable"] == 3
-        assert body["summary"]["global_score"] == 53
+        assert body["summary"]["global_score"] == 77
         assert body["summary"]["crest_pct"] == 50
         assert body["summary"]["toe_pct"] == 100
         assert body["summary"]["berm_pct"] == 67
@@ -124,7 +126,8 @@ class TestContract:
         assert sectors["A"]["n_evaluable"] == 2
         assert sectors["A"]["crest_pct"] == 50
         assert sectors["B"]["n_evaluable"] == 1
-        assert sectors["B"]["global_score"] == 30  # berma CUMPLE credit only
+        assert sectors["B"]["global_score"] == 100
+        assert sectors["B"]["coverage"]["weight_available_mean"] == pytest.approx(0.3)
 
 
 class TestSessionSettings:
@@ -213,9 +216,12 @@ class TestSessionIsolation:
         _seed(session_id)
         api_test_client.headers["X-Session-ID"] = "some-other-session"
         body = api_test_client.get(ENDPOINT).json()
+        assert body["session_id"] != session_id
         assert body["n_total_rows"] == 0
         assert body["summary"] == {
             "global_score": None,
+            "coverage": {"n_rows": 0, "n_evaluable": 0, "n_complete": 0, "weight_available_mean": None, "n_available": {"crest": 0, "toe": 0, "berm": 0}},
+            "rows": [],
             "n_total": 0,
             "n_evaluable": 0,
             "crest_cumple": 0,
@@ -243,8 +249,8 @@ class TestProvenance:
         assert body["metadata"]["source"] == "persisted_comparisons"
         assert body["metadata"]["status"] == "computed"
         assert body["metadata"]["assumptions"] == [
-            "global score = 0.4 * crest + 0.3 * toe + 0.3 * berma per evaluable row",
-            "partial credit: CUMPLE=1.0, FUERA DE TOLERANCIA=0.5, others=0",
+            "global score = mean of evaluable row scores; available weights 0.4 crest, 0.3 toe, 0.3 berma are renormalized per row",
+            "partial credit: CUMPLE=1.0, FUERA DE TOLERANCIA=0.5, NO CUMPLE=0",
             "missing deltas or non-tier berm_status are excluded without inference",
         ]
 

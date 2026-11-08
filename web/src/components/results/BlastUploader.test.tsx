@@ -134,6 +134,13 @@ describe('<BlastUploader />', () => {
     useSession.setState({ demoMode: false, demoData: null, designMeshId: null, topoMeshId: null });
   });
 
+  it('shows the persisted consolidation report without a recent upload', () => {
+    mockUpload();
+    mockBlastSummary({ data: { n_holes: 2, consolidation_report: { rows_in: 4, holes_out: 2, exact_copies_removed: 1, copies_by_malla: {}, holes_with_decks: 1, conflicts: [] } } } as unknown as Partial<ReturnType<typeof useBlastSessionSummary>>);
+    renderUploader();
+    expect(screen.getByTestId('blast-consolidation-report')).toHaveTextContent('Filas recibidas: 4');
+  });
+
   it('explains that blast data is absent and prevents upload for virtual demo meshes', async () => {
     useSession.setState({
       demoMode: true,

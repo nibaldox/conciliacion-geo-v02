@@ -33,6 +33,14 @@ from core.blast_correlation import aggregate_powder_factor_by_group
 from core.calculo_tronadura import proyectar_pozos_en_seccion
 
 
+def _finite_or_none(value):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if np.isfinite(number) else None
+
+
 def _project_one(
     df: pd.DataFrame,
     pf_enriched: pd.DataFrame,
@@ -78,11 +86,11 @@ def _project_one(
             'n_pf_valid': 0,
             'projected_df': proj,
         }
-    total_kg = (
-        float(proj[kg_col].fillna(0).sum())
-        if kg_col and kg_col in proj.columns
-        else 0.0
-    )
+    total_kg = None
+    if kg_col and kg_col in proj.columns:
+        kg_values = pd.to_numeric(proj[kg_col], errors='coerce')
+        kg_values = kg_values[np.isfinite(kg_values)]
+        total_kg = float(kg_values.sum()) if len(kg_values) else None
     proj_labeled = proj.copy()
     proj_labeled[label_col] = label_value
     pf_row = aggregate_powder_factor_by_group(
@@ -97,7 +105,7 @@ def _project_one(
         'pf_g_per_ton_avg': pf_row.get('pf_g_per_ton_avg'),
         'pf_g_per_ton_net_avg': pf_row.get('pf_g_per_ton_net_avg'),
         'pf_g_per_ton_inf_avg': pf_row.get('pf_g_per_ton_inf_avg'),
-        'energy_total_mj': pf_row.get('energy_total_mj', 0.0) or 0.0,
+        'energy_total_mj': _finite_or_none(pf_row.get('energy_total_mj')),
         'n_pf_valid': int(pf_row.get('n_pf_valid', 0) or 0),
         'projected_df': proj,
     }
@@ -190,8 +198,14 @@ def build_pf_deviation_scatter(
     embedded in the title for traceability.
     """
     fig = go.Figure()
-    df_over = df_corr[df_corr[over_y_col] > 0]
-    df_under = df_corr[df_corr[under_y_col] < 0]
+    x_numeric = pd.to_numeric(df_corr[x_col], errors='coerce')
+    over_numeric = pd.to_numeric(df_corr[over_y_col], errors='coerce')
+    under_numeric = pd.to_numeric(df_corr[under_y_col], errors='coerce')
+    over_mask = (over_numeric > 0) & np.isfinite(x_numeric) & np.isfinite(over_numeric)
+    under_mask = (under_numeric < 0) & np.isfinite(x_numeric) & np.isfinite(under_numeric)
+    df_over = df_corr[over_mask]
+    df_under = df_corr[under_mask]
+    n_excluded = int((~(over_mask | under_mask)).sum())
 
     if not df_over.empty:
         fig.add_trace(go.Scatter(
@@ -216,7 +230,7 @@ def build_pf_deviation_scatter(
         ))
 
     if show_ols and not df_over.empty and len(df_over) > 1:
-        xs = pd.to_numeric(df_over[x_col], errors='coerce').fillna(0).values.astype(float)
+        xs = pd.to_numeric(df_over[x_col], errors='coerce').values.astype(float)
         ys = df_over[over_y_col].values.astype(float)
         if np.var(xs) > 0:
             m, b = np.polyfit(xs, ys, 1)
@@ -241,6 +255,13 @@ def build_pf_deviation_scatter(
         margin=dict(l=40, r=20, t=40, b=40),
         yaxis=dict(zeroline=True, zerolinecolor='gray', zerolinewidth=1),
     )
+    if n_excluded:
+        fig.add_annotation(
+            xref='paper', yref='paper', x=0.01, y=0.99,
+            xanchor='left', yanchor='top', showarrow=False,
+            align='left', font=dict(size=11, color='#888888'),
+            text=f"Excluidos {n_excluded} de {len(df_corr)} puntos sin dato",
+        )
     return fig
 
 

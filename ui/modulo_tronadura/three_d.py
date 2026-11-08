@@ -111,7 +111,7 @@ def render_three_d_tab(df_clean: pd.DataFrame) -> None:
     render_explosive_quality(df_filtered)
 
     with st.expander("📋 Datos procesados (Filtrados)", expanded=False):
-        st.dataframe(df_filtered, width="stretch")
+        st.dataframe(df_filtered.astype("string").fillna("sin dato"), width="stretch")
 
 
 def _render_filters_and_apply(df_clean: pd.DataFrame) -> pd.DataFrame:
@@ -173,9 +173,9 @@ def _render_filters_and_apply(df_clean: pd.DataFrame) -> pd.DataFrame:
     col_idx += 1
 
     sel_kg = None
-    if kg_col:
-        min_kg = float(df_clean[kg_col].fillna(0).min())
-        max_kg = float(df_clean[kg_col].fillna(0).max())
+    if kg_col and pd.to_numeric(df_clean[kg_col], errors="coerce").notna().any():
+        min_kg = float(pd.to_numeric(df_clean[kg_col], errors="coerce").min())
+        max_kg = float(pd.to_numeric(df_clean[kg_col], errors="coerce").max())
         if min_kg < max_kg:
             sel_kg = f_cols[col_idx].slider("Explosivo (Kg):", min_kg, max_kg, (min_kg, max_kg))
         else:
@@ -193,10 +193,8 @@ def _render_filters_and_apply(df_clean: pd.DataFrame) -> pd.DataFrame:
     if sel_len:
         df_filtered = df_filtered[(df_filtered["Len"] >= sel_len[0]) & (df_filtered["Len"] <= sel_len[1])]
     if sel_kg and kg_col:
-        df_filtered = df_filtered[
-            (df_filtered[kg_col].fillna(0) >= sel_kg[0]) &
-            (df_filtered[kg_col].fillna(0) <= sel_kg[1])
-        ]
+        kg_values = pd.to_numeric(df_filtered[kg_col], errors="coerce")
+        df_filtered = df_filtered[kg_values.isna() | kg_values.between(*sel_kg)]
 
     return df_filtered
 
@@ -270,6 +268,7 @@ def _get_topo_mesh_trace(show_topo_mesh: bool):
 def _get_energy_surface_trace(df_filtered: pd.DataFrame, show_energy_grid: bool):
     if not show_energy_grid:
         return None
+    set_last_idw_grid(None)
 
     kg_col = find_df_column(
         df_filtered,
@@ -283,6 +282,11 @@ def _get_energy_surface_trace(df_filtered: pd.DataFrame, show_energy_grid: bool)
 
     grid_nx, grid_ny, grid_nz, search_radius = get_idw_grid_params()
     energy_grid = build_energy_grid(df_filtered, kg_col, grid_nx, grid_ny, grid_nz, search_radius)
+    if energy_grid is None:
+        st.info("Sin datos de carga para el campo IDW.")
+        return None
+    known = int(pd.to_numeric(df_filtered[kg_col], errors="coerce").notna().sum())
+    st.caption(f"Campo IDW de carga conocida: {known}/{len(df_filtered)} pozos con dato; no es energía física.")
     set_last_idw_grid({
         "X": energy_grid["X"],
         "Y": energy_grid["Y"],
@@ -294,10 +298,8 @@ def _get_energy_surface_trace(df_filtered: pd.DataFrame, show_energy_grid: bool)
 
 def _get_pf_col(df: pd.DataFrame) -> str | None:
     """Resolve the powder-factor column: Voronoi g/ton first, then classic."""
-    if "pf_g_per_ton_inf" in df.columns:
-        return "pf_g_per_ton_inf"
-    if "pf_g_per_ton" in df.columns:
-        return "pf_g_per_ton"
+    if "pf_voronoi_bench_g_per_ton" in df.columns:
+        return "pf_voronoi_bench_g_per_ton"
     return None
 
 

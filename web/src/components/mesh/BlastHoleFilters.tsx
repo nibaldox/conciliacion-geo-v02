@@ -12,6 +12,7 @@ export interface BlastHole3DRecord {
   section_relation: string | null;
   section_distance_m: number | null;
   source_row_index?: number | null;
+  source_row_index_user?: number[] | null;
 }
 
 export interface BlastHoleFilterCounts {

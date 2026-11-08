@@ -437,7 +437,7 @@ class TestExportReportFilters:
 
         resp = self._get(client, headers, "word", {"showBlastHoles": True, "blastTolerance": 4.5})
         assert resp.status_code == 200, resp.text
-        assert captured["data"].blast == {"holes": holes, "tolerance": 4.5}
+        assert captured["data"].blast == {"holes": holes, "tolerance": 4.5, "data_status": "legacy_reimport_required"}
 
     def test_word_blast_absent_without_holes(self, client, headers, monkeypatch):
         captured: Dict[str, Any] = {}
@@ -468,7 +468,7 @@ class TestExportReportFilters:
         captured.clear()
         resp = self._get(client, headers, endpoint, {"showBlastHoles": True})
         assert resp.status_code == 200, resp.text
-        assert captured["data"].blast == {"holes": holes, "tolerance": 2.0}
+        assert captured["data"].blast == {"holes": holes, "tolerance": 2.0, "data_status": "legacy_reimport_required"}
         assert json.loads(resp.headers["X-Export-Filters-Applied"])["show_blast_holes"] is True
 
     def test_pdf_uses_report_builder_filters_and_filename(self, client, headers, monkeypatch):

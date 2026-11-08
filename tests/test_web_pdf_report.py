@@ -151,6 +151,43 @@ def _semantic_text(pdf_bytes):
     return " ".join(_text(pdf_bytes).split())
 
 
+@requires_pdf_text
+def test_pdf_distinguishes_effective_and_gross_berm_and_missing_deviation():
+    row = _comparison(section="S-01", bench=1, berm=(8.0, 9.0, "CUMPLE"))
+    row.update(berm_dev=None, effective_berm=6.5, effective_berm_status="NO CUMPLE")
+    second = _comparison(section="S-02", bench=2, berm=(8.0, 8.0, "CUMPLE"))
+    second.update(berm_dev=0.0, effective_berm=None, effective_berm_status=None)
+    data = build_report_data([row, second], SETTINGS, ReportFilters(), META)
+    text = _semantic_text(build_pdf_report(data).getvalue())
+    assert "Sección S-01 · Banco D1: berma real 9.00 m; estado berma CUMPLE; desviación berma sin dato; berma efectiva 6.50 m; estado berma efectiva NO CUMPLE" in text
+    assert "Sección S-02 · Banco D2: berma real 8.00 m; estado berma CUMPLE; desviación berma +0.00 m; berma efectiva sin dato; estado berma efectiva sin dato" in text
+
+
+@requires_pdf_text
+def test_pdf_blast_annex_exposes_pf_and_consolidation():
+    settings = {"blast_holes": [{"pf_voronoi_bench_g_per_ton": None,
+                                  "pf_voronoi_bench_status": "MISSING_FOOTPRINT"}],
+                "blast_upload_meta": {"consolidation_report": {"holes_out": 1, "exact_copies_removed": 2, "deck_rows_merged": 1}}}
+    data = build_report_data([], settings, ReportFilters(), META)
+    text = _semantic_text(build_pdf_report(data).getvalue())
+    assert "1000*Q/(A*H*rho)" in text
+    assert "Q/(B*S*H)" in text
+    assert "MISSING_FOOTPRINT" in text
+    assert "sin dato" in text
+    assert "copias" in text.lower()
+
+
+@requires_pdf_text
+def test_pdf_reports_partial_achievement_coverage():
+    row = _comparison(delta_toe=None, berm=(8.0, None, None))
+    data = build_report_data([row], SETTINGS, ReportFilters(), META)
+    text = _semantic_text(build_pdf_report(data).getvalue()).lower()
+    assert "cobertura" in text
+    assert "completos" in text
+    assert "peso medio" in text
+    assert "componentes faltantes" in text
+
+
 def _pages(pdf_bytes):
     return [page for page in _text(pdf_bytes).split("\f") if page.strip()]
 
@@ -513,9 +550,10 @@ def test_top_deviations_limited_to_five_per_parameter():
     assert sum(1 for entry in data.top_deviations if entry["parameter"] == "height") == 7
     text = _text(build_pdf_report(data).getvalue())
     assert "Altura de banco — 5 de 7 mayores" in text
-    assert "S-07" in text
-    assert "S-01" not in text
-    assert "S-02" not in text
+    deviation_table = text.split("Altura de banco — 5 de 7 mayores", 1)[1].split("Plano de cumplimiento", 1)[0]
+    assert "S-07" in deviation_table
+    assert "S-01" not in deviation_table
+    assert "S-02" not in deviation_table
 
 
 @requires_pdf_text

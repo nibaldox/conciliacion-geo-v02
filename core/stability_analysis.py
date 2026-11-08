@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import warnings
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Iterable, Optional
 
 import numpy as np
 
@@ -34,12 +34,23 @@ class BenchStabilityAssessment:
     overhang_severity: str
     rock_bridge_thickness_m: float
     rock_bridge_height_m: float
-    catch_bench_adequate: bool
-    catch_bench_ratio: float
+    catch_bench_adequate: Optional[bool]
+    catch_bench_ratio: Optional[float]
     wedge_risk: bool
     toppling_risk: bool
     face_angle_inconsistent: bool
     anisotropy_dispersion_deg: float
+
+
+def _optional_float(value) -> Optional[float]:
+    """Coerce ``value`` to a finite float, keeping "sin dato" as ``None``."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def assess_bench_stability(bench: BenchParams) -> BenchStabilityAssessment:
@@ -69,8 +80,11 @@ def assess_bench_stability(bench: BenchParams) -> BenchStabilityAssessment:
         overhang_severity=severity,
         rock_bridge_thickness_m=float(bench.rock_bridge_thickness_m),
         rock_bridge_height_m=float(bench.rock_bridge_height_m),
-        catch_bench_adequate=bool(bench.catch_bench_adequate),
-        catch_bench_ratio=float(bench.catch_bench_ratio),
+        catch_bench_adequate=(
+            None if bench.catch_bench_adequate is None
+            else bool(bench.catch_bench_adequate)
+        ),
+        catch_bench_ratio=_optional_float(bench.catch_bench_ratio),
         wedge_risk=bool(bench.wedge_risk),
         toppling_risk=bool(bench.toppling_risk),
         face_angle_inconsistent=bool(bench.face_angle_inconsistent),
@@ -136,6 +150,9 @@ def summarize_section_stability(benches: Iterable[BenchParams]) -> dict:
         ),
         'n_catch_bench_adequate': sum(
             1 for a in assessments if a.catch_bench_adequate
+        ),
+        'n_catch_bench_not_evaluable': sum(
+            1 for a in assessments if a.catch_bench_adequate is None
         ),
         'n_wedge_risk': sum(
             1 for a in assessments if a.wedge_risk
@@ -253,8 +270,15 @@ def compute_section_health_score(section_name: str, benches: list[BenchParams]) 
     fs_proxy = compute_planar_factor_of_safety_proxy(steepest)
     fs_score = _fs_to_score(fs_proxy)
 
-    berm_scores = [float(b.catch_bench_ratio) for b in benches_list]
-    berm_score = max(0.0, min(100.0, (sum(berm_scores) / n) * 100.0))
+    berm_scores = [
+        ratio for ratio in (
+            _optional_float(b.catch_bench_ratio) for b in benches_list
+        ) if ratio is not None
+    ]
+    berm_score = (
+        max(0.0, min(100.0, (sum(berm_scores) / len(berm_scores)) * 100.0))
+        if berm_scores else None
+    )
 
     overhang_values = [float(b.overhang_m) for b in benches_list]
     mean_overhang = sum(overhang_values) / n
@@ -286,7 +310,16 @@ def compute_section_health_score(section_name: str, benches: list[BenchParams]) 
         'toppling': 0.10,
         'anisotropy': 0.05,
     }
-    aggregate = sum(weights[k] * components[k] for k in weights)
+    available_weights = {
+        key: weight for key, weight in weights.items()
+        if components[key] is not None
+    }
+    total_weight = sum(available_weights.values())
+    aggregate = (
+        sum(available_weights[key] * components[key] for key in available_weights)
+        / total_weight
+        if total_weight else 0.0
+    )
     aggregate = max(0.0, min(100.0, aggregate))
 
     category = _classify_health(aggregate)

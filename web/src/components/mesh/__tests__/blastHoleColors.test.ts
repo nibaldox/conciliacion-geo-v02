@@ -17,6 +17,20 @@ function hole(rowId: string, attributes: Record<string, unknown> = {}): BlastHol
 }
 
 describe('mapBlastHoleColors', () => {
+  it('does not label geometric PF as influence PF', () => {
+    const records = [hole('geometry', { pf_g_per_ton: 120 })];
+    expect(getAvailableBlastHoleVariables(records)).not.toContain('powderFactor');
+    expect(mapBlastHoleColors(records, { kind: 'variable', variable: 'powderFactor' }).colorsByRowId.get('geometry')).toBe('#808080');
+  });
+
+  it('keeps missing primary PF distinct from secondary PF', () => {
+    const records = [hole('missing', { pf_voronoi_bench_g_per_ton: null, pf_g_per_ton: 120 })];
+    expect(getAvailableBlastHoleVariables(records)).toContain('powderFactorPrimary');
+    const result = mapBlastHoleColors(records, { kind: 'variable', variable: 'powderFactorPrimary' });
+    expect(result.colorsByRowId.get('missing')).toBe('#808080');
+    expect(result.legend).toMatchObject({ missingCount: 1, sourceKey: 'pf_voronoi_bench_g_per_ton' });
+  });
+
   it('treats blank category values as missing data', () => {
     const result = mapBlastHoleColors([
       hole('populated', { Banco: '3150' }),
@@ -152,7 +166,7 @@ describe('mapBlastHoleColors', () => {
 
   it('exports Streamlit variable labels for selector integration', () => {
     expect(BLAST_HOLE_VARIABLE_OPTIONS.map(({ value }) => value)).toEqual([
-      'charge', 'powderFactor', 'powderFactorGeometry', 'collarElevation', 'hardness', 'diameter', 'hardnessIndex',
+      'charge', 'powderFactorPrimary', 'powderFactor', 'powderFactorGeometry', 'collarElevation', 'hardness', 'diameter', 'hardnessIndex',
       'penetrationRate', 'depth', 'inclination', 'attribute',
     ]);
   });

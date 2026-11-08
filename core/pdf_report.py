@@ -43,6 +43,7 @@ Word report generator.
 from __future__ import annotations
 
 import io
+import math
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -262,6 +263,17 @@ def _top5_height_deviations(comparisons: List[Dict[str, Any]]) -> List[Dict[str,
     return rows[:5]
 
 
+def _finite_number(value: Any) -> Optional[float]:
+    """Return ``value`` as a finite float, or ``None`` when it is not one."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
 def _compliance_breakdown(comparisons: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Per-parameter CUMPLE / NO CUMPLE breakdown over MATCH comps.
 
@@ -288,9 +300,9 @@ def _compliance_breakdown(comparisons: List[Dict[str, Any]]) -> List[Dict[str, A
         pct = (n_ok / total * 100) if total else 0.0
 
         real_values = [
-            float(c[real_field])
-            for c in match_comps
-            if c.get(real_field) is not None
+            number
+            for number in (_finite_number(c.get(real_field)) for c in match_comps)
+            if number is not None
         ]
         if real_values:
             avg_val = sum(real_values) / len(real_values)
@@ -942,6 +954,8 @@ def generate_pdf_report(
     sections: Optional[List[Any]] = None,
     mesh_topo: Optional[Any] = None,
     grid_ref: float = 0.0,
+    consolidation_report: Optional[Dict[str, Any]] = None,
+    crest_toe_tolerance: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build the unified executive PDF report at ``output_path``.
 
@@ -1010,6 +1024,13 @@ def generate_pdf_report(
 
     # 2. Resumen Ejecutivo (score + breakdown)
     _build_executive_summary(story, comparisons, styles)
+    from html import escape
+    from core.report_generator import _blast_corrective_lines, _corrective_lines
+
+    for line in _corrective_lines(comparisons, crest_toe_tolerance):
+        story.append(Paragraph(escape(line), styles['body']))
+    for line in _blast_corrective_lines(df_pozos, consolidation_report):
+        story.append(Paragraph(escape(line), styles['body']))
 
     # 3. Profundidad del Rajo
     _build_depth_section(story, comparisons, styles)

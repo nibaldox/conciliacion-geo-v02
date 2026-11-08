@@ -21,6 +21,20 @@ The ``_angle_between_segments`` helper supports :func:`_detect_wedge_shape_in_fa
 import numpy as np
 
 
+NOT_EVALUABLE_STATUS = "-"
+
+
+def _finite_or_none(value):
+    """Return ``value`` as a finite float, or ``None`` when it is not measurable."""
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if np.isfinite(number) else None
+
+
 def _detect_overhangs_and_bridges(benches):
     """Detect overhangs and rock bridges between consecutive non-ramp benches.
 
@@ -95,14 +109,20 @@ def _evaluate_catch_bench_adequacy(benches, berm_design_min_m=None):
     ``berm_design >= max(rockfall_height * 0.6, 6 m)`` for 15 m benches.
     """
     for b in benches:
-        denom = max(float(b.berm_width), 1e-3)
-        b.catch_bench_ratio = float(b.effective_berm_width) / denom
+        berm_width = _finite_or_none(b.berm_width)
+        effective_berm = _finite_or_none(b.effective_berm_width)
+        if berm_width is None or effective_berm is None:
+            b.catch_bench_ratio = None
+            b.catch_bench_adequate = None
+            b.catch_bench_status = NOT_EVALUABLE_STATUS
+            continue
+        denom = max(berm_width, 1e-3)
+        b.catch_bench_ratio = effective_berm / denom
+        b.catch_bench_status = None
         if berm_design_min_m is None:
             b.catch_bench_adequate = False
         else:
-            b.catch_bench_adequate = (
-                float(b.effective_berm_width) >= float(berm_design_min_m)
-            )
+            b.catch_bench_adequate = effective_berm >= float(berm_design_min_m)
 
 
 def _angle_between_segments(v1: tuple[float, float], v2: tuple[float, float]) -> float:

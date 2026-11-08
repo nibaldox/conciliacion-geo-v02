@@ -17,7 +17,7 @@ import hashlib
 import json
 import threading
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -26,8 +26,9 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 import api.database as db
 import api.schemas as schemas
 from api._async_db import run_blast_limited
-from api.blast_identity import blast_hole_id, blast_row_ids
+from api.blast_identity import blast_data_status, blast_hole_id, blast_row_ids
 from core.calculo_tronadura import procesar_pozos
+from core.blast_correlation import PF_DEFINITIONS
 from core.column_utils import KILOS_CANDIDATES, first_present_column
 from core.geometry_contract import (
     GEOMETRY_CONFIGURATION_VERSION,
@@ -180,14 +181,12 @@ def _compute_descarga_series(df: pd.DataFrame) -> pd.Series:
         return pd.Series([np.nan] * len(df), index=df.index, dtype=float)
     length = pd.to_numeric(df[len_col], errors="coerce")
     taco = pd.to_numeric(df[taco_col], errors="coerce")
-    out = length - taco
-    return out.clip(lower=0.0)
+    return (length - taco).where((length > 0) & (taco >= 0) & (taco <= length))
 
 
-def _safe_mean(series: pd.Series) -> float:
+def _safe_mean(series: pd.Series) -> Optional[float]:
     cleaned = pd.to_numeric(series, errors="coerce").replace([np.inf, -np.inf], np.nan)
-    value = float(cleaned.mean()) if not cleaned.empty else 0.0
-    return value if math.isfinite(value) else 0.0
+    return _finite_number(cleaned.mean()) if not cleaned.empty else None
 
 
 def _hardness_distribution(df: pd.DataFrame) -> Dict[str, int]:
@@ -200,12 +199,12 @@ def _hardness_distribution(df: pd.DataFrame) -> Dict[str, int]:
 
 
 def _hole_id_for_row(row: pd.Series, index: int, df: pd.DataFrame) -> str:
-    for candidate in ("pozo", "hole_id", "id_pozo", "Hole_ID"):
+    for candidate in ("id_pozo", "pozo", "hole_id", "Hole_ID"):
         if candidate in df.columns:
             value = row.get(candidate)
             if value is not None and str(value) != "nan":
                 return str(value)
-    return str(index)
+    return "sin dato"
 
 
 def _df_to_hole_records(df: pd.DataFrame) -> List[Dict[str, object]]:
@@ -223,23 +222,23 @@ def _df_to_hole_records(df: pd.DataFrame) -> List[Dict[str, object]]:
             record[col] = value
 
         record["hole_id"] = _hole_id_for_row(row, idx, df)
-        record["carga"] = float(carga_series.loc[idx]) if pd.notna(carga_series.loc[idx]) else 0.0
-        record["descarga"] = float(descarga_series.loc[idx]) if pd.notna(descarga_series.loc[idx]) else 0.0
+        record["carga"] = _finite_number(carga_series.loc[idx])
+        record["descarga"] = _finite_number(descarga_series.loc[idx])
         records.append(record)
 
     return records
 
 
 def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
-    def _float_or_zero(key: str) -> float:
+    def _float_or_none(key: str) -> Optional[float]:
         value = record.get(key)
         if value is None:
-            return 0.0
+            return None
         try:
             number = float(value)
-            return number if math.isfinite(number) else 0.0
+            return number if math.isfinite(number) else None
         except (TypeError, ValueError):
-            return 0.0
+            return None
 
     def _str_or_none(key: str) -> Optional[str]:
         value = record.get(key)
@@ -250,20 +249,20 @@ def _record_to_summary(record: Dict[str, object]) -> schemas.BlastHoleSummary:
     hardness = _str_or_none("dureza")
     bench = _str_or_none("Banco_Original")
 
-    hole_id = _str_or_none("hole_id") or str(int(record.get("index", 0)))
+    hole_id = blast_hole_id(record, "sin dato")
 
     return schemas.BlastHoleSummary(
         hole_id=hole_id,
-        x=_float_or_zero("X"),
-        y=_float_or_zero("Y"),
-        z=_float_or_zero("Z_collar"),
-        carga=_float_or_zero("carga"),
-        descarga=_float_or_zero("descarga"),
+        x=_float_or_none("X"),
+        y=_float_or_none("Y"),
+        z=_float_or_none("Z_collar"),
+        carga=_float_or_none("carga"),
+        descarga=_float_or_none("descarga"),
         hardness=hardness,
         bench=bench,
-        length=_float_or_zero("Len"),
-        inclination=_float_or_zero("Incl"),
-        azimuth=_float_or_zero("Az"),
+        length=_float_or_none("Len"),
+        inclination=_float_or_none("Incl"),
+        azimuth=_float_or_none("Az"),
         z_collar_semantic=_str_or_none("Z_collar_semantic"),
         surface_sample_status=_str_or_none("surface_sample_status"),
         surface_sample_reason=_str_or_none("surface_sample_reason"),
@@ -345,6 +344,7 @@ def _build_upload_payload(
     *,
     date_source_column: Optional[str] = None,
     date_format: Optional[str] = None,
+    rock_density_tm3: Optional[float] = None,
 ) -> dict:
     """Run the full blast-upload pipeline off the event-loop thread.
 
@@ -400,6 +400,7 @@ def _build_upload_payload(
             design_surface_sha256=design_surface_sha256,
             column_map=processing_map,
             preserve_invalid_mapped_rows=column_map is not None,
+            rock_density_tm3=rock_density_tm3,
         )
     except KeyError as exc:
         blocking_errors.append({
@@ -462,12 +463,17 @@ def _build_upload_payload(
         hardness_dist = _hardness_distribution(df_clean)
         data_warnings_text = " | ".join(w["message"] for w in result.event_warnings)
     else:
-        carga_mean = 0.0
-        descarga_mean = 0.0
+        carga_mean = None
+        descarga_mean = None
         hardness_dist = {}
         data_warnings_text = ""
 
     accepted_rows = result.accepted_rows
+    if df_clean is not None and not df_clean.empty:
+        carga_values = _compute_carga_series(df_clean).tolist()
+        descarga_values = _compute_descarga_series(df_clean).tolist()
+        accepted_rows = [dict(row, carga=_finite_number(carga), descarga=_finite_number(descarga))
+                         for row, carga, descarga in zip(accepted_rows, carga_values, descarga_values)]
     rejected_rows = result.rejected_rows
     records = accepted_rows  # deprecated alias of the SAME list
     n_holes = len(accepted_rows)
@@ -475,12 +481,12 @@ def _build_upload_payload(
 
     summary = result.processing_summary()
 
-    return {
+    payload = {
         "n_holes": n_holes,
         "n_rows_loaded": n_holes,
         "n_rows_skipped": n_rows_skipped,
-        "carga_mean": round(carga_mean, 3),
-        "descarga_mean": round(descarga_mean, 3),
+        "carga_mean": round(carga_mean, 3) if carga_mean is not None else None,
+        "descarga_mean": round(descarga_mean, 3) if descarga_mean is not None else None,
         "hardness_distribution": hardness_dist,
         "accepted_rows": accepted_rows,
         "records": records,  # deprecated alias of accepted_rows
@@ -490,7 +496,12 @@ def _build_upload_payload(
         "event_warnings": result.event_warnings,
         "blocking_errors": result.blocking_errors,
         "spatial_diagnostics": result.spatial_diagnostics,
+        "consolidation_report": result.consolidation_report,
+        "footprint_report": result.footprint_report,
     }
+    payload = _json_finite(payload)
+    json.dumps(payload, allow_nan=False)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -798,17 +809,24 @@ async def upload_blast_csv(
         except Exception as exc:
             raise HTTPException(400, detail={"error_code": "DESIGN_SURFACE_SAMPLING_FAILED", "message": str(exc)}) from exc
 
+    session_blast = ((await _run_in_executor(db.get_settings, session_id)) or {}).get("blast") or {}
+    rock_density_tm3 = session_blast.get("rock_density_tm3")
     try:
         if date_selected:
             payload = await _run_in_executor(
                 functools.partial(
-                    _build_upload_payload, date_source_column=date_source_column, date_format=date_format
+                    _build_upload_payload, date_source_column=date_source_column, date_format=date_format,
+                    rock_density_tm3=rock_density_tm3,
                 ),
                 content, config, bench_height_m, design_samples, design_mesh_id, design_sha256,
                 coordinate_column_map, file.filename or "upload.csv", sheet_name, confirmed_map,
             )
         else:
-            payload = await _run_in_executor(_build_upload_payload, content, config, bench_height_m, design_samples, design_mesh_id, design_sha256, coordinate_column_map, file.filename or "upload.csv", sheet_name, confirmed_map)
+            payload = await _run_in_executor(
+                functools.partial(_build_upload_payload, rock_density_tm3=rock_density_tm3),
+                content, config, bench_height_m, design_samples, design_mesh_id, design_sha256,
+                coordinate_column_map, file.filename or "upload.csv", sheet_name, confirmed_map,
+            )
     except GeometryConfigurationError as exc:
         # The processor may raise GEOMETRY errors after the contract check
         # (e.g. declared source column not found in dataset).
@@ -838,9 +856,14 @@ async def upload_blast_csv(
             "counts": counts,
         }
 
+    try:
+        from core.blast_hole_consolidation import BLAST_ALGORITHM_VERSION
+    except ImportError:
+        BLAST_ALGORITHM_VERSION = None
     db.save_blast_upload(
         session_id,
         {
+            "blast_algorithm_version": BLAST_ALGORITHM_VERSION,
             "accepted_rows": payload["accepted_rows"],
             "holes": payload["accepted_rows"],  # legacy alias
             "n_holes": payload["n_holes"],
@@ -848,6 +871,8 @@ async def upload_blast_csv(
             "n_rows_skipped": payload["n_rows_skipped"],
             "rejected_rows": payload["rejected_rows"],
             "processing_summary": payload["processing_summary"],
+            "consolidation_report": payload["consolidation_report"],
+            "footprint_report": payload.get("footprint_report", {}),
             "data_warnings": payload["data_warnings"],
             "event_warnings": payload.get("event_warnings", []),
             "blocking_errors": payload.get("blocking_errors", []),
@@ -863,12 +888,15 @@ async def upload_blast_csv(
     from fastapi.responses import JSONResponse
 
     response_body = schemas.BlastUploadResponse(
+        **blast_data_status({"blast_algorithm_version": BLAST_ALGORITHM_VERSION}),
         session_id=session_id,
         n_holes=payload["n_holes"],
         n_rows_loaded=payload["n_rows_loaded"],
         n_rows_skipped=payload["n_rows_skipped"],
         data_warnings=payload.get("data_warnings", ""),
         processing_summary=payload.get("processing_summary", {}),
+        consolidation_report=payload.get("consolidation_report", {}),
+        footprint_report=payload.get("footprint_report", {}),
         accepted_rows=payload.get("accepted_rows", []),
         rejected_rows=payload.get("rejected_rows", []),
         event_warnings=payload.get("event_warnings", []),
@@ -905,8 +933,32 @@ def _build_hole_summaries(records: List[Dict[str, object]]) -> List[schemas.Blas
 # ---------------------------------------------------------------------------
 
 
-@router.get("/{session_id}/summary")
-async def get_blast_holes_summary(session_id: str, request: Request) -> dict[str, int]:
+@router.get("/definitions")
+async def get_blast_definitions(request: Request) -> dict:
+    return {
+        **blast_data_status(db.get_settings(request.state.session_id) or {}),
+        "pf_voronoi_bench_g_per_ton": {
+            "formula": "1000*Q/(A*H*rho)",
+            "numerator": "charge_kg",
+            "denominator": "footprint_voronoi_area*bench_height*density",
+            "unit": "g/t",
+            "height_source": "bench_height",
+            "footprint": (
+                "estimated_hull: perímetro convexo de los collares únicos de la "
+                "malla, expandido 0.5× la mediana de la distancia al vecino más "
+                "cercano; se rotula como huella estimada y se reemplaza por "
+                "polígonos reales cuando el operador los aporta"
+            ),
+            "footprint_modes": ["estimated_hull", "none"],
+        },
+        "kg_per_meter": {"formula": "Q/L", "unit": "kg/m"},
+        "kg_per_meter_loaded_column": {"formula": "Q/(L-T)", "unit": "kg/m"},
+        **PF_DEFINITIONS,
+    }
+
+
+@router.get("/{session_id}/summary", response_model=schemas.BlastSessionSummary)
+async def get_blast_holes_summary(session_id: str, request: Request) -> dict:
     if session_id != request.state.session_id:
         raise HTTPException(
             status_code=403,
@@ -915,23 +967,86 @@ async def get_blast_holes_summary(session_id: str, request: Request) -> dict[str
     settings = db.get_settings(session_id) or {}
     records = settings.get("blast_holes", [])
     n_holes = len(records) if isinstance(records, list) else 0
-    return {"n_holes": n_holes}
+    meta = settings.get("blast_upload_meta") or {}
+    return {
+        "n_holes": n_holes,
+        "consolidation_report": meta.get("consolidation_report") or None,
+        "footprint_report": meta.get("footprint_report") or None,
+        **blast_data_status(settings),
+    }
 
 
 @router.get("/{session_id}/holes")
 async def get_blast_holes(
     session_id: str,
+    request: Request,
     section_name: Optional[str] = None,
 ) -> schemas.BlastHolesResponse:
     _ = section_name  # reserved
+    if session_id != request.state.session_id:
+        raise HTTPException(403, detail={"error_code": "SESSION_ID_MISMATCH"})
 
     settings = db.get_settings(session_id) or {}
     raw = settings.get("blast_holes", [])
     if not isinstance(raw, list):
-        return schemas.BlastHolesResponse(session_id=session_id, holes=[])
+        return schemas.BlastHolesResponse(session_id=session_id, holes=[], **blast_data_status(settings))
 
     holes = await run_blast_limited(_build_hole_summaries, raw)
-    return schemas.BlastHolesResponse(session_id=session_id, holes=holes)
+    return schemas.BlastHolesResponse(session_id=session_id, holes=holes, **blast_data_status(settings))
+
+
+
+@router.get("/{session_id}/holes/{hole_id}", response_model=schemas.BlastHoleDetail)
+async def get_blast_hole_detail(session_id: str, hole_id: str, request: Request, row_id: Optional[str] = None):
+    if session_id != request.state.session_id:
+        raise HTTPException(403, detail={"error_code": "SESSION_ID_MISMATCH"})
+    settings = db.get_settings(session_id) or {}
+    records = settings.get("blast_holes") or []
+    records = [r for r in records if isinstance(r, dict)]
+    row_ids = blast_row_ids(session_id, records)
+    matches = [(r, rid) for r, rid in zip(records, row_ids) if blast_hole_id(r, "sin dato") == hole_id and (row_id is None or rid == row_id)]
+    if not matches:
+        raise HTTPException(404, detail={"error_code": "HOLE_NOT_FOUND"})
+    if len(matches) > 1:
+        raise HTTPException(409, detail={"error_code": "AMBIGUOUS_HOLE_ID", "row_ids": [rid for _, rid in matches]})
+    record, rid = matches[0]
+    data = cast(Dict[str, Any], _json_finite(record))
+    data = {key: value for key, value in data.items() if key not in ("source_row_indices_user", "source_row_index_user")}
+    data.update(hole_id=hole_id, row_id=rid, source_row_index_user=_source_row_index_user(record), **blast_data_status(settings))
+    return schemas.BlastHoleDetail(**data)
+
+
+def _source_row_index_user(record: Dict[str, object]) -> Optional[List[int]]:
+    values = record.get("source_row_indices_user")
+    if isinstance(values, (list, tuple)):
+        indices = []
+        for value in values:
+            if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+                continue
+            try:
+                indices.append(int(value))
+            except ValueError:
+                continue
+        return indices or None
+    value = record.get("source_row_index_user")
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return [int(value)]
+    except ValueError:
+        return None
+
+
+def _json_finite(value):
+    if isinstance(value, dict):
+        return {str(k): _json_finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_finite(v) for v in value]
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 def _finite_number(value: object) -> Optional[float]:
@@ -1021,7 +1136,7 @@ def _build_holes_3d(
     output = []
     counts = {"complete_geometry": 0, "collar_only": 0, "without_geometry": 0}
     for ordinal, (record, row_id) in enumerate(zip(records, row_ids)):
-        hole_id = blast_hole_id(record, ordinal)
+        hole_id = blast_hole_id(record, "sin dato")
         raw_index = record.get("source_row_index")
         try:
             source_index = int(raw_index) if raw_index is not None else None
@@ -1052,6 +1167,10 @@ def _build_holes_3d(
                 "Nombre_Malla_Original", "holes_polygon", "Malla", "Nombre_Fase", "Fase",
                 "Kilos_Cargados_real", "Kilos_Cargados", "Carga_kg", "Explosivo_kg", "carga",
                 "PF", "pf_g_per_ton", "PF_g_per_ton", "pf_g_per_ton_net", "pf_g_per_ton_inf",
+                "pf_voronoi_bench_g_per_ton", "pf_voronoi_bench_status",
+                "pf_voronoi_bench_unit", "pf_voronoi_bench_source",
+                "pf_voronoi_bench_assumptions", "pf_voronoi_bench_warnings",
+                "kg_per_meter_loaded_column", "n_decks", "explosive_mixed", "burden_spacing_source",
                 "Banco", "banco", "Banco_Diseno", "Nombre_Banco",
                 "Diametro", "Diametro_pozo", "Diametro_mm", "Diameter", "D_mm", "diameter_mm",
                 "dureza", "Dureza", "hardness",
@@ -1076,11 +1195,13 @@ def _build_holes_3d(
             section_distance = classification.min_distance_to_section_m
         output.append(schemas.BlastHole3D(
             row_id=row_id, hole_id=hole_id, source_row_index=source_index,
+            source_row_index_user=_source_row_index_user(record),
             collar=collar, toe=toe, geometry_status=state,
             provenance=provenance, attributes=attributes,
             section_relation=relation, section_distance_m=section_distance,
         ))
     return schemas.BlastHoles3DResponse(
+        **blast_data_status(settings),
         session_id=session_id,
         section_id=section_id,
         corridor_m=corridor_m if section_id is not None else None,

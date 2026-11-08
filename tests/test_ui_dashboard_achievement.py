@@ -86,9 +86,10 @@ class TestAchievementSummary:
         ]
         s = build_achievement_summary(rows, TOL)
         assert s is not None
-        # fila1: todo CUMPLE -> 1.0; fila2: crest FUERA 0.5, toe None 0, berm 1
-        # -> 0.4*0.5+0.3 = 0.5; fila3: crest NO 0, toe 1, berm NO 0 -> 0.3
-        assert s["global"] == int(round((1.0 + 0.5 + 0.3) / 3 * 100))
+        partial_row = (0.4 * 0.5 + 0.3 * 1.0) / (0.4 + 0.3)
+        expected_global = round((1.0 + partial_row + 0.3) / 3 * 100)
+        assert expected_global == 67
+        assert s["global"] == expected_global
         # strict: crest 1/3 finite deltas CUMPLE; toe 2/2; berm 2/3
         assert s["crest_pct"] == round(1 / 3 * 100)
         assert s["crest_denom"] == 3
@@ -117,7 +118,7 @@ class TestAchievementSummary:
         s = build_achievement_summary(rows, TOL)
         assert s["crest_denom"] == 0
         assert s["crest_pct"] == 0
-        assert s["global"] == 30  # solo berma CUMPLE: crédito ponderado 0.3
+        assert s["global"] == 100
         assert s["n_evaluable"] == 1
 
 

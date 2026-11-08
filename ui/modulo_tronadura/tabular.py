@@ -40,6 +40,24 @@ from ui.modulo_tronadura.state import (
 logger = logging.getLogger(__name__)
 
 
+def render_metric_definitions(df: pd.DataFrame) -> None:
+    from core.blast_correlation import PF_DEFINITIONS
+
+    with st.expander("Definiciones y cobertura de indicadores", expanded=True):
+        st.markdown("**PF principal:** carga / (área Voronoi recortada a la huella × altura de banco × densidad), g/t.")
+        for name, definition in PF_DEFINITIONS.items():
+            st.markdown(f"**{name} (secundario):** {definition['formula']}; denominador: {definition['denominator']}; unidad: {definition['unit']}.")
+        st.markdown("**kg_per_meter:** por metro perforado; **kg_per_meter_loaded_column:** por metro de columna cargada (kg/m).")
+        if "pf_voronoi_bench_status" in df:
+            counts = df["pf_voronoi_bench_status"].fillna("sin dato").replace({"MISSING_FOOTPRINT": "sin huella de malla"}).value_counts().to_dict()
+            st.write(f"Estado del PF principal: {counts}")
+        if "energy_coverage_kg_fraction" in df:
+            coverage = pd.to_numeric(df["energy_coverage_kg_fraction"], errors="coerce")
+            st.write(f"Cobertura de energía por pozo (fracción de kg conocida): {coverage.notna().sum()}/{len(df)} con dato; ver detalle por pozo.")
+            cols = [c for c in ("label_pozo", "energy_mj", "energy_known_mj", "energy_coverage_kg_fraction") if c in df]
+            st.dataframe(df[cols].astype("string").fillna("sin dato"), width="stretch")
+
+
 def render_explosive_quality(df_clean: pd.DataFrame) -> None:
     """H-08: explosive provenance (status/source/RWS) visible in the UI.
 
@@ -101,11 +119,12 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
     p_mean = pasadura_series.mean()
     p_min, p_max = DEFAULTS.blast_correlation_pasadura_optimal
     p_optimal = ((pasadura_series >= p_min) & (pasadura_series <= p_max)).sum()
-    p_pct = p_optimal / len(df_filtered) * 100 if len(df_filtered) > 0 else 0
+    p_valid = int(pasadura_series.notna().sum())
+    p_pct = p_optimal / p_valid * 100 if p_valid else None
 
     col_p1, col_p2 = st.columns(2)
-    col_p1.metric("Pasadura Promedio", f"{p_mean:.2f} m")
-    col_p2.metric(f"Pozos en Rango Óptimo ({p_min}m - {p_max}m)", f"{p_pct:.1f}%", f"{p_optimal}/{len(df_filtered)} pozos")
+    col_p1.metric("Pasadura Promedio", f"{p_mean:.2f} m" if np.isfinite(p_mean) else "sin dato")
+    col_p2.metric(f"Pozos en Rango Óptimo ({p_min}m - {p_max}m)", f"{p_pct:.1f}%" if p_pct is not None else "sin dato", f"{p_optimal}/{p_valid} pozos con dato")
 
     fig_pas = build_pasadura_figure(pasadura_series, p_min, p_max)
     st.plotly_chart(fig_pas, width="stretch")
@@ -181,8 +200,8 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
     pf_gt_available = False
     for row in kernel_rows:
         sec_name = row["section_name"]
-        avg_over_break = float(sec_over_grouped.get(sec_name, 0.0) or 0.0)
-        avg_under_break = float(sec_under_grouped.get(sec_name, 0.0) or 0.0)
+        avg_over_break = float(sec_over_grouped.get(sec_name, np.nan))
+        avg_under_break = float(sec_under_grouped.get(sec_name, np.nan))
         pf_vol = row["pf_vol_avg_kgm3"]
         if pf_vol is not None and not (isinstance(pf_vol, float) and np.isnan(pf_vol)):
             pf_available = True
@@ -197,7 +216,9 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
             "PF_g_ton": row.get("pf_g_per_ton_avg"),
             "PF_g_ton_net": row.get("pf_g_per_ton_net_avg"),
             "PF_g_ton_inf": row.get("pf_g_per_ton_inf_avg"),
-            "Energía_MJ": row["energy_total_mj"],
+            "PF_principal_huella_banco_g_ton": row.get("pf_voronoi_bench_g_per_ton_section"),
+            "Energía_conocida_MJ": row["energy_total_mj"],
+            "Cobertura_energía_fracción_kg": row.get("energy_coverage_kg_fraction"),
             "Sobre-excavación_Media_m": avg_over_break,
             "Deuda/Relleno_Media_m": avg_under_break,
         })
@@ -208,16 +229,16 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
         st.info("💡 No hay suficientes pozos con carga explosiva cercanos a las secciones para realizar la correlación.")
         return
 
-    st.dataframe(df_corr, width="stretch")
+    st.dataframe(df_corr.astype("string").fillna("sin dato"), width="stretch")
 
     if pf_gt_available:
         x_col = "PF_g_ton"
-        x_label = "Powder Factor (g/ton)"
-        x_caption_metric = "powder factor (g/ton)"
+        x_label = "PF secundario Q/(burden × espaciamiento × largo vertical × densidad) (g/t)"
+        x_caption_metric = "PF secundario por largo vertical (g/t)"
         x_fallback = False
     elif pf_available:
         x_col = "PF_Vol_kgm3"
-        x_label = "Powder Factor Volumétrico (kg/m³)"
+        x_label = "PF secundario Q/(burden × espaciamiento × altura de banco) (kg/m³)"
         x_caption_metric = "powder factor (kg/m³)"
         x_fallback = False
     else:
@@ -227,7 +248,7 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
         x_fallback = True
 
     fig_scat = build_pf_deviation_scatter(
-        df_corr,
+        df_corr.dropna(subset=[x_col]),
         x_col=x_col,
         x_label=x_label,
         radius_m=DEFAULTS.blast_correlation_radius_m,
@@ -237,7 +258,7 @@ def render_correlation_tab(df_clean: pd.DataFrame) -> None:
     if x_fallback:
         st.caption("ℹ️ Scatter con Kg crudo: powder factor no disponible (faltan columnas de burden/espaciamiento).")
 
-    r_over, r_under = compute_signed_correlations(df_corr, x_col)
+    r_over, r_under = compute_signed_correlations(df_corr.dropna(subset=[x_col]), x_col)
 
     if r_over > 0.5:
         st.success(f"📈 **Sobre-excavación — Correlación Fuerte Positiva (r = {r_over:.2f})**: Las secciones con mayor {x_caption_metric} presentan sistemáticamente mayor sobre-quiebre en la cresta. Es consistente con daño por exceso de energía.")

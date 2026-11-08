@@ -30,6 +30,12 @@ function hole(rowId: string, attributes: Record<string, unknown> = {}, collar: n
 afterEach(() => cleanup());
 
 describe('BlastHoleColorControls', () => {
+  it('shows mixed burden and spacing provenance for visible holes', () => {
+    const records = [hole('mixed', { burden_spacing_source: 'mixed', burden_source: 'design_column', spacing_source: 'knn_proxy' })];
+    render(<BlastHoleColorControls records={records} filteredRecords={records} onColorsChange={vi.fn()} />);
+    expect(screen.getByText(/mixta/i)).toBeInTheDocument();
+  });
+
   it('uses panel-width-driven auto-fit controls without forcing palette across columns', () => {
     const records = [hole('hole', { Kilos_Cargados_real: 100 })];
     const { container } = render(<BlastHoleColorControls records={records} filteredRecords={records} onColorsChange={vi.fn()} />);
@@ -120,9 +126,9 @@ describe('BlastHoleColorControls', () => {
     const records = [hole('hole', { pf_g_per_ton: 40, Diam_mm: 165 })];
     render(<BlastHoleColorControls records={records} filteredRecords={records} onColorsChange={vi.fn()} />);
 
-    expect(screen.getByLabelText('Variable')).toHaveValue('powderFactor');
+    expect(screen.getByLabelText('Variable')).toHaveValue('powderFactorGeometry');
     expect(Array.from(screen.getByLabelText('Variable').querySelectorAll('option')).map((option) => option.value)).toEqual([
-      'powderFactor', 'powderFactorGeometry', 'diameter', 'collarElevation',
+      'powderFactorGeometry', 'diameter', 'collarElevation',
     ]);
   });
 

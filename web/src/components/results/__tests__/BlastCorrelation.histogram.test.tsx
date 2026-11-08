@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import i18n from '../../../i18n';
 import {
   buildOverlayHistogram,
@@ -39,6 +39,7 @@ describe('buildOverlayHistogram', () => {
 
 vi.mock('../../../api/hooks', () => ({
   useBlastCorrelation: vi.fn(),
+  useBlastDefinitions: vi.fn(() => ({ data: undefined })),
   useBlastDamageModel: vi.fn(() => ({
     data: { points: [], fit: null, x_metric: 'pf_g_per_ton', y_metric: 'over_break' },
     isLoading: false,
@@ -94,7 +95,7 @@ vi.mock('../../charts/Plot', () => ({
   ),
 }));
 
-const { useBlastCorrelation } = await import('../../../api/hooks');
+const { useBlastCorrelation, useBlastDefinitions } = await import('../../../api/hooks');
 
 function makeRow(name: string): BlastCorrelationRow {
   return {
@@ -130,7 +131,7 @@ describe('<BlastCorrelation /> histogram section', () => {
     await i18n.changeLanguage('es');
   });
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(useBlastDefinitions).mockReturnValue({ data: undefined } as ReturnType<typeof useBlastDefinitions>); });
 
   it('renders the histogram section when data has carga/descarga', async () => {
     mockCorrelation(
@@ -145,7 +146,7 @@ describe('<BlastCorrelation /> histogram section', () => {
     });
     expect(screen.getByText('Distribución de carga y longitud cargada')).toBeInTheDocument();
     expect(screen.getByTestId('blast-charge-density-histogram')).toHaveTextContent(
-      'Densidad lineal de carga de explosivo',
+      'Carga por metro perforado (kg/m)',
     );
     expect(screen.getByTestId('blast-loaded-length-histogram')).toHaveTextContent(
       'Longitud de columna cargada',
@@ -157,9 +158,22 @@ describe('<BlastCorrelation /> histogram section', () => {
       expect(plot).toHaveAttribute('data-point-count', '20');
       expect(plot).toHaveAttribute(
         'data-x-axis-title',
-        index === 0 ? 'Densidad lineal de carga (kg/m)' : 'Longitud cargada (m)',
+        index === 0 ? 'Carga por metro perforado (kg/m)' : 'Longitud cargada (m)',
       );
     }
+  });
+
+  it('switches independent charge series with their own counts and API formula', () => {
+    vi.mocked(useBlastCorrelation).mockReturnValue({ data: { rows: [makeRow('S')], carga: [999], descarga: [], kg_per_meter: [1, 2, 3], kg_per_meter_loaded_column: [7] }, isLoading: false, error: null } as unknown as ReturnType<typeof useBlastCorrelation>);
+    vi.mocked(useBlastDefinitions).mockReturnValue({ data: { kg_per_meter: { formula: 'Q/L', unit: 'kg/m' }, kg_per_meter_loaded_column: { formula: 'Q/(L-T)', unit: 'kg/m' } } } as unknown as ReturnType<typeof useBlastDefinitions>);
+    render(<BlastCorrelation />);
+    const chart = screen.getByTestId('blast-charge-density-histogram');
+    expect(within(chart).getByText(/3 pozos/)).toBeInTheDocument();
+    expect(within(chart).getByText('Q/L')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Tipo de carga lineal'), { target: { value: 'kg_per_meter_loaded_column' } });
+    expect(within(chart).getByText(/1 pozo/)).toBeInTheDocument();
+    expect(within(chart).getByText('Q/(L-T)')).toBeInTheDocument();
+    expect(within(chart).getByTestId('plotly-stub')).toHaveAttribute('data-x-axis-title', 'Carga por metro de columna cargada (kg/m)');
   });
 
   it('does not render the histogram section when carga/descarga are absent', () => {

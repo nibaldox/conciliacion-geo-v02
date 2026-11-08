@@ -22,6 +22,8 @@ from core.design_achievement import (
 
 ZERO_ROWS_EXPECTED: Dict[str, object] = {
     "global_score": None,
+    "coverage": {"n_rows": 0, "n_evaluable": 0, "n_complete": 0, "weight_available_mean": None, "n_available": {"crest": 0, "toe": 0, "berm": 0}},
+    "rows": [],
     "n_total": 0,
     "n_evaluable": 0,
     "crest_cumple": 0,
@@ -122,7 +124,7 @@ class TestSummaryMetrics:
 
         assert summary["n_total"] == 3
         assert summary["n_evaluable"] == 3
-        assert summary["global_score"] == 53
+        assert summary["global_score"] == 77
         assert summary["crest_cumple"] == 1
         assert summary["crest_denom"] == 2
         assert summary["crest_pct"] == 50
@@ -252,7 +254,7 @@ class TestInvalidDeltaSanitization:
         summary = build_design_achievement_summary(rows, {"neg": 1.0, "pos": 1.0})
 
         assert summary["n_evaluable"] == 1
-        assert summary["global_score"] == 30
+        assert summary["global_score"] == 100
         assert summary["crest_denom"] == 0
         assert summary["crest_pct"] is None
         assert summary["delta_crest_mean"] is None

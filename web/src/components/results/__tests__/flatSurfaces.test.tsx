@@ -23,6 +23,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('../CompliancePlanView', () => ({ CompliancePlanView: () => null }));
 vi.mock('../DesignAchievementPanel', () => ({ DesignAchievementPanel: () => null }));
+vi.mock('../ProposalSummaryCard', () => ({ ProposalSummaryCard: () => null }));
 vi.mock('../../charts/Plot', () => ({ default: () => <div data-testid="plot" /> }));
 
 import { BlastTemporalFilter } from '../BlastTemporalFilter';
