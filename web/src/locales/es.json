@@ -76,6 +76,8 @@
     "removing": "Eliminando…",
     "unsupported_format": "Formato no soportado. Use: {{formats}}",
     "upload_failed": "Error al subir el archivo. Intente nuevamente.",
+    "too_large_for_demo": "La superficie supera el límite de la demo pública ({{limit}} MB). Para trabajar con la topografía completa, use la aplicación local o su propio servidor.",
+    "too_large_for_demo_generic": "La superficie supera el límite de carga de la demo pública. Para trabajar con la topografía completa, use la aplicación local o su propio servidor.",
     "plan_view_title_2d": "Vista en planta con Plotly",
     "plan_view_subtitle_2d": "Descarga diferida: ~3 MB de JS. Solo se carga cuando hacés clic.",
     "plan_view_button_2d": "Cargar vista en planta",
