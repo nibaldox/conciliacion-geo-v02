@@ -8,10 +8,17 @@ export interface FilterBarProps {
   readonly filter: UseFilterStateApi;
   readonly blastDataAvailable?: boolean;
   readonly horizontalDeviationAvailable?: boolean;
+  readonly proposalLayerAvailable?: boolean;
   readonly activeCount?: number;
 }
 
-export function FilterBar({ filter, blastDataAvailable = false, horizontalDeviationAvailable = false, activeCount }: FilterBarProps) {
+export function FilterBar({
+  filter,
+  blastDataAvailable = false,
+  horizontalDeviationAvailable = false,
+  proposalLayerAvailable = false,
+  activeCount,
+}: FilterBarProps) {
   const { t } = useTranslation();
   const { state, setField, reset } = filter;
 
@@ -66,6 +73,17 @@ export function FilterBar({ filter, blastDataAvailable = false, horizontalDeviat
           label={t('profileView.filter.horizontal_deviation', { defaultValue: 'Desviación horizontal' })}
           title={t('profileView.filter.horizontal_deviation_help', {
             defaultValue: 'Colorea la topografía por dH a igual cota; + sobreexcavación, − faltante.',
+          })}
+        />
+      )}
+
+      {proposalLayerAvailable && (
+        <FilterToggle
+          checked={state.showProposalLayer}
+          onChange={(v) => setField('showProposalLayer', v)}
+          label={t('proposal.chartLayer', { defaultValue: 'Propuesta' })}
+          title={t('proposal.chartLayerHelp', {
+            defaultValue: 'Marca la pata sólida guiada y el piso local (capa en validación)',
           })}
         />
       )}

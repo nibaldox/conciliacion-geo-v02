@@ -20,6 +20,7 @@ import {
 } from '../../utils/format';
 import type { ComparisonResult, MatchType } from '../../api/types';
 import { filterResults, type ResultFilterState } from './resultFilters.utils';
+import { ProposalTable } from './ProposalTable';
 
 interface ResultsTableProps {
   filters?: ResultFilterState;
@@ -301,6 +302,14 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
 
   return (
     <div className="space-y-3">
+      <details data-slot="proposal-expander" className="text-xs">
+        <summary className="cursor-pointer select-none text-text-secondary hover:text-text-primary">
+          🧪 {t('proposal.title')}
+        </summary>
+        <div className="pt-3">
+          <ProposalTable rows={orderedData} showSection />
+        </div>
+      </details>
       <div className="flex items-center gap-2 text-xs">
         <label htmlFor="results-order" className="text-text-muted">
           {t('table.order_label', { defaultValue: 'Orden' })}

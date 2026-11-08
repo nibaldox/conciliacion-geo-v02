@@ -26,6 +26,8 @@ export interface FilterState {
   readonly showHorizontalDeviation: boolean;
   /** Overlay blast-hole projections. */
   readonly showBlastHoles: boolean;
+  /** Overlay the guided proposal (solid toe + local floor). */
+  readonly showProposalLayer: boolean;
   /** Maximum distance (m) from the section line for a blast hole
    *  to be considered "on" this section. Only meaningful when
    *  `showBlastHoles` is true. */
@@ -43,6 +45,7 @@ export const DEFAULT_FILTER_STATE: FilterState = Object.freeze({
   showSemaphore: false,
   showHorizontalDeviation: true,
   showBlastHoles: true,
+  showProposalLayer: false,
   blastTolerance: 10,
   statusFilter: [],
 });
@@ -61,6 +64,7 @@ export function isFilterActive(state: FilterState): boolean {
     state.showSemaphore !== d.showSemaphore ||
     state.showHorizontalDeviation !== d.showHorizontalDeviation ||
     state.showBlastHoles !== d.showBlastHoles ||
+    state.showProposalLayer !== d.showProposalLayer ||
     state.blastTolerance !== d.blastTolerance ||
     state.statusFilter.length > 0
   );

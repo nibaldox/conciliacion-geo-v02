@@ -183,6 +183,7 @@ export interface ProfileData {
   reconciled_topo_legacy?: { distances: number[]; elevations: number[] } | null;
   horizontal_deviation?: HorizontalDeviationProfile | null;
   benches_topo?: BenchParams[] | null;
+  benches_design?: BenchParams[] | null;
   floor_elevation?: number | null;
   crest_elevation_max?: number | null;
   profile_warnings?: { design?: string[]; topo?: string[] } | null;
@@ -326,8 +327,64 @@ export interface ComparisonResult {
   effective_berm?: number | null;
   delta_crest: number | null;
   delta_toe: number | null;
-  bench_score?: number;
-  section_score?: number;
+  bench_score?: number | null;
+  section_score?: number | null;
+  height_score?: number | null;
+  angle_score?: number | null;
+  berm_score?: number | null;
+  berm_dev?: number | null;
+  section_status?: string | null;
+  effective_berm_status?: string | null;
+  berm_remnant_max_m?: number | null;
+  berm_remnant_area_m2?: number | null;
+  guided_delta_crest?: number | null;
+  guided_delta_crest_status?: string | null;
+  guided_delta_toe?: number | null;
+  guided_delta_toe_status?: string | null;
+  guided_height?: number | null;
+  guided_height_status?: string | null;
+  guided_angle?: number | null;
+  guided_angle_status?: string | null;
+  guided_berm?: number | null;
+  guided_berm_status?: string | null;
+  guided_berm_remnant_max_m?: number | null;
+  guided_berm_remnant_area_m2?: number | null;
+  guided_warnings?: string[] | null;
+  guided_floor_offset_m?: number | null;
+  guided_floor_offset_status?: string | null;
+  guided_remaining_thickness_mean_m?: number | null;
+  guided_remaining_thickness_max_m?: number | null;
+  guided_excavation_debt_area_m2?: number | null;
+  design_bench_state?: string | null;
+  split_bench?: boolean | null;
+  split_of?: number | null;
+  proposed_source?: string | null;
+  proposed_height?: number | null;
+  proposed_angle?: number | null;
+  proposed_delta_crest?: number | null;
+  proposed_delta_toe?: number | null;
+  proposed_berm?: number | null;
+  proposed_height_source?: string | null;
+  proposed_angle_source?: string | null;
+  proposed_crest_source?: string | null;
+  proposed_toe_source?: string | null;
+  proposed_berm_source?: string | null;
+  proposed_height_status?: string | null;
+  proposed_angle_status?: string | null;
+  proposed_crest_status?: string | null;
+  proposed_toe_status?: string | null;
+  proposed_berm_status?: string | null;
+  proposed_bench_score?: number | null;
+  proposed_evaluable?: boolean;
+  proposed_exclusion_reason?: string | null;
+  floor_offset_m?: number | null;
+  floor_status?: string | null;
+  excavation_debt_thickness_mean_m?: number | null;
+  excavation_debt_thickness_max_m?: number | null;
+  excavation_debt_area_m2?: number | null;
+  proposal_status?: string | null;
+  proposal_error?: string | null;
+  floor_tolerance_used?: { max: number } | null;
 }
 
 export interface ProcessStatus {
@@ -336,6 +393,60 @@ export interface ProcessStatus {
   total_sections: number | null;
   completed_sections: number;
   n_results: number;
+}
+
+export interface ProposedCoverage {
+  n_evaluable: number;
+  n_design_benches: number;
+  ratio: number | null;
+}
+
+export interface ProposedSectionSummary {
+  section: string | null;
+  proposed_section_score: number | null;
+  proposed_section_status: string | null;
+  n_rows: number;
+  n_evaluable: number;
+  n_not_excavated: number;
+  n_section_truncated: number;
+  n_unmeasured: number;
+  n_split_fragments: number;
+  n_split_benches: number;
+  excavation_debt_area_m2: number;
+  floor_status_counts: Record<string, number>;
+}
+
+export interface ProposedSummary {
+  section: string | null;
+  proposed_global_score: number | null;
+  n_rows: number;
+  n_evaluable: number;
+  n_not_excavated: number;
+  n_section_truncated: number;
+  n_unmeasured: number;
+  n_split_fragments: number;
+  n_split_benches: number;
+  excavation_debt_area_m2: number;
+  floor_status_counts: Record<string, number>;
+  coverage: ProposedCoverage;
+  by_section: Record<string, ProposedSectionSummary>;
+}
+
+export interface ProposedComplianceResponse {
+  session_id: string;
+  proposal_status: 'current' | 'not_computed' | 'partial';
+  n_total_rows: number;
+  n_proposal_rows: number;
+  n_failed_rows: number;
+  n_not_computed_rows: number;
+  summary: ProposedSummary | null;
+  floor_tolerance: Record<string, number>;
+  floor_tolerance_used?: Record<string, number> | null;
+  floor_tolerance_source: 'session' | 'core_default';
+  filters: Record<string, string[]>;
+  status_model: string;
+  assumptions: string[];
+  warnings: string[];
 }
 
 export interface ExportRequest {
@@ -414,7 +525,7 @@ export interface BlastHoleOnProfile {
   is_within_tolerance: boolean;
 }
 
-export interface BlastHolesOnProfileResponse {
+export interface BlastHolesOnProfileResponse extends BlastResponseProvenance {
   section_id: string;
   mesh_id: string;
   tolerance: number;
@@ -428,27 +539,44 @@ export interface BlastHolesOnProfileResponse {
 // snake_case to match the JSON wire format, consistent with the rest
 // of the types in this file (e.g. BlastHolesOnProfileResponse).
 
+export type BlastDataStatus = 'current' | 'legacy_reimport_required';
+
+export interface BlastResponseProvenance {
+  data_status?: BlastDataStatus;
+  algorithm_version?: string | null;
+}
+
 export interface BlastCorrelationRow {
   section_name: string;
   num_wells: number;
-  total_kg: number;
-  mean_abs_deviation: number;
-  avg_over_break: number;
-  avg_under_break: number;
+  total_kg: number | null;
+  mean_abs_deviation: number | null;
+  avg_over_break: number | null;
+  avg_under_break: number | null;
   n_over: number;
   n_under: number;
-  pf_vol_avg_kgm3: number;
-  pf_area_avg_kgm2: number;
+  pf_vol_avg_kgm3: number | null;
+  pf_area_avg_kgm2: number | null;
   /** Highlighted primary metric (g/ton). */
-  pf_g_per_ton_avg: number;
+  pf_g_per_ton_avg: number | null;
   /** Additive metric: powder factor using bench height excluding sub-drill ("sin pasadura"). */
-  pf_g_per_ton_net_avg: number;
-  energy_total_mj: number;
+  pf_g_per_ton_net_avg: number | null;
+  energy_total_mj: number | null;
+  energy_known_mj?: number | null;
+  n_kg_known?: number;
+  n_kg_missing?: number;
   n_pf_valid: number;
   /** Geotechnical-domain label echoed from the section's `sector`. */
   sector: string;
   /** Effective ρ (ton/m³) applied for this row (per-sector override or global). */
-  rock_density_used: number;
+  rock_density_used: number | null;
+  pf_voronoi_bench_g_per_ton_section?: number | null;
+  n_pf_voronoi_bench_valid?: number;
+  pf_voronoi_bench_status_counts?: Record<string, number>;
+  pf_voronoi_bench_source_counts?: Record<string, number>;
+  pf_voronoi_bench_source_dominant?: string | null;
+  pf_g_per_ton_inf_avg?: number | null;
+  energy_coverage_kg_fraction?: number | null;
 }
 
 export interface BlastTemporalFilter {
@@ -462,12 +590,14 @@ export interface BlastTemporalFilter {
   missing: number;
 }
 
-export interface BlastCorrelationResponse {
+export interface BlastCorrelationResponse extends BlastResponseProvenance {
   rows: BlastCorrelationRow[];
   tolerance: number | null;
   n_sections: number;
   carga?: number[];
   descarga?: number[];
+  kg_per_meter?: number[];
+  kg_per_meter_loaded_column?: number[];
   temporal_filter?: BlastTemporalFilter;
 }
 
@@ -481,25 +611,25 @@ export interface BlastCorrelationResponse {
 export interface BlastDamagePoint {
   section_name: string;
   /** Per-mass powder factor (g/ton) — the x-axis metric. */
-  pf_g_per_ton: number;
+  pf_g_per_ton: number | null;
   /** Mean overbreak (m) for the section — the y-axis metric. */
-  over_break: number;
+  over_break: number | null;
 }
 
 export type BlastDamageConfidence = 'HIGH' | 'MEDIUM' | 'LOW' | 'INSUFFICIENT';
 
 export interface BlastDamageModelFit {
-  beta0: number;
-  beta1: number;
-  r_squared: number;
-  p_value: number;
+  beta0: number | null;
+  beta1: number | null;
+  r_squared: number | null;
+  p_value: number | null;
   n: number;
   confidence: BlastDamageConfidence;
-  ci_beta1_low: number;
-  ci_beta1_high: number;
+  ci_beta1_low: number | null;
+  ci_beta1_high: number | null;
 }
 
-export interface BlastDamageModelResponse {
+export interface BlastDamageModelResponse extends BlastResponseProvenance {
   points: BlastDamagePoint[];
   fit: BlastDamageModelFit | null;
   x_metric: string;
@@ -557,7 +687,51 @@ export interface BlockingError {
   details?: Record<string, unknown>;
 }
 
-export interface BlastUploadResponse {
+export interface BlastConsolidationIssue {
+  malla?: string | null;
+  id_pozo?: string | null;
+  source_row_indices: number[];
+  reason: string;
+}
+
+export interface BlastConsolidationReport {
+  key_columns: string[];
+  rows_in: number;
+  holes_out: number;
+  exact_copies_removed: number;
+  copies_by_malla: Record<string, number>;
+  holes_with_decks: number;
+  deck_rows_merged: number;
+  conflicts: BlastConsolidationIssue[];
+  unmerged_missing_identity: number;
+  version: string | null;
+  warnings?: BlastConsolidationIssue[];
+}
+
+export interface BlastFootprintReport {
+  mode: string;
+  n_mallas: number;
+  n_estimated: number;
+  n_user: number;
+  n_missing: number;
+  buffer_factor?: number | null;
+  method: string;
+  missing_reasons?: Record<string, string>;
+}
+
+export interface BlastDefinition {
+  formula: string;
+  numerator?: string;
+  denominator?: string;
+  unit: string;
+  height_source?: string;
+  footprint?: string;
+  footprint_modes?: string[];
+}
+
+export type BlastDefinitions = Record<string, BlastDefinition>;
+
+export interface BlastUploadResponse extends BlastResponseProvenance {
   session_id: string;
   n_holes: number;
   n_rows_loaded: number;
@@ -568,6 +742,8 @@ export interface BlastUploadResponse {
   // Structured processing output (integración §3.6).
   data_warnings: string;
   processing_summary: Record<string, unknown>;
+  consolidation_report?: BlastConsolidationReport;
+  footprint_report?: BlastFootprintReport;
   accepted_rows?: Record<string, unknown>[];
   rejected_rows: RejectedRow[];
   event_warnings: Record<string, unknown>[];
@@ -589,22 +765,71 @@ export interface BlastUploadResponse {
 
 export interface BlastHoleSummary {
   hole_id: string;
-  x: number;
-  y: number;
+  x: number | null;
+  y: number | null;
   z: number | null;
   carga: number | null;
   descarga: number | null;
   hardness: string | null;
   section_name?: string;
+  bench?: string | null;
+  length?: number | null;
+  inclination?: number | null;
+  azimuth?: number | null;
+  z_collar_semantic?: string | null;
+  surface_sample_status?: string | null;
+  surface_sample_reason?: string | null;
+  surface_sample_method?: string | null;
+  surface_sample_mesh_id?: string | null;
+  surface_sample_mesh_sha256?: string | null;
+  surface_sample_unit?: string | null;
+  surface_sample_assumption?: string | null;
 }
 
-export interface BlastHolesResponse {
+export interface BlastHolesResponse extends BlastResponseProvenance {
   session_id: string;
   holes: BlastHoleSummary[];
 }
 
-export interface BlastSessionSummaryResponse {
+export interface BlastSessionSummaryResponse extends BlastResponseProvenance {
   n_holes: number;
+  consolidation_report?: BlastConsolidationReport | null;
+  footprint_report?: BlastFootprintReport | null;
+}
+
+export interface BlastHoleDeck {
+  kg: number | null;
+  explosive: string | null;
+  taco_m: number | null;
+  source_row_index: number | null;
+}
+
+export interface BlastHoleDetail extends BlastResponseProvenance {
+  hole_id: string;
+  row_id: string;
+  decks: BlastHoleDeck[];
+  explosive_mix: Record<string, number>;
+  source_row_indices: number[];
+  source_row_index_user: number[] | null;
+  duplicate_rows_removed: number;
+  area_influence_m2: number | null;
+  area_status: string | null;
+  pf_voronoi_bench_area_m2: number | null;
+  pf_voronoi_bench_area_status: string | null;
+  pf_voronoi_bench_domain_area_m2: number | null;
+  pf_voronoi_bench_g_per_ton: number | null;
+  pf_voronoi_bench_status: string | null;
+  pf_voronoi_bench_source: string | null;
+  pf_voronoi_bench_unit: string | null;
+  pf_voronoi_bench_assumptions: string[];
+  pf_voronoi_bench_warnings: string[];
+  bench_height_status: string | null;
+  altura_carga_warning: string | null;
+  energy_total_mj: number | null;
+  energy_known_mj: number | null;
+  energy_coverage_kg_fraction: number | null;
+  kg_per_meter_loaded_column: number | null;
+  kg_per_meter_loaded_column_status: string | null;
 }
 
 // AI reporter (core/ai_v2)
@@ -860,4 +1085,47 @@ export interface SimulationCreateResponse {
     accepted_rows_hash: string;
   };
   npz_sha256: string;
+}
+
+export interface DesignAchievementCoverage {
+  n_rows: number;
+  n_available: Record<'crest' | 'toe' | 'berm', number>;
+  n_evaluable: number;
+  n_complete: number;
+  weight_available_mean: number | null;
+}
+
+export interface DesignAchievementRowDetail {
+  score: number | null;
+  components_available: ('crest' | 'toe' | 'berm')[];
+  components_missing: ('crest' | 'toe' | 'berm')[];
+  weight_available: number;
+}
+
+export interface DesignAchievementDetails {
+  coverage?: DesignAchievementCoverage;
+  rows?: DesignAchievementRowDetail[];
+  per_malla_coverage?: Record<string, DesignAchievementCoverage> | null;
+}
+
+export interface BlastHole3DAttributes extends Record<string, unknown> {
+  pf_voronoi_bench_g_per_ton?: number | null;
+  pf_voronoi_bench_status?: string | null;
+  kg_per_meter_loaded_column?: number | null;
+  n_decks?: number | null;
+  explosive_mixed?: boolean | null;
+  burden_source?: 'design_column' | 'knn_proxy' | null;
+  spacing_source?: 'design_column' | 'knn_proxy' | null;
+  burden_spacing_source?: 'design_column' | 'knn_proxy' | 'mixed' | null;
+}
+
+declare module './designAchievement' {
+  interface DesignAchievementSummary {
+    coverage?: DesignAchievementCoverage;
+    rows?: DesignAchievementRowDetail[];
+    per_malla_coverage?: Record<string, DesignAchievementCoverage> | null;
+  }
+  interface DesignAchievementResponse {
+    per_malla_coverage?: Record<string, DesignAchievementCoverage> | null;
+  }
 }

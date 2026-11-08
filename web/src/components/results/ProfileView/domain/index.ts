@@ -84,3 +84,34 @@ export {
   toDesignBenchStatuses,
   toProfileViewModel,
 } from './mapping';
+
+export type {
+  ProposalSource,
+  ProposalMagnitudeSource,
+  ProposalBenchState,
+  ProposalValuePair,
+  ProposalRow,
+  ProposalSessionNotice,
+  ProposalDesignBench,
+  ProposalOverlay,
+  ProposalOverlayPoint,
+  ProposalOverlaySegment,
+  ProposalProfileRange,
+  ProposalLang,
+} from './proposal';
+
+export {
+  PROPOSAL_FLOOR_SPAN_M,
+  hasProposalData,
+  toProposalBenchState,
+  toProposalRow,
+  toProposalRows,
+  formatProposalNumber,
+  formatProposalPair,
+  formatSignedMeters,
+  formatFloor,
+  formatFloorStatusCounts,
+  toProposalSessionNotice,
+  toProposalProfileRange,
+  buildProposalOverlay,
+} from './proposal';

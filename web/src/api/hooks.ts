@@ -38,6 +38,9 @@ import type {
   ColumnSchemaResponse,
 } from './types';
 
+export { buildProposedComplianceQuery, useProposedCompliance } from './proposedCompliance';
+export type { UseProposedComplianceResult } from './proposedCompliance';
+
 // ─── Demo data helpers ──────────────────────────────────────
 //
 // When the session is in demo mode (set by useSession().loadDemo()),
@@ -1116,5 +1119,13 @@ export function useCreateBlastSimulation() {
       client
         .post<import('./types').SimulationCreateResponse>('/blast/simulations', body)
         .then((r) => r.data),
+  });
+}
+
+export function useBlastDefinitions() {
+  return useQuery({
+    queryKey: ['blast-definitions'],
+    queryFn: async () => (await client.get<import('./types').BlastDefinitions>('/blast/definitions')).data,
+    staleTime: Infinity,
   });
 }

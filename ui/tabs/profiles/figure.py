@@ -16,6 +16,7 @@ from ui.tabs.profiles.traces import (
     add_sector_areas_traces,
     add_semaphore_traces,
 )
+from ui.tabs.profiles.proposal import add_proposal_traces
 
 
 def build_profile_figure(
@@ -31,9 +32,11 @@ def build_profile_figure(
     show_pozos=False,
     blast_tolerance=None,
     show_sector_areas=False,
+    show_proposal=False,
     config=None,
     area_fill_design=None,
     params_topo=None,
+    params_design=None,
     comparison_results=None,
     reconciled_design=None,
     reconciled_topo=None,
@@ -51,6 +54,8 @@ def build_profile_figure(
         area_fill_design = []
     if params_topo is None:
         params_topo = []
+    if params_design is None:
+        params_design = []
     if comparison_results is None:
         comparison_results = []
     if reconciled_design is None:
@@ -127,6 +132,12 @@ def build_profile_figure(
 
     if show_pozos and blast_tolerance is not None:
         add_blast_holes(fig, section, blast_tolerance, blast_df_clean, cache=pozos_cache)
+
+    if show_proposal:
+        design_benches = None
+        if i < len(params_design) and params_design[i] is not None:
+            design_benches = params_design[i].benches
+        add_proposal_traces(fig, sec_comps, design_benches)
 
     all_d = np.concatenate([pd_prof.distances, pt_prof.distances])
     all_z = np.concatenate([pd_prof.elevations, pt_prof.elevations])

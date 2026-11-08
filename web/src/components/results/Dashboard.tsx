@@ -3,6 +3,7 @@ import { BenchFilter } from './BenchFilter';
 import { CompliancePlanView } from './CompliancePlanView';
 import { ResultFilters } from './ResultFilters';
 import { DesignAchievementPanel } from './DesignAchievementPanel';
+import { ProposalSummaryCard } from './ProposalSummaryCard';
 import { filterResults, type ResultFilterState } from './resultFilters.utils';
 import { useTranslation } from 'react-i18next';
 import Plot from '../charts/Plot';
@@ -658,6 +659,11 @@ export function Dashboard() {
   const bermWidths = useMemo(() => collectField(filteredResults, 'berm_real'), [filteredResults]);
 
   const totalBenches = filteredResults.length;
+
+  const proposalSections = useMemo(
+    () => [...new Set(filteredResults.map((row) => row.section))],
+    [filteredResults],
+  );
   const nSections = new Set(filteredResults.map((row) => row.section)).size;
 
   const plotConfig = useMemo<Partial<Config>>(
@@ -778,7 +784,10 @@ export function Dashboard() {
             {sectorCompliance.some((sector) => sector.sector?.trim()) ? <Plot data={sectorChartData} layout={sectorChartLayout} config={plotConfig} style={{ width: '100%' }} /> : <p className="text-xs text-text-muted">{t('dashboard.rail.no_sectors')}</p>}
           </SummaryPanel>
         </div>
-        <DesignAchievementPanel filters={filters} />
+        <div className="grid min-w-0 gap-6 xl:grid-cols-2">
+          <DesignAchievementPanel filters={filters} />
+          <ProposalSummaryCard filters={filters} sections={proposalSections} />
+        </div>
       </>}
     </div>
   );

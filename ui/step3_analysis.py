@@ -12,6 +12,7 @@ from core import (
     cut_mesh_with_section,
     extract_parameters,
     compare_design_vs_asbuilt,
+    compare_design_vs_asbuilt_guided,
 )
 from core.geom_utils import calculate_area_between_profiles
 
@@ -42,10 +43,18 @@ def render_step3(config: dict) -> None:
         st.session_state.params_topo = results['params_topo']
         st.session_state.comparison_results = results['comparisons']
         st.session_state.processed_sections = sections_to_process
+        st.session_state.proposal_failed_sections = results.get(
+            'proposal_failed_sections', [])
         st.session_state.step = 4
 
         _precompute_profile_artefacts(results)
         _render_summary_metrics(results)
+        failed = st.session_state.proposal_failed_sections
+        if failed:
+            st.warning(
+                "⚠️ Medición guiada no calculada en: "
+                + ", ".join(failed)
+                + " — esas secciones muestran solo los valores oficiales.")
 
 
 def _precompute_profile_artefacts(results: dict) -> None:
@@ -99,6 +108,27 @@ def _precompute_profile_artefacts(results: dict) -> None:
 # Private helpers
 # ---------------------------------------------------------------------------
 
+def _compare_with_proposal(ep_d, ep_t, tolerances, asbuilt_profile):
+    """Compare with the guided proposal; never break the official rows.
+
+    Returns ``(rows, proposal_ok)``. On success the rows are the official
+    ones plus the ``guided_*`` / ``proposed_*`` fields; if the guided
+    measurement raises, the official ``compare_design_vs_asbuilt`` rows are
+    returned with ``proposal_ok=False`` so the section is reported as
+    «propuesta no calculada».
+    """
+    if not (ep_d is not None and ep_t is not None and ep_d.benches and ep_t.benches):
+        return [], True
+    try:
+        rows = compare_design_vs_asbuilt_guided(
+            ep_d, ep_t, tolerances,
+            asbuilt_profile.distances, asbuilt_profile.elevations,
+        )
+        return rows, True
+    except Exception:
+        return compare_design_vs_asbuilt(ep_d, ep_t, tolerances), False
+
+
 def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
     """Run mesh cutting and parameter extraction in parallel. Returns results dict."""
     total = len(sections_to_process)
@@ -127,6 +157,7 @@ def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
 
         ep_d = ep_t = None
         comp = []
+        proposal_ok = True
         if pd_prof is not None and pt_prof is not None:
             ep_d = extract_parameters(
                 pd_prof.distances, pd_prof.elevations,
@@ -134,13 +165,13 @@ def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
             ep_t = extract_parameters(
                 pt_prof.distances, pt_prof.elevations,
                 section.name, section.sector, resolution, face_threshold, berm_threshold)
-            if ep_d.benches and ep_t.benches:
-                comp = compare_design_vs_asbuilt(ep_d, ep_t, tolerances)
-        return i, pd_prof, pt_prof, ep_d, ep_t, comp
+            comp, proposal_ok = _compare_with_proposal(ep_d, ep_t, tolerances, pt_prof)
+        return i, pd_prof, pt_prof, ep_d, ep_t, comp, proposal_ok
 
     completed = 0
+    proposal_failed_sections = []
     with ThreadPoolExecutor() as executor:
-        for i, pd_prof, pt_prof, ep_d, ep_t, comp in executor.map(
+        for i, pd_prof, pt_prof, ep_d, ep_t, comp, proposal_ok in executor.map(
                 _process_single, enumerate(sections_to_process)):
             profiles_d[i] = pd_prof
             profiles_t[i] = pt_prof
@@ -148,6 +179,8 @@ def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
                 params_d[i] = ep_d
                 params_t[i] = ep_t
                 comparisons.extend(comp)
+            if not proposal_ok:
+                proposal_failed_sections.append(sections_to_process[i].name)
             completed += 1
             status.text(
                 f"Procesando sección {sections_to_process[i].name} ({completed}/{total})...")
@@ -161,6 +194,7 @@ def _run_parallel_analysis(sections_to_process, config: dict) -> dict:
         'params_topo': params_t,
         'comparisons': comparisons,
         'total': total,
+        'proposal_failed_sections': proposal_failed_sections,
     }
 
 

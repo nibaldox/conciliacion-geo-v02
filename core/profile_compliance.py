@@ -12,6 +12,7 @@ Three public functions live here:
   compliance scoring used by the Excel/Word reports.
 """
 
+import math
 import warnings
 from dataclasses import dataclass
 from typing import List
@@ -35,6 +36,21 @@ from core.profile_extract import (
 )
 
 _BLOCKED_MATCH_COST = 1e9
+
+
+def _finite_or_none(value):
+    """Return ``value`` as a finite float, or ``None`` when it is absent.
+
+    A missing or non-finite magnitude (``None``/``NaN``/``inf``) means the
+    parameter could not be measured; it must never be read as a zero.
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
 
 
 def _evaluate_status(deviation, tol_neg, tol_pos):
@@ -239,11 +255,14 @@ def _build_match_row(
     tol_b = tolerances['berm_width']
 
     min_berm = tol_b.get('min', 0.0)
-    berm_real = round(bt.berm_width, 2)
+    berm_real_width = _finite_or_none(bt.berm_width)
+    berm_design_width = _finite_or_none(bd.berm_width)
+    effective_berm_width = _finite_or_none(bt.effective_berm_width)
+    berm_real = round(berm_real_width, 2) if berm_real_width is not None else None
 
-    berm_complies = berm_real >= min_berm
-    berm_status = STATUS_CUMPLE if berm_complies else STATUS_NO_CUMPLE
-    berm_score = 60 if berm_complies else 0
+    berm_complies = berm_real is not None and berm_real >= min_berm
+    berm_status = '-' if berm_real is None else (STATUS_CUMPLE if berm_complies else STATUS_NO_CUMPLE)
+    berm_score = None if berm_real is None else (60 if berm_complies else 0)
 
     angle_complies = abs(angle_dev) <= (tol_a['neg'] if angle_dev < 0 else tol_a['pos'])
     angle_status = _evaluate_status(angle_dev, tol_a['neg'], tol_a['pos'])
@@ -268,12 +287,20 @@ def _build_match_row(
         'angle_real': round(bt.face_angle, 1),
         'angle_dev': round(angle_dev, 1),
         'angle_status': angle_status,
-        'berm_design': round(bd.berm_width, 2),
+        'berm_design': round(berm_design_width, 2) if berm_design_width is not None else None,
         'berm_real': berm_real,
+        'berm_dev': (round(berm_real_width - berm_design_width, 2)
+                     if berm_real_width is not None and berm_design_width is not None else None),
         'berm_min': min_berm,
         'berm_status': berm_status,
         'spill_width': round(bt.spill_width, 2),
-        'effective_berm': round(bt.effective_berm_width, 2),
+        'effective_berm': (round(effective_berm_width, 2)
+                           if effective_berm_width is not None else None),
+        'effective_berm_status': (
+            (STATUS_CUMPLE if round(bt.effective_berm_width, 2) >= min_berm else STATUS_NO_CUMPLE)
+            if bt.effective_berm_width is not None and np.isfinite(bt.effective_berm_width)
+            and min_berm is not None and np.isfinite(min_berm) else None
+        ),
         'delta_crest': round(
             (bt.crest_distance - bd.crest_distance) *
             (1.0 if bd.crest_distance >= bd.toe_distance else -1.0), 2),
@@ -285,12 +312,13 @@ def _build_match_row(
         'berm_score': berm_score,
         'angle_score': angle_score,
         'height_score': height_score,
-        'bench_score': berm_score + angle_score + height_score,
+        'bench_score': berm_score + angle_score + height_score if berm_score is not None else None,
     }
 
 
 def _build_missing_row(bd, params_design) -> dict:
     """Build a MISSING comparison row (design has bench, topo doesn't)."""
+    berm_design_width = _finite_or_none(bd.berm_width)
     return {
         'sector': params_design.sector,
         'section': params_design.section_name,
@@ -306,7 +334,8 @@ def _build_missing_row(bd, params_design) -> dict:
         'angle_real': None,
         'angle_dev': None,
         'angle_status': "-",
-        'berm_design': round(bd.berm_width, 2),
+        'berm_design': (round(berm_design_width, 2)
+                        if berm_design_width is not None else None),
         'berm_real': None,
         'berm_min': None,
         'berm_status': STATUS_FALTA_BANCO,
@@ -322,6 +351,9 @@ def _build_missing_row(bd, params_design) -> dict:
 
 def _build_extra_row(bt, params_design) -> dict:
     """Build an EXTRA comparison row (topo has bench, design doesn't)."""
+    berm_real_width = _finite_or_none(bt.berm_width)
+    effective_berm_width = _finite_or_none(bt.effective_berm_width)
+    spill_width = _finite_or_none(bt.spill_width)
     return {
         'sector': params_design.sector,
         'section': params_design.section_name,
@@ -338,11 +370,12 @@ def _build_extra_row(bt, params_design) -> dict:
         'angle_dev': None,
         'angle_status': "-",
         'berm_design': None,
-        'berm_real': round(bt.berm_width, 2),
+        'berm_real': round(berm_real_width, 2) if berm_real_width is not None else None,
         'berm_min': None,
         'berm_status': STATUS_BANCO_ADICIONAL,
-        'spill_width': round(bt.spill_width, 2),
-        'effective_berm': round(bt.effective_berm_width, 2),
+        'spill_width': round(spill_width, 2) if spill_width is not None else None,
+        'effective_berm': (round(effective_berm_width, 2)
+                           if effective_berm_width is not None else None),
         'delta_crest': None,
         'delta_toe': None,
         'bench_design': None,
@@ -430,7 +463,15 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
         if j not in matched_topo_indices:
             comparisons.append(_build_extra_row(benches_topo[j], params_design))
 
-    match_scores = [c['bench_score'] for c in comparisons if c['type'] == 'MATCH']
+    match_scores = [
+        score
+        for score in (
+            _finite_or_none(c.get('bench_score'))
+            for c in comparisons
+            if c['type'] == 'MATCH'
+        )
+        if score is not None
+    ]
     section_score = round(sum(match_scores) / len(match_scores), 1) if match_scores else 0.0
     section_status = STATUS_CUMPLE if section_score >= 70 else STATUS_NO_CUMPLE
 
@@ -624,3 +665,162 @@ def compute_sector_deviations(
         ))
 
     return sectors
+
+
+def compare_design_vs_asbuilt_guided(
+    params_design, params_topo, tolerances, asbuilt_distances, asbuilt_elevations,
+    *, defaults=None, apply_proposal: bool = True,
+):
+    """Compare design vs as-built and ADD design-guided measurement fields.
+
+    Runs :func:`compare_design_vs_asbuilt` unchanged, then measures every
+    design bench against the raw as-built profile with
+    :func:`core.design_guided_measurement.measure_design_benches` and only
+    ADDS fields to the returned rows; every legacy value (deltas, statuses,
+    scores, ``height_real``, ``berm_status``, ``bench_score`` ...) stays
+    byte-identical.
+
+    Added on MATCH and MISSING rows:
+
+    - ``guided_delta_crest`` / ``guided_delta_toe`` / ``guided_height`` /
+      ``guided_angle`` / ``guided_berm`` / ``guided_floor_offset_m`` and
+      their ``*_status`` counterparts (value is ``None``, never 0, when the
+      magnitude cannot be measured).
+    - ``design_bench_state``: ``excavated`` | ``not_excavated`` |
+      ``section_truncated`` | ``unmeasured``.
+    - ``guided_remaining_thickness_mean_m`` / ``_max_m`` /
+      ``guided_excavation_debt_area_m2`` when ``not_excavated``.
+
+    The guided measurement also receives the as-built segmentation
+    (``params_topo.benches``), so an excavated bench displaced horizontally
+    (a full as-built bench at the design elevations) is recovered past the
+    profile end and measured as excavated with an additive
+    ``bench_offset`` warning instead of falling to ``not_excavated``.
+
+    MATCH rows also get ``split_bench`` (True when the guided measurement
+    resolves the complete design bench but the match used a fragment), and
+    EXTRA rows that are a fragment of a split design bench get
+    ``split_of`` = that design bench number (``None`` otherwise).
+
+    With ``apply_proposal=True`` (default) the rows additionally carry the
+    wave 9 ``proposed_*`` / floor / excavation-debt fields computed by
+    :func:`core.guided_compliance.apply_proposed_rules`; the official
+    values never change.
+    """
+    from core.design_guided_measurement import (
+        BENCH_STATE_EXCAVATED,
+        BENCH_STATE_NOT_EXCAVATED,
+        BENCH_STATE_SECTION_TRUNCATED,
+        STATUS_MEASURED,
+        DEFAULTS as _GUIDED_DEFAULTS,
+        excavation_debt_area,
+        measure_design_benches,
+    )
+
+    rows = compare_design_vs_asbuilt(params_design, params_topo, tolerances)
+    guided = measure_design_benches(
+        params_design.benches, asbuilt_distances, asbuilt_elevations,
+        defaults=defaults if defaults is not None else _GUIDED_DEFAULTS,
+        asbuilt_benches=params_topo.benches,
+    )
+    gmap = {g.bench_number: g for g in guided}
+    design_by_num = {b.bench_number: b for b in params_design.benches}
+
+    state_map = {
+        BENCH_STATE_EXCAVATED: 'excavated',
+        BENCH_STATE_NOT_EXCAVATED: 'not_excavated',
+        BENCH_STATE_SECTION_TRUNCATED: 'section_truncated',
+    }
+
+    def _r2(v):
+        return round(float(v), 2) if v is not None else None
+
+    def _r1(v):
+        return round(float(v), 1) if v is not None else None
+
+    def _overlap(a, b):
+        return min(max(a[0], a[1]), max(b[0], b[1])) - max(min(a[0], a[1]), min(b[0], b[1]))
+
+    def _same_face(bd, bt):
+        dh = _overlap(
+            (float(bd.crest_distance), float(bd.toe_distance)),
+            (float(bt.crest_distance), float(bt.toe_distance)),
+        )
+        dv = _overlap(
+            (float(bd.crest_elevation), float(bd.toe_elevation)),
+            (float(bt.crest_elevation), float(bt.toe_elevation)),
+        )
+        return dh > 0.5 and dv > 0.5
+
+    extra_rows = [r for r in rows if r['type'] == 'EXTRA']
+    split_design = {}
+
+    for row in rows:
+        if row['type'] not in ('MATCH', 'MISSING'):
+            continue
+        g = gmap.get(row['bench_num'])
+        row['guided_delta_crest'] = _r2(g.delta_crest) if g is not None else None
+        row['guided_delta_crest_status'] = g.crest_asbuilt_status if g is not None else 'unmeasured'
+        row['guided_delta_toe'] = _r2(g.delta_toe) if g is not None else None
+        row['guided_delta_toe_status'] = g.toe_asbuilt_status if g is not None else 'unmeasured'
+        row['guided_height'] = _r2(g.height_asbuilt) if g is not None else None
+        row['guided_height_status'] = g.height_status if g is not None else 'unmeasured'
+        row['guided_angle'] = _r1(g.face_angle_asbuilt) if g is not None else None
+        row['guided_angle_status'] = g.face_angle_status if g is not None else 'unmeasured'
+        row['guided_berm'] = _r2(g.berm_asbuilt) if g is not None else None
+        row['guided_berm_status'] = g.berm_status if g is not None else 'unmeasured'
+        row['guided_floor_offset_m'] = _r2(g.floor_offset_m) if g is not None else None
+        row['guided_floor_offset_status'] = g.floor_offset_status if g is not None else 'unmeasured'
+        row['guided_berm_remnant_max_m'] = _r2(g.berm_remnant_max_m) if g is not None else None
+        row['guided_berm_remnant_area_m2'] = _r2(g.berm_remnant_area_m2) if g is not None else None
+        row['guided_warnings'] = list(g.warnings) if g is not None else []
+        row['design_bench_state'] = (
+            state_map.get(g.bench_state, 'unmeasured') if g is not None else 'unmeasured'
+        )
+        row['guided_remaining_thickness_mean_m'] = (
+            _r2(g.remaining_thickness_mean_m) if g is not None else None
+        )
+        row['guided_remaining_thickness_max_m'] = (
+            _r2(g.remaining_thickness_max_m) if g is not None else None
+        )
+        row['guided_excavation_debt_area_m2'] = (
+            _r2(excavation_debt_area(
+                g.crest_design, g.toe_design, asbuilt_distances, asbuilt_elevations,
+            )) if g is not None and g.bench_state == BENCH_STATE_NOT_EXCAVATED else None
+        )
+
+        if row['type'] == 'MATCH' and g is not None:
+            complete = (
+                g.crest_asbuilt_status == STATUS_MEASURED
+                and g.toe_asbuilt_status == STATUS_MEASURED
+            )
+            row['split_bench'] = False
+            if complete:
+                bd = design_by_num.get(row['bench_num'])
+                h_match = _finite_or_none(row.get('height_real'))
+                h_guided = g.height_asbuilt
+                height_fragment = (
+                    h_match is not None and h_guided is not None
+                    and abs(h_match - h_guided) > 3.0
+                )
+                adjacent_extra = (
+                    bd is not None
+                    and any(_same_face(bd, x['bench_real']) for x in extra_rows)
+                )
+                if height_fragment or adjacent_extra:
+                    row['split_bench'] = True
+                    if bd is not None:
+                        split_design[row['bench_num']] = bd
+
+    for row in extra_rows:
+        row['split_of'] = None
+        for num, bd in split_design.items():
+            if _same_face(bd, row['bench_real']):
+                row['split_of'] = num
+                break
+
+    if apply_proposal:
+        from core.guided_compliance import apply_proposed_rules
+        rows = apply_proposed_rules(rows, tolerances)
+
+    return rows

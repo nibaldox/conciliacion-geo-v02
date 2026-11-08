@@ -12,6 +12,10 @@ from core.section_cutter import (
 from core.param_extractor import (
     extract_parameters, build_reconciled_profile_v2,
     compare_design_vs_asbuilt, build_reconciled_profile,
+    compare_design_vs_asbuilt_guided,
+)
+from core.guided_compliance import (
+    apply_proposed_rules, summarize_proposed, summarize_proposed_section,
 )
 from core.excel_writer import export_results
 from core.report_generator import generate_word_report, generate_section_images_zip
@@ -31,6 +35,8 @@ __all__ = [
     'inspect_dxf_surface', 'import_dxf_surface',
     'cut_both_surfaces', 'extract_parameters', 'build_reconciled_profile_v2',
     'compare_design_vs_asbuilt', 'build_reconciled_profile',
+    'compare_design_vs_asbuilt_guided',
+    'apply_proposed_rules', 'summarize_proposed', 'summarize_proposed_section',
     'generate_word_report', 'generate_section_images_zip',
     'HorizontalDeviationResult', 'HorizontalFaceGeometry',
     'classify_horizontal_deviation', 'compute_horizontal_deviation',

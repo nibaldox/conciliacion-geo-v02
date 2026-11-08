@@ -37,8 +37,9 @@ import {
   reconciledTopoLineStyle,
 } from '../infrastructure/plotlyTheme';
 
-import type { Bench, ProfileLine, ProfileViewModel, ProfilePoint } from '../domain/types';
+import type { Bench, ProfileLine, ProfileViewModel, ProfilePoint, ComparisonResultDto } from '../domain/types';
 import { type FilterState } from '../domain/filters';
+import { buildProposalOverlay, toProposalProfileRange, type ProposalDesignBench, type ProposalProfileRange } from '../domain';
 import { type UseCrossLinkStateApi } from '../application';
 import type { SpillBench } from '../domain/mapping';
 import { STATUS_BG_VAR, STATUS_FG_VAR, STATUS_BORDER_VAR, STATUS_ICON } from '../domain/status';
@@ -150,6 +151,8 @@ export function ProfileChart({ viewModel, filterState, crossLink, height = 480 }
       profilePointKind: t('profileView.chart.trace.profilePointKind'),
       projectedCollarKind: t('profileView.chart.trace.projectedCollarKind'),
       intersectionKind: t('profileView.chart.trace.intersectionKind'),
+      proposalToe: t('proposal.chartToe', { defaultValue: 'Pata sólida guiada' }),
+      proposalFloor: t('proposal.chartFloor', { defaultValue: 'Piso local (propuesta)' }),
       statuses: {
         CUMPLE: t('profileView.chart.trace.status.compliant'),
         FUERA: t('profileView.chart.trace.status.outside'),
@@ -431,6 +434,16 @@ export function buildTraces(
     traces.push(...buildSpillAreaTraces(vm.benches, traceLabels.spill));
   }
 
+  // 5b. Proposal overlay — guided solid toe + local floor (validation layer)
+  if (filterState.showProposalLayer && (vm.designBenches?.length ?? 0) > 0) {
+    traces.push(...buildProposalTraces(
+      vm.comparisons ?? [],
+      vm.designBenches ?? [],
+      traceLabels,
+      toProposalProfileRange(vm.lines),
+    ));
+  }
+
   // 6. Bench markers — split by status when showSemaphore, else one trace
   traces.push(...buildBenchMarkers(vm.benches, filterState, crossLink, hoverLabels, traceLabels));
 
@@ -448,6 +461,49 @@ export function buildTraces(
     }
   }
 
+  return traces;
+}
+
+export function buildProposalTraces(
+  comparisons: readonly ComparisonResultDto[],
+  designBenches: readonly ProposalDesignBench[],
+  traceLabels: ProfileChartTraceLabels = DEFAULT_PROFILE_CHART_TRACE_LABELS,
+  profileRange?: ProposalProfileRange | null,
+): Partial<Plotly.ScatterData>[] {
+  const overlay = buildProposalOverlay(comparisons, designBenches, profileRange);
+  const traces: Partial<Plotly.ScatterData>[] = [];
+  if (overlay.toeMarkers.length > 0) {
+    traces.push({
+      type: 'scatter',
+      mode: 'markers',
+      x: overlay.toeMarkers.map((point) => point.x),
+      y: overlay.toeMarkers.map((point) => point.y),
+      name: traceLabels.proposalToe ?? 'Pata sólida guiada',
+      marker: { symbol: 'triangle-up', size: 11, color: '#7B1FA2', line: { width: 1, color: 'white' } },
+      legendgroup: 'propuesta',
+    });
+  }
+  if (overlay.floorSegments.length > 0) {
+    const xs: (number | null)[] = [];
+    const ys: (number | null)[] = [];
+    overlay.floorSegments.forEach((segment, index) => {
+      if (index > 0) {
+        xs.push(null);
+        ys.push(null);
+      }
+      xs.push(segment.x0, segment.x1);
+      ys.push(segment.elevation, segment.elevation);
+    });
+    traces.push({
+      type: 'scatter',
+      mode: 'lines',
+      x: xs,
+      y: ys,
+      name: traceLabels.proposalFloor ?? 'Piso local (propuesta)',
+      line: { color: '#7B1FA2', width: 2, dash: 'dot' },
+      legendgroup: 'propuesta piso',
+    });
+  }
   return traces;
 }
 
@@ -902,6 +958,8 @@ export interface ProfileChartTraceLabels {
   readonly profilePointKind: string;
   readonly projectedCollarKind: string;
   readonly intersectionKind: string;
+  readonly proposalToe?: string;
+  readonly proposalFloor?: string;
   readonly statuses: Readonly<Record<Bench['status'], string>>;
 }
 
@@ -923,6 +981,8 @@ const DEFAULT_PROFILE_CHART_TRACE_LABELS: ProfileChartTraceLabels = {
   profilePointKind: 'Tipo de punto',
   projectedCollarKind: 'Collar proyectado',
   intersectionKind: 'Intersección segmento-sección',
+  proposalToe: 'Pata sólida guiada',
+  proposalFloor: 'Piso local (propuesta)',
   statuses: {
     CUMPLE: 'Cumple',
     FUERA: 'Fuera',

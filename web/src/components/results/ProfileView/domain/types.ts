@@ -12,6 +12,7 @@
  */
 
 import type { BenchParams, ComparisonResult, HorizontalDeviationProfile, ProfileData, SectionResponse } from '../../../../api/types';
+import type { ProposalDesignBench } from './proposal';
 
 // ─── Status ──────────────────────────────────────────────────
 
@@ -124,6 +125,8 @@ export interface ProfileViewModel {
   readonly profileWarnings?: ProfileWarnings;
   readonly floorElevation?: number | null;
   readonly crestElevationMax?: number | null;
+  readonly comparisons?: readonly ComparisonResultDto[];
+  readonly designBenches?: readonly ProposalDesignBench[];
 }
 
 // ─── Source DTOs (narrowed) ─────────────────────────────────

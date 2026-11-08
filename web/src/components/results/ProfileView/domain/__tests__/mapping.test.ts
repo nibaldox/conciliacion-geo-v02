@@ -528,6 +528,44 @@ describe('toProfileViewModel', () => {
     expect(vm.horizontalDeviation).toBe(horizontalDeviation);
   });
 
+  it('maps design benches for the proposal overlay and drops non-finite berms', () => {
+    const vm = toProfileViewModel(
+      makeProfile({
+        benches_design: [
+          {
+            bench_number: 1,
+            crest_elevation: 3095,
+            crest_distance: 20,
+            toe_elevation: 3080,
+            toe_distance: 10,
+            bench_height: 15,
+            face_angle: 75,
+            berm_width: 8,
+            is_ramp: false,
+          },
+          {
+            bench_number: 2,
+            crest_elevation: 3080,
+            crest_distance: 40,
+            toe_elevation: 3065,
+            toe_distance: 30,
+            bench_height: 15,
+            face_angle: 75,
+            berm_width: Number.NaN,
+            is_ramp: false,
+          },
+        ],
+      }),
+      makeSection(),
+      [],
+    );
+    expect(vm.designBenches).toEqual([
+      { benchNumber: 1, crestDistance: 20, toeDistance: 10, toeElevation: 3080, bermWidth: 8 },
+      { benchNumber: 2, crestDistance: 40, toeDistance: 30, toeElevation: 3065, bermWidth: null },
+    ]);
+    expect(toProfileViewModel(makeProfile(), makeSection(), []).designBenches).toEqual([]);
+  });
+
   it('preserves per-surface profile warnings without translating them into compliance status', () => {
     const vm = toProfileViewModel(
       makeProfile({ profile_warnings: { design: ['disconnected_profile_components'], topo: [] } }),

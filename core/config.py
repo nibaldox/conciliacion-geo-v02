@@ -49,6 +49,7 @@ class Tolerances:
     inter_ramp_angle: Dict[str, float] = field(default_factory=lambda: {'neg': 3.0, 'pos': 2.0})
     overall_angle: Dict[str, float] = field(default_factory=lambda: {'neg': 2.0, 'pos': 2.0})
     crest_toe_deviation: Dict[str, float] = field(default_factory=lambda: {'neg': 1.0, 'pos': 1.0})
+    floor_vertical: Dict[str, float] = field(default_factory=lambda: {'max': 0.5})
 
 
 @dataclass(frozen=True)
