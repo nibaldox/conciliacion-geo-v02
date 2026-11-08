@@ -50,7 +50,9 @@ export function Header() {
           <h1 className="truncate text-sm font-semibold md:text-lg">{t('app.title')}</h1>
           <p className="hidden text-xs text-text-muted lg:block">{t('app.tagline')}</p>
         </div>
-        <span data-slot="project-status" data-status={projectStatus} data-tone={STATUS_TONE[projectStatus]} className="ui-chip hidden shrink-0 sm:inline-flex" role="status">{t('ux.status_' + projectStatus)}</span>
+        <span className="hidden shrink-0 sm:inline-flex">
+          <span data-slot="project-status" data-status={projectStatus} data-tone={STATUS_TONE[projectStatus]} className="ui-chip" role="status">{t('ux.status_' + projectStatus)}</span>
+        </span>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <div className="hidden items-center gap-1 md:flex"><KeyboardShortcutsHelp /><LanguageToggle /></div>

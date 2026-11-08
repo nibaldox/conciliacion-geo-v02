@@ -809,6 +809,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
   const [longitudinalStep, setLongitudinalStep] = useState(2);
   const [verticalStep, setVerticalStep] = useState(1);
   const [controlsSize, setControlsSize] = useState<{ width: number; height: number | null }>({ width: 320, height: null });
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
   const controlsResizeStart = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const blastPanelId = useId();
   const [blastPanelOpen, setBlastPanelOpen] = useState(readBlastPanelDefaultOpen);
@@ -1102,6 +1103,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
   const canvasNode = (
     <Canvas
       camera={{ fov: 50, near: 1, far: 50000 }}
+      dpr={[1, 1.75]}
       gl={{ antialias: true, preserveDrawingBuffer: true }}
     >
       <CameraController maxDim={bounds.maxDim} />
@@ -1146,10 +1148,11 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
   const generalBody = (
     <>
       <div
+        id="mesh-layer-panel"
         data-testid="mesh-layer-panel"
         role="group"
         aria-label={t('viewer.layers', { defaultValue: 'Capas visibles' })}
-        className="absolute top-2 right-2 sm:top-4 sm:right-4 z-20 overflow-auto p-3 rounded-lg bg-surface-raised shadow-lg flex flex-col gap-3 border text-xs sm:text-sm select-none"
+        className={`absolute top-2 right-2 sm:top-4 sm:right-4 z-20 overflow-auto p-3 rounded-lg bg-surface-raised shadow-lg ${mobilePanelOpen ? 'flex' : 'hidden'} sm:flex flex-col gap-3 border text-xs sm:text-sm select-none`}
         style={{
           width: controlsSize.width,
           height: controlsSize.height ?? undefined,
@@ -1181,6 +1184,15 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
         {renderHorizontalDeviationControls()}
       </div>
       <div className="absolute inset-0 bg-viewer-bg">{canvasNode}</div>
+      <button
+        type="button"
+        className="absolute bottom-3 right-3 z-30 flex min-h-11 items-center gap-2 rounded border border-border bg-surface-raised px-3 text-xs text-text-primary shadow-lg hover:bg-surface-muted sm:hidden"
+        aria-expanded={mobilePanelOpen}
+        aria-controls="mesh-layer-panel"
+        onClick={() => setMobilePanelOpen((open) => !open)}
+      >
+        {t('viewer.layers_toggle')}
+      </button>
       {cameraOverlay}
     </>
   );
