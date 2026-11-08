@@ -58,6 +58,19 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
     return t('step1.upload_failed');
   }, [t]);
 
+  const getUploadError = useCallback((error: unknown) => {
+    if (typeof error === 'object' && error !== null && 'response' in error) {
+      const response = (error as { response?: { status?: number; data?: { detail?: unknown } } }).response;
+      if (response?.status === 413) {
+        const detail = typeof response.data?.detail === 'string' ? response.data.detail : '';
+        const limit = detail.match(/limit of (\d+(?:\.\d+)?)\s*MB/i);
+        if (limit) return t('step1.too_large_for_demo', { limit: limit[1] });
+        return t('step1.too_large_for_demo_generic');
+      }
+    }
+    return getApiError(error);
+  }, [t, getApiError]);
+
   const handleFile = useCallback(
     (file: File) => {
       const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -102,12 +115,12 @@ function DropZone({ type, meshId, onSetMeshId, compact = false }: DropZoneProps)
           },
           onError: (err) => {
             console.error('Upload failed:', err);
-            setUploadError(getApiError(err));
+            setUploadError(getUploadError(err));
           },
         },
       );
     },
-    [upload, type, onSetMeshId, t, inspectDxf, cancelDxfMutation, getApiError],
+    [upload, type, onSetMeshId, t, inspectDxf, cancelDxfMutation, getApiError, getUploadError],
   );
 
   const handleDxfCancel = useCallback(() => {

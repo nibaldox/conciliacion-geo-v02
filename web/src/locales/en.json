@@ -76,6 +76,8 @@
     "removing": "Removing…",
     "unsupported_format": "Unsupported format. Use: {{formats}}",
     "upload_failed": "Upload failed. Please try again.",
+    "too_large_for_demo": "The surface exceeds the public demo's limit ({{limit}} MB). To work with the full topography, use the local application or your own server.",
+    "too_large_for_demo_generic": "The surface exceeds the public demo's upload limit. To work with the full topography, use the local application or your own server.",
     "plan_view_title_2d": "Plan view with Plotly",
     "plan_view_subtitle_2d": "Deferred download: ~3 MB of JS. Only loads when you click.",
     "plan_view_button_2d": "Load plan view",
