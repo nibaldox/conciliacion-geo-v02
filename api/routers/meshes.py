@@ -47,6 +47,8 @@ from core.config import DEFAULTS, DETECTION, HORIZONTAL_DEVIATION
 
 router = APIRouter(prefix="/meshes", tags=["meshes"])
 
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
 # ---------------------------------------------------------------------------
 # Session dependency
 # ---------------------------------------------------------------------------
@@ -828,51 +830,66 @@ async def upload_mesh(
     if type not in ("design", "topo"):
         raise HTTPException(400, "type must be 'design' or 'topo'")
 
-    content = await file.read()
-    if len(content) == 0:
-        raise HTTPException(400, "Empty file")
-
     filename = file.filename or "mesh.stl"
 
-    # Load mesh to validate and extract metadata
     suffix = Path(filename).suffix or ".stl"
     fd, tmp = tempfile.mkstemp(suffix=suffix)
     try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(content)
-        mesh = load_mesh(tmp)
+        limit = DEFAULTS.max_upload_mb * 1024 * 1024
+        size = 0
+        with os.fdopen(fd, "wb") as target:
+            while chunk := await file.read(_UPLOAD_CHUNK_BYTES):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(
+                        413,
+                        "The instance cannot hold a file this size in memory: "
+                        "upload a lighter surface or use a larger instance.",
+                    )
+                target.write(chunk)
+            target.flush()
+            os.fsync(target.fileno())
+        if size == 0:
+            raise HTTPException(400, "Empty file")
+
+        mesh = await asyncio.to_thread(load_mesh, tmp)
+
+        raw_bounds = get_mesh_bounds(mesh)
+        clean_bounds = {
+            "xmin": raw_bounds["xmin"],
+            "xmax": raw_bounds["xmax"],
+            "ymin": raw_bounds["ymin"],
+            "ymax": raw_bounds["ymax"],
+            "zmin": raw_bounds["zmin"],
+            "zmax": raw_bounds["zmax"],
+        }
+        n_vertices = len(mesh.vertices)
+        n_faces = len(mesh.faces)
+        del mesh
+
+        session_id = await run_db(db.get_or_create_session, get_session_id(request))
+        mesh_id = await run_db(
+            db.save_mesh,
+            session_id=session_id,
+            mesh_type=type,
+            filename=filename,
+            data_path=tmp,
+            n_vertices=n_vertices,
+            n_faces=n_faces,
+            bounds=clean_bounds,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Error loading mesh: {exc}")
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
 
-    raw_bounds = get_mesh_bounds(mesh)
-    clean_bounds = {
-        "xmin": raw_bounds["xmin"],
-        "xmax": raw_bounds["xmax"],
-        "ymin": raw_bounds["ymin"],
-        "ymax": raw_bounds["ymax"],
-        "zmin": raw_bounds["zmin"],
-        "zmax": raw_bounds["zmax"],
-    }
-
-    session_id = await run_db(db.get_or_create_session, get_session_id(request))
-    mesh_id = await run_db(
-        db.save_mesh,
-        session_id=session_id,
-        mesh_type=type,
-        filename=filename,
-        data=content,
-        n_vertices=len(mesh.vertices),
-        n_faces=len(mesh.faces),
-        bounds=clean_bounds,
-    )
-
     return {
         "mesh_id": mesh_id,
-        "n_vertices": len(mesh.vertices),
-        "n_faces": len(mesh.faces),
+        "n_vertices": n_vertices,
+        "n_faces": n_faces,
         "bounds": clean_bounds,
     }
 

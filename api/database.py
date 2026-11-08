@@ -245,44 +245,80 @@ def cleanup_old_sessions(max_age_hours: int = 24):
 # --- Mesh operations ---
 
 
+_MESH_BLOB_CHUNK_BYTES = 1024 * 1024
+
+
 def save_mesh(
     session_id: str,
     mesh_type: str,
     filename: str,
-    data: bytes,
-    n_vertices: int,
-    n_faces: int,
-    bounds: Dict[str, float],
+    data: Optional[bytes] = None,
+    n_vertices: int = 0,
+    n_faces: int = 0,
+    bounds: Optional[Dict[str, float]] = None,
     import_options: Optional[Dict[str, Any]] = None,
     import_report: Optional[Dict[str, Any]] = None,
+    data_path: Optional[str] = None,
 ) -> str:
-    """Save a mesh file to the database. Returns mesh ID."""
+    """Save a mesh file to the database. Returns mesh ID.
+
+    Exactly one of ``data`` (bytes) or ``data_path`` (file streamed
+    into SQLite via blobopen) must be provided.
+    """
+    if (data is None) == (data_path is None):
+        raise ValueError("save_mesh requires exactly one of data or data_path")
     mesh_id = str(uuid.uuid4())
     conn = get_connection()
-    # Remove any existing mesh of same type for this session
-    conn.execute(
-        "DELETE FROM meshes WHERE session_id = ? AND type = ?", (session_id, mesh_type)
-    )
-    conn.execute(
-        "INSERT INTO meshes (id, session_id, type, filename, data, n_vertices, n_faces, bounds, import_options, import_report) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            mesh_id,
-            session_id,
-            mesh_type,
-            filename,
-            data,
-            n_vertices,
-            n_faces,
-            json.dumps(bounds),
-            json.dumps(import_options) if import_options is not None else None,
-            json.dumps(import_report) if import_report is not None else None,
-        ),
-    )
-    conn.execute(
-        "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,)
-    )
-    conn.commit()
-    conn.close()
+    try:
+        # Remove any existing mesh of same type for this session
+        conn.execute(
+            "DELETE FROM meshes WHERE session_id = ? AND type = ?", (session_id, mesh_type)
+        )
+        if data_path is not None:
+            blob_size = os.path.getsize(data_path)
+            cur = conn.execute(
+                "INSERT INTO meshes (id, session_id, type, filename, data, n_vertices, n_faces, bounds, import_options, import_report) VALUES (?, ?, ?, ?, zeroblob(?), ?, ?, ?, ?, ?)",
+                (
+                    mesh_id,
+                    session_id,
+                    mesh_type,
+                    filename,
+                    blob_size,
+                    n_vertices,
+                    n_faces,
+                    json.dumps(bounds),
+                    json.dumps(import_options) if import_options is not None else None,
+                    json.dumps(import_report) if import_report is not None else None,
+                ),
+            )
+            rowid = cur.lastrowid
+            if rowid is None:
+                raise ValueError("INSERT into meshes returned no rowid")
+            with open(data_path, "rb") as src, conn.blobopen("meshes", "data", rowid) as blob:
+                while chunk := src.read(_MESH_BLOB_CHUNK_BYTES):
+                    blob.write(chunk)
+        else:
+            conn.execute(
+                "INSERT INTO meshes (id, session_id, type, filename, data, n_vertices, n_faces, bounds, import_options, import_report) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    mesh_id,
+                    session_id,
+                    mesh_type,
+                    filename,
+                    data,
+                    n_vertices,
+                    n_faces,
+                    json.dumps(bounds),
+                    json.dumps(import_options) if import_options is not None else None,
+                    json.dumps(import_report) if import_report is not None else None,
+                ),
+            )
+        conn.execute(
+            "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
     return mesh_id
 
 
