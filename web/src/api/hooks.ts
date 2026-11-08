@@ -41,6 +41,16 @@ import type {
 export { buildProposedComplianceQuery, useProposedCompliance } from './proposedCompliance';
 export type { UseProposedComplianceResult } from './proposedCompliance';
 
+const MIN_UPLOAD_TIMEOUT_MS = 600000;
+const UPLOAD_TIMEOUT_BYTES_PER_SECOND = 100000;
+
+function uploadTimeoutMs(fileSizeBytes: number): number {
+  return Math.max(
+    MIN_UPLOAD_TIMEOUT_MS,
+    Math.ceil(fileSizeBytes / UPLOAD_TIMEOUT_BYTES_PER_SECOND) * 1000,
+  );
+}
+
 // ─── Demo data helpers ──────────────────────────────────────
 //
 // When the session is in demo mode (set by useSession().loadDemo()),
@@ -109,6 +119,7 @@ export function useUploadMesh() {
       fd.append('type', type);
       return client.post('/meshes/upload', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: uploadTimeoutMs(file.size),
       }).then(r => r.data);
     },
     onSuccess: () => {
@@ -125,6 +136,7 @@ export function useInspectDxf() {
       fd.append('type', type);
       return client.post('/meshes/dxf/inspect', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: uploadTimeoutMs(file.size),
       }).then((response) => response.data);
     },
   });
