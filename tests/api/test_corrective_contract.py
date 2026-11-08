@@ -54,7 +54,7 @@ def test_upload_report_persists_and_primary_pf_is_nullable(client):
     json.dumps(db.get_settings(sid), allow_nan=False)
 
 
-def test_damage_model_drops_missing_not_measured_zero(monkeypatch):
+def test_damage_model_drops_missing_not_measured_zero(monkeypatch, isolated_data_dir):
     from types import SimpleNamespace
     from api.routers import process
 
@@ -83,7 +83,7 @@ def test_profile_missing_burden_and_spacing_are_null():
     assert hole.spacing is None
 
 
-def test_damage_model_does_not_round_away_valid_small_samples(monkeypatch):
+def test_damage_model_does_not_round_away_valid_small_samples(monkeypatch, isolated_data_dir):
     from types import SimpleNamespace
     from api.routers import process
 
