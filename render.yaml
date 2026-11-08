@@ -59,9 +59,12 @@ services:
       - key: CONCILIACION_RATE_LIMIT_PER_MIN
         value: "120"
 
-      # ── Body size (mirrors .streamlit/config.toml) ──────────────
+      # ── Body size (public demo cap) ─────────────────────────────
+      # Free instance has 512 MB: a 16 MB upload already peaks ~440 MB,
+      # so a larger cap only buys OOM kills. Raise it only when changing
+      # plan — 128 is the right cap for 1c-2g.
       - key: CONCILIACION_MAX_UPLOAD_MB
-        value: "500"
+        value: "16"
 
       # ── Future opt-ins (Phase 2.9) — leave false for now ───────
       - key: CONCILIACION_USE_SUPABASE

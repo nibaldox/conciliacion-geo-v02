@@ -1,5 +1,24 @@
 # Continuidad para agentes de codificación
 
+## Continuación — 8 de noviembre de 2026: memoria de la demo pública
+
+Cierre documental del dimensionamiento de la demo pública en Render, medido con los archivos reales; no es una validación operacional de la demo desplegada. La rama `fix/demo-upload-memory` está fusionada a `main` (PR #30, commit de fusión `15a78e9`) y `render.yaml` deja `CONCILIACION_MAX_UPLOAD_MB=16` como salvaguarda de la instancia gratuita.
+
+Picos de memoria medidos:
+
+| Escenario | Pico |
+|---|---|
+| Topografía real (41 MB, 417.669 vértices): solo subida | 795 MB |
+| Topografía real: análisis completo de 78 secciones | 955 MB |
+| Diseño de 237 KB | 219 MB |
+| Subida con el arreglo de streaming ya fusionado | 783 MB: sigue sin caber en 512 MB; el contenedor vuelve a caer con 502 |
+
+- **Planes**: `plan: free` (0.1 CPU / 512 MB) no sirve con archivos reales — muere con la subida sola. `1c-2g` cubre el peor caso: 955 MB × 1,25 = 1,19 GB, dentro de los 2 GB, con el análisis completo en ~42 s. `2c-4g` es innecesario.
+- **Tiempo en free**: la extrapolación lineal a 0.1 CPU da ~7 min por análisis completo (42 s × 10), y en la práctica la instancia ni siquiera sostiene la subida.
+- **La caché no es la palanca**: recortar `CONCILIACION_MESH_CACHE_MB` no cambia el pico (±1 %); lo dominan la subida y el análisis.
+- **No hay fragmentación posible**: `/process` no acepta procesar un subconjunto de secciones.
+- **Arreglo de subida**: fusionado en PR #30 (`15a78e9`); el cuerpo se escribe por bloques y el exceso de tamaño responde 413 en lugar de matar el proceso. El límite efectivo lo fija `CONCILIACION_MAX_UPLOAD_MB` (leída por `core/config.py`, default 500), de modo que el 16 de la demo es una salvaguarda real y la nota de inconsistencia del 7 de octubre sobre esa variable quedó obsoleta. Subir el valor solo al cambiar de plan: 128 con `1c-2g`.
+
 ## Continuación — 8 de noviembre de 2026: medición guiada por diseño y propuesta en validación
 
 Estado: rama `feat/tronadura-auditable`, **sin commit al momento de escribir**. Verificado antes de redactar: `git log --oneline -3` con HEAD `415e21f` (el mismo merge de main) y `git status --short` con 155 entradas sin commit, de ellas 44 sin seguimiento; el trabajo de la rama vive íntegramente como cambios en el árbol de trabajo. Cierre técnico documental; no es validación operacional con datos reales de operación.

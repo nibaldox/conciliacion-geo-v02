@@ -162,6 +162,8 @@ Estas capturas corresponden a revisiones anteriores a las últimas correcciones 
 
 Abrir la [demo en GitHub Pages](https://nibaldox.github.io/conciliacion-geo-v02/) y usar el botón de datos de ejemplo. El despliegue está configurado con frontend estático en Pages y API en Render. La API puede necesitar tiempo para arrancar tras inactividad. En esta revisión de documentación no se comprobó el estado del servicio publicado.
 
+La demo pública limita la subida a 16 MB porque la instancia gratuita de Render tiene 512 MB; los picos medidos y el dimensionamiento recomendado de planes están en [HANDOFF.md](docs/HANDOFF.md#continuación--8-de-noviembre-de-2026-memoria-de-la-demo-pública).
+
 ## Instalación y ejecución local
 
 **Requisitos:** Python 3.10+ según `pyproject.toml`, Node.js **22+** según `web/package.json`, npm y Git. La CI principal prueba Python 3.12; el workflow de empaquetado `build.yml` utiliza Python 3.14. Para operaciones que utilizan `rtree`, instalar `libspatialindex-dev` en Linux (`sudo apt install libspatialindex-dev`) o `spatialindex` en macOS (`brew install spatialindex`).
@@ -254,7 +256,7 @@ Los defaults de detección, tolerancias y física están en las dataclasses cong
 |---|---|
 | `CONCILIACION_DATA_DIR` | Directorio de datos de la API |
 | `CONCILIACION_CORS_ORIGINS` | Orígenes permitidos separados por comas |
-| `CONCILIACION_MAX_UPLOAD_MB` | Declarada en Render; el código actual usa `DEFAULTS.max_upload_mb` (500 MiB), sin leer esta variable |
+| `CONCILIACION_MAX_UPLOAD_MB` | Límite de subida en MiB, leído por `core/config.py` (`DEFAULTS.max_upload_mb`, 500 por defecto); la demo gratuita lo fija en 16 — ver [HANDOFF.md](docs/HANDOFF.md#continuación--8-de-noviembre-de-2026-memoria-de-la-demo-pública) |
 | `CONCILIACION_RATE_LIMIT_ENABLED`, `CONCILIACION_RATE_LIMIT_PER_MIN` | Activación y límite de solicitudes |
 | `CONCILIACION_LOG_LEVEL`, `CONCILIACION_LOG_FORMAT` | Nivel y formato de logs |
 | `CONCILIACION_WORKERS` | Configuración de workers |
