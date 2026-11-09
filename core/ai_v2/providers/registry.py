@@ -70,22 +70,25 @@ PROVIDER_PRESETS: dict[ProviderType, dict[str, str]] = {
 }
 
 TOOL_CALL_CAPABILITY: dict[ProviderType, bool] = {
-    ProviderType.OLLAMA: False,
-    ProviderType.LMSTUDIO: False,
+    ProviderType.OLLAMA: True,
+    ProviderType.LMSTUDIO: True,
     ProviderType.OPENAI: True,
-    ProviderType.OPENROUTER: False,
+    ProviderType.OPENROUTER: True,
     ProviderType.MINIMAX: False,
     ProviderType.GLM: False,
-    ProviderType.GROK: False,
+    ProviderType.GROK: True,
 }
-"""Conservative tool-calling capability per preset.
+"""Tool-calling capability per preset (T3 design correction).
 
-True ONLY for providers with verified function calling over their
-OpenAI-compatible chat-completions endpoint (OpenAI gpt-4o family).
-Ollama / LM Studio / OpenRouter depend on the loaded model, and the
-MiniMax and GLM presets point at Anthropic-format endpoints, so they
-stay False until verified (plan section 2: an OpenAI-compatible
-endpoint does not imply working function calling).
+True for providers speaking the OpenAI chat-completions tool-calls
+format: OpenAI, Grok (xAI, ``/v1``) plus the OpenAI-compatible local /
+relay presets (Ollama, LM Studio, OpenRouter), whose loaded models are
+expected to support function calling over ``/v1/chat/completions``.
+False ONLY for the Anthropic-format presets (MiniMax and GLM), whose
+endpoints use ``anthropic-version`` semantics this loop does not speak.
+A wrong True degrades gracefully at runtime: when the provider rejects
+tool calls mid-stream the loop surfaces a sanitized error event and
+stops — no crash, no faked text (see the loop regression test).
 """
 
 

@@ -8,17 +8,21 @@ request time. The frontend can only approve or deny with the
 ``invocation_id`` — it can never auto-approve (anti-spoofing, plan
 section 4.3).
 
-Only the abstract store interface and helpers live here; the concrete
-in-memory implementation lands in T3. ``claim`` MUST be atomic and
-single-use: an unknown, expired, foreign-session or already-claimed
-run is rejected with the matching exception.
+Only the abstract store interface, its typed rejections and helpers
+live here, plus the concrete single-process implementation used in
+production: :class:`InMemoryPendingRunStore`. ``claim`` MUST be atomic
+and single-use: an unknown, expired, foreign-session or
+already-claimed run is rejected with the matching exception.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import secrets
+import threading
+import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,7 +32,13 @@ PENDING_TTL_S: float = 900.0
 
 
 class PendingRun(BaseModel):
-    """Full resume state of one tool call awaiting user confirmation."""
+    """Full resume state of one tool call awaiting user confirmation.
+
+    ``turn_confirmations`` counts the confirmation pauses already
+    presented to the user within the same user turn (guardrail 4,
+    plan section 5.4); the default keeps older serialized pendings
+    loadable across deployments.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -45,6 +55,7 @@ class PendingRun(BaseModel):
     created_at: float = Field(gt=0.0)
     expires_at: float = Field(gt=0.0)
     confirmations_used: int = Field(default=0, ge=0)
+    turn_confirmations: int = Field(default=1, ge=1)
 
 
 class PendingRunError(Exception):
@@ -99,6 +110,59 @@ class PendingRunStore(ABC):
         ...
 
 
+class InMemoryPendingRunStore(PendingRunStore):
+    """Single-process in-memory pending-confirmation store.
+
+    Atomicity and single-use are guaranteed by a process-wide lock
+    around ``claim``: the winning caller receives the run and the entry
+    is consumed, so concurrent or repeated claims raise
+    :class:`AlreadyClaimedPendingRun` while an id never stored raises
+    :class:`PendingRunNotFound`. Expired entries raise
+    :class:`ExpiredPendingRun` and are dropped on sight; a create-time
+    sweep keeps the map bounded. Denial consumes the pending too —
+    consumption happens in ``claim`` regardless of the later decision.
+    """
+
+    def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
+        self._entries: dict[str, PendingRun] = {}
+        self._claimed: set[str] = set()
+        self._lock = threading.Lock()
+        self._clock = clock
+
+    def create(self, run: PendingRun) -> str:
+        with self._lock:
+            now = self._clock()
+            expired = [
+                key
+                for key, entry in self._entries.items()
+                if entry.expires_at <= now
+            ]
+            for key in expired:
+                del self._entries[key]
+            self._entries[run.invocation_id] = run
+            return run.invocation_id
+
+    def claim(self, invocation_id: str, session_id: str) -> PendingRun:
+        with self._lock:
+            run = self._entries.get(invocation_id)
+            if run is None:
+                if invocation_id in self._claimed:
+                    raise AlreadyClaimedPendingRun(invocation_id)
+                raise PendingRunNotFound(invocation_id)
+            if run.expires_at <= self._clock():
+                del self._entries[invocation_id]
+                raise ExpiredPendingRun(invocation_id)
+            if run.session_id != session_id:
+                raise ForeignSessionPendingRun(invocation_id)
+            del self._entries[invocation_id]
+            self._claimed.add(invocation_id)
+            return run
+
+    def invalidate(self, invocation_id: str) -> None:
+        with self._lock:
+            self._entries.pop(invocation_id, None)
+
+
 def new_invocation_id() -> str:
     """Return a fresh unpredicatable invocation id (``inv_``-prefixed)."""
     return f"inv_{secrets.token_urlsafe(16)}"
@@ -125,6 +189,7 @@ __all__ = [
     "AlreadyClaimedPendingRun",
     "ExpiredPendingRun",
     "ForeignSessionPendingRun",
+    "InMemoryPendingRunStore",
     "PendingRun",
     "PendingRunError",
     "PendingRunNotFound",

@@ -29,9 +29,26 @@ Per-tool-call flow (plan sections 4.1/5.2):
    (``error``), provider timeout, or provider failure — surfaced as an
    explicit error event, NEVER faked text.
 
+Two transversal guardrails (plan section 5.4) gate EVERY new
+confirmation: at most ``MAX_TURN_CONFIRMATIONS`` pauses per user turn
+(an excess call is answered with a ``confirmation_limit_reached``
+observation and NEVER executes), and a call already denied by the
+user in the same turn is never requested again (``denied_by_user``
+observation with ``MSG_DENIED_NO_RETRY``).
+
 Every tool call of a turn is answered before the next iteration, so a
 multi-tool-call turn always produces one ``role: tool`` message per
 ``tool_call_id``.
+
+Resumption (plan sections 4.3/5-T3): ``resume_pending_turn`` atomically
+claims the pending confirmation, revalidates the approved arguments
+(canonical SHA-256) and the session ``ToolState`` fingerprint —
+invalidating and re-evaluating the pure policy when the state changed —
+then executes or denies EXACTLY the confirmed call, answers every
+remaining unanswered ``tool_call_id`` of the paused assistant message
+and continues the same bounded loop. The approve/deny decision arrives
+as a parameter from the caller (T4 confirm endpoint): the model can
+never approve itself.
 """
 from __future__ import annotations
 
@@ -47,7 +64,12 @@ from pydantic import BaseModel, ValidationError
 from core.ai_v2.agent.catalog import get_tool, openai_tools
 from core.ai_v2.agent.confirmations import (
     PENDING_TTL_S,
+    AlreadyClaimedPendingRun,
+    ExpiredPendingRun,
+    ForeignSessionPendingRun,
     PendingRun,
+    PendingRunError,
+    PendingRunNotFound,
     PendingRunStore,
     canonical_args_sha256,
     new_invocation_id,
@@ -78,6 +100,8 @@ StateProvider = Callable[[str], Awaitable[ToolState]]
 
 DEFAULT_MAX_ITERATIONS = 8
 DEFAULT_TIMEOUT_S = 120.0
+MAX_TURN_CONFIRMATIONS = 2
+"""Guardrail 4: max REPLACE/EXPENSIVE_REPLACE pauses per user turn."""
 
 _OBSERVATION_MAX_CHARS = 4000
 _SUMMARY_MAX_CHARS = 200
@@ -103,6 +127,41 @@ MSG_MAX_ITERATIONS = (
 )
 MSG_PENDING_ERROR = (
     "No se pudo registrar la confirmación pendiente; inténtalo de nuevo."
+)
+MSG_CONFIRMATION_NOT_FOUND = (
+    "No hay una confirmación pendiente con ese identificador."
+)
+MSG_CONFIRMATION_EXPIRED = (
+    "La confirmación expiró; solicita la acción nuevamente."
+)
+MSG_CONFIRMATION_FOREIGN = (
+    "Esta confirmación pertenece a otra sesión."
+)
+MSG_CONFIRMATION_CONSUMED = (
+    "Esta confirmación ya fue procesada."
+)
+MSG_CONFIRMATION_ARGS_CHANGED = (
+    "Los argumentos aprobados ya no coinciden con los registrados; "
+    "la confirmación fue invalidada."
+)
+MSG_CONFIRMATION_CORRUPT = (
+    "El estado de la confirmación es inconsistente; solicita la "
+    "acción nuevamente."
+)
+MSG_CONFIRMATION_STATE_CHANGED = (
+    "El estado de la sesión cambió desde la solicitud; se requiere "
+    "confirmar nuevamente."
+)
+MSG_DENIED_BY_USER = "El usuario denegó la ejecución de esta herramienta."
+MSG_DENIED_NO_RETRY = (
+    "Ya fue denegada en este turno y no se reintentará."
+)
+MSG_TURN_CANCELLED = (
+    "El usuario canceló la acción; esta operación del turno no se ejecutó."
+)
+MSG_CONFIRMATION_LIMIT = (
+    "Se alcanzó el límite de confirmaciones por turno; solicita lo que "
+    "falte en lenguaje natural."
 )
 
 
@@ -229,6 +288,50 @@ async def run_agent_turn(
 
     resolved_tools = tools if tools is not None else openai_tools()
     conversation = list(messages)
+    async for event in _drive_iterations(
+        session_id=session_id,
+        conversation=conversation,
+        provider=provider,
+        model=model,
+        executor=executor,
+        pending_store=pending_store,
+        state_provider=state_provider,
+        resolved_tools=resolved_tools,
+        max_iterations=max_iterations,
+        timeout_s=timeout_s,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        turn_confirmations=0,
+    ):
+        yield event
+
+
+async def _drive_iterations(
+    *,
+    session_id: str,
+    conversation: list[dict[str, Any]],
+    provider: BaseProvider,
+    model: str,
+    executor: ToolExecutor,
+    pending_store: PendingRunStore,
+    state_provider: StateProvider,
+    resolved_tools: list[dict[str, Any]],
+    max_iterations: int,
+    timeout_s: float,
+    temperature: float,
+    max_tokens: int,
+    turn_confirmations: int,
+) -> AsyncIterator[AgentEvent]:
+    """Bounded provider iterations over one conversation.
+
+    Shared by ``run_agent_turn`` and ``resume_pending_turn``: calls the
+    provider, answers every tool call of the turn (stopping early on a
+    recorded confirmation or a store failure) and terminates with a
+    ``done`` event on stop, provider failure or budget exhaustion.
+    ``turn_confirmations`` is the count of confirmation pauses already
+    presented in this user turn; every new pause created here stores
+    ``turn_confirmations + 1`` and the guardrails evaluate against it.
+    """
     usage_total: AIUsage | None = None
     start_ns = time.perf_counter_ns()
 
@@ -284,6 +387,7 @@ async def run_agent_turn(
                 state_provider=state_provider,
                 model=model,
                 provider=provider,
+                turn_confirmations=turn_confirmations,
             )
             for event in events:
                 yield event
@@ -315,13 +419,17 @@ async def _handle_tool_call(
     state_provider: StateProvider,
     model: str,
     provider: BaseProvider,
+    turn_confirmations: int,
 ) -> tuple[list[AgentEvent], Literal["confirmation_required", "error"] | None]:
     """Process one tool call and append its role:tool answer.
 
     Returns the events for this call and, when the stream must STOP,
     the ``done`` finish reason (``confirmation_required`` after a
     recorded pending run, ``error`` when recording failed); None to
-    continue the loop.
+    continue the loop. Confirmation-gated calls first pass the
+    guardrails: a call denied by the user in this turn and a pause
+    beyond ``MAX_TURN_CONFIRMATIONS`` are answered with a safe
+    observation and NEVER execute nor create a pending.
     """
     invocation_id = new_invocation_id()
     spec = get_tool(call.name)
@@ -391,6 +499,24 @@ async def _handle_tool_call(
     decision = decide(spec, state)
     args_for_event = validated.model_dump()
     if decision.requires_confirmation:
+        block = _pending_block_reason(
+            conversation=conversation,
+            spec=spec,
+            validated_args=args_for_event,
+            turn_confirmations=turn_confirmations,
+        )
+        if block is not None:
+            error, message = block
+            observation = {
+                "ok": False,
+                "error": error,
+                "message": message,
+            }
+            events = _denial_events(
+                invocation_id, call.name, args_for_event, error, message
+            )
+            conversation.append(_tool_message(call.call_id, observation))
+            return events, None
         recorded = _record_pending(
             pending_store=pending_store,
             invocation_id=invocation_id,
@@ -402,6 +528,7 @@ async def _handle_tool_call(
             spec=spec,
             args=args_for_event,
             state=state,
+            turn_confirmations=turn_confirmations + 1,
         )
         if recorded is None:
             return [ErrorEvent(content=MSG_PENDING_ERROR)], "error"
@@ -420,6 +547,33 @@ async def _handle_tool_call(
         ]
         return events, "confirmation_required"
 
+    events, observation = await _execute_tool(
+        invocation_id=invocation_id,
+        call=call,
+        spec=spec,
+        handler=handler,
+        validated=validated,
+        session_id=session_id,
+    )
+    conversation.append(_tool_message(call.call_id, observation))
+    return events, None
+
+
+async def _execute_tool(
+    *,
+    invocation_id: str,
+    call: ToolCallRequest,
+    spec: ToolSpec,
+    handler: ToolHandler,
+    validated: BaseModel,
+    session_id: str,
+) -> tuple[list[AgentEvent], dict[str, Any]]:
+    """Execute one validated call under the per-tool timeout budget.
+
+    Shared by the live loop and the resume path: handler failures and
+    timeouts become sanitized observations, never raised; the returned
+    events announce the call and its bounded outcome.
+    """
     started_ns = time.perf_counter_ns()
     try:
         result = await asyncio.wait_for(
@@ -452,7 +606,7 @@ async def _handle_tool_call(
         ToolCallEvent(
             invocation_id=invocation_id,
             name=call.name,
-            args=args_for_event,
+            args=validated.model_dump(),
             requires_confirmation=False,
         ),
         ToolResultEvent(
@@ -464,8 +618,7 @@ async def _handle_tool_call(
             duration_ms=duration_ms,
         ),
     ]
-    conversation.append(_tool_message(call.call_id, observation))
-    return events, None
+    return events, observation
 
 
 def _validated_args(
@@ -488,6 +641,108 @@ def _validated_args(
         return None, raw, "schema_validation"
 
 
+def _turn_messages(conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Slice of the conversation belonging to the CURRENT user turn.
+
+    Everything after the LAST ``role: user`` message: denials recorded
+    in earlier turns must never leak into the no-retry block.
+    """
+    start = 0
+    for index, message in enumerate(conversation):
+        if isinstance(message, dict) and message.get("role") == "user":
+            start = index + 1
+    return conversation[start:]
+
+
+def _observation_error(content: Any) -> str | None:
+    """``error`` field of a role:tool observation payload, if parseable."""
+    if not isinstance(content, str):
+        return None
+    try:
+        payload = json.loads(content)
+    except ValueError:
+        return None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, str):
+            return error
+    return None
+
+
+def _denied_call_keys(
+    conversation: list[dict[str, Any]],
+) -> set[tuple[str, str]]:
+    """(tool_name, canonical args sha256) pairs denied by the user.
+
+    Scans the CURRENT user turn only: a ``role:tool`` observation with
+    ``error == 'denied_by_user'`` marks its ``tool_call_id`` as denied,
+    and the raw assistant entry carrying that id contributes its
+    canonical args hash (via the spec args model, when parseable).
+    Unparseable or uncataloged entries are skipped, never guessed.
+    """
+    denied_ids = {
+        message["tool_call_id"]
+        for message in _turn_messages(conversation)
+        if isinstance(message, dict)
+        and message.get("role") == "tool"
+        and isinstance(message.get("tool_call_id"), str)
+        and _observation_error(message.get("content")) == "denied_by_user"
+    }
+    keys: set[tuple[str, str]] = set()
+    for message in _turn_messages(conversation):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for entry in message.get("tool_calls") or []:
+            entry_id = entry.get("id") if isinstance(entry, dict) else None
+            if not isinstance(entry_id, str) or entry_id not in denied_ids:
+                continue
+            function = (entry.get("function") or {}) if isinstance(entry, dict) else {}
+            spec = get_tool(str(function.get("name") or ""))
+            if spec is None:
+                continue
+            try:
+                raw = json.loads(str(function.get("arguments") or ""))
+            except ValueError:
+                continue
+            try:
+                validated = spec.args_model.model_validate(raw)
+            except ValidationError:
+                continue
+            keys.add((spec.name, canonical_args_sha256(validated.model_dump())))
+    return keys
+
+
+def _was_denied_in_turn(
+    conversation: list[dict[str, Any]],
+    spec: ToolSpec,
+    validated_args: dict[str, Any],
+) -> bool:
+    """True when the IDENTICAL call was already denied in this turn."""
+    key = (spec.name, canonical_args_sha256(validated_args))
+    return key in _denied_call_keys(conversation)
+
+
+def _pending_block_reason(
+    *,
+    conversation: list[dict[str, Any]],
+    spec: ToolSpec,
+    validated_args: dict[str, Any],
+    turn_confirmations: int,
+) -> tuple[str, str] | None:
+    """Guardrails 5 + 4: why a NEW pending must NOT be created, if so.
+
+    A call already denied by the user in this turn is never re-asked
+    (hard no-retry block), and a pause beyond ``MAX_TURN_CONFIRMATIONS``
+    exceeds the per-turn cap. Returns ``(error, message)`` so the caller
+    can answer the call without executing it and without a pending.
+    """
+    if _was_denied_in_turn(conversation, spec, validated_args):
+        return "denied_by_user", MSG_DENIED_NO_RETRY
+    if turn_confirmations + 1 > MAX_TURN_CONFIRMATIONS:
+        return "confirmation_limit_reached", MSG_CONFIRMATION_LIMIT
+    return None
+
+
 def _record_pending(
     *,
     pending_store: PendingRunStore,
@@ -500,6 +755,7 @@ def _record_pending(
     spec: ToolSpec,
     args: dict[str, Any],
     state: ToolState,
+    turn_confirmations: int,
 ) -> str | None:
     """Persist the full resume state; None when the store rejects it."""
     now = time.time()
@@ -516,6 +772,7 @@ def _record_pending(
         state_fingerprint=state.fingerprint(),
         created_at=now,
         expires_at=now + PENDING_TTL_S,
+        turn_confirmations=turn_confirmations,
     )
     try:
         return pending_store.create(pending)
@@ -523,11 +780,406 @@ def _record_pending(
         return None
 
 
+def _pending_assistant_message(
+    conversation: list[dict[str, Any]], tool_call_id: str
+) -> dict[str, Any] | None:
+    """Assistant message carrying the pending tool_call id, if any."""
+    for message in reversed(conversation):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for entry in message.get("tool_calls") or []:
+            if isinstance(entry, dict) and entry.get("id") == tool_call_id:
+                return message
+    return None
+
+
+def _call_entry(message: dict[str, Any], tool_call_id: str) -> dict[str, Any] | None:
+    """Raw tool_call entry for one id inside an assistant message."""
+    for entry in message.get("tool_calls") or []:
+        if isinstance(entry, dict) and entry.get("id") == tool_call_id:
+            return entry
+    return None
+
+
+def _answered_call_ids(conversation: list[dict[str, Any]]) -> set[str]:
+    """Ids that already carry a role:tool answer in the conversation."""
+    return {
+        message["tool_call_id"]
+        for message in conversation
+        if isinstance(message, dict)
+        and message.get("role") == "tool"
+        and isinstance(message.get("tool_call_id"), str)
+    }
+
+
+def _entry_to_request(entry: dict[str, Any], call_id: str) -> ToolCallRequest:
+    """Rebuild a ToolCallRequest from a raw replayed tool_call entry."""
+    function = entry.get("function") or {}
+    return ToolCallRequest(
+        call_id=call_id,
+        name=str(function.get("name") or ""),
+        arguments=str(function.get("arguments") or ""),
+        arguments_valid=True,
+    )
+
+
+def _denial_events(
+    invocation_id: str,
+    name: str,
+    args: dict[str, Any],
+    error: str,
+    message: str,
+) -> list[AgentEvent]:
+    """Announce + close a call that will NOT run because the user denied."""
+    return [
+        ToolCallEvent(
+            invocation_id=invocation_id,
+            name=name,
+            args=args,
+            requires_confirmation=False,
+        ),
+        ToolResultEvent(
+            invocation_id=invocation_id,
+            name=name,
+            ok=False,
+            summary=message,
+            error=error,
+            duration_ms=0.0,
+        ),
+    ]
+
+
+async def resume_pending_turn(
+    *,
+    session_id: str,
+    invocation_id: str,
+    approved: bool,
+    provider: BaseProvider,
+    executor: ToolExecutor,
+    pending_store: PendingRunStore,
+    state_provider: StateProvider,
+    model: str | None = None,
+    max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    tools: list[dict[str, Any]] | None = None,
+    temperature: float = 0.3,
+    max_tokens: int = 4096,
+) -> AsyncIterator[AgentEvent]:
+    """Resume ONE paused turn after the user's approve/deny decision.
+
+    The pending run is claimed atomically (single-use; denial consumes
+    it too) and revalidated before anything executes:
+
+    - the raw arguments replayed from the stored assistant message must
+      re-validate and hash to the approved ``args_sha256``;
+    - the session ``ToolState`` is RE-QUERIED now: an unchanged
+      fingerprint honors the approval, a changed one re-evaluates the
+      pure policy — which either executes autonomously (prior work
+      disappeared) or re-arms a fresh confirmation with a NEW
+      invocation id.
+
+    APPROVED: the confirmed tool executes exactly once and every other
+    unanswered ``tool_call_id`` of the paused assistant message goes
+    through the normal flow (validate -> policy -> execute/observe), so
+    the provider receives one ``role: tool`` message per id before the
+    next iteration. DENIED: nothing executes — the confirmed call and
+    the unanswered siblings receive safe denial observations and the
+    loop continues with a fresh provider iteration. The per-turn
+    confirmation counter travels inside the pending run: every re-arm
+    or sibling pause is created with ``turn_confirmations + 1`` and
+    refused once ``MAX_TURN_CONFIRMATIONS`` is exceeded, and a call
+    already denied by the user in this turn is never re-asked.
+
+    Args:
+        session_id: Active session id from the middleware; must match
+            the pending run's session or the claim is rejected.
+        invocation_id: Pending confirmation identifier shown to the UI.
+        approved: The user's decision; the model cannot set it.
+        provider: Live provider to continue the conversation with (the
+            caller re-instantiates it from the pending run's
+            ``provider``/``model``).
+        executor: Tool name -> async handler mapping.
+        pending_store: Injected pending-confirmation store.
+        state_provider: Async ``session_id`` -> real ``ToolState``.
+        model: Provider model identifier; defaults to the pending run's.
+        max_iterations: Fresh budget of provider iterations.
+        timeout_s: Per-iteration provider budget.
+        tools: OpenAI tools payload; defaults to the whole catalog.
+        temperature: Sampling temperature for provider calls.
+        max_tokens: Provider max_tokens for provider calls.
+
+    Yields:
+        T0 agent events; the stream ALWAYS ends with a ``done`` event
+        (never an unhandled exception for typed claim rejections).
+    """
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be >= 1")
+
+    try:
+        pending = pending_store.claim(invocation_id, session_id)
+    except PendingRunNotFound:
+        yield ErrorEvent(content=MSG_CONFIRMATION_NOT_FOUND)
+        yield DoneEvent(finish_reason="error")
+        return
+    except ExpiredPendingRun:
+        yield ErrorEvent(content=MSG_CONFIRMATION_EXPIRED)
+        yield DoneEvent(finish_reason="error")
+        return
+    except ForeignSessionPendingRun:
+        yield ErrorEvent(content=MSG_CONFIRMATION_FOREIGN)
+        yield DoneEvent(finish_reason="error")
+        return
+    except AlreadyClaimedPendingRun:
+        yield ErrorEvent(content=MSG_CONFIRMATION_CONSUMED)
+        yield DoneEvent(finish_reason="error")
+        return
+    except PendingRunError:
+        yield ErrorEvent(content=MSG_PENDING_ERROR)
+        yield DoneEvent(finish_reason="error")
+        return
+    except Exception:
+        yield ErrorEvent(content=MSG_PENDING_ERROR)
+        yield DoneEvent(finish_reason="error")
+        return
+
+    resolved_model = model if model is not None else pending.model
+    conversation = [dict(message) for message in pending.messages]
+    assistant_message = _pending_assistant_message(conversation, pending.tool_call_id)
+    if assistant_message is None:
+        pending_store.invalidate(invocation_id)
+        yield ErrorEvent(content=MSG_CONFIRMATION_CORRUPT)
+        yield DoneEvent(finish_reason="error")
+        return
+    entry = _call_entry(assistant_message, pending.tool_call_id)
+    if entry is None:
+        pending_store.invalidate(invocation_id)
+        yield ErrorEvent(content=MSG_CONFIRMATION_CORRUPT)
+        yield DoneEvent(finish_reason="error")
+        return
+    call = _entry_to_request(entry, pending.tool_call_id)
+
+    spec = get_tool(call.name)
+    if spec is None or spec.name != pending.tool_name:
+        pending_store.invalidate(invocation_id)
+        yield ErrorEvent(content=MSG_CONFIRMATION_CORRUPT)
+        yield DoneEvent(finish_reason="error")
+        return
+
+    validated, _raw_args, arg_error = _validated_args(spec, call)
+    if arg_error is not None or validated is None:
+        pending_store.invalidate(invocation_id)
+        yield ErrorEvent(content=MSG_CONFIRMATION_ARGS_CHANGED)
+        yield DoneEvent(finish_reason="error")
+        return
+    validated_args = validated.model_dump()
+    if canonical_args_sha256(validated_args) != pending.args_sha256:
+        pending_store.invalidate(invocation_id)
+        yield ErrorEvent(content=MSG_CONFIRMATION_ARGS_CHANGED)
+        yield DoneEvent(finish_reason="error")
+        return
+
+    state_now = await state_provider(session_id)
+    decision = decide(spec, state_now)
+    confirmed_block: tuple[str, str] | None = None
+    if state_now.fingerprint() != pending.state_fingerprint:
+        if decision.requires_confirmation:
+            confirmed_block = _pending_block_reason(
+                conversation=conversation,
+                spec=spec,
+                validated_args=validated_args,
+                turn_confirmations=pending.turn_confirmations,
+            )
+            if confirmed_block is None:
+                re_invocation = new_invocation_id()
+                recorded = _record_pending(
+                    pending_store=pending_store,
+                    invocation_id=re_invocation,
+                    session_id=session_id,
+                    provider=provider,
+                    model=resolved_model,
+                    conversation=conversation,
+                    call=call,
+                    spec=spec,
+                    args=validated_args,
+                    state=state_now,
+                    turn_confirmations=pending.turn_confirmations + 1,
+                )
+                if recorded is None:
+                    yield ErrorEvent(content=MSG_PENDING_ERROR)
+                    yield DoneEvent(finish_reason="error")
+                    return
+                yield ToolCallEvent(
+                    invocation_id=re_invocation,
+                    name=spec.name,
+                    args=validated_args,
+                    requires_confirmation=True,
+                )
+                yield ConfirmationRequiredEvent(
+                    invocation_id=re_invocation,
+                    name=spec.name,
+                    args_summary=decision.human_summary_es,
+                )
+                yield DoneEvent(finish_reason="confirmation_required")
+                return
+            block_error, block_message = confirmed_block
+            block_observation = {
+                "ok": False,
+                "error": block_error,
+                "message": block_message,
+            }
+            for event in _denial_events(
+                invocation_id, spec.name, validated_args, block_error, block_message
+            ):
+                yield event
+            conversation.append(_tool_message(pending.tool_call_id, block_observation))
+
+    if confirmed_block is None and approved:
+        handler = executor.get(spec.name)
+        if handler is None:
+            observation = {
+                "ok": False,
+                "error": "handler_unavailable",
+                "message": MSG_TOOL_UNAVAILABLE,
+            }
+            for event in _denial_events(
+                invocation_id,
+                spec.name,
+                validated_args,
+                "handler_unavailable",
+                MSG_TOOL_UNAVAILABLE,
+            ):
+                yield event
+            conversation.append(_tool_message(pending.tool_call_id, observation))
+        else:
+            events, observation = await _execute_tool(
+                invocation_id=invocation_id,
+                call=call,
+                spec=spec,
+                handler=handler,
+                validated=validated,
+                session_id=session_id,
+            )
+            conversation.append(_tool_message(pending.tool_call_id, observation))
+            for event in events:
+                yield event
+    elif confirmed_block is None:
+        observation = {
+            "ok": False,
+            "error": "denied_by_user",
+            "message": MSG_DENIED_BY_USER,
+        }
+        for event in _denial_events(
+            invocation_id,
+            spec.name,
+            validated_args,
+            "denied_by_user",
+            MSG_DENIED_BY_USER,
+        ):
+            yield event
+        conversation.append(_tool_message(pending.tool_call_id, observation))
+
+    if approved:
+        for sibling in _unanswered_siblings(conversation, assistant_message, pending):
+            sibling_call = _entry_to_request(sibling, str(sibling.get("id")))
+            events, stop_reason = await _handle_tool_call(
+                call=sibling_call,
+                session_id=session_id,
+                conversation=conversation,
+                executor=executor,
+                pending_store=pending_store,
+                state_provider=state_provider,
+                model=resolved_model,
+                provider=provider,
+                turn_confirmations=pending.turn_confirmations,
+            )
+            for event in events:
+                yield event
+            if stop_reason is not None:
+                yield DoneEvent(finish_reason=stop_reason)
+                return
+    else:
+        for event in _answer_siblings_denied(conversation, assistant_message, pending):
+            yield event
+
+    resolved_tools = tools if tools is not None else openai_tools()
+    async for event in _drive_iterations(
+        session_id=session_id,
+        conversation=conversation,
+        provider=provider,
+        model=resolved_model,
+        executor=executor,
+        pending_store=pending_store,
+        state_provider=state_provider,
+        resolved_tools=resolved_tools,
+        max_iterations=max_iterations,
+        timeout_s=timeout_s,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        turn_confirmations=pending.turn_confirmations,
+    ):
+        yield event
+
+
+def _unanswered_siblings(
+    conversation: list[dict[str, Any]],
+    assistant_message: dict[str, Any],
+    pending: PendingRun,
+) -> list[dict[str, Any]]:
+    """Raw tool_call entries of the paused message still unanswered."""
+    answered = _answered_call_ids(conversation)
+    siblings: list[dict[str, Any]] = []
+    for candidate in assistant_message.get("tool_calls") or []:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_id = candidate.get("id")
+        if (
+            isinstance(candidate_id, str)
+            and candidate_id
+            and candidate_id != pending.tool_call_id
+            and candidate_id not in answered
+        ):
+            siblings.append(candidate)
+    return siblings
+
+
+def _answer_siblings_denied(
+    conversation: list[dict[str, Any]],
+    assistant_message: dict[str, Any],
+    pending: PendingRun,
+) -> list[AgentEvent]:
+    """Safe denial observations for every unanswered sibling call."""
+    events: list[AgentEvent] = []
+    observation = {
+        "ok": False,
+        "error": "skipped_turn_denied",
+        "message": MSG_TURN_CANCELLED,
+    }
+    for sibling in _unanswered_siblings(conversation, assistant_message, pending):
+        sibling_call = _entry_to_request(sibling, str(sibling.get("id")))
+        try:
+            sibling_args: dict[str, Any] = sibling_call.parse_arguments()
+        except ValueError:
+            sibling_args = {}
+        events.extend(
+            _denial_events(
+                new_invocation_id(),
+                sibling_call.name,
+                sibling_args,
+                "skipped_turn_denied",
+                MSG_TURN_CANCELLED,
+            )
+        )
+        conversation.append(_tool_message(sibling_call.call_id, observation))
+    return events
+
+
 __all__ = [
     "DEFAULT_MAX_ITERATIONS",
     "DEFAULT_TIMEOUT_S",
+    "MAX_TURN_CONFIRMATIONS",
     "StateProvider",
     "ToolExecutor",
     "ToolHandler",
+    "resume_pending_turn",
     "run_agent_turn",
 ]

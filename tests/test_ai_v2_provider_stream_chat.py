@@ -163,15 +163,15 @@ def test_openai_compat_capability_default_false_and_injectable():
     assert enabled.supports_tool_calls is True
 
 
-def test_registry_capability_conservative_defaults():
+def test_registry_capability_openai_format_defaults():
     expected = {
-        ProviderType.OLLAMA: False,
-        ProviderType.LMSTUDIO: False,
+        ProviderType.OLLAMA: True,
+        ProviderType.LMSTUDIO: True,
         ProviderType.OPENAI: True,
-        ProviderType.OPENROUTER: False,
+        ProviderType.OPENROUTER: True,
         ProviderType.MINIMAX: False,
         ProviderType.GLM: False,
-        ProviderType.GROK: False,
+        ProviderType.GROK: True,
     }
     for ptype, capability in expected.items():
         assert ProviderRegistry.supports_tool_calls(ptype) is capability, ptype
@@ -184,6 +184,10 @@ def test_registry_get_carries_capability_flag():
     )
     assert (
         ProviderRegistry.get(ProviderType.OLLAMA, api_key="k").supports_tool_calls
+        is True
+    )
+    assert (
+        ProviderRegistry.get(ProviderType.GLM, api_key="k").supports_tool_calls
         is False
     )
 

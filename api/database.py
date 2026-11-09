@@ -628,6 +628,27 @@ def get_process_status(session_id: str) -> Dict:
     }
 
 
+def try_begin_process(session_id: str) -> bool:
+    """Atomically claim the session for a new pipeline run.
+
+    Performs the conditional transition to ``'running'`` in a single
+    UPDATE: the row only matches when the session is not currently busy
+    (``process_status`` NULL on legacy rows, or any non-busy value), so
+    exactly one of two concurrent callers wins and a check-then-run race
+    cannot launch the pipeline twice.
+    """
+    conn = get_connection()
+    cursor = conn.execute(
+        "UPDATE sessions SET process_status = 'running', updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (process_status IS NULL OR process_status NOT IN ('running', 'processing'))",
+        (session_id,),
+    )
+    claimed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return claimed
+
+
 # --- Results operations ---
 
 
