@@ -492,6 +492,42 @@ class TestProcessRun:
             },
         }
 
+    def test_run_persists_completed_sections_in_status(self, client, headers, stl_path, monkeypatch):
+        """After a full run, status reports completed_sections == total_sections."""
+        import numpy as np
+        from core import ProfileCutDiagnostics
+
+        _upload_mesh(client, headers, stl_path, "design")
+        _upload_mesh(client, headers, stl_path, "topo")
+        sections = [
+            {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 20.0, "sector": "A"},
+            {"name": "S-02", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 20.0, "sector": "A"},
+        ]
+        sections_response = client.post(
+            "/api/v1/sections/manual", json=sections, headers=headers,
+        )
+        assert sections_response.status_code == 200
+
+        class MockProfile:
+            def __init__(self):
+                self.distances = np.array([0.0, 1.0])
+                self.elevations = np.array([100.0, 100.0])
+
+        import api.routers.process as process_router
+        monkeypatch.setattr(
+            process_router,
+            "cut_mesh_with_section_diagnostics",
+            lambda mesh, section: ProfileCutDiagnostics(MockProfile(), ()),
+        )
+
+        resp = client.post("/api/v1/process", headers=headers)
+        assert resp.status_code == 200
+
+        status = client.get("/api/v1/process/status", headers=headers).json()
+        assert status["status"] == "complete"
+        assert status["total_sections"] == 2
+        assert status["completed_sections"] == status["total_sections"]
+
 
 class TestProcessProfiles:
     def test_profiles_out_of_range_404(self, client):
