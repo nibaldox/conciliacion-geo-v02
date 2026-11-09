@@ -474,7 +474,9 @@ def _run_pipeline_sync(
             comparison_results.extend(comps)
             section_profile_warnings[sec.name] = profile_warnings
             completed += 1
-            db.update_process_status(session_id, "processing", completed, len(sections))
+            db.update_process_status(
+                session_id, "processing", completed, len(sections), completed
+            )
 
     # Persist results
     # Save extraction cache for each section
@@ -501,7 +503,9 @@ def _run_pipeline_sync(
         safe_results.append(safe_c)
 
     db.save_results(session_id, safe_results)
-    db.update_process_status(session_id, "complete", len(sections), len(sections))
+    db.update_process_status(
+        session_id, "complete", len(sections), len(sections), len(sections)
+    )
 
     return {
         "status": "complete",
