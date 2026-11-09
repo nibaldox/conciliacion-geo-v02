@@ -212,6 +212,7 @@
     "complete_title": "Procesamiento Completo",
     "error_title": "Error en el procesamiento",
     "error_detail": "Hubo un error al procesar las secciones. Intenta nuevamente.",
+    "error_reason_label": "Motivo:",
     "start_processing": "▶ Iniciar Procesamiento"
   },
   "step4": {

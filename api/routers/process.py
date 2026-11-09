@@ -539,7 +539,8 @@ async def run_process(request: Request, body: Optional[schemas.ProcessSettings] 
         return await _run_in_executor(
             _run_pipeline_sync, session_id, sections_raw, body_overrides
         )
-    except HTTPException:
+    except HTTPException as exc:
+        logger.warning("Process rejected: status=%s detail=%s", exc.status_code, exc.detail)
         raise
     except Exception as exc:
         logger.exception("Run process failed")

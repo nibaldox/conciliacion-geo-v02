@@ -212,6 +212,7 @@
     "complete_title": "Processing Complete",
     "error_title": "Processing Error",
     "error_detail": "There was an error processing the sections. Please try again.",
+    "error_reason_label": "Reason:",
     "start_processing": "▶ Start Processing"
   },
   "step4": {
