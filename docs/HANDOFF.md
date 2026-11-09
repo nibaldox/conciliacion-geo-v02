@@ -1,5 +1,19 @@
 # Continuidad para agentes de codificación
 
+## Continuación — 9 de noviembre de 2026: agente de IA conversacional (chat flotante web)
+
+Estado: v1 geotécnica del agente **completa y verificada** en `feat/ai-agent-chat` (16 commits sobre `origin/main`, sin push). Plan aprobado: `docs/AI_CHAT_AGENT_PLAN.md`; inventario: `docs/AI_CHAT_AGENT_INVENTORY.md` (64 endpoints: 16 cubiertos por 13 herramientas / 33 candidatos ola 2 / 7 solo-frontend / 8 excluidos).
+
+**Qué se construyó**: backend del agente (`core/ai_v2/agent/`: catálogo congelado de 13 herramientas, política fail-closed, bucle NDJSON con confirmaciones server-side single-use, guardarraíles máx-2-confirmaciones/sin-reintento/cap-8), handlers wrappers finos (`api/ai_agent_handlers.py` READ + `api/ai_agent_write_handlers.py`), endpoints `/api/v1/ai/chat|confirm|conversation/{id}` con claim-then-stream (404/410/409) y conversación server-side SQLite, UI flotante (`web/src/components/ai-chat/`: solo-texto, restauración de historial, descargas por tabla determinista, i18n ES/EN, a11y), y hardening: claim atómico compartido UI↔agente (`db.try_begin_process`), reset single-owner, bootstrap de sesión en los 4 endpoints de IA, ciclos de import rotos (deferral en handlers + bottom-relocation en write_handlers con contrato monkeypatch preservado).
+
+**Despliegue (matriz)**: Pages: operador fija repo var `VITE_AI_CHAT` (off por defecto). Docker: build-arg `VITE_AI_CHAT=true` (default false). Portable Electron: `VITE_AI_CHAT="true"` automático + sidecar fija `CONCILIACION_AI_CHAT_ENABLED=true`, `CONCILIACION_AI_LOCAL_ONLY=1`, `CONCILIACION_WORKERS=1` **después** de los spreads (el entorno padre no puede degradarlas). Backend corporativo: `CONCILIACION_AI_CHAT_ENABLED=true`, `CONCILIACION_AI_LOCAL_ONLY=1`, `CONCILIACION_WORKERS=1`, `CONCILIACION_LMSTUDIO_BASE_URL=http://host-ia-interno:1234/v1` (red interna; jamás público ni VITE_*), `CONCILIACION_LMSTUDIO_DEFAULT_MODEL=<id>`.
+
+**Gates finales (ejecución propia del agente)**: pytest `--ignore=tests/test_openblast.py` → **3.585 passed / 2 skipped / 0 failed** (colección 3.626 total / 3.587 sin openblast; el fallo intermedio de la allowlist CI se corrigió en `04846bf`); vitest completo **1.492/1.492**; `tsc -b` + build limpios; ESLint 0 errores (1 warning preexistente ajeno); Electron `node --test lib/spawn-sidecar.test.js` → **8/8**; revisión adversarial 2 lentes: datos/contratos **CLEAN 7/7**, anti-spoof sólido.
+
+**Riesgos conocidos**: (1) terminación abrupta durante pipeline deja la sesión en `running` sin recovery (`GET /session/recovery` no resetea; sin lease por diseño); (2) turnos concurrentes en la misma conversación = last-writer-wins de historial (sin bypass de seguridad; fix sketch en el plan §T7); (3) GET/DELETE de conversación desconocida puede crear la fila de sesión (inocuo, idempotente); (4) auditoría solo con `{name, invocation_id, args_sha256}` — nunca coordenadas ni texto del usuario.
+
+**Pendiente del usuario**: (1) T6 — cargar en LM Studio un modelo pequeño con tool-calls (candidatos: `qwen3.8-flash-next`, `qwen3.8-35b-a3b-distill`, `gemma-4-26b-a4b`; el 27B q6 no es viable en 16 GB de VRAM) y comunicar el id exacto; (2) ola 2 — alcance (completa / núcleo / settings-sesión) según el inventario. Sin push hasta autorización.
+
 ## Continuación — 8 de noviembre de 2026: memoria de la demo pública
 
 Cierre documental del dimensionamiento de la demo pública en Render, medido con los archivos reales; no es una validación operacional de la demo desplegada. La rama `fix/demo-upload-memory` está fusionada a `main` (PR #30, commit de fusión `15a78e9`) y `render.yaml` deja `CONCILIACION_MAX_UPLOAD_MB=16` como salvaguarda de la instancia gratuita.
