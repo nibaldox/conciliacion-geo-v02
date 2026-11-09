@@ -73,7 +73,7 @@ function parseParameterDraft(draft: string, min: number, max: number): number | 
   return value;
 }
 
-export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHandler?: (handler: ((anchor: CurveAnchor) => void) | null) => void }) {
+export function SectionCurveForm() {
   const { t } = useTranslation();
   const designMeshId = useSession((s) => s.designMeshId);
   const { data: contourData } = useMeshBreaklines(designMeshId);
@@ -100,15 +100,6 @@ export function SectionCurveForm({ onRegisterClickHandler }: { onRegisterClickHa
   useEffect(() => {
     dispatchCurveSelection({ type: 'context', context: snapshot ? snapshot.context : null });
   }, [snapshot, dispatchCurveSelection]);
-
-  useEffect(() => {
-    if (!onRegisterClickHandler) return;
-    onRegisterClickHandler((anchor) => dispatchCurveSelection({ type: 'click', anchor }));
-    return () => {
-      onRegisterClickHandler(null);
-      dispatchCurveSelection({ type: 'cancel' });
-    };
-  }, [onRegisterClickHandler, dispatchCurveSelection]);
 
   const helpSummaryRef = useRef<HTMLElement | null>(null);
 

@@ -294,6 +294,15 @@ describe('LeftSidebar — definición de secciones por curvas', () => {
     expect(useSession.getState().curveSelection).toBe(selection);
     expect(screen.getByRole('note')).toHaveTextContent('La vista 3D se activa automáticamente. Elige una curva en la superficie para definir la sección.');
   });
+
+  it('conserva el manejador de clics del visor 3D con el panel colapsado', () => {
+    useSession.setState({ sidebarCollapsed: true });
+    const { unmount } = renderSidebar();
+    expect(document.querySelector('[data-slot="left-sidebar-collapsed"]')).toBeInTheDocument();
+    expect(useSession.getState().mapClickHandler).not.toBeNull();
+    unmount();
+    expect(useSession.getState().mapClickHandler).toBeNull();
+  });
 });
 
 async function waitForDebounce() {

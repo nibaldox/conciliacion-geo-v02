@@ -80,6 +80,7 @@ export function LeftSidebar() {
   const setDesignMeshId = useSession((s) => s.setDesignMeshId);
   const setTopoMeshId = useSession((s) => s.setTopoMeshId);
   const setMapClickHandler = useSession((s) => s.setMapClickHandler);
+  const dispatchCurveSelection = useSession((s) => s.dispatchCurveSelection);
   const openWorkflowStep = useSession((s) => s.openWorkflowStep);
   const setOpenWorkflowStep = useSession((s) => s.setOpenWorkflowStep);
   const setParametersConfirmed = useSession((s) => s.setParametersConfirmed);
@@ -183,6 +184,13 @@ export function LeftSidebar() {
     });
   };
 
+  useEffect(() => {
+    setMapClickHandler((anchor) => dispatchCurveSelection({ type: 'click', anchor }));
+    return () => {
+      setMapClickHandler(null);
+    };
+  }, [setMapClickHandler, dispatchCurveSelection]);
+
   if (sidebarCollapsed) {
     return (
       <aside
@@ -284,7 +292,7 @@ export function LeftSidebar() {
                   <p role="note" className="rounded-md border border-border bg-surface-raised px-2 py-1.5 text-xs text-text-secondary">
                     {t('workspace.curve_view_hint', { defaultValue: 'La vista 3D se activa automáticamente. Elige una curva en la superficie para definir la sección.' })}
                   </p>
-                  <SectionCurveForm onRegisterClickHandler={setMapClickHandler} />
+                  <SectionCurveForm />
                 </>
               )}
               {sectionTab === 'file' && <SectionFileUpload />}

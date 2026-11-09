@@ -8,8 +8,6 @@ import { getCurveGeometrySnapshot } from '../curveGeometryAdapter';
 import type { CurveAnchor, CurveSelectionState } from '../curveSelectionState';
 import type { ContourData } from '../../../api/types';
 
-type RegisteredHandler = ((anchor: CurveAnchor) => void) | null;
-
 const mocks = vi.hoisted(() => ({
   breaklines: { current: null as unknown },
   mutation: {
@@ -76,22 +74,22 @@ function anchorAt(t: number, snapshot = currentSnapshot()): CurveAnchor {
   return anchorForCurve('0-0', t, snapshot);
 }
 
-let registered: RegisteredHandler = null;
-
 function mounted() {
-  const utils = render(
-    <SectionCurveForm
-      onRegisterClickHandler={(handler) => {
-        registered = handler;
-      }}
-    />,
-  );
-  expect(registered).not.toBeNull();
+  const utils = render(<SectionCurveForm />);
+  act(() => {
+    useSession.getState().setMapClickHandler(
+      (anchor) => useSession.getState().dispatchCurveSelection({ type: 'click', anchor }),
+    );
+  });
+  if (!useSession.getState().mapClickHandler) {
+    throw new Error('map click handler missing');
+  }
   return utils;
 }
 
 function clickAnchor(anchor: CurveAnchor): void {
-  const click = registered as (anchor: CurveAnchor) => void;
+  const click = useSession.getState().mapClickHandler;
+  if (!click) throw new Error('map click handler missing');
   act(() => {
     click(anchor);
   });
