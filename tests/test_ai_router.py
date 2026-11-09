@@ -39,6 +39,7 @@ def test_providers(client):
     body = resp.json()
     assert "providers" in body
     assert isinstance(body["providers"], list)
+    assert isinstance(body["chat_enabled"], bool)
 
 
 def test_generate_validation_error(client):

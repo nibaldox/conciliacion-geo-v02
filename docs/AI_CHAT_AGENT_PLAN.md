@@ -205,6 +205,7 @@ Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simul
 - Tope de iteraciones (~8) + timeout global del chat + timeout por herramienta.
 - Rate limit reutiliza `middleware_ratelimit.py`.
 - Feature flags: `VITE_AI_CHAT=true` + `CONCILIACION_AI_CHAT_ENABLED` — la demo pública Render free (512 MB) puede mantenerlo apagado.
+- **Soberanía de datos (decisión del usuario, 9-nov-2026)**: política local-only en el backend para TODOS los endpoints de IA (chat + informes) — solo `lmstudio` por defecto (`CONCILIACION_AI_LOCAL_ONLY=0` relaja); los turnos del chat no usan la caché en disco de informes; topos/secciones/resultados completos jamás viajan al modelo (solo resúmenes pequeños); la conversación vive en SQLite del servidor, no en localStorage.
 - Toda escritura de settings (ola 2) pasa por `save_settings` (incrementa `settings_version`).
 - Las herramientas nunca mutan registros de pozos in situ ni devuelven blobs.
 
@@ -230,9 +231,9 @@ Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simul
 - **T1 — Handlers de lectura** *(completada — handlers de solo lectura validados: 127 pytest dirigidos en verde)*: en `api/`, sobre `api.database`/dominio; conteos SQL. pytest con sesión fixture.
 - **T2 — Bucle de tool-calling + eventos** *(completada — extensión aditiva de proveedores + bucle validados: 332 pytest del barrido ai_v2 en verde)*: con proveedor fake; extender provider sin romper `/ai/generate`.
 - **T3 — `PendingRun` completo + herramientas REPLACE** *(completada — validada: 388 pytest del barrido en verde; incluye guardrails 4+5 en el bucle y guard atómico de proceso)*: claim atómico, TTL, invalidación + herramientas REPLACE + guards de concurrencia e idempotencia.
-- **T4 — Endpoints `/ai/chat` y `/ai/chat/confirm`** (NDJSON, timeouts separados, flags, auditoría).
+- **T4 — Endpoints `/ai/chat` y `/ai/chat/confirm`** *(completada — validada: 422 pytest del barrido en verde, batería NDJSON estable ×3; incluye store de conversaciones SQLite server-side, política local-only corporativa para TODOS los endpoints de IA, guard de workers, claim-then-stream con 404/410/409, prompt de sistema server-side y auditoría con hash canónico sin coordenadas)*: NDJSON, timeouts separados, flags, auditoría.
 - **T5 — UI web del chat** (botón, panel, tarjetas, store, lector, i18n; vitest + build).
-- **T6 — Integración visual**: instancia funcional con URL, probada con STL reales del usuario; dashboard refleja lo que el agente genera; móvil + ambos temas.
+- **T6 — Integración visual**: instancia funcional con URL, probada con STL reales del usuario **y con un modelo local cargado en LM Studio que emita tool-calls** (verificar el modelo cargado: no todos emiten tool-calls); el dashboard refleja lo que el agente genera; móvil + ambos temas. UI bloqueada a "LM Studio · Local" con indicador de disponibilidad.
 - **T7 — Gates finales**: pytest (`--ignore=tests/test_openblast.py`), vitest, `npx tsc -b`, `npm run build`, ESLint + revisión adversarial del delta (contratos/datos + anti-spoof/propagación) + HANDOFF + cierre del inventario §5.5.
 - **T7-bis — Hardening previo al cierre** *(pendiente — hallazgo de T3; no es riesgo aceptable)*: `POST /process` debe compartir el claim atómico (`db.try_begin_process`) para que la UI y el agente no lancen pipelines concurrentes, y `_run_pipeline_sync` debe restablecer el estado de proceso en fallo (hoy deja la sesión pegada en `running`/`processing`; el handler del agente ya se protege, el endpoint original no). Defectos preexistentes del endpoint original; endurecer antes de declarar el agente completo.
 
@@ -240,7 +241,7 @@ Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simul
 
 ## 9. Decisiones cerradas
 
-1. **Proveedor/modelo**: selector existente (`useAIConfig`); herramientas v1 solo con proveedores con `supports_tool_calls` verificado.
+1. **Proveedor/modelo**: **LM Studio, local — decisión del usuario** (9-nov-2026, webapp corporativo: la información de la sesión no sale de la máquina). Política local-only en el backend para TODOS los endpoints de IA (chat + informes): solo `lmstudio` es aceptado por defecto; `CONCILIACION_AI_LOCAL_ONLY=0` relaja; `CONCILIACION_LMSTUDIO_BASE_URL` y `CONCILIACION_LMSTUDIO_DEFAULT_MODEL` configuran host y modelo del servidor de IA interno. Herramientas requieren además un modelo cargado en LM Studio que emita tool-calls (verificar en T6).
 2. **Política de escrituras**: clases de riesgo por estado (§5) — definida por el asistente por delegación del usuario.
 3. **Carga de topos**: doble vía — drag&drop en el chat (siempre iniciada por el usuario, autónoma, con advertencia en línea y informe de reemplazo) + mallas ya cargadas.
 4. **Alcance v1**: flujo geotécnico completo (subir → secciones → procesar → exportar), entregas incrementales T1–T5; inventario completo de routers como cierre (§5.5).

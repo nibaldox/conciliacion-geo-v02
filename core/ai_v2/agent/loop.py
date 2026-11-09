@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -89,6 +90,8 @@ from core.ai_v2.agent.turn import ToolCallRequest
 from core.ai_v2.models import AIUsage
 from core.ai_v2.providers.base import BaseProvider
 
+logger = logging.getLogger(__name__)
+
 ToolHandler = Callable[[str, BaseModel], Awaitable[dict[str, Any]]]
 """Injected handler signature: validated args model in, small dict out."""
 
@@ -97,6 +100,15 @@ ToolExecutor = Mapping[str, ToolHandler]
 
 StateProvider = Callable[[str], Awaitable[ToolState]]
 """Async session_id -> real ``ToolState`` snapshot."""
+
+ConversationSink = Callable[[list[dict[str, Any]]], None]
+"""Sync sink invoked ONCE at stream end with the final conversation copy.
+
+Additive (T4): the API layer passes a callback that persists the
+conversation server-side. The loop NEVER mutates the caller's ``messages``
+list; the sink receives a fresh shallow copy of the loop's own
+conversation, so storing it cannot alias the caller's input.
+"""
 
 DEFAULT_MAX_ITERATIONS = 8
 DEFAULT_TIMEOUT_S = 120.0
@@ -255,6 +267,8 @@ async def run_agent_turn(
     tools: list[dict[str, Any]] | None = None,
     temperature: float = 0.3,
     max_tokens: int = 4096,
+    conversation_id: str | None = None,
+    conversation_sink: ConversationSink | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run ONE bounded agent turn, yielding typed events.
 
@@ -274,6 +288,14 @@ async def run_agent_turn(
         tools: OpenAI tools payload; defaults to the whole catalog.
         temperature: Sampling temperature for provider calls.
         max_tokens: Provider max_tokens for provider calls.
+        conversation_id: Additive (T4) server-side conversation id
+            stamped into every pending confirmation created this turn,
+            so ``POST /ai/chat/confirm`` can resume the right
+            conversation. ``None`` keeps the pre-T4 behaviour.
+        conversation_sink: Additive (T4) sync callback invoked at most
+            once when the stream ends, with a copy of the final
+            conversation. Sink failures are logged and swallowed: they
+            must never corrupt the event stream after ``done``.
 
     Yields:
         T0 agent events; the stream ALWAYS ends with a ``done`` event.
@@ -288,22 +310,45 @@ async def run_agent_turn(
 
     resolved_tools = tools if tools is not None else openai_tools()
     conversation = list(messages)
-    async for event in _drive_iterations(
-        session_id=session_id,
-        conversation=conversation,
-        provider=provider,
-        model=model,
-        executor=executor,
-        pending_store=pending_store,
-        state_provider=state_provider,
-        resolved_tools=resolved_tools,
-        max_iterations=max_iterations,
-        timeout_s=timeout_s,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        turn_confirmations=0,
-    ):
-        yield event
+    try:
+        async for event in _drive_iterations(
+            session_id=session_id,
+            conversation=conversation,
+            provider=provider,
+            model=model,
+            executor=executor,
+            pending_store=pending_store,
+            state_provider=state_provider,
+            resolved_tools=resolved_tools,
+            max_iterations=max_iterations,
+            timeout_s=timeout_s,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            turn_confirmations=0,
+            conversation_id=conversation_id,
+        ):
+            yield event
+    finally:
+        if conversation_sink is not None:
+            _emit_conversation(conversation_sink, conversation)
+
+
+def _emit_conversation(
+    sink: ConversationSink, conversation: list[dict[str, Any]]
+) -> None:
+    """Hand a copy of the final conversation to the sink; never raises.
+
+    A failing sink must not corrupt the event stream (it runs in the
+    generator's ``finally``, after ``done`` may already be yielded), so
+    failures are logged with the exception type only — never the
+    conversation content.
+    """
+    try:
+        sink([dict(message) for message in conversation])
+    except Exception as exc:
+        logger.warning(
+            "agent conversation sink failed: %s", type(exc).__name__
+        )
 
 
 async def _drive_iterations(
@@ -321,6 +366,7 @@ async def _drive_iterations(
     temperature: float,
     max_tokens: int,
     turn_confirmations: int,
+    conversation_id: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Bounded provider iterations over one conversation.
 
@@ -388,6 +434,7 @@ async def _drive_iterations(
                 model=model,
                 provider=provider,
                 turn_confirmations=turn_confirmations,
+                conversation_id=conversation_id,
             )
             for event in events:
                 yield event
@@ -420,6 +467,7 @@ async def _handle_tool_call(
     model: str,
     provider: BaseProvider,
     turn_confirmations: int,
+    conversation_id: str | None = None,
 ) -> tuple[list[AgentEvent], Literal["confirmation_required", "error"] | None]:
     """Process one tool call and append its role:tool answer.
 
@@ -529,6 +577,7 @@ async def _handle_tool_call(
             args=args_for_event,
             state=state,
             turn_confirmations=turn_confirmations + 1,
+            conversation_id=conversation_id,
         )
         if recorded is None:
             return [ErrorEvent(content=MSG_PENDING_ERROR)], "error"
@@ -756,6 +805,7 @@ def _record_pending(
     args: dict[str, Any],
     state: ToolState,
     turn_confirmations: int,
+    conversation_id: str | None = None,
 ) -> str | None:
     """Persist the full resume state; None when the store rejects it."""
     now = time.time()
@@ -773,6 +823,7 @@ def _record_pending(
         created_at=now,
         expires_at=now + PENDING_TTL_S,
         turn_confirmations=turn_confirmations,
+        conversation_id=conversation_id,
     )
     try:
         return pending_store.create(pending)
@@ -864,11 +915,14 @@ async def resume_pending_turn(
     tools: list[dict[str, Any]] | None = None,
     temperature: float = 0.3,
     max_tokens: int = 4096,
+    conversation_sink: ConversationSink | None = None,
+    claimed: PendingRun | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Resume ONE paused turn after the user's approve/deny decision.
 
-    The pending run is claimed atomically (single-use; denial consumes
-    it too) and revalidated before anything executes:
+    Unless ``claimed`` is provided, the pending run is claimed atomically
+    (single-use; denial consumes it too) and revalidated before anything
+    executes:
 
     - the raw arguments replayed from the stored assistant message must
       re-validate and hash to the approved ``args_sha256``;
@@ -907,6 +961,18 @@ async def resume_pending_turn(
         tools: OpenAI tools payload; defaults to the whole catalog.
         temperature: Sampling temperature for provider calls.
         max_tokens: Provider max_tokens for provider calls.
+        conversation_sink: Additive (T4) sync callback invoked at most
+            once when the stream ends after a successful claim, with a
+            copy of the final conversation. Claim rejections end the
+            stream before any conversation exists, so the sink is NOT
+            invoked for them. Sink failures are logged and swallowed.
+        claimed: Additive (T4) already-claimed pending run. When given,
+            the internal atomic claim is SKIPPED — the HTTP endpoint
+            claimed it just before, mapping the typed claim failures to
+            status codes before any 200 stream starts — and this run is
+            used directly, so a confirmation can never be streamed after
+            a concurrent consumer consumed it. ``None`` keeps the
+            internal claim (backwards compatible).
 
     Yields:
         T0 agent events; the stream ALWAYS ends with a ``done`` event
@@ -915,32 +981,34 @@ async def resume_pending_turn(
     if max_iterations < 1:
         raise ValueError("max_iterations must be >= 1")
 
-    try:
-        pending = pending_store.claim(invocation_id, session_id)
-    except PendingRunNotFound:
-        yield ErrorEvent(content=MSG_CONFIRMATION_NOT_FOUND)
-        yield DoneEvent(finish_reason="error")
-        return
-    except ExpiredPendingRun:
-        yield ErrorEvent(content=MSG_CONFIRMATION_EXPIRED)
-        yield DoneEvent(finish_reason="error")
-        return
-    except ForeignSessionPendingRun:
-        yield ErrorEvent(content=MSG_CONFIRMATION_FOREIGN)
-        yield DoneEvent(finish_reason="error")
-        return
-    except AlreadyClaimedPendingRun:
-        yield ErrorEvent(content=MSG_CONFIRMATION_CONSUMED)
-        yield DoneEvent(finish_reason="error")
-        return
-    except PendingRunError:
-        yield ErrorEvent(content=MSG_PENDING_ERROR)
-        yield DoneEvent(finish_reason="error")
-        return
-    except Exception:
-        yield ErrorEvent(content=MSG_PENDING_ERROR)
-        yield DoneEvent(finish_reason="error")
-        return
+    pending: PendingRun | None = claimed
+    if pending is None:
+        try:
+            pending = pending_store.claim(invocation_id, session_id)
+        except PendingRunNotFound:
+            yield ErrorEvent(content=MSG_CONFIRMATION_NOT_FOUND)
+            yield DoneEvent(finish_reason="error")
+            return
+        except ExpiredPendingRun:
+            yield ErrorEvent(content=MSG_CONFIRMATION_EXPIRED)
+            yield DoneEvent(finish_reason="error")
+            return
+        except ForeignSessionPendingRun:
+            yield ErrorEvent(content=MSG_CONFIRMATION_FOREIGN)
+            yield DoneEvent(finish_reason="error")
+            return
+        except AlreadyClaimedPendingRun:
+            yield ErrorEvent(content=MSG_CONFIRMATION_CONSUMED)
+            yield DoneEvent(finish_reason="error")
+            return
+        except PendingRunError:
+            yield ErrorEvent(content=MSG_PENDING_ERROR)
+            yield DoneEvent(finish_reason="error")
+            return
+        except Exception:
+            yield ErrorEvent(content=MSG_PENDING_ERROR)
+            yield DoneEvent(finish_reason="error")
+            return
 
     resolved_model = model if model is not None else pending.model
     conversation = [dict(message) for message in pending.messages]
@@ -1003,6 +1071,7 @@ async def resume_pending_turn(
                     args=validated_args,
                     state=state_now,
                     turn_confirmations=pending.turn_confirmations + 1,
+                    conversation_id=pending.conversation_id,
                 )
                 if recorded is None:
                     yield ErrorEvent(content=MSG_PENDING_ERROR)
@@ -1091,33 +1160,41 @@ async def resume_pending_turn(
                 model=resolved_model,
                 provider=provider,
                 turn_confirmations=pending.turn_confirmations,
+                conversation_id=pending.conversation_id,
             )
             for event in events:
                 yield event
             if stop_reason is not None:
                 yield DoneEvent(finish_reason=stop_reason)
+                if conversation_sink is not None:
+                    _emit_conversation(conversation_sink, conversation)
                 return
     else:
         for event in _answer_siblings_denied(conversation, assistant_message, pending):
             yield event
 
     resolved_tools = tools if tools is not None else openai_tools()
-    async for event in _drive_iterations(
-        session_id=session_id,
-        conversation=conversation,
-        provider=provider,
-        model=resolved_model,
-        executor=executor,
-        pending_store=pending_store,
-        state_provider=state_provider,
-        resolved_tools=resolved_tools,
-        max_iterations=max_iterations,
-        timeout_s=timeout_s,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        turn_confirmations=pending.turn_confirmations,
-    ):
-        yield event
+    try:
+        async for event in _drive_iterations(
+            session_id=session_id,
+            conversation=conversation,
+            provider=provider,
+            model=resolved_model,
+            executor=executor,
+            pending_store=pending_store,
+            state_provider=state_provider,
+            resolved_tools=resolved_tools,
+            max_iterations=max_iterations,
+            timeout_s=timeout_s,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            turn_confirmations=pending.turn_confirmations,
+            conversation_id=pending.conversation_id,
+        ):
+            yield event
+    finally:
+        if conversation_sink is not None:
+            _emit_conversation(conversation_sink, conversation)
 
 
 def _unanswered_siblings(
@@ -1177,6 +1254,7 @@ __all__ = [
     "DEFAULT_MAX_ITERATIONS",
     "DEFAULT_TIMEOUT_S",
     "MAX_TURN_CONFIRMATIONS",
+    "ConversationSink",
     "StateProvider",
     "ToolExecutor",
     "ToolHandler",

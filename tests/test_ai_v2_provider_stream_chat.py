@@ -28,6 +28,7 @@ from core.ai_v2.providers.openai_compat import (
     OpenAICompatibleProvider,
     _validate_call_arguments,
 )
+from core.ai_v2.providers.registry import resolve_base_url
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +199,50 @@ def test_registry_presets_unchanged_by_capability_map():
     assert preset["base_url"] == "http://localhost:11434/v1"
     for values in PROVIDER_PRESETS.values():
         assert all(isinstance(v, str) for v in values.values())
+
+
+# ---------------------------------------------------------------------------
+# resolve_base_url: single LM Studio base_url resolution point (T4)
+# ---------------------------------------------------------------------------
+
+
+LMSTUDIO_BASE_URL_ENV = "CONCILIACION_LMSTUDIO_BASE_URL"
+
+
+def test_resolve_base_url_lmstudio_env_override(monkeypatch):
+    monkeypatch.setenv(LMSTUDIO_BASE_URL_ENV, "  http://10.0.0.5:1234/v1  ")
+    assert resolve_base_url(ProviderType.LMSTUDIO) == "http://10.0.0.5:1234/v1"
+
+
+def test_resolve_base_url_blank_env_counts_as_unset(monkeypatch):
+    monkeypatch.setenv(LMSTUDIO_BASE_URL_ENV, "   ")
+    assert resolve_base_url(ProviderType.LMSTUDIO) == "http://localhost:1234/v1"
+
+
+def test_resolve_base_url_env_unset_returns_preset_for_every_provider(monkeypatch):
+    monkeypatch.delenv(LMSTUDIO_BASE_URL_ENV, raising=False)
+    for provider_type in ProviderType:
+        assert resolve_base_url(provider_type) == (
+            PROVIDER_PRESETS[provider_type]["base_url"]
+        ), provider_type
+
+
+def test_resolve_base_url_env_never_touches_other_providers(monkeypatch):
+    monkeypatch.setenv(LMSTUDIO_BASE_URL_ENV, "http://elsewhere:1234/v1")
+    assert resolve_base_url(ProviderType.OPENAI) == "https://api.openai.com/v1"
+    assert resolve_base_url(ProviderType.OLLAMA) == "http://localhost:11434/v1"
+
+
+def test_registry_get_carries_resolved_base_url(monkeypatch):
+    monkeypatch.setenv(LMSTUDIO_BASE_URL_ENV, "http://10.0.0.5:1234/v1")
+    provider = ProviderRegistry.get(ProviderType.LMSTUDIO, api_key="k")
+    assert str(provider._client.base_url).rstrip("/") == "http://10.0.0.5:1234/v1"
+    monkeypatch.delenv(LMSTUDIO_BASE_URL_ENV, raising=False)
+    preset_provider = ProviderRegistry.get(ProviderType.LMSTUDIO, api_key="k")
+    assert (
+        str(preset_provider._client.base_url).rstrip("/")
+        == "http://localhost:1234/v1"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -95,6 +95,44 @@ class ScriptedChatProvider(BaseProvider):
         return True
 
 
+class TurnThenHangProvider(BaseProvider):
+    """Answers ONE scripted tool-call turn, then blocks forever.
+
+    Second and later ``stream_chat`` calls await a never-set event, so a
+    consumer that stops mid-stream leaves the generator genuinely
+    suspended instead of finished — the shape of a client disconnect.
+    """
+
+    def __init__(self, turn: ChatTurn) -> None:
+        self._turn = turn
+        self._never = asyncio.Event()
+        self.name = "fake"
+        self.calls = 0
+
+    @property
+    def supports_tool_calls(self) -> bool:
+        return True
+
+    async def stream_chat(
+        self, messages: list[dict[str, Any]], **kwargs: Any
+    ) -> ChatTurn:
+        self.calls += 1
+        if self.calls == 1:
+            return self._turn
+        await self._never.wait()
+        raise AssertionError("unreachable: the hang event is never set")
+
+    async def stream(self, messages, *, model, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("report stream() must not be used by the loop")
+        yield  # noqa: unreachable - makes this an async generator
+
+    async def list_models(self) -> list[str]:
+        return []
+
+    async def health_check(self) -> bool:
+        return True
+
+
 class RecordingPendingStore(PendingRunStore):
     """In-memory fake of the frozen T0 interface."""
 
@@ -835,3 +873,55 @@ async def test_loop_does_not_import_api():
         l for l in result.stdout.splitlines() if l.startswith("API_MODULES:")
     )
     assert line == "API_MODULES:"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_turn_persists_conversation_via_sink():
+    """Client disconnect mid-stream (GeneratorExit) still persists the turn.
+
+    The provider answers ONE tool-call turn and then blocks forever, so
+    the generator stays genuinely suspended after the loop yields the
+    ToolCallEvent (the confirmation-required pause keeps any role:tool
+    message OUT of the conversation). Cancelling via ``aclose()`` must
+    run the loop's ``finally`` exactly ONCE and hand the sink the
+    accumulated conversation — system + user + the assistant
+    ``tool_calls`` message — with nothing raised and nothing executed.
+    """
+    args_json = '{"start": [0, 0], "end": [100, 0], "n_sections": 5}'
+    provider = TurnThenHangProvider(
+        ChatTurn(
+            tool_calls=[
+                tool_call("generate_sections_auto", args_json, call_id="c1")
+            ]
+        )
+    )
+    handler = RecordingHandler()
+    sunk: list[list[dict[str, Any]]] = []
+
+    def sink(messages: list[dict[str, Any]]) -> None:
+        sunk.append(messages)
+
+    gen = run_agent_turn(
+        session_id=SESSION,
+        messages=list(BASE_MESSAGES),
+        provider=provider,
+        model="test-model",
+        executor={"generate_sections_auto": handler},
+        pending_store=RecordingPendingStore(),
+        state_provider=StateStub(ToolState(n_sections=3, has_design_mesh=True)),
+        conversation_sink=sink,
+    )
+    first = await gen.__anext__()
+    assert isinstance(first, ToolCallEvent)
+    assert first.requires_confirmation is True
+    assert first.invocation_id.startswith("inv_")
+    await gen.aclose()  # type: ignore[union-attr]
+    assert len(sunk) == 1
+    assert [m["role"] for m in sunk[0]] == ["system", "user", "assistant"]
+    assistant = sunk[0][-1]
+    assert assistant["tool_calls"][0]["id"] == "c1"
+    assert assistant["tool_calls"][0]["function"]["name"] == (
+        "generate_sections_auto"
+    )
+    assert handler.calls == []
+    assert provider.calls == 1

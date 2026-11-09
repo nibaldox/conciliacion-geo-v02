@@ -23,7 +23,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -56,6 +56,12 @@ class PendingRun(BaseModel):
     expires_at: float = Field(gt=0.0)
     confirmations_used: int = Field(default=0, ge=0)
     turn_confirmations: int = Field(default=1, ge=1)
+    conversation_id: Optional[str] = None
+    """Server-side conversation the paused turn belongs to (T4).
+
+    ``None`` keeps older serialized pendings loadable and stays ``None``
+    for pendings created outside a conversation-scoped turn.
+    """
 
 
 class PendingRunError(Exception):
@@ -161,6 +167,33 @@ class InMemoryPendingRunStore(PendingRunStore):
     def invalidate(self, invocation_id: str) -> None:
         with self._lock:
             self._entries.pop(invocation_id, None)
+
+    def peek(self, invocation_id: str, session_id: str) -> PendingRun:
+        """Read-only lookup that never consumes nor mutates the run.
+
+        Additive (T4): lets the HTTP layer map the outcome of an imminent
+        ``claim`` to status codes (unknown / expired / foreign /
+        already-claimed) BEFORE calling ``resume_pending_turn``, which
+        performs the atomic single-use ``claim`` itself. The rejection
+        semantics mirror ``claim`` exactly: unknown ids raise
+        :class:`PendingRunNotFound`, expired runs
+        :class:`ExpiredPendingRun`, runs of another session
+        :class:`ForeignSessionPendingRun` and consumed ids
+        :class:`AlreadyClaimedPendingRun`. A successful peek does NOT
+        reserve the run: a concurrent claim between peek and claim still
+        surfaces as the loop's typed "consumed" rejection.
+        """
+        with self._lock:
+            run = self._entries.get(invocation_id)
+            if run is None:
+                if invocation_id in self._claimed:
+                    raise AlreadyClaimedPendingRun(invocation_id)
+                raise PendingRunNotFound(invocation_id)
+            if run.expires_at <= self._clock():
+                raise ExpiredPendingRun(invocation_id)
+            if run.session_id != session_id:
+                raise ForeignSessionPendingRun(invocation_id)
+            return run
 
 
 def new_invocation_id() -> str:

@@ -203,6 +203,7 @@ app.add_middleware(
     ],
     expose_headers=[
         "X-Session-ID",
+        "X-Conversation-Id",
         "Content-Disposition",
         "X-Export-Filters-Applied",
     ],

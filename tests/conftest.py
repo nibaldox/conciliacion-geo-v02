@@ -309,6 +309,24 @@ def _api_reset_state_caches(monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ai_policy_env(monkeypatch):
+    """Hermetic defaults for the AI policy env vars (local-only, workers).
+
+    ``CONCILIACION_AI_LOCAL_ONLY`` defaults to ACTIVE in production, but
+    this suite drives scripted fake providers, so tests start from the
+    policy-relaxed value and each AI-policy test opts in explicitly via
+    monkeypatch.setenv. The LM Studio overrides and the worker count are
+    cleared so a developer's shell cannot leak configuration into
+    assertions.
+    """
+    monkeypatch.setenv("CONCILIACION_AI_LOCAL_ONLY", "0")
+    monkeypatch.delenv("CONCILIACION_LMSTUDIO_BASE_URL", raising=False)
+    monkeypatch.delenv("CONCILIACION_LMSTUDIO_DEFAULT_MODEL", raising=False)
+    monkeypatch.delenv("CONCILIACION_WORKERS", raising=False)
+    yield
+
+
 # ---------------------------------------------------------------------------
 # V5-09: Hermeticidad — isolate tests from environment proxy variables
 # ---------------------------------------------------------------------------
