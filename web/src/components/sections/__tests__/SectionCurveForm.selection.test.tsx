@@ -7,8 +7,6 @@ import { getCurveGeometrySnapshot } from '../curveGeometryAdapter';
 import type { CurveAnchor } from '../curveSelectionState';
 import type { ContourData } from '../../../api/types';
 
-type RegisteredHandler = ((anchor: CurveAnchor) => void) | null;
-
 const mocks = vi.hoisted(() => ({
   breaklines: { current: null as unknown },
   mutation: {
@@ -62,19 +60,17 @@ function anchorAt(t: number, snapshot = currentSnapshot()): CurveAnchor {
   })!;
 }
 
-let registered: RegisteredHandler = null;
-
-function registerCapture(): (cb: unknown) => void {
-  return (cb: unknown) => {
-    registered = (cb as RegisteredHandler | null) ?? null;
-  };
-}
-
 function mounted() {
-  const utils = render(<SectionCurveForm onRegisterClickHandler={registerCapture()} />);
-  expect(registered).not.toBeNull();
+  const utils = render(<SectionCurveForm />);
+  act(() => {
+    useSession.getState().setMapClickHandler(
+      (anchor) => useSession.getState().dispatchCurveSelection({ type: 'click', anchor }),
+    );
+  });
+  const click = useSession.getState().mapClickHandler;
+  if (!click) throw new Error('map click handler missing');
   return {
-    click: registered as (anchor: CurveAnchor) => void,
+    click,
     rerender: utils.rerender,
   };
 }
@@ -217,7 +213,7 @@ describe('SectionCurveForm curve selection integration', () => {
     expect(selection.start).not.toBeNull();
 
     mocks.breaklines.current = buildContourData();
-    rerender(<SectionCurveForm onRegisterClickHandler={registerCapture()} />);
+    rerender(<SectionCurveForm />);
     selection = useSession.getState().curveSelection;
     expect(selection.start).toBeNull();
     expect(screen.getByRole('button', { name: 'project_input.generate' })).toBeDisabled();
@@ -229,25 +225,24 @@ describe('SectionCurveForm curve selection integration', () => {
     expect(screen.getByRole('button', { name: 'project_input.generate' })).toBeDisabled();
 
     mocks.breaklines.current = undefined;
-    rerender(<SectionCurveForm onRegisterClickHandler={registerCapture()} />);
+    rerender(<SectionCurveForm />);
     selection = useSession.getState().curveSelection;
     expect(selection.start).toBeNull();
     expect(screen.getByRole('button', { name: 'project_input.generate' })).toBeDisabled();
   });
 
-  it('clears the registration and current selection when the form unmounts', () => {
+  it('keeps the click handler and the current selection when the form unmounts', () => {
     mocks.breaklines.current = buildContourData();
-    mounted();
-    const click = registered as (anchor: CurveAnchor) => void;
+    const { click } = mounted();
     clickAnchor(click, anchorAt(0));
     clickAnchor(click, anchorAt(0.2));
     expect(useSession.getState().curveSelection.start).not.toBeNull();
 
     cleanup();
-    expect(registered).toBeNull();
+    expect(useSession.getState().mapClickHandler).not.toBeNull();
     const selection = useSession.getState().curveSelection;
-    expect(selection.curveId).toBeNull();
-    expect(selection.start).toBeNull();
+    expect(selection.curveId).toBe('0-0');
+    expect(selection.start).not.toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
   });
 
