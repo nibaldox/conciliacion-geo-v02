@@ -81,6 +81,7 @@ from core.ai_v2.providers.registry import (
 )
 from api import ai_agent_conversations as agent_conversations
 import api.database as db
+from api._async_db import run_db
 from api.ai_agent_handlers import get_workflow_state
 from api.ai_agent_write_handlers import ALL_HANDLERS
 
@@ -603,9 +604,9 @@ async def chat(req: AgentChatRequest, request: Request) -> StreamingResponse:
     worker_conflict = _chat_worker_conflict()
     if worker_conflict is not None:
         raise HTTPException(status_code=503, detail=worker_conflict)
+    session_id = await run_db(db.get_or_create_session, request.state.session_id)
     if _local_only_active() and req.provider != _LOCAL_ONLY_PROVIDER:
         raise HTTPException(status_code=400, detail=_MSG_AI_LOCAL_ONLY)
-    session_id = request.state.session_id
     try:
         ProviderType(req.provider)
     except ValueError:
@@ -678,7 +679,7 @@ async def chat_confirm(
     worker_conflict = _chat_worker_conflict()
     if worker_conflict is not None:
         raise HTTPException(status_code=503, detail=worker_conflict)
-    session_id = request.state.session_id
+    session_id = await run_db(db.get_or_create_session, request.state.session_id)
     try:
         claimed = AGENT_PENDING_STORE.claim(req.invocation_id, session_id)
     except (PendingRunNotFound, ForeignSessionPendingRun):
@@ -774,7 +775,7 @@ async def delete_chat_conversation(
     worker_conflict = _chat_worker_conflict()
     if worker_conflict is not None:
         raise HTTPException(status_code=503, detail=worker_conflict)
-    session_id = request.state.session_id
+    session_id = await run_db(db.get_or_create_session, request.state.session_id)
     deleted = db.delete_ai_conversation(conversation_id, session_id)
     response: dict[str, Any] = {"deleted": deleted, "pendings_invalidated": 0}
     if deleted:
@@ -887,7 +888,7 @@ async def get_chat_conversation(
     worker_conflict = _chat_worker_conflict()
     if worker_conflict is not None:
         raise HTTPException(status_code=503, detail=worker_conflict)
-    session_id = request.state.session_id
+    session_id = await run_db(db.get_or_create_session, request.state.session_id)
     stored = db.get_ai_conversation(conversation_id, session_id)
     if stored is None:
         return JSONResponse(status_code=404, content={"exists": False})

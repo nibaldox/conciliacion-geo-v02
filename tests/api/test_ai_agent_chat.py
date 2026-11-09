@@ -27,6 +27,7 @@ from fastapi.testclient import TestClient
 import api.ai_agent_conversations as agent_conversations
 import api.database as db
 import api.routers.ai as ai_router
+from api._async_db import run_db
 from api.main import app
 from core.ai_v2 import AIRequest, AIResponseChunk
 from core.ai_v2.agent.events import (
@@ -1382,3 +1383,150 @@ def test_delete_and_history_survive_a_store_without_conversation_support(
     assert body["conversation_id"] == history_conv_id
     assert body["pending"] is None
     assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
+
+
+# ---------------------------------------------------------------------------
+# Fresh-session bootstrap: chat as a session's FIRST request
+# ---------------------------------------------------------------------------
+
+
+FRESH_SESSION = "sess-chat-fresh-bootstrap"
+FRESH_HEADERS = {"X-Session-ID": FRESH_SESSION}
+
+FRESH_SECTIONS = [
+    {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 200.0},
+    {"name": "S-02", "origin": [100.0, 0.0], "azimuth": 0.0, "length": 200.0},
+]
+
+
+def _install_section_write_spy(
+    monkeypatch: pytest.MonkeyPatch, executed: list[str]
+) -> None:
+    """Route generate_sections_auto to the REAL persistence path.
+
+    The spy mirrors the production write (``_save_sections`` ->
+    ``db.save_sections`` via run_db); the design-mesh requirement of the
+    real generator is irrelevant to the persistence regression.
+    """
+
+    async def spy_generate_sections_auto(
+        session_id: str, args: Any
+    ) -> dict[str, Any]:
+        executed.append(f"{session_id}:{type(args).__name__}")
+        await run_db(db.save_sections, session_id, FRESH_SECTIONS)
+        stored = await run_db(db.get_sections, session_id)
+        return {"ok": True, "n_sections": len(stored)}
+
+    monkeypatch.setattr(
+        ai_router,
+        "ALL_HANDLERS",
+        {
+            **ai_router.ALL_HANDLERS,
+            "generate_sections_auto": spy_generate_sections_auto,
+        },
+    )
+
+
+def test_chat_first_request_on_fresh_session_persists_sections(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert db.session_exists(FRESH_SESSION) is False
+    executed: list[str] = []
+    _install_section_write_spy(monkeypatch, executed)
+    fake = ScriptedChatProvider(
+        [
+            tool_turn(
+                "call_1",
+                "generate_sections_auto",
+                '{"start": [0.0, 0.0], "end": [300.0, 0.0], "n_sections": 2}',
+            ),
+            text_turn("Secciones generadas."),
+        ]
+    )
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "genera secciones", headers=FRESH_HEADERS)
+    assert resp.status_code == 200
+    assert executed == [f"{FRESH_SESSION}:SectionAutoArgs"]
+    events = ndjson_events(resp)
+    assert [e.type for e in events] == ["tool_call", "tool_result", "text", "done"]
+    call, result = events[0], events[1]
+    assert isinstance(call, ToolCallEvent)
+    assert call.requires_confirmation is False
+    assert isinstance(result, ToolResultEvent) and result.ok is True
+    summary = json.loads(result.summary)
+    assert summary == {"ok": True, "n_sections": 2}
+    assert events[-1].finish_reason == "stop"
+    assert len(db.get_sections(FRESH_SESSION)) == 2
+    stored = db.get_sections(FRESH_SESSION)
+    assert [s["name"] for s in stored] == ["S-01", "S-02"]
+    assert db.session_exists(FRESH_SESSION) is True
+
+
+def test_run_reconciliation_on_fresh_session_never_process_running(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from api.ai_agent_write_handlers import _MSG_PROCESS_RUNNING
+
+    assert db.session_exists(FRESH_SESSION) is False
+    fake = ScriptedChatProvider(
+        [
+            tool_turn("call_1", "run_reconciliation", "{}"),
+            text_turn("No hay secciones para procesar."),
+        ]
+    )
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "procesa la conciliación", headers=FRESH_HEADERS)
+    assert resp.status_code == 200
+    events = ndjson_events(resp)
+    assert [e.type for e in events] == ["tool_call", "tool_result", "text", "done"]
+    result = events[1]
+    assert isinstance(result, ToolResultEvent)
+    assert _MSG_PROCESS_RUNNING not in result.summary
+    assert "process_running" not in result.summary
+    summary = json.loads(result.summary)
+    assert summary["ok"] is False
+    assert summary["error"] == "no_sections"
+    assert events[-1].finish_reason == "stop"
+    assert db.get_process_status(FRESH_SESSION)["status"] == "idle"
+    assert db.session_exists(FRESH_SESSION) is True
+
+
+def test_chat_existing_session_turn_still_works_identically(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=2)
+    sections_before = db.get_sections(SESSION_A)
+    fake = ScriptedChatProvider([text_turn("Respuesta normal.")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola de nuevo")
+    assert resp.status_code == 200
+    events = ndjson_events(resp)
+    assert [e.type for e in events] == ["text", "done"]
+    assert isinstance(events[0], TextEvent)
+    assert events[0].content == "Respuesta normal."
+    assert events[-1].finish_reason == "stop"
+    assert db.get_sections(SESSION_A) == sections_before
+    assert db.get_or_create_session(SESSION_A) == SESSION_A
+    assert db.session_exists(SESSION_A) is True
+
+
+def test_get_and_delete_unknown_conversation_on_fresh_session_generic(
+    client: TestClient, chat_on: None
+) -> None:
+    assert db.session_exists(FRESH_SESSION) is False
+    got = client.get(
+        "/api/v1/ai/chat/conversation/conv_unknown_fresh", headers=FRESH_HEADERS
+    )
+    assert got.status_code == 404
+    assert got.json() == {"exists": False}
+    deleted = client.delete(
+        "/api/v1/ai/chat/conversation/conv_unknown_fresh", headers=FRESH_HEADERS
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": False, "pendings_invalidated": 0}
+    got_other = client.get(
+        "/api/v1/ai/chat/conversation/conv_unknown_fresh", headers=CHAT_HEADERS_A
+    )
+    assert got_other.status_code == 404
+    assert got_other.json() == {"exists": False}
+    assert db.get_ai_conversation("conv_unknown_fresh", FRESH_SESSION) is None
