@@ -23,6 +23,7 @@ import {
   handleCurveSceneClick,
   hasCurvePreviewViewChanged,
   resolveCurveSceneCandidate,
+  TOUCH_RADIUS_PX,
 } from '../curveScenePicking';
 import type { CurvePreviewViewSnapshot, CurveScenePickingInput } from '../curveScenePicking';
 import type { CurveGeometryPolyline, CurveGeometrySnapshot } from '../../sections/curveGeometryAdapter';
@@ -514,6 +515,181 @@ describe('curveScenePicking', () => {
       expect(consume({ ...okEvent, delta: 3.0001 })).toBeNull();
       expect(stops).toBe(0);
       expect(consume({ ...okEvent, delta: 3 })).not.toBeNull();
+      expect(stops).toBe(1);
+    });
+
+    function handlerFor(camera: Camera, canvas: ReturnType<typeof fakeCanvas>, picks: CurveAnchor[]): (event: Parameters<ReturnType<typeof createCurveSceneClickHandler>>[0]) => CurveAnchor | null {
+      return createCurveSceneClickHandler({
+        snapshot: inputFor().snapshot,
+        selectedCurveId: 'curve-a',
+        camera,
+        center,
+        canvas,
+        getOccluders: () => [],
+        onPick: (anchor) => {
+          picks.push(anchor);
+        },
+      });
+    }
+
+    function touchEvent(
+      camera: Camera,
+      canvas: ReturnType<typeof fakeCanvas>,
+      pointerType: string | undefined,
+      delta: number,
+    ): { intersections: Intersection<Object3D>[]; nativeEvent: { clientX: number; clientY: number; pointerType?: string }; delta: number; stopPropagation: () => void } {
+      const css = projectedCss(toRenderPoint(mineAt(0, 0, -4.1)), camera);
+      const base = fixtureEvent(camera, canvas, { clientX: canvas.left + css.x, clientY: canvas.top + css.y });
+      return {
+        ...base,
+        delta,
+        nativeEvent: pointerType === undefined
+          ? { clientX: base.nativeEvent.clientX, clientY: base.nativeEvent.clientY }
+          : { clientX: base.nativeEvent.clientX, clientY: base.nativeEvent.clientY, pointerType },
+        stopPropagation: (): void => undefined,
+      };
+    }
+
+    it('selects the active curve for a touch tap with a 10 px delta within the touch tolerances', () => {
+      const camera = perspectiveCamera();
+      const canvas = fakeCanvas();
+      const picks: CurveAnchor[] = [];
+      let stops = 0;
+      const handler = handlerFor(camera, canvas, picks);
+      const event = touchEvent(camera, canvas, 'touch', 10);
+      const anchor = handler({
+        ...event,
+        stopPropagation: () => {
+          stops += 1;
+        },
+      });
+      expect(anchor).not.toBeNull();
+      expect(anchor?.curveId).toBe('curve-a');
+      expect(anchor?.segmentIndex).toBe(0);
+      expect(stops).toBe(1);
+      expect(picks.length).toBe(1);
+      expect(picks[0]).toBe(anchor);
+    });
+
+    it('keeps the desktop contract: a mouse event with a 10 px delta is still rejected', () => {
+      const camera = perspectiveCamera();
+      const canvas = fakeCanvas();
+      const picks: CurveAnchor[] = [];
+      let stops = 0;
+      const handler = handlerFor(camera, canvas, picks);
+      const anchor = handler({
+        ...touchEvent(camera, canvas, 'mouse', 10),
+        stopPropagation: () => {
+          stops += 1;
+        },
+      });
+      expect(anchor).toBeNull();
+      expect(stops).toBe(0);
+      expect(picks.length).toBe(0);
+      const withoutPointerType = handler({
+        ...touchEvent(camera, canvas, undefined, 10),
+        stopPropagation: () => {
+          stops += 1;
+        },
+      });
+      expect(withoutPointerType).toBeNull();
+      expect(stops).toBe(0);
+      expect(picks.length).toBe(0);
+    });
+
+    it('rejects a touch tap with a 20 px delta beyond the touch drag limit', () => {
+      const camera = perspectiveCamera();
+      const canvas = fakeCanvas();
+      const picks: CurveAnchor[] = [];
+      let stops = 0;
+      const handler = handlerFor(camera, canvas, picks);
+      const anchor = handler({
+        ...touchEvent(camera, canvas, 'touch', 20),
+        stopPropagation: () => {
+          stops += 1;
+        },
+      });
+      expect(anchor).toBeNull();
+      expect(stops).toBe(0);
+      expect(picks.length).toBe(0);
+    });
+
+    it('picks a curve 15 px away through the injected touch radius and misses for a mouse pointer', () => {
+      const camera = perspectiveCamera();
+      const canvas = fakeCanvas();
+      const css = projectedCss(toRenderPoint(mineAt(0, 0, -4.1)), camera);
+      const line = taggedLine('curve-a', curveAPoints);
+      const forgedHit: Intersection<Object3D> = {
+        distance: 4.1,
+        point: new Vector3(0, 0, -4.1),
+        index: 0,
+        object: line,
+      };
+      const touchPicks: CurveAnchor[] = [];
+      const touchAnchor = handlerFor(camera, canvas, touchPicks)({
+        intersections: [forgedHit],
+        nativeEvent: { clientX: canvas.left + css.x, clientY: canvas.top + css.y + 15, pointerType: 'touch' },
+        delta: 0,
+        stopPropagation: (): void => undefined,
+      });
+      expect(touchAnchor).not.toBeNull();
+      expect(touchAnchor?.curveId).toBe('curve-a');
+      expect(touchPicks.length).toBe(1);
+      const mousePicks: CurveAnchor[] = [];
+      let stops = 0;
+      const mouseAnchor = handlerFor(camera, canvas, mousePicks)({
+        intersections: [forgedHit],
+        nativeEvent: { clientX: canvas.left + css.x, clientY: canvas.top + css.y + 15, pointerType: 'mouse' },
+        delta: 0,
+        stopPropagation: () => {
+          stops += 1;
+        },
+      });
+      expect(mouseAnchor).toBeNull();
+      expect(stops).toBe(0);
+      expect(mousePicks.length).toBe(0);
+    });
+  });
+
+  describe('touch pick radius', () => {
+    function midpointHit(line: Line): Intersection<Object3D> {
+      return {
+        distance: 4.1,
+        point: new Vector3(0, 0, -4.1),
+        index: 0,
+        object: line,
+      };
+    }
+
+    it('picks a curve 15 px away with the 22 px touch radius and misses with the default 8 px radius', () => {
+      const camera = perspectiveCamera();
+      const line = taggedLine('curve-a', curveAPoints);
+      const anchorScreen = projectedCss(toRenderPoint(mineAt(0, 0, -4.1)), camera);
+      const pointer = { x: anchorScreen.x, y: anchorScreen.y + 15 };
+      const intersections = [midpointHit(line)];
+      let picks = 0;
+      let stops = 0;
+      const click = (radiusPx?: number): CurveAnchor | null =>
+        handleCurveSceneClick(
+          inputFor({ camera, pointer, intersections, ...(radiusPx === undefined ? {} : { radiusPx }) }),
+          {
+            dragDistancePx: 0,
+            onPick: () => {
+              picks += 1;
+            },
+            stopPropagation: () => {
+              stops += 1;
+            },
+          },
+        );
+      const withTouchRadius = click(TOUCH_RADIUS_PX);
+      expect(withTouchRadius).not.toBeNull();
+      expect(withTouchRadius?.curveId).toBe('curve-a');
+      expect(picks).toBe(1);
+      expect(stops).toBe(1);
+      const withDefaultRadius = click();
+      expect(withDefaultRadius).toBeNull();
+      expect(picks).toBe(1);
       expect(stops).toBe(1);
     });
   });
