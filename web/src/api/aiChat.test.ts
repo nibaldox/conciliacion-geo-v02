@@ -11,6 +11,7 @@ import {
   readAgentEventStream,
   sendChat,
 } from './aiChat';
+import client from './client';
 
 const { mockGet, mockDelete, mockGetSessionId } = vi.hoisted(() => ({
   mockGet: vi.fn(),
@@ -369,6 +370,7 @@ describe('extractExportDownload', () => {
 describe('downloadExportFile', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    client.defaults.baseURL = '/api/v1';
   });
 
   it('fetches the endpoint with the session header and saves the blob', async () => {
@@ -447,5 +449,101 @@ describe('downloadExportFile', () => {
       ).rejects.toThrow('export_download_unsafe_endpoint');
     }
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('composes the table path against the relative base without duplication', async () => {
+    client.defaults.baseURL = '/api/v1';
+    const mockFetch = vi.fn(async () =>
+      new Response('binary', {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:fake');
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    const append = vi.spyOn(document.body, 'appendChild');
+    try {
+      await downloadExportFile({
+        format: 'excel',
+        filename: 'Conciliacion_Geotecnica.xlsx',
+        endpoint: '/api/v1/export/excel',
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const [url, init] = mockFetch.mock.calls[0] as unknown as [
+        string,
+        RequestInit,
+      ];
+      expect(url).toBe('/api/v1/export/excel');
+      expect(url).not.toContain('/api/v1/api/v1');
+      expect((init.headers as Record<string, string>)['X-Session-ID']).toBe(
+        'sess-test',
+      );
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const blob = createObjectURL.mock.calls[0][0] as Blob;
+      expect(blob.type).toBe(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      const anchor = append.mock.calls[0][0] as HTMLAnchorElement;
+      expect(anchor.download).toBe('Conciliacion_Geotecnica.xlsx');
+      expect(click).toHaveBeenCalledTimes(1);
+    } finally {
+      createObjectURL.mockRestore();
+      click.mockRestore();
+      append.mockRestore();
+    }
+  });
+
+  it('composes the table path against an absolute base without duplicating the api prefix', async () => {
+    client.defaults.baseURL = 'https://host/api/v1';
+    const mockFetch = vi.fn(async () =>
+      new Response('binary', {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:fake');
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    const append = vi.spyOn(document.body, 'appendChild');
+    try {
+      await downloadExportFile({
+        format: 'excel',
+        filename: 'Conciliacion_Geotecnica.xlsx',
+        endpoint: '/api/v1/export/excel',
+        contentType:
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const [url, init] = mockFetch.mock.calls[0] as unknown as [
+        string,
+        RequestInit,
+      ];
+      expect(url).toBe('https://host/api/v1/export/excel');
+      expect(url).not.toContain('/api/v1/api/v1');
+      expect((init.headers as Record<string, string>)['X-Session-ID']).toBe(
+        'sess-test',
+      );
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const blob = createObjectURL.mock.calls[0][0] as Blob;
+      expect(blob.type).toBe(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      );
+      const anchor = append.mock.calls[0][0] as HTMLAnchorElement;
+      expect(anchor.download).toBe('Conciliacion_Geotecnica.xlsx');
+      expect(click).toHaveBeenCalledTimes(1);
+    } finally {
+      createObjectURL.mockRestore();
+      click.mockRestore();
+      append.mockRestore();
+    }
   });
 });

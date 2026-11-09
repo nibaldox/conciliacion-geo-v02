@@ -260,9 +260,8 @@ export async function downloadExportFile(
     throw new Error('export_download_unsafe_endpoint');
   }
   const base = resolveBaseUrl();
-  const url = info.endpoint.startsWith(base)
-    ? info.endpoint
-    : `${base}${info.endpoint}`;
+  const suffix = info.endpoint.replace(/^\/api\/v1/, '');
+  const url = `${base}${suffix}`;
   const headers: Record<string, string> = {};
   const sessionId = getSessionId();
   if (sessionId) headers['X-Session-ID'] = sessionId;
