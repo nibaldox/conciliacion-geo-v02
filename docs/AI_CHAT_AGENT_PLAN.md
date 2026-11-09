@@ -80,7 +80,7 @@ api/routers/ai.py   POST /ai/chat · POST /ai/chat/confirm
 
 - `models.py`: `ToolRisk` (str Enum: READ, ADDITIVE, EXPORT, REPLACE, EXPENSIVE_REPLACE, DESTRUCTIVE, CONFIG), `ToolSpec` (nombre, descripción, modelo Pydantic de args, riesgo, `state_keys` que vigilan el estado previo, `timeout_s` propio, `idempotent`, resumen de impacto), `ToolState` (n_sections, n_results, process_status, has_design_mesh, has_topo_mesh), `PolicyDecision`.
 - `events.py`: unión discriminada de eventos NDJSON por `type`: `text`, `tool_call` (lleva `invocation_id`), `tool_result`, `confirmation_required`, `error`, `done`; `finish_reason: "stop" | "error" | "confirmation_required"`.
-- `policy.py`: función **pura** `decide(spec, args, state) -> PolicyDecision` — tabla de verdad testeada (§5).
+- `policy.py`: función **pura** `decide(spec, state) -> PolicyDecision` — la decisión depende solo de la clase de riesgo y del estado previo (los argumentos no la afectan); tabla de verdad testeada (§5).
 - `catalog.py`: catálogo v1 de `ToolSpec` con schemas derivados de los parámetros reales de los routers; modelos de args con `extra="forbid"` y límites de longitud/tamaño; sin imports dinámicos de nombres de herramienta.
 - `confirmations.py`: interfaz congelada de `PendingRunStore` (`create` / `claim` atómico / `invalidate`); implementación en T3.
 - `loop.py` (T2) + `handlers` (T1/T3, en `api/`): traducción catálogo → `api.database`/dominio; `/process` se envuelve importando `_run_pipeline_sync` tal cual y ejecutándolo en executor — **sin refactor de `process.py`** en esta fase.
@@ -171,7 +171,6 @@ Consecuencia práctica: en una **sesión limpia**, el flujo completo `subir → 
 | `add_section_click` | `POST /sections/click` | ADDITIVE | nunca |
 | `generate_sections_auto` | `POST /sections/auto` | REPLACE | sí si existen secciones |
 | `generate_sections_manual` | `POST /sections/manual` | REPLACE | sí si existen secciones |
-| `generate_sections_from_file` | `POST /sections/from-file` (vía archivo adjunto al chat) | REPLACE (verificado) | sí si existen secciones |
 | `run_reconciliation` | `POST /process` (`_run_pipeline_sync`) | EXPENSIVE_REPLACE | sí si existen resultados |
 | `get_results_summary` | `GET /process/results` + `/status` | READ | nunca |
 | `get_profile` | `GET /process/profiles/{id}` (una sección, campos resumidos) | READ | nunca |
@@ -196,7 +195,7 @@ Consecuencia práctica: en una **sesión limpia**, el flujo completo `subir → 
 
 ### 5.5 Ola 2 (mapeo o exclusión explícita de cada endpoint restante)
 
-Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simulaciones, mapeos, settings/tolerancias (CONFIG — siempre confirmación), `delete_sections` / `delete_mesh` (DESTRUCTIVE — siempre confirmación), session. Cada endpoint queda mapeado a herramienta o excluido con motivo antes de declarar el feature completo (T7).
+Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simulaciones, mapeos, settings/tolerancias (CONFIG — siempre confirmación), `delete_sections` / `delete_mesh` (DESTRUCTIVE — siempre confirmación), session, y generación de secciones desde archivo (`/sections/from-file`): acción del frontend — sube el CSV/DXF y pasa el resultado al agente como observación, igual que la subida de mallas — sin mecanismo backend para un `file_ref`. Cada endpoint queda mapeado a herramienta o excluido con motivo antes de declarar el feature completo (T7).
 
 ---
 
@@ -227,7 +226,7 @@ Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simul
 
 ## 8. Entregas
 
-- **T0 — Congelar contrato** *(en curso)*: `core/ai_v2/agent/` — `models.py` (ToolRisk, ToolSpec, ToolState, PolicyDecision), `events.py` (unión discriminada + helpers NDJSON), `policy.py` (tabla de verdad pura), `catalog.py` (14 ToolSpec con schemas de los parámetros reales), `confirmations.py` (interfaz `PendingRunStore` + dataclass `PendingRun`, implementación T3); espejo TS `web/src/api/agentChat.ts` + fixture; tests de contrato y de tabla de verdad. Verificaciones por lectura: `/meshes/upload` (campos + reemplazo por rol), colisión de nombre en export, soporte de tool-calls en `providers/base.py`/`openai_compat.py`/`config.py`, asignación de sesión en middleware. **Sin HTTP, sin loop, sin handlers, sin llamadas a proveedores.**
+- **T0 — Congelar contrato** *(en curso)*: `core/ai_v2/agent/` — `models.py` (ToolRisk, ToolSpec, ToolState, PolicyDecision), `events.py` (unión discriminada + helpers NDJSON), `policy.py` (tabla de verdad pura), `catalog.py` (13 ToolSpec con schemas de los parámetros reales), `confirmations.py` (interfaz `PendingRunStore` + dataclass `PendingRun`, implementación T3); espejo TS `web/src/api/agentChat.ts` + fixture; tests de contrato y de tabla de verdad. Verificaciones por lectura: `/meshes/upload` (campos + reemplazo por rol), colisión de nombre en export, soporte de tool-calls en `providers/base.py`/`openai_compat.py`/`config.py`, asignación de sesión en middleware. **Sin HTTP, sin loop, sin handlers, sin llamadas a proveedores.**
 - **T1 — Handlers de lectura** (en `api/`, sobre `api.database`/dominio; conteos SQL). pytest con sesión fixture.
 - **T2 — Bucle de tool-calling + eventos** con proveedor fake; extender provider sin romper `/ai/generate`.
 - **T3 — `PendingRun` completo** (claim atómico, TTL, invalidación) + herramientas REPLACE + guards de concurrencia e idempotencia.
