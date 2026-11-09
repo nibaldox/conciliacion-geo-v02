@@ -365,8 +365,15 @@ export function LeftSidebar() {
   };
 
   return (
-    <aside
-      data-slot="left-sidebar"
+    <>
+      <div
+        role="presentation"
+        aria-hidden="true"
+        onClick={() => setSidebarCollapsed(true)}
+        className="fixed inset-0 z-30 bg-black/50 md:hidden"
+      />
+      <aside
+        data-slot="left-sidebar"
       className="project-sidebar relative h-full flex flex-col border-r shrink-0 select-none overflow-hidden"
       style={{
         width: sidebarWidth,
@@ -422,6 +429,7 @@ export function LeftSidebar() {
         }}
         aria-hidden="true"
       />
-    </aside>
+      </aside>
+    </>
   );
 }

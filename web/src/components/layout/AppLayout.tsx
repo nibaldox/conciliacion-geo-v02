@@ -10,6 +10,7 @@ interface AppLayoutProps { children: ReactNode }
 
 export function AppLayout({ children }: AppLayoutProps) {
   const view = useSession((s) => s.activeWorkspaceView);
+  const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
   const isSpatialView = view === '3d';
   const isBlastView = view === 'blast';
   const { t } = useTranslation();
@@ -26,7 +27,9 @@ export function AppLayout({ children }: AppLayoutProps) {
             <h2 className="text-xl font-semibold tracking-tight md:text-2xl">{t(titles[view])}</h2>
             <DemoBanner />
           </div>
-          <ViewsToolbar />
+          <ViewsToolbar onNavigate={() => {
+            if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches) setSidebarCollapsed(true);
+          }} />
           <div className={`min-h-0 flex-1 p-3 md:p-6 ${isSpatialView || isBlastView ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
             <div className={`mx-auto flex w-full flex-col ${isSpatialView ? 'min-h-0 flex-1' : isBlastView ? 'min-h-0 flex-1 max-w-[1800px]' : 'min-h-full max-w-[1800px]'}`}>
               <div className={isBlastView ? 'flex min-h-0 flex-1 flex-col' : 'min-h-0 flex-1'}>{children}</div>

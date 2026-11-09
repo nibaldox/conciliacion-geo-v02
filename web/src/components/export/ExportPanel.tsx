@@ -243,7 +243,7 @@ export function ExportPanel() {
             <li key={format.id} data-export-format={format.id} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-text-primary">{format.name}</p>
-                <p className="truncate text-xs text-text-muted" title={format.description}>{format.description}</p>
+                <p className="line-clamp-2 text-xs text-text-muted" title={format.description}>{format.description}</p>
                 {format.failed && (
                   <p role="alert" aria-live="polite" className="mt-0.5 text-xs text-[var(--status-nok-text)]">
                     {format.errorLabel}
