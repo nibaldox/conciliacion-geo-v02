@@ -46,6 +46,7 @@ def _comparison_row(
     row_type: str = "MATCH",
     berm_status: Any = STATUS_CUMPLE,
     level: str = "1000",
+    angle_status: Any = STATUS_CUMPLE,
 ) -> Dict[str, Any]:
     """Production-shaped comparison row (mirrors core.profile_compliance)."""
     return {
@@ -56,7 +57,7 @@ def _comparison_row(
         "type": row_type,
         "level": level,
         "height_status": status,
-        "angle_status": STATUS_CUMPLE,
+        "angle_status": angle_status,
         "berm_status": berm_status,
         "section_status": status,
         "section_score": score,
@@ -642,6 +643,48 @@ class TestQueryResults:
         assert query["rows"] is None
         assert query["units"] == {"height": "m", "angle": "deg", "berm": "m"}
         assert query["warnings"] == []
+
+    async def test_pct_by_parameter_uses_evaluable_denominator(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _comparison_row("S-01", "A", STATUS_CUMPLE, 85.0, angle_status=STATUS_CUMPLE),
+                _comparison_row("S-01", "A", STATUS_FUERA, 45.0, bench_num=2, row_type="EXTRA", angle_status=STATUS_FUERA),
+                _comparison_row("S-02", "B", STATUS_NO_CUMPLE, 20.0, bench_num=3, row_type="MISSING", angle_status=STATUS_NO_CUMPLE),
+                _comparison_row("S-03", "A", STATUS_CUMPLE, 80.0, bench_num=4, angle_status="-"),
+            ],
+        )
+        query = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        pct_angle = query["pct_by_parameter"]["angle"]
+        assert pct_angle["n_evaluable"] == 3
+        assert pct_angle["pct"] == {
+            STATUS_CUMPLE: 33.3,
+            STATUS_FUERA: 33.3,
+            STATUS_NO_CUMPLE: 33.3,
+        }
+        assert abs(sum(pct_angle["pct"].values()) - 100.0) < 0.2
+        assert "-" not in pct_angle["pct"]
+        assert "sin_medir" not in pct_angle["pct"]
+        assert query["status_by_parameter"]["angle"] == {
+            STATUS_CUMPLE: 1,
+            STATUS_FUERA: 1,
+            STATUS_NO_CUMPLE: 1,
+            "-": 1,
+        }
+
+    async def test_pct_by_parameter_zero_evaluable_when_all_unmeasured(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _comparison_row("S-01", "A", STATUS_CUMPLE, 85.0, angle_status="-"),
+                _comparison_row("S-01", "A", STATUS_FUERA, 45.0, bench_num=2, row_type="EXTRA", angle_status=None),
+            ],
+        )
+        query = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        assert query["pct_by_parameter"]["angle"] == {"n_evaluable": 0, "pct": {}}
+        assert query["status_by_parameter"]["angle"] == {"-": 1, "sin_medir": 1}
 
     async def test_filters_by_bench_and_sector(self, api_isolated_db):
         session_id = db.create_session()

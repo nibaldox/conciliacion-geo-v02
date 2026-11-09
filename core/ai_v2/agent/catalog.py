@@ -164,11 +164,13 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
             "Filter reconciliation result rows by level (bench floor "
             "elevation as text, e.g. ['3065']), bench number, sector, "
             "section, parameter (height/angle/berm) and exact status. "
-            "Returns aggregates (status by section/parameter/type), the "
-            "list of available levels with counts, and optionally "
-            "(include_rows=true) up to row_limit rows with design vs "
-            "as-built values and deviations. Use it when the user asks "
-            "about a specific level, bench, sector or status."
+            "Returns aggregates (status by section/parameter/type), "
+            "pct_by_parameter with precomputed percentages over evaluable "
+            "rows (statuses other than \"-\") so you never have to compute "
+            "them yourself, the list of available levels with counts, and "
+            "optionally (include_rows=true) up to row_limit rows with "
+            "design vs as-built values and deviations. Use it when the "
+            "user asks about a specific level, bench, sector or status."
         ),
         args_model=ResultQueryArgs,
         risk=ToolRisk.READ,

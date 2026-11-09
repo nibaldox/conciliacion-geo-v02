@@ -123,6 +123,23 @@ def _level_sort_key(level: str) -> Tuple[int, float, str]:
         return (1, 0.0, level)
 
 
+def _pct_entry(counter: Counter) -> Dict[str, Any]:
+    """Precomputed percentages over evaluable rows (not ``-``/empty/None)."""
+    counts = {
+        key: n
+        for key, n in counter.items()
+        if n and key is not None and key != "-" and key != ""
+    }
+    n_evaluable = sum(counts.values())
+    if n_evaluable == 0:
+        return {"n_evaluable": 0, "pct": {}}
+    pct = {
+        _json_key(key): round(n * 100.0 / n_evaluable, 1)
+        for key, n in counts.items()
+    }
+    return {"n_evaluable": n_evaluable, "pct": pct}
+
+
 _PARAMETER_STATUS_FIELDS: Dict[str, str] = {
     "height": "height_status",
     "angle": "angle_status",
@@ -582,7 +599,9 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
     table semantics via ``_filter_comparisons``; ``parameter`` + ``status``
     additionally keep rows whose parameter status equals ``status``. The
     available levels are always reported from ALL session rows so the
-    agent can discover which levels exist.
+    agent can discover which levels exist. ``pct_by_parameter`` returns
+    precomputed percentages over evaluable rows (statuses other than
+    ``-``, empty or None) so the model never has to compute them itself.
     """
     from api.routers.process import _filter_comparisons
 
@@ -683,6 +702,10 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
                 _json_key(key): value
                 for key, value in counters["berm_status"].items()
             },
+        },
+        "pct_by_parameter": {
+            param: _pct_entry(counters[status_field])
+            for param, status_field in _PARAMETER_STATUS_FIELDS.items()
         },
         "sections": [
             {
