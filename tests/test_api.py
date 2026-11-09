@@ -4,16 +4,24 @@ Covers all 24 API endpoints across meshes, sections, process, settings,
 and export routers. Uses an isolated SQLite database per test.
 """
 
+import asyncio
 import io
 import os
+import queue
 import tempfile
+import threading
 import uuid
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from api.main import app
 import api.database as db
+import api.ai_agent_write_handlers as write_handlers
+import api.routers.process as process_router
+from api.ai_agent_write_handlers import run_reconciliation
+from core.ai_v2.agent.models import RunReconciliationArgs
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +99,47 @@ def _upload_mesh(client, headers, stl_path, mesh_type="design"):
         )
     assert resp.status_code == 200, f"Upload failed: {resp.text}"
     return resp.json()
+
+
+def _process_section_dict(name: str = "S-01") -> dict:
+    return {
+        "name": name,
+        "origin": [0.0, 0.0],
+        "azimuth": 0.0,
+        "length": 20.0,
+        "sector": "A",
+    }
+
+
+def _make_blocking_pipeline(entered, release):
+    def fake_pipeline(session_id, sections_raw, body_overrides):
+        if entered is not None:
+            entered.set()
+        release.wait(timeout=30)
+        db.update_process_status(
+            session_id, "complete", len(sections_raw), len(sections_raw)
+        )
+        return {
+            "status": "complete",
+            "total_sections": len(sections_raw),
+            "total_results": 0,
+            "profile_warnings": {},
+        }
+
+    return fake_pipeline
+
+
+def _make_idle_write_counter():
+    """Wrap db.update_process_status, counting only 'idle' writes."""
+    real_update = db.update_process_status
+    counter = {"idle": 0}
+
+    def counting_update(session_id, status, *args):
+        if status == "idle":
+            counter["idle"] += 1
+        return real_update(session_id, status, *args)
+
+    return counting_update, counter
 
 
 # ===================================================================
@@ -437,10 +486,263 @@ class TestProcessResults:
 
 
 class TestProcessRun:
-    def test_run_no_sections_400(self, client):
-        """Running process without sections returns 400."""
-        resp = client.post("/api/v1/process")
+    def test_run_no_sections_400(self, client, headers):
+        """Running process without sections returns 400 and releases the claim."""
+        resp = client.post("/api/v1/process", headers=headers)
         assert resp.status_code == 400
+        session = headers["x-session-id"]
+        assert db.get_process_status(session)["status"] == "idle"
+
+    def test_run_failure_resets_status_to_idle(self, client, headers, monkeypatch):
+        """An unexpected pipeline failure resets process_status to idle."""
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+
+        def explode(session_id, sections_raw, body_overrides):
+            raise RuntimeError("pipeline exploded")
+
+        monkeypatch.setattr(process_router, "_run_pipeline_sync", explode)
+        resp = client.post("/api/v1/process", headers=headers)
+        assert resp.status_code == 500
+        assert "pipeline exploded" in resp.json()["detail"]
+        assert db.get_process_status(session)["status"] == "idle"
+
+    def test_run_mesh_rejection_resets_status_to_idle(self, client, headers):
+        """An HTTPException rejection inside the pipeline resets status to idle."""
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+        resp = client.post("/api/v1/process", headers=headers)
+        assert resp.status_code == 400
+        assert "design mesh not uploaded" in resp.json()["detail"]
+        assert db.get_process_status(session)["status"] == "idle"
+
+    def test_mesh_rejection_writes_idle_exactly_once(self, client, headers, monkeypatch):
+        """Mesh-rejection route performs exactly one idle write."""
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+        counting_update, counter = _make_idle_write_counter()
+        monkeypatch.setattr(db, "update_process_status", counting_update)
+
+        resp = client.post("/api/v1/process", headers=headers)
+
+        assert resp.status_code == 400
+        assert counter["idle"] == 1
+        assert db.get_process_status(session)["status"] == "idle"
+
+    def test_pipeline_runtime_error_writes_idle_exactly_once(
+        self, client, headers, monkeypatch
+    ):
+        """Unexpected pipeline failure performs exactly one idle write."""
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+
+        def explode(session_id, sections_raw, body_overrides):
+            raise RuntimeError("pipeline exploded")
+
+        counting_update, counter = _make_idle_write_counter()
+        monkeypatch.setattr(db, "update_process_status", counting_update)
+        monkeypatch.setattr(process_router, "_run_pipeline_sync", explode)
+
+        resp = client.post("/api/v1/process", headers=headers)
+
+        assert resp.status_code == 500
+        assert counter["idle"] == 1
+        assert db.get_process_status(session)["status"] == "idle"
+
+    def test_no_sections_writes_idle_exactly_once(self, client, headers, monkeypatch):
+        """No-sections 400 route performs exactly one idle write."""
+        session = headers["x-session-id"]
+        counting_update, counter = _make_idle_write_counter()
+        monkeypatch.setattr(db, "update_process_status", counting_update)
+
+        resp = client.post("/api/v1/process", headers=headers)
+
+        assert resp.status_code == 400
+        assert counter["idle"] == 1
+        assert db.get_process_status(session)["status"] == "idle"
+
+    def test_no_route_leaves_session_busy(self, client, headers, monkeypatch):
+        """Claim, no-sections, failure and rejection routes all end non-busy."""
+        session = headers["x-session-id"]
+        real_pipeline = process_router._run_pipeline_sync
+
+        resp = client.post("/api/v1/process", headers=headers)
+        assert resp.status_code == 400
+        assert db.get_process_status(session)["status"] == "idle"
+
+        db.save_sections(session, [_process_section_dict("S-01")])
+
+        def explode(session_id, sections_raw, body_overrides):
+            raise RuntimeError("pipeline exploded")
+
+        monkeypatch.setattr(process_router, "_run_pipeline_sync", explode)
+        resp = client.post("/api/v1/process", headers=headers)
+        assert resp.status_code == 500
+        assert db.get_process_status(session)["status"] == "idle"
+
+        monkeypatch.setattr(process_router, "_run_pipeline_sync", real_pipeline)
+        resp = client.post("/api/v1/process", headers=headers)
+        assert resp.status_code == 400
+        assert db.get_process_status(session)["status"] == "idle"
+
+    def test_run_concurrent_posts_exactly_one_succeeds(self, headers, monkeypatch):
+        """Two concurrent POST /process: one 200, one 409, no stuck states."""
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+        release = threading.Event()
+        responses = queue.Queue()
+        monkeypatch.setattr(
+            process_router,
+            "_run_pipeline_sync",
+            _make_blocking_pipeline(None, release),
+        )
+        start = threading.Barrier(2)
+
+        with TestClient(app) as concurrent_client:
+            def fire():
+                start.wait(timeout=30)
+                responses.put(concurrent_client.post("/api/v1/process", headers=headers))
+
+            threads = [threading.Thread(target=fire) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            rejected = responses.get(timeout=30)
+            assert rejected.status_code == 409
+            release.set()
+            accepted = responses.get(timeout=30)
+            for thread in threads:
+                thread.join(timeout=30)
+            assert all(not thread.is_alive() for thread in threads)
+
+        assert sorted([accepted.status_code, rejected.status_code]) == [200, 409]
+        assert db.get_process_status(session)["status"] == "complete"
+
+    def test_ui_post_rejected_while_agent_holds_claim(self, client, headers, monkeypatch):
+        """Agent run_reconciliation claims first: UI POST gets 409, agent completes."""
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+        agent_entered = threading.Event()
+        release = threading.Event()
+        handler_result = {}
+        counting_update, counter = _make_idle_write_counter()
+        monkeypatch.setattr(db, "update_process_status", counting_update)
+        monkeypatch.setattr(
+            write_handlers,
+            "_run_pipeline_sync",
+            _make_blocking_pipeline(agent_entered, release),
+        )
+
+        def agent_run():
+            handler_result["value"] = asyncio.run(
+                run_reconciliation(session, RunReconciliationArgs())
+            )
+
+        agent_thread = threading.Thread(target=agent_run)
+        agent_thread.start()
+        assert agent_entered.wait(timeout=30), "agent pipeline never started"
+        assert db.get_process_status(session)["status"] == "running"
+
+        resp = client.post("/api/v1/process", headers=headers)
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == process_router._MSG_PROCESS_RUNNING
+        assert counter["idle"] == 0
+        assert db.get_process_status(session)["status"] == "running"
+
+        third = client.post("/api/v1/process", headers=headers)
+        assert third.status_code == 409
+        assert third.json()["detail"] == process_router._MSG_PROCESS_RUNNING
+        assert counter["idle"] == 0
+        assert db.get_process_status(session)["status"] == "running"
+
+        release.set()
+        agent_thread.join(timeout=30)
+        assert handler_result["value"]["ok"] is True
+        assert handler_result["value"]["status"] == "complete"
+        assert counter["idle"] == 0
+        assert db.get_process_status(session)["status"] == "complete"
+
+    def test_agent_rejected_while_ui_holds_claim(self, client, headers, monkeypatch):
+        """UI POST claims first: agent run_reconciliation gets process_running."""
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+        ui_entered = threading.Event()
+        agent_may_start = threading.Event()
+        release = threading.Event()
+        responses = queue.Queue()
+        handler_result = {}
+        counting_update, counter = _make_idle_write_counter()
+        monkeypatch.setattr(db, "update_process_status", counting_update)
+        monkeypatch.setattr(
+            process_router,
+            "_run_pipeline_sync",
+            _make_blocking_pipeline(ui_entered, release),
+        )
+
+        def fire_ui():
+            responses.put(client.post("/api/v1/process", headers=headers))
+
+        def agent_run():
+            agent_may_start.wait(timeout=30)
+            handler_result["value"] = asyncio.run(
+                run_reconciliation(session, RunReconciliationArgs())
+            )
+
+        ui_thread = threading.Thread(target=fire_ui)
+        agent_thread = threading.Thread(target=agent_run)
+        ui_thread.start()
+        assert ui_entered.wait(timeout=30), "UI pipeline never started"
+        agent_may_start.set()
+        agent_thread.start()
+        agent_thread.join(timeout=30)
+        assert handler_result["value"] == {
+            "ok": False,
+            "error": "process_running",
+            "message": write_handlers._MSG_PROCESS_RUNNING,
+        }
+        assert counter["idle"] == 0
+        assert db.get_process_status(session)["status"] == "running"
+
+        release.set()
+        resp = responses.get(timeout=30)
+        ui_thread.join(timeout=30)
+        assert resp.status_code == 200
+        assert counter["idle"] == 0
+        assert db.get_process_status(session)["status"] == "complete"
+
+    @pytest.mark.parametrize(
+        "raise_http", [True, False], ids=["http_rejection", "runtime_error"]
+    )
+    def test_agent_pipeline_failure_writes_idle_exactly_once(
+        self, headers, monkeypatch, raise_http
+    ):
+        """Agent flow performs exactly one idle write, owned by the frozen handler.
+
+        The wrapper no longer resets: the handler's own except clauses are
+        the sole idle writer when its pipeline fails.
+        """
+        session = headers["x-session-id"]
+        db.save_sections(session, [_process_section_dict("S-01")])
+
+        def explode(session_id, sections_raw, body_overrides):
+            if raise_http:
+                raise HTTPException(400, "mesh missing")
+            raise RuntimeError("pipeline exploded")
+
+        counting_update, counter = _make_idle_write_counter()
+        monkeypatch.setattr(db, "update_process_status", counting_update)
+        monkeypatch.setattr(write_handlers, "_run_pipeline_sync", explode)
+
+        if raise_http:
+            result = asyncio.run(run_reconciliation(session, RunReconciliationArgs()))
+            assert result["ok"] is False
+            assert result["error"] == "pipeline_rejected"
+            assert "mesh missing" in result["message"]
+        else:
+            with pytest.raises(RuntimeError):
+                asyncio.run(run_reconciliation(session, RunReconciliationArgs()))
+
+        assert counter["idle"] == 1
+        assert db.get_process_status(session)["status"] == "idle"
 
     def test_run_reports_profile_warnings_per_section(self, client, headers, stl_path, monkeypatch):
         import numpy as np
