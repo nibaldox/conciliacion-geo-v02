@@ -69,6 +69,25 @@ PROVIDER_PRESETS: dict[ProviderType, dict[str, str]] = {
     },
 }
 
+TOOL_CALL_CAPABILITY: dict[ProviderType, bool] = {
+    ProviderType.OLLAMA: False,
+    ProviderType.LMSTUDIO: False,
+    ProviderType.OPENAI: True,
+    ProviderType.OPENROUTER: False,
+    ProviderType.MINIMAX: False,
+    ProviderType.GLM: False,
+    ProviderType.GROK: False,
+}
+"""Conservative tool-calling capability per preset.
+
+True ONLY for providers with verified function calling over their
+OpenAI-compatible chat-completions endpoint (OpenAI gpt-4o family).
+Ollama / LM Studio / OpenRouter depend on the loaded model, and the
+MiniMax and GLM presets point at Anthropic-format endpoints, so they
+stay False until verified (plan section 2: an OpenAI-compatible
+endpoint does not imply working function calling).
+"""
+
 
 class ProviderRegistry:
     @classmethod
@@ -83,11 +102,17 @@ class ProviderRegistry:
             base_url=preset["base_url"],
             api_key=api_key,
             name=provider_type.value,
+            supports_tool_calls=TOOL_CALL_CAPABILITY.get(provider_type, False),
         )
 
     @classmethod
     def get_default_model(cls, provider_type: ProviderType) -> str:
         return _resolve_default_model(provider_type)
+
+    @classmethod
+    def supports_tool_calls(cls, provider_type: ProviderType) -> bool:
+        """Conservative per-preset tool-calling capability default."""
+        return TOOL_CALL_CAPABILITY.get(provider_type, False)
 
     @classmethod
     def list_providers(cls) -> list[str]:

@@ -228,7 +228,7 @@ Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simul
 
 - **T0 — Congelar contrato** *(completada — contrato congelado y validado: pytest/vitest/tsc dirigidos en verde)*: `core/ai_v2/agent/` — `models.py` (ToolRisk, ToolSpec, ToolState, PolicyDecision), `events.py` (unión discriminada + helpers NDJSON), `policy.py` (tabla de verdad pura), `catalog.py` (13 ToolSpec con schemas de los parámetros reales), `confirmations.py` (interfaz `PendingRunStore` + dataclass `PendingRun`, implementación T3); espejo TS `web/src/api/agentChat.ts` + fixture; tests de contrato y de tabla de verdad. Verificaciones por lectura: `/meshes/upload` (campos + reemplazo por rol), colisión de nombre en export, soporte de tool-calls en `providers/base.py`/`openai_compat.py`/`config.py`, asignación de sesión en middleware. **Sin HTTP, sin loop, sin handlers, sin llamadas a proveedores.**
 - **T1 — Handlers de lectura** *(completada — handlers de solo lectura validados: 127 pytest dirigidos en verde)*: en `api/`, sobre `api.database`/dominio; conteos SQL. pytest con sesión fixture.
-- **T2 — Bucle de tool-calling + eventos** con proveedor fake; extender provider sin romper `/ai/generate`.
+- **T2 — Bucle de tool-calling + eventos** *(completada — extensión aditiva de proveedores + bucle validados: 332 pytest del barrido ai_v2 en verde)*: con proveedor fake; extender provider sin romper `/ai/generate`.
 - **T3 — `PendingRun` completo** (claim atómico, TTL, invalidación) + herramientas REPLACE + guards de concurrencia e idempotencia.
 - **T4 — Endpoints `/ai/chat` y `/ai/chat/confirm`** (NDJSON, timeouts separados, flags, auditoría).
 - **T5 — UI web del chat** (botón, panel, tarjetas, store, lector, i18n; vitest + build).
