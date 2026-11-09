@@ -20,6 +20,8 @@ export interface CurveScenePickingInput {
 
 const DEFAULT_RADIUS_PX = 8;
 const MAX_DRAG_DISTANCE_PX = 3;
+export const TOUCH_RADIUS_PX = 22;
+export const TOUCH_MAX_DRAG_DISTANCE_PX = 16;
 const OCCLUSION_ROUNDOFF = 1e-6;
 
 function curveIdOf(object: Object3D): string | null {
@@ -101,7 +103,11 @@ function isOccluded(
 
 export interface CurveScenePointerEvent {
   readonly intersections: readonly Intersection<Object3D>[];
-  readonly nativeEvent: { readonly clientX: number; readonly clientY: number };
+  readonly nativeEvent: {
+    readonly clientX: number;
+    readonly clientY: number;
+    readonly pointerType?: string;
+  };
   readonly delta: number;
   readonly stopPropagation: () => void;
 }
@@ -174,12 +180,14 @@ export function handleCurveSceneClick(
   input: CurveScenePickingInput,
   options: {
     readonly dragDistancePx: number;
+    readonly maxDragPx?: number;
     readonly onPick: (anchor: CurveAnchor) => void;
     readonly stopPropagation: () => void;
   },
 ): CurveAnchor | null {
   const { dragDistancePx, stopPropagation, onPick } = options;
-  if (!Number.isFinite(dragDistancePx) || dragDistancePx < 0 || dragDistancePx > MAX_DRAG_DISTANCE_PX) {
+  const maxDragPx = options.maxDragPx ?? MAX_DRAG_DISTANCE_PX;
+  if (!Number.isFinite(dragDistancePx) || dragDistancePx < 0 || dragDistancePx > maxDragPx) {
     return null;
   }
   const anchor = resolveCurveSceneCandidate(input);
@@ -212,10 +220,14 @@ export function createCurveSceneClickHandler(
 ): (event: CurveScenePointerEvent) => CurveAnchor | null {
   return (event) => {
     if (input.onPick === null) return null;
+    const pointerType = event.nativeEvent?.pointerType;
+    const isTouch = pointerType === 'touch' || pointerType === 'pen';
+    const pickingInput = buildCurveScenePickingInput(input, event);
     const anchor = handleCurveSceneClick(
-      buildCurveScenePickingInput(input, event),
+      isTouch ? { ...pickingInput, radiusPx: TOUCH_RADIUS_PX } : pickingInput,
       {
         dragDistancePx: event.delta,
+        maxDragPx: isTouch ? TOUCH_MAX_DRAG_DISTANCE_PX : undefined,
         onPick: input.onPick,
         stopPropagation: event.stopPropagation,
       },

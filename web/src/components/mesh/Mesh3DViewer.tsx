@@ -22,6 +22,7 @@ import {
   createCurveScenePreviewHandler,
   getCurveSearchThreshold,
   hasCurvePreviewViewChanged,
+  TOUCH_RADIUS_PX,
 } from './curveScenePicking';
 import type { CurvePreviewViewSnapshot } from './curveScenePicking';
 import { buildCurveSelectionVisuals, type RenderPoint3D } from './curveSelectionVisuals';
@@ -206,9 +207,17 @@ function Scene({
     };
   }, [camera, gl, layers.topo, onPivot, pickingPivot]);
 
+  const coarsePointer = useMemo(
+    () =>
+      typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches,
+    [],
+  );
+
   useFrame(() => {
     if (raycaster.params.Line) {
-      raycaster.params.Line.threshold = getCurveSearchThreshold(camera, size.height, undefined, curveSearchBounds) ?? 0;
+      raycaster.params.Line.threshold = getCurveSearchThreshold(camera, size.height, coarsePointer ? TOUCH_RADIUS_PX : undefined, curveSearchBounds) ?? 0;
     }
     const preview = previewRef.current;
     if (preview === null || !preview.visible) return;
