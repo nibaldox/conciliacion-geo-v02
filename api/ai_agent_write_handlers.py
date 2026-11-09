@@ -20,6 +20,11 @@ Semantics honored here (verified against the routers):
   so the session can never stay stuck at ``running``.
 - ``export_report`` returns download METADATA only — never binary.
 
+The ``api.routers`` helpers are imported at the bottom of this module,
+after ``ALL_HANDLERS``: a top-of-module import would create a
+collection cycle (``api.routers`` imports ``ai`` at package init, and
+``ai.py`` imports ``ALL_HANDLERS`` from this module back).
+
 Aggregated with the strictly read-only ``READ_HANDLERS`` into
 ``ALL_HANDLERS``, which covers exactly the 13 catalog tools.
 """
@@ -32,14 +37,6 @@ import api.database as db
 import numpy as np
 from api._async_db import run_db
 from api.ai_agent_handlers import READ_HANDLERS
-from api.routers.process import _run_pipeline_sync
-from api.routers.sections import (
-    _get_design_mesh,
-    _load_sections,
-    _save_sections,
-    _section_to_dict,
-    _section_to_response,
-)
 from fastapi import HTTPException
 from core.ai_v2.agent.catalog import TOOL_CATALOG
 from core.ai_v2.agent.models import (
@@ -336,3 +333,13 @@ __all__ = [
     "generate_sections_manual",
     "run_reconciliation",
 ]
+
+
+from api.routers.process import _run_pipeline_sync
+from api.routers.sections import (
+    _get_design_mesh,
+    _load_sections,
+    _save_sections,
+    _section_to_dict,
+    _section_to_response,
+)

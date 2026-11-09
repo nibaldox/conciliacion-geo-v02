@@ -16,6 +16,11 @@ Conventions shared by all handlers:
   truncation flags so output size stays bounded on real sessions.
 - Not-found lookups return ``{"found": False, ...}`` instead of raising,
   so the agent loop can surface a readable tool result.
+
+The ``api.routers.process`` computation helpers are imported lazily
+inside the handlers that use them: a module-level import would create a
+collection cycle (``api.routers`` imports ``ai`` at package init, and
+``ai.py`` imports this module back).
 """
 from __future__ import annotations
 
@@ -26,11 +31,6 @@ from collections import Counter
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import api.database as db
-from api.routers.process import (
-    _build_design_achievement_sync,
-    _build_profile_payload_sync,
-    _build_proposed_compliance_sync,
-)
 from fastapi import HTTPException
 from core.ai_v2.agent.catalog import TOOL_CATALOG
 from core.ai_v2.agent.models import (
@@ -396,6 +396,8 @@ async def get_results_summary(session_id: str, args: NoArgs) -> Dict[str, Any]:
 
 async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
     """One section summarized via the router's own profile computation."""
+    from api.routers.process import _build_profile_payload_sync
+
     try:
         index = int(args.section_id)
     except ValueError:
@@ -438,6 +440,8 @@ async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
 
 async def get_design_achievement(session_id: str, args: NoArgs) -> Dict[str, Any]:
     """Logro Diseño summary via the router's computation, compacted."""
+    from api.routers.process import _build_design_achievement_sync
+
     response = await _run_off_loop(_build_design_achievement_sync, session_id, None, None, None, None)
     summary = response.get("summary") or {}
     sectors = [
@@ -472,6 +476,8 @@ async def get_design_achievement(session_id: str, args: NoArgs) -> Dict[str, Any
 
 async def get_proposed_compliance(session_id: str, args: NoArgs) -> Dict[str, Any]:
     """Proposed-parameters compliance summary via the router's helper."""
+    from api.routers.process import _build_proposed_compliance_sync
+
     response = await _run_off_loop(_build_proposed_compliance_sync, session_id, None, None, None, None)
     payload = response.model_dump()
     out: Dict[str, Any] = {
