@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { useWorkflowStatus } from '../../hooks/useWorkflowStatus';
@@ -24,6 +24,11 @@ export function ViewsToolbar({ onNavigate }: ViewsToolbarProps) {
   const setActiveView = useSession((s) => s.setActiveWorkspaceView);
   const { isComplete } = useWorkflowStatus();
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    const activeIndex = VIEWS.findIndex((view) => view.key === activeView);
+    tabRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [activeView]);
 
   const select = (key: WorkspaceView) => {
     setActiveView(key);
