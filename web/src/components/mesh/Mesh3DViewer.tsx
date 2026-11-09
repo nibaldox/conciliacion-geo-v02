@@ -810,6 +810,17 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
   const [verticalStep, setVerticalStep] = useState(1);
   const [controlsSize, setControlsSize] = useState<{ width: number; height: number | null }>({ width: 320, height: null });
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [isNarrow, setIsNarrow] = useState(
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 639px)').matches,
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 639px)');
+    const onChange = (event: MediaQueryListEvent) => setIsNarrow(event.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
   const controlsResizeStart = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const blastPanelId = useId();
   const [blastPanelOpen, setBlastPanelOpen] = useState(readBlastPanelDefaultOpen);
@@ -1152,18 +1163,23 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
         data-testid="mesh-layer-panel"
         role="group"
         aria-label={t('viewer.layers', { defaultValue: 'Capas visibles' })}
-        className={`absolute top-2 right-2 sm:top-4 sm:right-4 z-20 overflow-auto p-3 rounded-lg bg-surface-raised shadow-lg ${mobilePanelOpen ? 'flex' : 'hidden'} sm:flex flex-col gap-3 border text-xs sm:text-sm select-none`}
-        style={{
-          width: controlsSize.width,
-          height: controlsSize.height ?? undefined,
-          minWidth: 280,
-          minHeight: 280,
-          maxWidth: 'calc(100% - 1rem)',
-          maxHeight: 'calc(100% - 1rem)',
-          borderColor: 'var(--color-border-strong)',
-        }}
+        className={`absolute ${isNarrow ? 'inset-x-2 bottom-2' : 'top-2 right-2 sm:top-4 sm:right-4'} z-20 overflow-auto p-3 rounded-lg bg-surface-raised shadow-lg ${mobilePanelOpen ? 'flex' : 'hidden'} sm:flex flex-col gap-3 border text-xs sm:text-sm select-none`}
+        style={
+          isNarrow
+            ? { maxHeight: '50%', borderColor: 'var(--color-border-strong)' }
+            : {
+                width: controlsSize.width,
+                height: controlsSize.height ?? undefined,
+                minWidth: 280,
+                minHeight: 280,
+                maxWidth: 'calc(100% - 1rem)',
+                maxHeight: 'calc(100% - 1rem)',
+                borderColor: 'var(--color-border-strong)',
+              }
+        }
       >
-        <button type="button" aria-label={t('viewer.panel_resize_corner', { defaultValue: 'Cambiar ancho y alto del panel' })} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" title={t('viewer.panel_resize_hint', { defaultValue: 'Arrastra la esquina para ajustar' })} onPointerDown={beginControlsResize} onPointerMove={moveControlsResize} onPointerUp={() => { controlsResizeStart.current = null; }} onPointerCancel={() => { controlsResizeStart.current = null; }} onKeyDown={(event) => {
+        {!isNarrow && (
+          <button type="button" aria-label={t('viewer.panel_resize_corner', { defaultValue: 'Cambiar ancho y alto del panel' })} aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Shift+ArrowLeft Shift+ArrowRight Shift+ArrowUp Shift+ArrowDown" title={t('viewer.panel_resize_hint', { defaultValue: 'Arrastra la esquina para ajustar' })} onPointerDown={beginControlsResize} onPointerMove={moveControlsResize} onPointerUp={() => { controlsResizeStart.current = null; }} onPointerCancel={() => { controlsResizeStart.current = null; }} onKeyDown={(event) => {
           if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
           event.preventDefault();
           const step = event.shiftKey ? 40 : 16;
@@ -1172,11 +1188,20 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
           const panelHeight = event.currentTarget.parentElement?.getBoundingClientRect().height ?? 280;
           setControlsSize((size) => ({ width: Math.max(280, Math.min(maxWidth, size.width + (event.key === 'ArrowLeft' ? step : event.key === 'ArrowRight' ? -step : 0))), height: Math.max(280, Math.min(maxHeight, (size.height ?? panelHeight) + (event.key === 'ArrowDown' ? step : event.key === 'ArrowUp' ? -step : 0))) }));
         }} className="absolute bottom-0 left-0 z-10 flex h-11 w-11 cursor-sw-resize touch-none items-end justify-start p-1 text-text-muted hover:text-accent focus-visible:outline focus-visible:outline-2" aria-describedby="mesh-panel-resize-hint"><svg aria-hidden="true" viewBox="0 0 18 18" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 15 15 3M8 15 15 8M13 15l2-2" /></svg></button>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
           <span className="font-semibold uppercase tracking-wider text-accent-bright">
             {t('viewer.layers', { defaultValue: 'CAPAS VISIBLES' })}
           </span>
-          <span id="mesh-panel-resize-hint" className="text-xs" style={mutedStyle}>{t('viewer.panel_resize_hint', { defaultValue: 'Arrastra una esquina para ajustar' })}</span>
+          <span id="mesh-panel-resize-hint" className="hidden text-xs sm:inline" style={mutedStyle}>{t('viewer.panel_resize_hint', { defaultValue: 'Arrastra una esquina para ajustar' })}</span>
+          <button
+            type="button"
+            className="flex h-11 w-11 items-center justify-center text-lg leading-none text-text-muted hover:text-accent sm:hidden"
+            aria-label={t('viewer.layers_close')}
+            onClick={() => setMobilePanelOpen(false)}
+          >
+            ×
+          </button>
         </div>
         {renderLayerToggles()}
         {renderBlastHolesToggle()}
@@ -1186,7 +1211,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
       <div className="absolute inset-0 bg-viewer-bg">{canvasNode}</div>
       <button
         type="button"
-        className="absolute bottom-3 right-3 z-30 flex min-h-11 items-center gap-2 rounded border border-border bg-surface-raised px-3 text-xs text-text-primary shadow-lg hover:bg-surface-muted sm:hidden"
+        className={`absolute bottom-3 right-3 z-30 ${mobilePanelOpen ? 'hidden' : 'flex'} min-h-11 items-center gap-2 rounded border border-border bg-surface-raised px-3 text-xs text-text-primary shadow-lg hover:bg-surface-muted sm:hidden`}
         aria-expanded={mobilePanelOpen}
         aria-controls="mesh-layer-panel"
         onClick={() => setMobilePanelOpen((open) => !open)}

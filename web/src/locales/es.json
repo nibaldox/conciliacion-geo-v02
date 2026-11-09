@@ -1069,6 +1069,7 @@
     "panel_resize_corner": "Cambiar ancho y alto del panel",
     "panel_resize_hint": "Arrastra la esquina para ajustar",
     "layers_toggle": "Capas",
+    "layers_close": "Cerrar",
     "cesium_load_error": "Error al cargar CesiumJS: {{message}}",
     "cesium_init_error": "Error al inicializar CesiumJS: {{message}}",
     "cesium_loading": "Cargando CesiumJS (≈4 MB)…",
