@@ -16,8 +16,9 @@ Guarantees and limits:
   every conversation served to the loop. The client sends only plain
   user text — never roles.
 - TTL: conversations not updated within
-  :data:`CONVERSATION_TTL_HOURS` are deleted opportunistically on
-  access (same SQLite timestamp format as ``cleanup_old_sessions``).
+  :data:`CONVERSATION_TTL_HOURS` are deleted by ``api.main`` at
+  startup, by a background task every 6 hours, and opportunistically
+  on access (same SQLite timestamp format as ``cleanup_old_sessions``).
 - Cap: at most :data:`MAX_CONVERSATION_MESSAGES` messages and
   :data:`MAX_CONVERSATION_CHARS` JSON-encoded characters are kept per
   conversation. Trimming is GROUP-AWARE: an assistant

@@ -164,6 +164,9 @@ MSG_CONFIRMATION_STATE_CHANGED = (
     "El estado de la sesión cambió desde la solicitud; se requiere "
     "confirmar nuevamente."
 )
+MSG_CONFIRMATION_CONVERSATION_DELETED = (
+    "La conversación asociada fue eliminada; la acción no se ejecutará."
+)
 MSG_DENIED_BY_USER = "El usuario denegó la ejecución de esta herramienta."
 MSG_DENIED_NO_RETRY = (
     "Ya fue denegada en este turno y no se reintentará."
@@ -412,6 +415,10 @@ async def _drive_iterations(
         usage_total = _accumulate_usage(usage_total, turn.usage)
 
         if not turn.tool_calls:
+            if turn.text:
+                conversation.append(
+                    {"role": "assistant", "content": turn.text}
+                )
             yield TextEvent(content=turn.text)
             yield DoneEvent(
                 finish_reason="stop",
@@ -578,6 +585,7 @@ async def _handle_tool_call(
             state=state,
             turn_confirmations=turn_confirmations + 1,
             conversation_id=conversation_id,
+            args_summary=decision.human_summary_es[:500],
         )
         if recorded is None:
             return [ErrorEvent(content=MSG_PENDING_ERROR)], "error"
@@ -806,6 +814,7 @@ def _record_pending(
     state: ToolState,
     turn_confirmations: int,
     conversation_id: str | None = None,
+    args_summary: str = "",
 ) -> str | None:
     """Persist the full resume state; None when the store rejects it."""
     now = time.time()
@@ -824,6 +833,7 @@ def _record_pending(
         expires_at=now + PENDING_TTL_S,
         turn_confirmations=turn_confirmations,
         conversation_id=conversation_id,
+        args_summary=args_summary,
     )
     try:
         return pending_store.create(pending)
@@ -917,6 +927,7 @@ async def resume_pending_turn(
     max_tokens: int = 4096,
     conversation_sink: ConversationSink | None = None,
     claimed: PendingRun | None = None,
+    conversation_exists: Callable[[str, str], bool] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Resume ONE paused turn after the user's approve/deny decision.
 
@@ -973,6 +984,14 @@ async def resume_pending_turn(
             used directly, so a confirmation can never be streamed after
             a concurrent consumer consumed it. ``None`` keeps the
             internal claim (backwards compatible).
+        conversation_exists: Additive (T5) predicate
+            ``(session_id, conversation_id) -> bool`` evaluated after the
+            claim and the corrupt-state checks. When the pending belongs
+            to a conversation that no longer exists (deleted between the
+            pause and the approval), the pending is invalidated and the
+            stream ends with an explicit error — NOTHING executes, so a
+            deleted conversation can never be resurrected by an
+            approval. ``None`` skips the check (backwards compatible).
 
     Yields:
         T0 agent events; the stream ALWAYS ends with a ``done`` event
@@ -1024,6 +1043,16 @@ async def resume_pending_turn(
         yield ErrorEvent(content=MSG_CONFIRMATION_CORRUPT)
         yield DoneEvent(finish_reason="error")
         return
+
+    if (
+        pending.conversation_id
+        and conversation_exists is not None
+        and not conversation_exists(session_id, pending.conversation_id)
+    ):
+        pending_store.invalidate(invocation_id)
+        yield ErrorEvent(content=MSG_CONFIRMATION_CONVERSATION_DELETED)
+        yield DoneEvent(finish_reason="error")
+        return
     call = _entry_to_request(entry, pending.tool_call_id)
 
     spec = get_tool(call.name)
@@ -1072,6 +1101,7 @@ async def resume_pending_turn(
                     state=state_now,
                     turn_confirmations=pending.turn_confirmations + 1,
                     conversation_id=pending.conversation_id,
+                    args_summary=decision.human_summary_es[:500],
                 )
                 if recorded is None:
                     yield ErrorEvent(content=MSG_PENDING_ERROR)

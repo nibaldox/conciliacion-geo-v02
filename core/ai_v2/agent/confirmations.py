@@ -62,6 +62,13 @@ class PendingRun(BaseModel):
     ``None`` keeps older serialized pendings loadable and stays ``None``
     for pendings created outside a conversation-scoped turn.
     """
+    args_summary: str = Field(default="", max_length=500)
+    """Human-readable Spanish summary of the approved call (T5).
+
+    Carries the policy's ``human_summary_es`` captured at pause time so a
+    restored confirmation card can be rendered without the raw
+    arguments. The default keeps older serialized pendings loadable.
+    """
 
 
 class PendingRunError(Exception):
@@ -115,6 +122,42 @@ class PendingRunStore(ABC):
         """Drop the pending run; unknown ids are ignored."""
         ...
 
+    def invalidate_for_conversation(
+        self, session_id: str, conversation_id: str
+    ) -> int:
+        """Remove + tombstone every pending of one conversation (T5).
+
+        Additive: implementations that do not support conversation-scoped
+        invalidation keep the base default, which refuses the operation
+        instead of silently pretending it happened. Returns the number of
+        invalidated runs.
+        """
+        raise NotImplementedError
+
+    def peek_for_conversation(
+        self, session_id: str, conversation_id: str
+    ) -> Optional[PendingRun]:
+        """Non-consuming lookup of one conversation's pending (T5).
+
+        Additive: returns the live (unexpired) pending awaiting
+        confirmation for this session + conversation, or ``None``.
+        """
+        raise NotImplementedError
+
+    def invalidated_conversation(
+        self, invocation_id: str, session_id: str
+    ) -> Optional[str]:
+        """Conversation binding of a DELETE-invalidated pending (T5).
+
+        Additive: returns the conversation id remembered when
+        ``invalidate_for_conversation`` removed this pending, so the
+        confirm endpoint can answer 404 (deleted conversation = nothing
+        to confirm) instead of the generic consumed 409. ``None`` when
+        the id was never invalidated this way, belongs to another
+        session, or the record was already swept.
+        """
+        raise NotImplementedError
+
 
 class InMemoryPendingRunStore(PendingRunStore):
     """Single-process in-memory pending-confirmation store.
@@ -125,13 +168,19 @@ class InMemoryPendingRunStore(PendingRunStore):
     :class:`AlreadyClaimedPendingRun` while an id never stored raises
     :class:`PendingRunNotFound`. Expired entries raise
     :class:`ExpiredPendingRun` and are dropped on sight; a create-time
-    sweep keeps the map bounded. Denial consumes the pending too —
+    sweep keeps the map bounded. Consumed ids are remembered as
+    tombstones (``id -> claimed_at``) so a later claim answers
+    :class:`AlreadyClaimedPendingRun` instead of silently re-arming the
+    same id; tombstones older than ``PENDING_TTL_S`` are swept in the
+    same ``create`` pass so the tombstone map stays bounded in
+    long-lived processes. Denial consumes the pending too —
     consumption happens in ``claim`` regardless of the later decision.
     """
 
     def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
         self._entries: dict[str, PendingRun] = {}
-        self._claimed: set[str] = set()
+        self._claimed: dict[str, float] = {}
+        self._invalidated: dict[str, tuple[str, str, float]] = {}
         self._lock = threading.Lock()
         self._clock = clock
 
@@ -145,6 +194,20 @@ class InMemoryPendingRunStore(PendingRunStore):
             ]
             for key in expired:
                 del self._entries[key]
+            stale_tombstones = [
+                key
+                for key, claimed_at in self._claimed.items()
+                if now - claimed_at > PENDING_TTL_S
+            ]
+            for key in stale_tombstones:
+                del self._claimed[key]
+            stale_invalidations = [
+                key
+                for key, record in self._invalidated.items()
+                if now - record[2] > PENDING_TTL_S
+            ]
+            for key in stale_invalidations:
+                del self._invalidated[key]
             self._entries[run.invocation_id] = run
             return run.invocation_id
 
@@ -161,12 +224,96 @@ class InMemoryPendingRunStore(PendingRunStore):
             if run.session_id != session_id:
                 raise ForeignSessionPendingRun(invocation_id)
             del self._entries[invocation_id]
-            self._claimed.add(invocation_id)
+            self._claimed[invocation_id] = self._clock()
             return run
 
     def invalidate(self, invocation_id: str) -> None:
         with self._lock:
             self._entries.pop(invocation_id, None)
+
+    def invalidate_for_conversation(
+        self, session_id: str, conversation_id: str
+    ) -> int:
+        """Remove + tombstone every pending of this session + conversation.
+
+        Additive (T5): backs the DELETE conversation endpoint — a deleted
+        conversation must never leave an approvable pending behind, or a
+        later approval would resurrect a purged conversation. Matching
+        entries are removed under the lock and remembered as tombstones
+        (same bounded map as ``claim``), so a later claim answers
+        :class:`AlreadyClaimedPendingRun` instead of re-arming. Unknown,
+        expired and foreign entries are left untouched. Returns the
+        number of invalidated runs.
+        """
+        with self._lock:
+            now = self._clock()
+            victims = [
+                key
+                for key, run in self._entries.items()
+                if run.session_id == session_id
+                and run.conversation_id == conversation_id
+            ]
+            for key in victims:
+                run = self._entries[key]
+                bound_conversation = run.conversation_id or ""
+                self._invalidated[key] = (
+                    run.session_id,
+                    bound_conversation,
+                    now,
+                )
+                del self._entries[key]
+                self._claimed[key] = now
+            return len(victims)
+
+    def invalidated_conversation(
+        self, invocation_id: str, session_id: str
+    ) -> Optional[str]:
+        """Binding of a pending removed by ``invalidate_for_conversation``.
+
+        Additive (T5): lets the confirm endpoint answer 404 (deleted
+        conversation = nothing to confirm) for pendings tombstoned by a
+        conversation DELETE instead of the generic consumed 409, which
+        stays reserved for genuine claim races. Returns the conversation
+        id only for the SAME session that owned the pending and only
+        while the record is still bounded (``PENDING_TTL_S`` sweep in
+        ``create``); claim-consumed ids were never recorded here, so a
+        genuine race keeps answering :class:`AlreadyClaimedPendingRun`
+        upstream and a plain 409.
+        """
+        with self._lock:
+            record = self._invalidated.get(invocation_id)
+            if record is None:
+                return None
+            bound_session, conversation_id, invalidated_at = record
+            if bound_session != session_id:
+                return None
+            if self._clock() - invalidated_at > PENDING_TTL_S:
+                return None
+            return conversation_id
+
+    def peek_for_conversation(
+        self, session_id: str, conversation_id: str
+    ) -> Optional[PendingRun]:
+        """Read-only lookup of one conversation's live pending.
+
+        Additive (T5): lets the history endpoint render the pending
+        confirmation card after a page reload. Scans under the lock and
+        NEVER consumes nor mutates the entry; expired runs are skipped
+        (not dropped — expiry remains ``claim``'s concern). Returns
+        ``None`` when no live pending matches this session AND
+        conversation; foreign-session pendings are invisible, mirroring
+        the NOT FOUND semantics of ``claim``.
+        """
+        with self._lock:
+            now = self._clock()
+            for run in self._entries.values():
+                if (
+                    run.session_id == session_id
+                    and run.conversation_id == conversation_id
+                    and run.expires_at > now
+                ):
+                    return run
+            return None
 
     def peek(self, invocation_id: str, session_id: str) -> PendingRun:
         """Read-only lookup that never consumes nor mutates the run.

@@ -25,14 +25,15 @@ Chat (T4) notes:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.ai_v2 import (
@@ -79,6 +80,7 @@ from core.ai_v2.providers.registry import (
     resolve_base_url,
 )
 from api import ai_agent_conversations as agent_conversations
+import api.database as db
 from api.ai_agent_handlers import get_workflow_state
 from api.ai_agent_write_handlers import ALL_HANDLERS
 
@@ -396,6 +398,22 @@ Single-process only — see the module docstring and ``render.yaml``
 """
 
 
+def _invalidated_conversation_of(
+    invocation_id: str, session_id: str
+) -> str | None:
+    """Conversation binding of a pending tombstoned by a DELETE (T5).
+
+    Store implementations that do not track conversation-scoped
+    invalidation answer ``None`` (the generic consumed mapping applies).
+    """
+    try:
+        return AGENT_PENDING_STORE.invalidated_conversation(
+            invocation_id, session_id
+        )
+    except NotImplementedError:
+        return None
+
+
 def _chat_enabled() -> bool:
     """Feature-flag read at request time (env-var opt-in)."""
     return os.environ.get(CHAT_FLAG_ENV, "").strip().lower() in (
@@ -674,6 +692,17 @@ async def chat_confirm(
             detail=_sanitize_error(MSG_CONFIRMATION_EXPIRED),
         )
     except AlreadyClaimedPendingRun:
+        bound_conversation = _invalidated_conversation_of(
+            req.invocation_id, session_id
+        )
+        if (
+            bound_conversation is not None
+            and db.get_ai_conversation(bound_conversation, session_id) is None
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail=_sanitize_error(MSG_CONFIRMATION_NOT_FOUND),
+            )
         raise HTTPException(
             status_code=409,
             detail=_sanitize_error(MSG_CONFIRMATION_CONSUMED),
@@ -687,6 +716,9 @@ async def chat_confirm(
             status_code=502, detail=_sanitize_error(_MSG_CHAT_PROVIDER_UNAVAILABLE)
         )
     conversation_id = claimed.conversation_id
+
+    def _conversation_exists(sid: str, cid: str) -> bool:
+        return db.get_ai_conversation(cid, sid) is not None
 
     def _make_sink(
         conv_id: str,
@@ -712,8 +744,168 @@ async def chat_confirm(
                 state_provider=_agent_state_provider,
                 conversation_sink=conversation_sink,
                 claimed=claimed,
+                conversation_exists=_conversation_exists,
             )
         ):
             yield line
 
     return _ndjson_response(stream(), conversation_id)
+
+
+@router.delete("/chat/conversation/{conversation_id}")
+async def delete_chat_conversation(
+    request: Request,
+    conversation_id: str = Path(min_length=1, max_length=64),
+) -> dict:
+    """Delete ONE server-side conversation owned by this session.
+
+    Corporate data retention (T5): the "limpiar conversación" button in
+    the chat panel must really remove the stored messages, not just
+    reset the client view. Gated by the SAME chat flag and worker guard
+    as the other chat endpoints. Unknown and foreign ids answer
+    ``{"deleted": false}`` — existence is never revealed. When the row
+    is removed, every pending confirmation bound to this session +
+    conversation is invalidated AND tombstoned first (additive
+    ``pendings_invalidated`` count), so a later approval can never
+    resurrect a deleted conversation.
+    """
+    if not _chat_enabled():
+        raise HTTPException(status_code=503, detail=_MSG_CHAT_DISABLED)
+    worker_conflict = _chat_worker_conflict()
+    if worker_conflict is not None:
+        raise HTTPException(status_code=503, detail=worker_conflict)
+    session_id = request.state.session_id
+    deleted = db.delete_ai_conversation(conversation_id, session_id)
+    response: dict[str, Any] = {"deleted": deleted, "pendings_invalidated": 0}
+    if deleted:
+        try:
+            response["pendings_invalidated"] = (
+                AGENT_PENDING_STORE.invalidate_for_conversation(
+                    session_id, conversation_id
+                )
+            )
+        except NotImplementedError:
+            del response["pendings_invalidated"]
+    return response
+
+
+_HISTORY_SUMMARY_MAX_CHARS = 200
+"""Bound for sanitized tool summaries (mirrors the loop's event summary)."""
+
+
+def _history_tool_entry(message: dict[str, Any]) -> dict[str, Any]:
+    """Sanitized {role, ok, summary, error} for one stored tool answer.
+
+    Parsed from the stored observation JSON ONLY: the raw arguments are
+    never echoed back. The summary is the human ``message`` verbatim
+    (bounded); an observation without one — or with unparseable content
+    — yields an EMPTY summary, so no JSON dump of the observation can
+    leak args fragments through the history endpoint.
+    """
+    content = message.get("content")
+    payload: Any = None
+    if isinstance(content, str):
+        try:
+            payload = json.loads(content)
+        except ValueError:
+            payload = None
+    if isinstance(payload, dict):
+        summary = payload.get("message")
+        if not isinstance(summary, str):
+            summary = ""
+        error = payload.get("error")
+        return {
+            "role": "tool",
+            "ok": bool(payload.get("ok")),
+            "summary": summary[:_HISTORY_SUMMARY_MAX_CHARS],
+            "error": error if isinstance(error, str) else None,
+        }
+    return {
+        "role": "tool",
+        "ok": False,
+        "summary": "",
+        "error": None,
+    }
+
+
+def _sanitize_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Client-safe projection of a stored conversation (T5).
+
+    The server-side system prompt is EXCLUDED (it never leaves the
+    server); user and assistant messages keep only their plain text;
+    assistant ``tool_calls`` are reduced to the list of function NAMES
+    (the raw arguments stay server-side); ``role:tool`` answers become
+    {ok, summary, error} parsed from the stored observation. This is the
+    exact shape served by GET /ai/chat/conversation/{id}.
+    """
+    sanitized: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role")
+        if role == "system":
+            continue
+        if role == "tool":
+            sanitized.append(_history_tool_entry(message))
+            continue
+        content = message.get("content")
+        entry: dict[str, Any] = {
+            "role": "assistant" if role == "assistant" else "user",
+            "content": content if isinstance(content, str) else "",
+        }
+        if role == "assistant":
+            tools = [
+                str((call.get("function") or {}).get("name") or "")
+                for call in message.get("tool_calls") or []
+                if isinstance(call, dict)
+            ]
+            tools = [name for name in tools if name]
+            if tools:
+                entry["tools"] = tools
+        sanitized.append(entry)
+    return sanitized
+
+
+@router.get("/chat/conversation/{conversation_id}")
+async def get_chat_conversation(
+    request: Request,
+    conversation_id: str = Path(min_length=1, max_length=64),
+) -> Any:
+    """Sanitized history + live pending of ONE conversation (T5).
+
+    Restores the chat view after a page reload WITHOUT persisting
+    anything client-side: the conversation id already in the browser is
+    re-bound to the middleware session and the server answers the
+    sanitized message list (see :func:`_sanitize_history` — no system
+    prompt, no raw tool arguments) plus the conversation's pending
+    confirmation {invocation_id, tool_name, args_summary} so the card
+    can be re-armed against POST /ai/chat/confirm. Unknown and foreign
+    ids answer the SAME generic ``{"exists": false}`` with a 404 status
+    — existence is never revealed. Gated by the SAME chat flag and
+    worker guard as the other chat endpoints.
+    """
+    if not _chat_enabled():
+        raise HTTPException(status_code=503, detail=_MSG_CHAT_DISABLED)
+    worker_conflict = _chat_worker_conflict()
+    if worker_conflict is not None:
+        raise HTTPException(status_code=503, detail=worker_conflict)
+    session_id = request.state.session_id
+    stored = db.get_ai_conversation(conversation_id, session_id)
+    if stored is None:
+        return JSONResponse(status_code=404, content={"exists": False})
+    try:
+        pending = AGENT_PENDING_STORE.peek_for_conversation(
+            session_id, conversation_id
+        )
+    except NotImplementedError:
+        pending = None
+    return {
+        "exists": True,
+        "conversation_id": conversation_id,
+        "messages": _sanitize_history(stored),
+        "pending": None
+        if pending is None
+        else {
+            "invocation_id": pending.invocation_id,
+            "tool_name": pending.tool_name,
+            "args_summary": pending.args_summary,
+        },
+    }

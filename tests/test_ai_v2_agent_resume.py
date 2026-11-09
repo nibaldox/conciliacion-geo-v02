@@ -15,6 +15,7 @@ from core.ai_v2.agent.confirmations import (
     AlreadyClaimedPendingRun,
     InMemoryPendingRunStore,
     PendingRun,
+    PendingRunNotFound,
 )
 from core.ai_v2.agent.events import (
     ConfirmationRequiredEvent,
@@ -28,6 +29,7 @@ from core.ai_v2.agent.loop import (
     MAX_TURN_CONFIRMATIONS,
     MSG_CONFIRMATION_ARGS_CHANGED,
     MSG_CONFIRMATION_CONSUMED,
+    MSG_CONFIRMATION_CONVERSATION_DELETED,
     MSG_CONFIRMATION_CORRUPT,
     MSG_CONFIRMATION_EXPIRED,
     MSG_CONFIRMATION_FOREIGN,
@@ -802,3 +804,159 @@ async def test_sibling_pause_increments_counter_and_cap_blocks_last_sibling():
     assert not any(isinstance(e, ConfirmationRequiredEvent) for e in second)
     assert isinstance(second[-1], DoneEvent)
     assert second[-1].finish_reason == "stop"
+
+
+# ---------------------------------------------------------------------------
+# Conversation existence check (T5): a deleted conversation never resumes
+# ---------------------------------------------------------------------------
+
+
+async def pause_in_conversation(
+    executor: dict[str, Any],
+    state: ToolState,
+    store: InMemoryPendingRunStore,
+) -> str:
+    """Pause one confirmation inside conversation conv_x; return its id."""
+    provider = ScriptedChatProvider(
+        [ChatTurn(tool_calls=[tool_call("generate_sections_auto", AUTO_ARGS_JSON, call_id="c-conf")])]
+    )
+    events = await collect(
+        run_agent_turn(
+            session_id=SESSION,
+            messages=list(BASE_MESSAGES),
+            provider=provider,
+            model="test-model",
+            executor=executor,
+            pending_store=store,
+            state_provider=MutableStateStub(state),
+            conversation_id="conv_x",
+        )
+    )
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "confirmation_required"
+    return next(
+        e.invocation_id
+        for e in events
+        if isinstance(e, ConfirmationRequiredEvent)
+    )
+
+
+@pytest.mark.asyncio
+async def test_resume_on_deleted_conversation_errors_without_executing():
+    handler = RecordingHandler({"n_sections": 5})
+    store = CountingStore()
+    invocation_id = await pause_in_conversation(
+        {"generate_sections_auto": handler}, ToolState(n_sections=3), store
+    )
+    assert store.created_runs[-1].conversation_id == "conv_x"
+    assert store.created_runs[-1].args_summary
+    continuation = ScriptedChatProvider([ChatTurn(text="nunca")])
+    events = await collect(
+        resume_pending_turn(
+            session_id=SESSION,
+            invocation_id=invocation_id,
+            approved=True,
+            provider=continuation,
+            executor={"generate_sections_auto": handler},
+            pending_store=store,
+            state_provider=MutableStateStub(ToolState(n_sections=3)),
+            conversation_exists=lambda sid, cid: False,
+        )
+    )
+    assert [type(e).__name__ for e in events] == ["ErrorEvent", "DoneEvent"]
+    error = events[0]
+    assert isinstance(error, ErrorEvent)
+    assert error.content == MSG_CONFIRMATION_CONVERSATION_DELETED
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "error"
+    assert handler.calls == []
+    assert continuation.requests == []
+    with pytest.raises(AlreadyClaimedPendingRun):
+        store.claim(invocation_id, SESSION)
+    with pytest.raises(PendingRunNotFound):
+        store.claim("inv_never_stored", SESSION)
+
+
+@pytest.mark.asyncio
+async def test_resume_passes_when_the_conversation_still_exists():
+    handler = RecordingHandler({"n_sections": 5})
+    store = CountingStore()
+    invocation_id = await pause_in_conversation(
+        {"generate_sections_auto": handler}, ToolState(n_sections=3), store
+    )
+    continuation = ScriptedChatProvider([ChatTurn(text="5 secciones listas.")])
+    events = await collect(
+        resume_pending_turn(
+            session_id=SESSION,
+            invocation_id=invocation_id,
+            approved=True,
+            provider=continuation,
+            executor={"generate_sections_auto": handler},
+            pending_store=store,
+            state_provider=MutableStateStub(ToolState(n_sections=3)),
+            conversation_exists=lambda sid, cid: cid == "conv_x",
+        )
+    )
+    assert handler.calls != []
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_resume_without_predicate_skips_the_check():
+    handler = RecordingHandler({"n_sections": 5})
+    store = CountingStore()
+    invocation_id = await pause_in_conversation(
+        {"generate_sections_auto": handler}, ToolState(n_sections=3), store
+    )
+    continuation = ScriptedChatProvider([ChatTurn(text="ejecutado igual.")])
+    events = await collect(
+        resume_pending_turn(
+            session_id=SESSION,
+            invocation_id=invocation_id,
+            approved=True,
+            provider=continuation,
+            executor={"generate_sections_auto": handler},
+            pending_store=store,
+            state_provider=MutableStateStub(ToolState(n_sections=3)),
+        )
+    )
+    assert handler.calls != []
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_resume_predicate_ignores_pendings_without_conversation():
+    handler = RecordingHandler({"n_sections": 5})
+    _, store, invocation_id = await pause_for_confirmation(
+        {"generate_sections_auto": handler}, ToolState(n_sections=3)
+    )
+    continuation = ScriptedChatProvider([ChatTurn(text="ok.")])
+    events = await collect(
+        resume_pending_turn(
+            session_id=SESSION,
+            invocation_id=invocation_id,
+            approved=True,
+            provider=continuation,
+            executor={"generate_sections_auto": handler},
+            pending_store=store,
+            state_provider=MutableStateStub(ToolState(n_sections=3)),
+            conversation_exists=lambda sid, cid: False,
+        )
+    )
+    assert handler.calls != []
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_pending_created_by_loop_carries_args_summary():
+    handler = RecordingHandler({"n_sections": 5})
+    store = CountingStore()
+    await pause_in_conversation(
+        {"generate_sections_auto": handler}, ToolState(n_sections=3), store
+    )
+    created = store.created_runs[-1]
+    assert created.args_summary
+    assert created.args_summary == "Sobrescribe 3 secciones existentes"

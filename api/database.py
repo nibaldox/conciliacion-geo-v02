@@ -935,6 +935,26 @@ def get_ai_conversation(
     return [m for m in parsed if isinstance(m, dict)]
 
 
+def delete_ai_conversation(conversation_id: str, session_id: str) -> bool:
+    """Delete one conversation owned by ``session_id``; True iff removed.
+
+    Unknown ids and foreign sessions are indistinguishable: both delete
+    nothing and return ``False``, so callers can answer ``{"deleted":
+    false}`` without revealing whether the conversation exists.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM ai_conversations "
+            "WHERE conversation_id = ? AND session_id = ?",
+            (conversation_id, session_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
 def delete_old_ai_conversations(max_age_hours: int = 24) -> int:
     """Delete conversations whose ``updated_at`` is older than the TTL."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)

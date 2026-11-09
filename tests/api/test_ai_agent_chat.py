@@ -37,7 +37,10 @@ from core.ai_v2.agent.events import (
     ToolResultEvent,
     parse_event_line,
 )
-from core.ai_v2.agent.loop import MSG_CONFIRMATION_CONSUMED
+from core.ai_v2.agent.loop import (
+    MSG_CONFIRMATION_CONSUMED,
+    MSG_CONFIRMATION_CONVERSATION_DELETED,
+)
 from core.ai_v2.agent.turn import ChatTurn, ToolCallRequest
 from core.ai_v2.providers.base import BaseProvider
 
@@ -211,7 +214,8 @@ def test_chat_text_only_turn(client: TestClient, chat_on: None, monkeypatch: pyt
     assert seen[-1] == {"role": "user", "content": "hola agente"}
     stored = db.get_ai_conversation(conv_id, SESSION_A)
     assert stored is not None
-    assert [m["role"] for m in stored] == ["system", "user"]
+    assert [m["role"] for m in stored] == ["system", "user", "assistant"]
+    assert stored[-1]["content"] == "Hola, ¿en qué te ayudo?"
 
 
 def test_chat_read_tool_executed(client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,7 +303,9 @@ def test_confirm_approval_executes_once(
     assert resp.headers["X-Conversation-Id"].startswith("conv_")
     stored = db.get_ai_conversation(resp.headers["X-Conversation-Id"], SESSION_A)
     assert stored is not None
-    assert stored[-1]["role"] == "tool"
+    assert stored[-2]["role"] == "tool"
+    assert stored[-1]["role"] == "assistant"
+    assert stored[-1]["content"] == "Listo, secciones reemplazadas."
     second = confirm_post(client, invocation_id, True)
     assert second.status_code == 409
     assert len(sections) == 1
@@ -327,8 +333,10 @@ def test_confirm_denial_zero_execution(
     ]
     stored = db.get_ai_conversation(resp.headers["X-Conversation-Id"], SESSION_A)
     assert stored is not None
-    assert stored[-1]["role"] == "tool"
-    assert "denied_by_user" in stored[-1]["content"]
+    assert stored[-2]["role"] == "tool"
+    assert "denied_by_user" in stored[-2]["content"]
+    assert stored[-1]["role"] == "assistant"
+    assert stored[-1]["content"] == "Entendido, no reemplazo nada."
 
 
 # ---------------------------------------------------------------------------
@@ -407,12 +415,20 @@ def test_conversation_persists_and_role_json_stays_text(
     assert second.headers["X-Conversation-Id"] == conv_id
     seen = fake2.requests[0]
     roles = [m["role"] for m in seen]
-    assert roles == ["system", "user", "user"]
+    assert roles == ["system", "user", "assistant", "user"]
     assert seen[0]["role"] == "system"
     assert seen[-1] == {"role": "user", "content": injected}
     stored = db.get_ai_conversation(conv_id, SESSION_A)
     assert stored is not None
-    assert roles == [m["role"] for m in stored]
+    assert [m["role"] for m in stored] == [
+        "system",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    assert seen[2]["content"] == "primera respuesta"
+    assert stored[-1]["content"] == "segunda respuesta"
     foreign = chat_post(client, "hola", conversation_id=conv_id, headers=CHAT_HEADERS_B)
     assert foreign.status_code == 404
     conn = db.get_connection()
@@ -998,3 +1014,371 @@ def test_cap_messages_never_orphans_tool_answer(
     assert [m["role"] for m in trimmed] == ["system", "user"]
     assert _tool_groups_are_intact(trimmed)
     assert trimmed[-1]["content"] == "sigue"
+
+
+# ---------------------------------------------------------------------------
+# Conversation deletion (T5 — corporate data retention)
+# ---------------------------------------------------------------------------
+
+
+def test_delete_own_conversation_and_fresh_restart(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = ScriptedChatProvider([text_turn("primera respuesta")])
+    install_fake_providers(monkeypatch, [fake])
+    first = chat_post(client, "mensaje que sera borrado")
+    assert first.status_code == 200
+    conv_id = first.headers["X-Conversation-Id"]
+    assert db.get_ai_conversation(conv_id, SESSION_A) is not None
+
+    resp = client.delete(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True, "pendings_invalidated": 0}
+    assert db.get_ai_conversation(conv_id, SESSION_A) is None
+
+    resumed = chat_post(client, "continuar", conversation_id=conv_id)
+    assert resumed.status_code == 404
+
+    fresh_provider = ScriptedChatProvider([text_turn("conversacion nueva")])
+    install_fake_providers(monkeypatch, [fresh_provider])
+    fresh = chat_post(client, "empezar de nuevo")
+    assert fresh.status_code == 200
+    assert fresh.headers["X-Conversation-Id"] != conv_id
+
+
+def test_delete_unknown_and_foreign_conversations_never_reveal_existence(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unknown = client.delete(
+        "/api/v1/ai/chat/conversation/conv_does_not_exist",
+        headers=CHAT_HEADERS_A,
+    )
+    assert unknown.status_code == 200
+    assert unknown.json() == {"deleted": False, "pendings_invalidated": 0}
+
+    fake = ScriptedChatProvider([text_turn("respuesta A")])
+    install_fake_providers(monkeypatch, [fake])
+    owned = chat_post(client, "mensaje de A")
+    conv_id = owned.headers["X-Conversation-Id"]
+    foreign = client.delete(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_B
+    )
+    assert foreign.status_code == 200
+    assert foreign.json() == {"deleted": False, "pendings_invalidated": 0}
+    assert foreign.json() == unknown.json()
+    assert db.get_ai_conversation(conv_id, SESSION_A) is not None
+
+
+def test_delete_conversation_gated_by_flag_and_workers(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(ai_router.CHAT_FLAG_ENV, raising=False)
+    gated = client.delete(
+        "/api/v1/ai/chat/conversation/conv_x", headers=CHAT_HEADERS_A
+    )
+    assert gated.status_code == 503
+    assert "deshabilitado" in gated.json()["detail"]
+    monkeypatch.setenv(ai_router.CHAT_FLAG_ENV, "true")
+    monkeypatch.setenv(ai_router.WORKERS_ENV, "2")
+    workers = client.delete(
+        "/api/v1/ai/chat/conversation/conv_x", headers=CHAT_HEADERS_A
+    )
+    assert workers.status_code == 503
+    assert "CONCILIACION_WORKERS=1" in workers.json()["detail"]
+    monkeypatch.setenv(ai_router.WORKERS_ENV, "1")
+    assert client.delete(
+        "/api/v1/ai/chat/conversation/conv_x", headers=CHAT_HEADERS_A
+    ).json() == {"deleted": False, "pendings_invalidated": 0}
+
+
+# ---------------------------------------------------------------------------
+# T5 — pending invalidation on delete, resume existence check, history GET
+# ---------------------------------------------------------------------------
+
+
+def _pause_with_conversation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, str]:
+    """Pause one turn on a confirmation; return (invocation_id, conv_id)."""
+    seed_sections(SESSION_A, n=2)
+    fake = ScriptedChatProvider(
+        [tool_turn("call_1", "generate_sections_manual", MANUAL_SECTIONS_ARGS)]
+    )
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "reemplaza las secciones")
+    assert resp.status_code == 200
+    conv_id = resp.headers["X-Conversation-Id"]
+    events = ndjson_events(resp)
+    assert events[-1].finish_reason == "confirmation_required"
+    invocation_id = next(
+        e.invocation_id
+        for e in events
+        if isinstance(e, ConfirmationRequiredEvent)
+    )
+    return invocation_id, conv_id
+
+
+def test_delete_conversation_invalidates_live_pendings(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invocation_id, conv_id = _pause_with_conversation(client, monkeypatch)
+    resp = client.delete(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True, "pendings_invalidated": 1}
+    assert db.get_ai_conversation(conv_id, SESSION_A) is None
+    assert (
+        ai_router.AGENT_PENDING_STORE.peek_for_conversation(
+            SESSION_A, conv_id
+        )
+        is None
+    )
+    executed: list[str] = []
+
+    async def spy_handler(session_id: str, args: Any) -> dict[str, Any]:
+        executed.append(f"{session_id}:{args}")
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        ai_router,
+        "ALL_HANDLERS",
+        {"generate_sections_manual": spy_handler},
+    )
+    denied = confirm_post(client, invocation_id, True)
+    unknown = confirm_post(client, "inv_unknown", True)
+    assert denied.status_code == 404
+    assert denied.status_code == unknown.status_code
+    assert denied.json()["detail"] == unknown.json()["detail"]
+    assert executed == []
+
+
+def test_confirm_after_conversation_delete_errors_without_executing(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invocation_id, conv_id = _pause_with_conversation(client, monkeypatch)
+    assert db.delete_ai_conversation(conv_id, SESSION_A) is True
+    resume = ScriptedChatProvider([text_turn("no debo ejecutarme")])
+    install_fake_providers(monkeypatch, [resume])
+    resp = confirm_post(client, invocation_id, True)
+    assert resp.status_code == 200
+    events = ndjson_events(resp)
+    assert [e.type for e in events] == ["error", "done"]
+    assert events[0].content == MSG_CONFIRMATION_CONVERSATION_DELETED
+    assert events[-1].finish_reason == "error"
+    assert len(resume.requests) == 0
+    assert [(s["name"], s["azimuth"]) for s in db.get_sections(SESSION_A)] == [
+        ("S-01", 0.0),
+        ("S-02", 0.0),
+    ]
+    consumed = confirm_post(client, invocation_id, True)
+    assert consumed.status_code == 409
+
+
+def test_confirm_survives_when_conversation_exists(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invocation_id = _confirmation_setup(client, monkeypatch)
+    resume = ScriptedChatProvider([text_turn("Listo.")])
+    install_fake_providers(monkeypatch, [resume])
+    resp = confirm_post(client, invocation_id, True)
+    assert resp.status_code == 200
+    events = ndjson_events(resp)
+    assert events[-1].finish_reason == "stop"
+    assert len(db.get_sections(SESSION_A)) == 1
+
+
+def test_get_conversation_history_sanitized_with_pending(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    invocation_id, conv_id = _pause_with_conversation(client, monkeypatch)
+    resp = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["exists"] is True
+    assert body["conversation_id"] == conv_id
+    messages = body["messages"]
+    assert [m["role"] for m in messages] == ["user", "assistant"]
+    assert messages[0] == {
+        "role": "user",
+        "content": "reemplaza las secciones",
+    }
+    assert "origin" not in resp.text
+    assert "10.0" not in resp.text
+    assert messages[1]["tools"] == ["generate_sections_manual"]
+    assert "arguments" not in messages[1]
+    assert body["pending"] == {
+        "invocation_id": invocation_id,
+        "tool_name": "generate_sections_manual",
+        "args_summary": body["pending"]["args_summary"],
+    }
+    assert body["pending"]["args_summary"]
+    assert "10.0" not in body["pending"]["args_summary"]
+    peeked = ai_router.AGENT_PENDING_STORE.peek(invocation_id, SESSION_A)
+    assert peeked is not None
+    assert peeked.args_summary == body["pending"]["args_summary"]
+
+
+def test_get_conversation_history_without_pending(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = ScriptedChatProvider([text_turn("respuesta simple")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "mensaje con resultado")
+    conv_id = resp.headers["X-Conversation-Id"]
+    got = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert got.status_code == 200
+    body = got.json()
+    assert body["exists"] is True
+    assert body["pending"] is None
+    assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
+    assert body["messages"][-1]["content"] == "respuesta simple"
+
+
+def test_get_conversation_history_never_reveals_existence(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    unknown = client.get(
+        "/api/v1/ai/chat/conversation/conv_missing", headers=CHAT_HEADERS_A
+    )
+    assert unknown.status_code == 404
+    assert unknown.json() == {"exists": False}
+    fake = ScriptedChatProvider([text_turn("respuesta A")])
+    install_fake_providers(monkeypatch, [fake])
+    owned = chat_post(client, "mensaje de A")
+    conv_id = owned.headers["X-Conversation-Id"]
+    foreign = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_B
+    )
+    assert foreign.status_code == 404
+    assert foreign.json() == unknown.json()
+    monkeypatch.delenv(ai_router.CHAT_FLAG_ENV, raising=False)
+    gated = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert gated.status_code == 503
+    monkeypatch.setenv(ai_router.CHAT_FLAG_ENV, "true")
+    monkeypatch.setenv(ai_router.WORKERS_ENV, "2")
+    workers = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert workers.status_code == 503
+    monkeypatch.setenv(ai_router.WORKERS_ENV, "1")
+
+
+def test_get_conversation_history_tool_observations_sanitized(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conv_id = "conv_tool_obs"
+    messages = [
+        {"role": "system", "content": "PROMPT SECRETO DEL SERVIDOR"},
+        {"role": "user", "content": "consulta"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "export_report",
+                        "arguments": '{"format": "excel"}',
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": json.dumps(
+                {
+                    "ok": True,
+                    "format": "excel",
+                    "filename": "Conciliacion.xlsx",
+                    "endpoint": "/api/v1/export/excel",
+                },
+                ensure_ascii=False,
+            ),
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_2",
+            "content": json.dumps(
+                {
+                    "ok": False,
+                    "error": "denied_by_user",
+                    "message": "El usuario denegó la ejecución.",
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    db.save_ai_conversation(conv_id, SESSION_A, messages)
+    resp = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    serialized = json.dumps(body, ensure_ascii=False)
+    assert "PROMPT SECRETO" not in serialized
+    roles = [m["role"] for m in body["messages"]]
+    assert roles == ["user", "assistant", "tool", "tool"]
+    assistant = body["messages"][1]
+    assert assistant["content"] == ""
+    assert assistant["tools"] == ["export_report"]
+    tool_ok = body["messages"][2]
+    assert tool_ok["ok"] is True
+    assert tool_ok["error"] is None
+    assert tool_ok["summary"] == ""
+    assert "Conciliacion.xlsx" not in serialized
+    assert "/api/v1/export/excel" not in serialized
+    tool_denied = body["messages"][3]
+    assert tool_denied["ok"] is False
+    assert tool_denied["error"] == "denied_by_user"
+    assert tool_denied["summary"] == "El usuario denegó la ejecución."
+    assert '{"format": "excel"}' not in serialized
+
+
+def test_delete_and_history_survive_a_store_without_conversation_support(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = ScriptedChatProvider([text_turn("respuesta uno")])
+    fake_two = ScriptedChatProvider([text_turn("respuesta dos")])
+    install_fake_providers(monkeypatch, [fake, fake_two])
+    first = chat_post(client, "mensaje uno")
+    second = chat_post(client, "mensaje dos")
+    delete_conv_id = first.headers["X-Conversation-Id"]
+    history_conv_id = second.headers["X-Conversation-Id"]
+
+    class UnsupportedStore(ai_router.InMemoryPendingRunStore):
+        def invalidate_for_conversation(
+            self, session_id: str, conversation_id: str
+        ) -> int:
+            raise NotImplementedError
+
+        def peek_for_conversation(
+            self, session_id: str, conversation_id: str
+        ) -> Any:
+            raise NotImplementedError
+
+    monkeypatch.setattr(ai_router, "AGENT_PENDING_STORE", UnsupportedStore())
+    deleted = client.delete(
+        f"/api/v1/ai/chat/conversation/{delete_conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {"deleted": True}
+    got = client.get(
+        f"/api/v1/ai/chat/conversation/{history_conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert got.status_code == 200
+    body = got.json()
+    assert body["exists"] is True
+    assert body["conversation_id"] == history_conv_id
+    assert body["pending"] is None
+    assert [m["role"] for m in body["messages"]] == ["user", "assistant"]
