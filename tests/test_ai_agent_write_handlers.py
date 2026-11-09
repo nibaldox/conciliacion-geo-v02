@@ -104,7 +104,7 @@ def _save_box_mesh(session_id: str, mesh_type: str) -> str:
 
 def test_all_handlers_cover_exactly_the_catalog():
     assert set(ALL_HANDLERS.keys()) == set(TOOL_CATALOG.keys())
-    assert len(ALL_HANDLERS) == len(TOOL_CATALOG) == 13
+    assert len(ALL_HANDLERS) == len(TOOL_CATALOG) == 14
 
 
 def test_read_handlers_stay_strictly_read_only():

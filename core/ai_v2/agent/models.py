@@ -216,11 +216,47 @@ class NoArgs(_StrictArgs):
     """Arguments for tools that take no parameters."""
 
 
+class ResultQueryArgs(_StrictArgs):
+    """Arguments for ``query_results`` (filtered READ over result rows).
+
+    ``level`` values are the design bench floor elevations exactly as the
+    web table shows them (text, e.g. ``['3065', '3066']``); ``bench``
+    values are design bench numbers matched by their string form, like
+    the web table filter.
+    """
+
+    sector: Optional[list[str]] = Field(default=None, max_length=20)
+    section: Optional[list[str]] = Field(default=None, max_length=20)
+    level: Optional[list[str]] = Field(default=None, max_length=60)
+    bench: Optional[list[int]] = Field(default=None, max_length=50)
+    parameter: Optional[Literal["height", "angle", "berm"]] = None
+    status: Optional[str] = Field(default=None, max_length=40)
+    include_rows: bool = False
+    row_limit: int = Field(default=20, ge=1, le=50)
+
+
+class AchievementFilterArgs(_StrictArgs):
+    """Optional dimension filters for the two summary tools.
+
+    Same semantics as the web table filters (ANDed across dimensions,
+    ORed within one; ``''`` selectable): mirrors the repeatable query
+    parameters of GET /process/design-achievement and
+    GET /process/proposed-compliance.
+    """
+
+    sector: Optional[list[str]] = Field(default=None, max_length=20)
+    section: Optional[list[str]] = Field(default=None, max_length=20)
+    level: Optional[list[str]] = Field(default=None, max_length=60)
+    bench: Optional[list[int]] = Field(default=None, max_length=50)
+
+
 __all__ = [
+    "AchievementFilterArgs",
     "ExportReportArgs",
     "MeshIdArgs",
     "NoArgs",
     "PolicyDecision",
+    "ResultQueryArgs",
     "RunReconciliationArgs",
     "SectionAutoArgs",
     "SectionClickArgs",

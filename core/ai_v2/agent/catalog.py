@@ -1,4 +1,4 @@
-"""v1 agent tool catalog (13 tools) — plan section 5.3.
+"""v1 agent tool catalog (14 tools) — plan section 5.3.
 
 Each :class:`ToolSpec` derives its JSON schema from the arg model that
 mirrors the REAL router request parameters. No imports from ``api/``:
@@ -15,9 +15,11 @@ from typing import Any
 from pydantic import BaseModel
 
 from core.ai_v2.agent.models import (
+    AchievementFilterArgs,
     ExportReportArgs,
     MeshIdArgs,
     NoArgs,
+    ResultQueryArgs,
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
@@ -136,9 +138,11 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         name="get_design_achievement",
         description=(
             "Return the design achievement summary: design vs as-built "
-            "compliance rates per sector and parameter."
+            "compliance rates per sector and parameter. Accepts optional "
+            "filters by sector, section, level (bench floor elevation as "
+            "text) and bench number."
         ),
-        args_model=NoArgs,
+        args_model=AchievementFilterArgs,
         risk=ToolRisk.READ,
         impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
     ),
@@ -146,9 +150,27 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         name="get_proposed_compliance",
         description=(
             "Return the proposed-parameters compliance summary with "
-            "coverage, per-section scores and floor status counts."
+            "coverage, per-section scores and floor status counts. "
+            "Accepts optional filters by sector, section, level (bench "
+            "floor elevation as text) and bench number."
         ),
-        args_model=NoArgs,
+        args_model=AchievementFilterArgs,
+        risk=ToolRisk.READ,
+        impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
+    ),
+    ToolSpec(
+        name="query_results",
+        description=(
+            "Filter reconciliation result rows by level (bench floor "
+            "elevation as text, e.g. ['3065']), bench number, sector, "
+            "section, parameter (height/angle/berm) and exact status. "
+            "Returns aggregates (status by section/parameter/type), the "
+            "list of available levels with counts, and optionally "
+            "(include_rows=true) up to row_limit rows with design vs "
+            "as-built values and deviations. Use it when the user asks "
+            "about a specific level, bench, sector or status."
+        ),
+        args_model=ResultQueryArgs,
         risk=ToolRisk.READ,
         impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
     ),

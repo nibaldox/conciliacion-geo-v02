@@ -19,7 +19,14 @@ import trimesh
 import api.database as db
 from api.ai_agent_handlers import READ_HANDLERS
 from core.ai_v2.agent.catalog import TOOL_CATALOG
-from core.ai_v2.agent.models import MeshIdArgs, NoArgs, SectionIdArgs, ToolRisk
+from core.ai_v2.agent.models import (
+    AchievementFilterArgs,
+    MeshIdArgs,
+    NoArgs,
+    ResultQueryArgs,
+    SectionIdArgs,
+    ToolRisk,
+)
 from core.compliance_status import STATUS_CUMPLE, STATUS_FUERA, STATUS_NO_CUMPLE
 
 SIZE_BOUND_BYTES = 4096
@@ -38,6 +45,7 @@ def _comparison_row(
     bench_num: int = 1,
     row_type: str = "MATCH",
     berm_status: Any = STATUS_CUMPLE,
+    level: str = "1000",
 ) -> Dict[str, Any]:
     """Production-shaped comparison row (mirrors core.profile_compliance)."""
     return {
@@ -46,7 +54,7 @@ def _comparison_row(
         "bench_num": bench_num,
         "bench_num_topo": bench_num,
         "type": row_type,
-        "level": "1000",
+        "level": level,
         "height_status": status,
         "angle_status": STATUS_CUMPLE,
         "berm_status": berm_status,
@@ -194,6 +202,7 @@ async def _call_all(session_id: str) -> Dict[str, Dict[str, Any]]:
     outputs["get_results_summary"] = await READ_HANDLERS["get_results_summary"](session_id, NoArgs())
     outputs["get_design_achievement"] = await READ_HANDLERS["get_design_achievement"](session_id, NoArgs())
     outputs["get_proposed_compliance"] = await READ_HANDLERS["get_proposed_compliance"](session_id, NoArgs())
+    outputs["query_results"] = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
     return outputs
 
 
@@ -208,7 +217,7 @@ class TestMappingCompleteness:
             name for name, spec in TOOL_CATALOG.items() if spec.risk is ToolRisk.READ
         }
         assert set(READ_HANDLERS) == expected
-        assert len(expected) == 8
+        assert len(expected) == 9
 
     def test_no_non_read_tool_is_mapped(self):
         read_names = {
@@ -339,7 +348,7 @@ class TestSummarySizeBound:
         outputs["get_profile"] = await READ_HANDLERS["get_profile"](
             session_a, SectionIdArgs(section_id="0")
         )
-        assert len(outputs) == 8
+        assert len(outputs) == 9
         for name, payload in outputs.items():
             serialized = json.dumps(payload, ensure_ascii=False)
             assert len(serialized.encode("utf-8")) < SIZE_BOUND_BYTES, name
@@ -598,3 +607,209 @@ class TestGetProposedCompliance:
         assert summary["n_evaluable"] == 1
         assert summary["per_section_scores"] == {"S-01": 90.0}
         assert summary["per_sections_truncated"] is False
+
+
+@pytest.mark.asyncio
+class TestQueryResults:
+    async def test_filters_by_level_with_aggregates(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _comparison_row("S-01", "A", STATUS_CUMPLE, 85.0, bench_num=1, level="3065"),
+                _comparison_row("S-01", "A", STATUS_FUERA, 45.0, bench_num=2, row_type="EXTRA", level="3065"),
+                _comparison_row("S-02", "B", STATUS_NO_CUMPLE, 20.0, bench_num=3, row_type="MISSING", level="3066"),
+                _comparison_row("S-03", "A", STATUS_CUMPLE, 90.0, bench_num=4, level="sin dato"),
+            ],
+        )
+        query = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs(level=["3065"]))
+        assert query["n_total_rows"] == 4
+        assert query["n_matched_rows"] == 2
+        assert query["filters"]["level"] == ["3065"]
+        assert query["by_section_status"] == {STATUS_CUMPLE: 1, STATUS_FUERA: 1}
+        assert query["by_type"] == {"MATCH": 1, "EXTRA": 1}
+        assert query["status_by_parameter"]["height"] == {STATUS_CUMPLE: 1, STATUS_FUERA: 1}
+        assert query["status_by_parameter"]["angle"] == {STATUS_CUMPLE: 2}
+        by_section = {entry["name"]: entry for entry in query["sections"]}
+        assert by_section["S-01"]["n_rows"] == 2
+        assert by_section["S-01"]["worst_status"] == STATUS_FUERA
+        assert by_section["S-01"]["section_score"] == 85.0
+        assert query["levels"] == [
+            {"level": "3065", "n_rows": 2},
+            {"level": "3066", "n_rows": 1},
+            {"level": "sin dato", "n_rows": 1},
+        ]
+        assert query["rows"] is None
+        assert query["units"] == {"height": "m", "angle": "deg", "berm": "m"}
+        assert query["warnings"] == []
+
+    async def test_filters_by_bench_and_sector(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _comparison_row("S-01", "A", STATUS_CUMPLE, 85.0, bench_num=1),
+                _comparison_row("S-01", "A", STATUS_FUERA, 45.0, bench_num=2, row_type="EXTRA"),
+                _comparison_row("S-02", "B", STATUS_NO_CUMPLE, 20.0, bench_num=2, row_type="MISSING"),
+            ],
+        )
+        query = await READ_HANDLERS["query_results"](
+            session_id, ResultQueryArgs(bench=[2], sector=["A"])
+        )
+        assert query["n_total_rows"] == 3
+        assert query["n_matched_rows"] == 1
+        assert query["by_type"] == {"EXTRA": 1}
+        assert query["filters"] == {
+            "sector": ["A"],
+            "section": [],
+            "level": [],
+            "bench": [2],
+            "parameter": None,
+            "status": None,
+        }
+
+    async def test_parameter_and_status_filter(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _comparison_row("S-01", "A", STATUS_CUMPLE, 85.0, berm_status="-"),
+                _comparison_row("S-01", "A", STATUS_CUMPLE, 80.0, bench_num=2),
+                _comparison_row("S-02", "A", STATUS_FUERA, 45.0, bench_num=3, row_type="EXTRA"),
+            ],
+        )
+        parameter_only = await READ_HANDLERS["query_results"](
+            session_id, ResultQueryArgs(parameter="berm")
+        )
+        assert parameter_only["n_matched_rows"] == 3
+        berm = await READ_HANDLERS["query_results"](
+            session_id, ResultQueryArgs(parameter="berm", status="-")
+        )
+        assert berm["n_matched_rows"] == 1
+        assert berm["status_by_parameter"]["berm"] == {"-": 1}
+        assert berm["by_section_status"] == {STATUS_CUMPLE: 1}
+        height = await READ_HANDLERS["query_results"](
+            session_id, ResultQueryArgs(parameter="height", status=STATUS_FUERA)
+        )
+        assert height["n_matched_rows"] == 1
+        assert height["by_section_status"] == {STATUS_FUERA: 1}
+
+    async def test_include_rows_respects_row_limit_and_rounds(self, api_isolated_db):
+        session_id = db.create_session()
+        row = _comparison_row("S-01", "A", STATUS_CUMPLE, 85.0)
+        row.update(
+            {
+                "height_design": 15.0,
+                "height_real": 15.123456,
+                "height_dev": 0.123456,
+                "angle_design": 65.54,
+                "angle_real": 66.1234,
+                "angle_dev": 0.568,
+                "berm_design": 8.0,
+                "berm_real": 8.98765,
+                "berm_dev": 0.98765,
+                "bench_score": 88.888888,
+            }
+        )
+        db.save_results(
+            session_id,
+            [
+                row,
+                _comparison_row("S-01", "A", STATUS_FUERA, 45.0, bench_num=2, row_type="EXTRA"),
+                _comparison_row("S-02", "B", STATUS_NO_CUMPLE, 20.0, bench_num=3, row_type="MISSING"),
+            ],
+        )
+        query = await READ_HANDLERS["query_results"](
+            session_id, ResultQueryArgs(include_rows=True, row_limit=2)
+        )
+        assert query["n_matched_rows"] == 3
+        assert len(query["rows"]) == 2
+        first = query["rows"][0]
+        assert first["section"] == "S-01"
+        assert first["bench_num"] == 1
+        assert first["level"] == "1000"
+        assert set(first) == {
+            "section",
+            "bench_num",
+            "level",
+            "type",
+            "height_design",
+            "height_real",
+            "height_dev",
+            "height_status",
+            "angle_design",
+            "angle_real",
+            "angle_dev",
+            "angle_status",
+            "berm_design",
+            "berm_real",
+            "berm_dev",
+            "berm_status",
+            "bench_score",
+        }
+        assert first["height_design"] == 15.0
+        assert first["height_real"] == 15.12
+        assert first["height_dev"] == 0.12
+        assert first["angle_design"] == 65.5
+        assert first["angle_dev"] == 0.6
+        assert first["berm_real"] == 8.99
+        assert first["berm_dev"] == 0.99
+        assert first["bench_score"] == 88.89
+
+    async def test_query_is_scoped_to_own_session(self, session_a, session_b):
+        query_b = await READ_HANDLERS["query_results"](session_b, ResultQueryArgs(level=["1000"]))
+        assert query_b["n_total_rows"] == 3
+        assert query_b["n_matched_rows"] == 3
+        assert {entry["name"] for entry in query_b["sections"]} == {"S-99"}
+        foreign = await READ_HANDLERS["query_results"](session_b, ResultQueryArgs(section=["S-01"]))
+        assert foreign["n_total_rows"] == 3
+        assert foreign["n_matched_rows"] == 0
+        assert foreign["warnings"] == ["all_rows_filtered_out"]
+        query_a = await READ_HANDLERS["query_results"](session_a, ResultQueryArgs(sector=["Z"]))
+        assert query_a["n_matched_rows"] == 0
+        assert query_a["levels"] == [{"level": "1000", "n_rows": 3}]
+
+    async def test_default_payload_stays_under_size_bound(self, session_a):
+        payload = await READ_HANDLERS["query_results"](session_a, ResultQueryArgs())
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert len(serialized.encode("utf-8")) < SIZE_BOUND_BYTES
+
+    async def test_design_achievement_with_level_filter(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _comparison_row("S-01", "A", STATUS_CUMPLE, 85.0, bench_num=1, level="1000"),
+                _comparison_row("S-01", "A", STATUS_FUERA, 45.0, bench_num=2, level="2000"),
+            ],
+        )
+        unfiltered = await READ_HANDLERS["get_design_achievement"](session_id, NoArgs())
+        assert unfiltered["n_total_rows"] == 2
+        assert unfiltered["n_evaluable"] == 2
+        filtered = await READ_HANDLERS["get_design_achievement"](
+            session_id, AchievementFilterArgs(level=["1000"])
+        )
+        assert filtered["n_total_rows"] == 1
+        assert filtered["n_evaluable"] == 1
+        assert filtered["global_score"] == 100
+        assert filtered["crest_pct"] == 100
+        assert {entry["sector"] for entry in filtered["sectors"]} == {"A"}
+
+    async def test_all_rows_filtered_out_warning(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(session_id, [_comparison_row("S-01", "A", STATUS_CUMPLE, 85.0)])
+        query = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs(level=["9999"]))
+        assert query["n_total_rows"] == 1
+        assert query["n_matched_rows"] == 0
+        assert query["warnings"] == ["all_rows_filtered_out"]
+        assert query["by_section_status"] == {}
+        assert query["sections"] == []
+        assert query["levels"] == [{"level": "1000", "n_rows": 1}]
+
+    async def test_no_results_warning_on_empty_session(self, api_isolated_db):
+        session_id = db.create_session()
+        query = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs(level=["3065"]))
+        assert query["n_total_rows"] == 0
+        assert query["n_matched_rows"] == 0
+        assert query["warnings"] == ["no_results"]
+        assert query["levels"] == []

@@ -26,7 +26,7 @@ collection cycle (``api.routers`` imports ``ai`` at package init, and
 ``ai.py`` imports ``ALL_HANDLERS`` from this module back).
 
 Aggregated with the strictly read-only ``READ_HANDLERS`` into
-``ALL_HANDLERS``, which covers exactly the 13 catalog tools.
+``ALL_HANDLERS``, which covers exactly the 14 catalog tools.
 """
 from __future__ import annotations
 

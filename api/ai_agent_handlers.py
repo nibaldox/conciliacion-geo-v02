@@ -34,8 +34,10 @@ import api.database as db
 from fastapi import HTTPException
 from core.ai_v2.agent.catalog import TOOL_CATALOG
 from core.ai_v2.agent.models import (
+    AchievementFilterArgs,
     MeshIdArgs,
     NoArgs,
+    ResultQueryArgs,
     SectionIdArgs,
     ToolRisk,
 )
@@ -97,6 +99,36 @@ def _json_key(value: Any) -> str:
     if value is None:
         return _UNMEASURED_KEY
     return str(value)
+
+
+def _bench_strings(benches: Any) -> Optional[List[str]]:
+    """Render integer bench filter values as the table's string form."""
+    if not benches:
+        return None
+    return [str(bench) for bench in benches]
+
+
+def _rounded(value: Any, digits: int) -> Any:
+    """Round float measurements for output; ints and nulls pass through."""
+    if isinstance(value, bool) or not isinstance(value, float):
+        return value
+    return round(value, digits)
+
+
+def _level_sort_key(level: str) -> Tuple[int, float, str]:
+    """Numeric levels ascending first; non-numeric levels after, by text."""
+    try:
+        return (0, float(level), "")
+    except (TypeError, ValueError):
+        return (1, 0.0, level)
+
+
+_PARAMETER_STATUS_FIELDS: Dict[str, str] = {
+    "height": "height_status",
+    "angle": "angle_status",
+    "berm": "berm_status",
+}
+_MAX_LEVEL_ENTRIES = 60
 
 
 ResultT = TypeVar("ResultT")
@@ -438,11 +470,22 @@ async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
     }
 
 
-async def get_design_achievement(session_id: str, args: NoArgs) -> Dict[str, Any]:
-    """Logro Diseño summary via the router's computation, compacted."""
+async def get_design_achievement(session_id: str, args: AchievementFilterArgs) -> Dict[str, Any]:
+    """Logro Diseño summary via the router's computation, compacted.
+
+    Accepts ``NoArgs`` too (all filters default to None via ``getattr``)
+    for call sites predating the filtered signature.
+    """
     from api.routers.process import _build_design_achievement_sync
 
-    response = await _run_off_loop(_build_design_achievement_sync, session_id, None, None, None, None)
+    response = await _run_off_loop(
+        _build_design_achievement_sync,
+        session_id,
+        getattr(args, "sector", None),
+        getattr(args, "section", None),
+        getattr(args, "level", None),
+        _bench_strings(getattr(args, "bench", None)),
+    )
     summary = response.get("summary") or {}
     sectors = [
         {
@@ -474,11 +517,22 @@ async def get_design_achievement(session_id: str, args: NoArgs) -> Dict[str, Any
     }
 
 
-async def get_proposed_compliance(session_id: str, args: NoArgs) -> Dict[str, Any]:
-    """Proposed-parameters compliance summary via the router's helper."""
+async def get_proposed_compliance(session_id: str, args: AchievementFilterArgs) -> Dict[str, Any]:
+    """Proposed-parameters compliance summary via the router's helper.
+
+    Accepts ``NoArgs`` too (all filters default to None via ``getattr``)
+    for call sites predating the filtered signature.
+    """
     from api.routers.process import _build_proposed_compliance_sync
 
-    response = await _run_off_loop(_build_proposed_compliance_sync, session_id, None, None, None, None)
+    response = await _run_off_loop(
+        _build_proposed_compliance_sync,
+        session_id,
+        getattr(args, "sector", None),
+        getattr(args, "section", None),
+        getattr(args, "level", None),
+        _bench_strings(getattr(args, "bench", None)),
+    )
     payload = response.model_dump()
     out: Dict[str, Any] = {
         "proposal_status": payload.get("proposal_status"),
@@ -521,6 +575,131 @@ async def get_proposed_compliance(session_id: str, args: NoArgs) -> Dict[str, An
     return out
 
 
+async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any]:
+    """Filtered READ over the session's comparison rows (UI table filters).
+
+    Dimensions (level / bench / sector / section) reuse the exact web
+    table semantics via ``_filter_comparisons``; ``parameter`` + ``status``
+    additionally keep rows whose parameter status equals ``status``. The
+    available levels are always reported from ALL session rows so the
+    agent can discover which levels exist.
+    """
+    from api.routers.process import _filter_comparisons
+
+    rows = await _run_off_loop(db.get_results, session_id)
+    unfiltered_count = len(rows)
+    filtered = _filter_comparisons(
+        rows,
+        args.sector,
+        args.section,
+        args.level,
+        _bench_strings(args.bench),
+    )
+    if args.parameter and args.status is not None:
+        status_field = _PARAMETER_STATUS_FIELDS[args.parameter]
+        filtered = [
+            row for row in filtered if _json_key(row.get(status_field)) == args.status
+        ]
+
+    counters: Dict[str, Counter] = {field: Counter() for field in _ALL_FIELDS}
+    sections: Dict[str, Dict[str, Any]] = {}
+    for row in filtered:
+        fields = {field: row.get(field) for field in _ALL_FIELDS}
+        fields["section"] = row.get("section")
+        fields["section_score"] = row.get("section_score")
+        _absorb_row(fields, counters, sections)
+    ranked = sorted(
+        sections.items(),
+        key=lambda item: (-item[1]["worst_rank"], item[0]),
+    )
+    shown = ranked[:_MAX_SECTION_ENTRIES]
+
+    level_counter: Counter = Counter()
+    for row in rows:
+        level_counter[_json_key(row.get("level"))] += 1
+    levels = [
+        {"level": level, "n_rows": n_rows}
+        for level, n_rows in sorted(
+            level_counter.items(), key=lambda item: _level_sort_key(item[0])
+        )[:_MAX_LEVEL_ENTRIES]
+    ]
+
+    rows_out: Optional[List[Dict[str, Any]]] = None
+    if args.include_rows:
+        rows_out = [
+            {
+                "section": _json_key(row.get("section")),
+                "bench_num": row.get("bench_num"),
+                "level": _json_key(row.get("level")),
+                "type": _json_key(row.get("type")),
+                "height_design": _rounded(row.get("height_design"), 2),
+                "height_real": _rounded(row.get("height_real"), 2),
+                "height_dev": _rounded(row.get("height_dev"), 2),
+                "height_status": _json_key(row.get("height_status")),
+                "angle_design": _rounded(row.get("angle_design"), 1),
+                "angle_real": _rounded(row.get("angle_real"), 1),
+                "angle_dev": _rounded(row.get("angle_dev"), 1),
+                "angle_status": _json_key(row.get("angle_status")),
+                "berm_design": _rounded(row.get("berm_design"), 2),
+                "berm_real": _rounded(row.get("berm_real"), 2),
+                "berm_dev": _rounded(row.get("berm_dev"), 2),
+                "berm_status": _json_key(row.get("berm_status")),
+                "bench_score": _rounded(row.get("bench_score"), 2),
+            }
+            for row in filtered[: args.row_limit]
+        ]
+
+    warnings: List[str] = []
+    if unfiltered_count == 0:
+        warnings.append("no_results")
+    elif not filtered:
+        warnings.append("all_rows_filtered_out")
+
+    return {
+        "n_total_rows": unfiltered_count,
+        "n_matched_rows": len(filtered),
+        "filters": {
+            "sector": list(args.sector or []),
+            "section": list(args.section or []),
+            "level": list(args.level or []),
+            "bench": list(args.bench or []),
+            "parameter": args.parameter,
+            "status": args.status,
+        },
+        "by_section_status": {
+            _json_key(key): value for key, value in counters["section_status"].items()
+        },
+        "by_type": {_json_key(key): value for key, value in counters["type"].items()},
+        "status_by_parameter": {
+            "height": {
+                _json_key(key): value
+                for key, value in counters["height_status"].items()
+            },
+            "angle": {
+                _json_key(key): value
+                for key, value in counters["angle_status"].items()
+            },
+            "berm": {
+                _json_key(key): value
+                for key, value in counters["berm_status"].items()
+            },
+        },
+        "sections": [
+            {
+                "name": name,
+                "n_rows": entry["n_rows"],
+                "worst_status": _rank_to_status(entry["worst_rank"]),
+                "section_score": entry["score"],
+            }
+            for name, entry in shown
+        ],
+        "levels": levels,
+        "rows": rows_out,
+        "units": {"height": "m", "angle": "deg", "berm": "m"},
+        "warnings": warnings,
+    }
+
+
 _HANDLERS: Dict[str, Handler] = {
     "get_workflow_state": get_workflow_state,
     "list_meshes": list_meshes,
@@ -530,6 +709,7 @@ _HANDLERS: Dict[str, Handler] = {
     "get_profile": get_profile,
     "get_design_achievement": get_design_achievement,
     "get_proposed_compliance": get_proposed_compliance,
+    "query_results": query_results,
 }
 
 READ_HANDLERS: Dict[str, Handler] = {
@@ -549,4 +729,5 @@ __all__ = [
     "get_workflow_state",
     "list_meshes",
     "list_sections",
+    "query_results",
 ]

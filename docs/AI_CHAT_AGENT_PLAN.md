@@ -260,3 +260,14 @@ Tronadura (upload de pozos, resumen, holes/3d, correlation, damage-model), simul
 - Memoria de la API → resúmenes y conteos SQL, nunca blobs; la subida grande no pasa por el semáforo de blast (limitación conocida: no empeorarla).
 - Store de `PendingRun` en memoria → válido en el despliegue single-process actual (SQLite, instancia única); migrar a BD si hay multi-worker.
 - Demo pública Render free (512 MB) → feature flags permiten mantener el chat apagado.
+
+---
+
+## 11. T8 — Consulta filtrada de resultados (aditivo)
+
+Extensión posterior a T7, sin cambios de contrato existente: el catálogo pasa de 13 a **14 herramientas** y los resúmenes de consulta ganan los filtros que ya tenía la tabla web.
+
+- **`query_results` (READ, nueva)**: args `ResultQueryArgs` (`sector`/`section`/`level` como texto, `bench` como enteros, `parameter` height/angle/berm, `status` exacto, `include_rows`, `row_limit` 1-50). Filtra las filas de resultados con la MISMA semántica del filtro de la UI (`_filter_comparisons`: dimensiones ANDed, valores ORed, `''` seleccionable, banco por su forma string). Devuelve agregados (`by_section_status`, `by_type`, `status_by_parameter`), secciones peor-primero (máx 30), la lista de cotas disponibles con conteos tomadas de TODAS las filas de la sesión (máx 60, orden numérico ascendente cuando sea posible) y, con `include_rows=true`, hasta `row_limit` filas con diseño vs real y desviaciones (floats redondeados a 2 decimales, ángulos a 1). `n_total_rows`/`n_matched_rows` + avisos `no_results` / `all_rows_filtered_out`.
+- **`get_design_achievement` / `get_proposed_compliance`**: ahora toman `AchievementFilterArgs` (sector/sección/level/bench opcionales, mismos filtros que los endpoints GET correspondientes) y lo pasan a los helpers existentes del router. Siguen aceptando `NoArgs` (compatibilidad con call sites previos).
+- **Prompt del sistema**: regla nueva de cotas y filtros — preguntar por cota/banco/sector/estado → `query_results`; logro/cumplimiento de esa cota/banco/sector → mismos filtros en los dos resúmenes; sin responder con la sección más cercana salvo pedido explícito.
+- **Verificación**: contrato 14/14 (`test_catalog_has_exactly_14_tools`), cobertura de handlers 14/14, y los dos resúmenes aceptan `NoArgs` sin romper los tests existentes. Sin dependencias nuevas, sin `session_id` en args, sin embeddings/RAG (filtros deterministas sobre datos tabulares).

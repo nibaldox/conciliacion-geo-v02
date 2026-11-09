@@ -2,7 +2,7 @@
 
 Metodología: conteo verificado contra los decorators `@router.*` de `api/routers/*.py` el 9-nov-2026 — **64 endpoints exactos**. `GET /api/v1/health` vive en `api/main.py`, fuera de los routers, y queda fuera del alcance. Clasificaciones:
 
-- **CUBIERTO** — herramienta actual del catálogo v1 (13 ToolSpec).
+- **CUBIERTO** — herramienta actual del catálogo v1 (14 ToolSpec; `query_results` añade lectura filtrada de resultados por cota/banco/sector/sección/parámetro/estado).
 - **OLA-2** — candidato; `PENDING_USER_DECISION`: no se implementa ni se excluye sin la decisión explícita del usuario.
 - **DESTRUCTIVO** — OLA-2 con confirmación nivel 3 obligatoria (irreversible o de alcance total).
 - **FRONTEND** — acción del frontend (payload de visualización/transporte); excluido como herramienta.
@@ -74,14 +74,14 @@ Metodología: conteo verificado contra los decorators `@router.*` de `api/router
 |---|---|---|---|
 | POST | /process | CUBIERTO | run_reconciliation (claim atómico compartido, T7-bis) |
 | GET | /process/status | CUBIERTO | Nota de cobertura: alcanzado vía get_workflow_state / get_results_summary — sin herramienta dedicada |
-| GET | /process/results | CUBIERTO | get_results_summary |
+| GET | /process/results | CUBIERTO | get_results_summary; query_results (nuevo): lectura filtrada de resultados por cota/banco/sector/sección/parámetro/estado |
 | GET | /process/profiles/{section_id} | CUBIERTO | get_profile |
 | PUT | /process/results/{section_id}/reconciled | OLA-2 | Bench drag&drop (REPLACE del estado reconciliado) → confirmación |
 | GET | /process/profiles/{section_id}/blast-holes | OLA-2 | READ tronadura↔geotecnia |
 | GET | /process/blast-correlation | OLA-2 | READ |
 | GET | /process/blast-correlation/damage-model | OLA-2 | READ |
-| GET | /process/design-achievement | CUBIERTO | get_design_achievement |
-| GET | /process/proposed-compliance | CUBIERTO | get_proposed_compliance |
+| GET | /process/design-achievement | CUBIERTO | get_design_achievement (acepta filtros por sector/sección/cota/banco) |
+| GET | /process/proposed-compliance | CUBIERTO | get_proposed_compliance (acepta filtros por sector/sección/cota/banco) |
 
 ## /api/v1/sections (9)
 

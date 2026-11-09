@@ -55,9 +55,11 @@ from core.ai_v2.agent.events import (
     parse_event_line,
 )
 from core.ai_v2.agent.models import (
+    AchievementFilterArgs,
     ExportReportArgs,
     MeshIdArgs,
     NoArgs,
+    ResultQueryArgs,
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
@@ -82,6 +84,7 @@ EXPECTED_TOOL_NAMES = {
     "get_profile",
     "get_design_achievement",
     "get_proposed_compliance",
+    "query_results",
     "export_report",
 }
 
@@ -100,12 +103,14 @@ EXTRA_FIELD_PAYLOADS = {
     SectionIdArgs: {"section_id": "0", "force": True},
     NoArgs: {"anything": 1},
     SectionDefinitionArgs: {"origin": [0.0, 0.0], "azimuth": 0.0, "blob": None},
+    ResultQueryArgs: {"level": ["3065"], "session_id": "other"},
+    AchievementFilterArgs: {"bench": [3], "force": True},
 }
 
 
 class TestCatalog:
-    def test_catalog_has_exactly_13_tools(self) -> None:
-        assert len(AGENT_TOOLS) == 13
+    def test_catalog_has_exactly_14_tools(self) -> None:
+        assert len(AGENT_TOOLS) == 14
         assert {spec.name for spec in AGENT_TOOLS} == EXPECTED_TOOL_NAMES
 
     def test_names_are_unique(self) -> None:
@@ -136,6 +141,7 @@ class TestCatalog:
             ("get_profile", ToolRisk.READ, (), 30.0, False),
             ("get_design_achievement", ToolRisk.READ, (), 30.0, False),
             ("get_proposed_compliance", ToolRisk.READ, (), 30.0, False),
+            ("query_results", ToolRisk.READ, (), 30.0, False),
             ("export_report", ToolRisk.EXPORT, (), 30.0, True),
         ],
     )
