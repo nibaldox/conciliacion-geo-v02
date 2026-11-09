@@ -1804,6 +1804,16 @@
     },
     "observation": {
       "mesh_loaded": "{{role}} mesh loaded into the session: mesh_id={{meshId}} · vertices={{vertices}} · faces={{faces}} · bounds {{bounds}}. The assistant can use it as context."
+    },
+    "resize": {
+      "north": "Resize panel (top edge)",
+      "south": "Resize panel (bottom edge)",
+      "east": "Resize panel (right edge)",
+      "west": "Resize panel (left edge)",
+      "ne": "Resize panel (top-right corner)",
+      "nw": "Resize panel (top-left corner)",
+      "se": "Resize panel (bottom-right corner)",
+      "sw": "Resize panel (bottom-left corner)"
     }
   }
 }

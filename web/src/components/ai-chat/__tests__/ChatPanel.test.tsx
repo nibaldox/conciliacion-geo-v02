@@ -75,9 +75,15 @@ describe('ChatPanel — explicit deployment states', () => {
     expect(screen.getByTestId('ai-chat-status')).toHaveTextContent('CONFIGURADO');
     expect(screen.getByTestId('ai-chat-model-chip')).toHaveTextContent('qwen3-32b');
     expect(screen.queryByText('conectado')).toBeNull();
-    const panel = container.querySelector('[data-slot="ai-chat-panel"]');
+    const panel = container.querySelector<HTMLElement>(
+      '[data-slot="ai-chat-panel"]',
+    );
     expect(panel?.className).toContain('inset-x-0');
-    expect(panel?.className).toContain('sm:w-[380px]');
+    expect(panel?.className).not.toContain('sm:bottom-4');
+    expect(panel?.className).not.toContain('sm:right-4');
+    expect(panel?.style.position).toBe('fixed');
+    expect(panel?.style.width).toBe('380px');
+    expect(panel?.style.left).toBe(`${window.innerWidth - 380 - 16}px`);
   });
 
   it('shows the no-tool-calls notice for a provider without tool support', async () => {
@@ -94,12 +100,12 @@ describe('ChatPanel — explicit deployment states', () => {
   });
 });
 
-describe('ChatPanel — plain-text rendering and focus', () => {
-  it('renders model output as plain text (no HTML, no markdown HTML)', async () => {
+describe('ChatPanel — agent Markdown rendering and focus', () => {
+  it('renders agent Markdown safely and keeps raw HTML inert', async () => {
     mockGet.mockResolvedValue({ data: providersBody() });
     mockFetch.mockResolvedValueOnce(
       makeNdjsonResponse([
-        '{"type":"text","content":"**negrita** y <script>alert(1)</script>"}',
+        '{"type":"text","content":"**negrita** y <script>alert(1)</script>\\n\\n- punto uno\\n- punto dos"}',
         '{"type":"done","finish_reason":"stop","usage":null,"cached":false}',
       ]),
     );
@@ -107,13 +113,21 @@ describe('ChatPanel — plain-text rendering and focus', () => {
     const input = await screen.findByTestId('ai-chat-input');
     await userEvent.type(input, 'dame markdown');
     await userEvent.click(screen.getByTestId('ai-chat-send'));
-    expect(
-      await screen.findByText('**negrita** y <script>alert(1)</script>'),
-    ).toBeInTheDocument();
-    expect(container.querySelector('strong')).toBeNull();
-    expect(container.querySelector('em')).toBeNull();
+
+    expect(await screen.findByText('negrita')).toBeInTheDocument();
+    expect(container.querySelector('strong')?.textContent).toBe('negrita');
+    expect(screen.getByText('punto uno')).toBeInTheDocument();
+    expect(container.querySelectorAll('ul > li')).toHaveLength(2);
+
     expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('[onerror]')).toBeNull();
     expect(container.innerHTML).not.toContain('<script');
+    expect(container.textContent).toContain('<script>alert(1)</script>');
+
+    const userMessage = screen.getByText('dame markdown');
+    expect(userMessage.tagName).toBe('P');
+    expect(userMessage.className).toContain('whitespace-pre-wrap');
   });
 
   it('focuses the input on open and restores focus on close; Escape closes', async () => {

@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import { LMSTUDIO_PLACEHOLDER_MODEL } from '../../api/aiChat';
 import type { ChatMessage, ChatNotice } from '../../stores/aiChat';
 import { useAIChat } from '../../stores/aiChat';
 import { Spinner } from '../ui/Spinner';
+import { MarkdownMessage } from './MarkdownMessage';
 import { TopoUploadZone } from './TopoUploadZone';
 import { ConfirmationCard, ToolCallCard } from './ToolCallCard';
+import { type ResizeDirection, useResizablePanel } from './useResizablePanel';
 
 const NOTICE_TONE: Record<ChatNotice['severity'], string> = {
   info: 'border-border text-text-secondary',
@@ -46,7 +48,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         <span className="sr-only">
           {isUser ? t('aiChat.messages.you') : t('aiChat.messages.agent')}
         </span>
-        <p className="whitespace-pre-wrap break-words">{message.text}</p>
+        {message.kind === 'agent' ? (
+          <MarkdownMessage content={message.text} />
+        ) : (
+          <p className="whitespace-pre-wrap break-words">{message.text}</p>
+        )}
       </div>
     </div>
   );
@@ -101,14 +107,33 @@ interface ChatPanelProps {
   onClose: () => void;
 }
 
+const RESIZE_HANDLES: ReadonlyArray<{
+  direction: ResizeDirection;
+  labelKey: 'north' | 'south' | 'east' | 'west' | 'ne' | 'nw' | 'se' | 'sw';
+  orientation?: 'horizontal' | 'vertical';
+  className: string;
+}> = [
+  { direction: 'n', labelKey: 'north', orientation: 'horizontal', className: 'inset-x-3 top-0 h-1.5 cursor-n-resize' },
+  { direction: 's', labelKey: 'south', orientation: 'horizontal', className: 'inset-x-3 bottom-0 h-1.5 cursor-s-resize' },
+  { direction: 'e', labelKey: 'east', orientation: 'vertical', className: 'inset-y-3 right-0 w-1.5 cursor-e-resize' },
+  { direction: 'w', labelKey: 'west', orientation: 'vertical', className: 'inset-y-3 left-0 w-1.5 cursor-w-resize' },
+  { direction: 'nw', labelKey: 'nw', className: 'left-0 top-0 h-3 w-3 cursor-nw-resize' },
+  { direction: 'ne', labelKey: 'ne', className: 'right-0 top-0 h-3 w-3 cursor-ne-resize' },
+  { direction: 'sw', labelKey: 'sw', className: 'bottom-0 left-0 h-3 w-3 cursor-sw-resize' },
+  { direction: 'se', labelKey: 'se', className: 'bottom-0 right-0 h-3 w-3 cursor-se-resize' },
+];
+
 /**
  * The chat panel: history, notices, confirmation cards, mesh upload and
- * the message input. Model output is rendered as PLAIN TEXT (never
- * HTML, never markdown-to-HTML — XSS). Escape closes the panel and
- * focus is restored to the previously focused element.
+ * the message input. Agent output is rendered as Markdown inside a
+ * sandboxed renderer (no raw HTML ever reaches the DOM). On desktop the
+ * panel is resizable from its edges/corners; on mobile it stays a
+ * full-width bottom sheet. Escape closes the panel and focus is
+ * restored to the previously focused element.
  */
 export function ChatPanel({ onClose }: ChatPanelProps) {
   const { t } = useTranslation();
+  const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
   const streaming = useAIChat((s) => s.streaming);
   const providerState = useAIChat((s) => s.providerState);
@@ -175,6 +200,20 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     void clearConversation();
   };
 
+  const panelStyle: CSSProperties = {
+    paddingBottom: 'env(safe-area-inset-bottom)',
+    ...(resizable.isDesktop
+      ? {
+          position: 'fixed',
+          left: resizable.rect.left,
+          top: resizable.rect.top,
+          width: resizable.rect.width,
+          height: resizable.rect.height,
+          maxHeight: resizable.rect.height,
+        }
+      : {}),
+  };
+
   return (
     <section
       data-slot="ai-chat-panel"
@@ -184,10 +223,10 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       onKeyDown={(e) => {
         if (e.key === 'Escape') onClose();
       }}
-      className="fixed inset-x-0 bottom-0 z-[90] flex max-h-[72vh] flex-col rounded-t-xl border border-border bg-surface-raised text-text-primary shadow-lg sm:inset-x-auto sm:bottom-4 sm:right-4 sm:w-[380px] sm:rounded-xl"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed inset-x-0 bottom-0 z-[90] flex max-h-[72vh] flex-col rounded-t-xl border border-border bg-surface-raised text-text-primary shadow-lg sm:inset-x-auto sm:rounded-xl"
+      style={panelStyle}
     >
-      <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+      <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold">{t('aiChat.title')}</h2>
         {isLmStudioLocal && (
           <span
@@ -240,7 +279,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         </button>
       </header>
 
-      <div className="flex flex-col gap-2 overflow-y-auto px-3 py-2">
+      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-2">
         {notice && <NoticeBanner notice={notice} />}
         {!providerStateLoaded && (
           <div
@@ -323,7 +362,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       <TopoUploadZone />
 
       <form
-        className="flex items-end gap-2 border-t border-border px-3 py-2"
+        className="flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"
         onSubmit={(e) => {
           e.preventDefault();
           handleSubmit();
@@ -359,6 +398,24 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
           </button>
         )}
       </form>
+
+      {resizable.isDesktop &&
+        RESIZE_HANDLES.map(({ direction, labelKey, orientation, className }) => (
+          <div
+            key={direction}
+            role="separator"
+            data-testid={`ai-chat-resize-${direction}`}
+            aria-label={t(`aiChat.resize.${labelKey}`)}
+            aria-orientation={orientation}
+            tabIndex={0}
+            onPointerDown={(e) => resizable.startResize(direction, e)}
+            onPointerMove={resizable.onResizeMove}
+            onPointerUp={resizable.endResize}
+            onPointerCancel={resizable.endResize}
+            onKeyDown={(e) => resizable.adjustFromKeyboard(direction, e)}
+            className={`absolute z-20 touch-none ${className}`}
+          />
+        ))}
     </section>
   );
 }

@@ -1804,6 +1804,16 @@
     },
     "observation": {
       "mesh_loaded": "Malla de {{role}} cargada en la sesión: mesh_id={{meshId}} · vértices={{vertices}} · caras={{faces}} · extensión {{bounds}}. El asistente puede usarla como contexto."
+    },
+    "resize": {
+      "north": "Redimensionar panel (borde superior)",
+      "south": "Redimensionar panel (borde inferior)",
+      "east": "Redimensionar panel (borde derecho)",
+      "west": "Redimensionar panel (borde izquierdo)",
+      "ne": "Redimensionar panel (esquina superior derecha)",
+      "nw": "Redimensionar panel (esquina superior izquierda)",
+      "se": "Redimensionar panel (esquina inferior derecha)",
+      "sw": "Redimensionar panel (esquina inferior izquierda)"
     }
   }
 }
