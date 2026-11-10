@@ -856,3 +856,221 @@ class TestQueryResults:
         assert query["n_matched_rows"] == 0
         assert query["warnings"] == ["no_results"]
         assert query["levels"] == []
+
+
+# ---------------------------------------------------------------------------
+# Dashboard weighted score (parity with Dashboard.tsx computeGlobalScore)
+# ---------------------------------------------------------------------------
+
+
+def _scored_row(
+    section: str,
+    bench_score: float,
+    *,
+    sector: str = "A",
+    level: str = "3065",
+    bench_num: int = 1,
+    row_type: str = "MATCH",
+) -> Dict[str, Any]:
+    """MATCH-shaped row carrying an explicit bench_score (dashboard input)."""
+    row = _comparison_row(
+        section, sector, STATUS_CUMPLE, 85.0,
+        bench_num=bench_num, row_type=row_type, level=level,
+    )
+    row["bench_score"] = bench_score
+    return row
+
+
+def _seed_weighted_session() -> str:
+    """Section A: 100 + 50; section B: 0; EXTRA/MISSING rows must not count."""
+    session_id = db.create_session()
+    db.save_results(
+        session_id,
+        [
+            _scored_row("A", 100.0, bench_num=1),
+            _scored_row("A", 50.0, bench_num=2),
+            _scored_row("B", 0.0, sector="B"),
+            _scored_row("A", 100.0, bench_num=3, row_type="EXTRA"),
+            _scored_row("A", 100.0, bench_num=4, row_type="MISSING"),
+        ],
+    )
+    return session_id
+
+
+@pytest.mark.asyncio
+class TestDashboardWeightedScore:
+    async def test_weighted_score_over_synthetic_rows(self, api_isolated_db):
+        from core.report_data import compute_dashboard_weighted_score
+
+        session_id = _seed_weighted_session()
+        rows = db.get_results(session_id)
+        rows.append(
+            {
+                "section": "C",
+                "sector": "A",
+                "type": "MATCH",
+                "level": "3065",
+                "bench_num": 5,
+                "height_status": STATUS_CUMPLE,
+                "angle_status": STATUS_CUMPLE,
+                "berm_status": "-",
+                "bench_score": None,
+            }
+        )
+        weighted = compute_dashboard_weighted_score(rows)
+        assert weighted["global_score"] == pytest.approx(37.5)
+        assert weighted["n_profiles"] == 2
+        assert weighted["n_benches"] == 3
+        assert weighted["by_section"] == {"A": 75.0, "B": 0.0}
+        assert weighted["weights"] == {"berm": 60, "angle": 10, "height": 30}
+        assert weighted["definition"]
+
+        query = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        assert query["weighted_score"] == weighted
+
+    async def test_level_filter_reduces_weighted_score(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _scored_row("A", 100.0, level="3065", bench_num=1),
+                _scored_row("A", 50.0, level="3066", bench_num=2),
+                _scored_row("B", 0.0, sector="B", level="3066"),
+            ],
+        )
+        unfiltered = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        assert unfiltered["weighted_score"]["global_score"] == pytest.approx(37.5)
+        assert unfiltered["weighted_score"]["n_benches"] == 3
+        filtered = await READ_HANDLERS["query_results"](
+            session_id, ResultQueryArgs(level=["3066"])
+        )
+        assert filtered["weighted_score"]["global_score"] == pytest.approx(25.0)
+        assert filtered["weighted_score"]["global_score"] < unfiltered["weighted_score"]["global_score"]
+        assert filtered["weighted_score"]["n_profiles"] == 2
+        assert filtered["weighted_score"]["n_benches"] == 2
+        assert filtered["weighted_score"]["by_section"] == {"A": 50.0, "B": 0.0}
+
+    async def test_weighted_score_warning_when_no_scoreable_benches(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(session_id, [_scored_row("A", 100.0, row_type="EXTRA")])
+        query = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        assert query["n_matched_rows"] == 1
+        assert query["weighted_score"]["global_score"] is None
+        assert query["weighted_score"]["n_benches"] == 0
+        assert query["warnings"] == ["no hay bancos MATCH puntuables con los filtros aplicados"]
+
+    async def test_design_achievement_score_kind_and_weighted_score(self, api_isolated_db):
+        session_id = _seed_weighted_session()
+        achievement = await READ_HANDLERS["get_design_achievement"](session_id, NoArgs())
+        assert achievement["score_kind"] == "logro_diseno"
+        assert achievement["global_score"] is not None
+        assert achievement["global_score"] != achievement["weighted_score"]["global_score"]
+        assert achievement["weighted_score"]["global_score"] == pytest.approx(37.5)
+        assert achievement["weighted_score"]["n_profiles"] == 2
+        assert achievement["weighted_score"]["n_benches"] == 3
+
+    async def test_design_achievement_level_filter_feeds_weighted_score(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _scored_row("A", 100.0, level="3065", bench_num=1),
+                _scored_row("A", 50.0, level="3066", bench_num=2),
+            ],
+        )
+        filtered = await READ_HANDLERS["get_design_achievement"](
+            session_id, AchievementFilterArgs(level=["3065"])
+        )
+        assert filtered["score_kind"] == "logro_diseno"
+        assert filtered["weighted_score"]["global_score"] == pytest.approx(100.0)
+        assert filtered["weighted_score"]["n_profiles"] == 1
+        assert filtered["weighted_score"]["n_benches"] == 1
+
+    async def test_include_rows_payload_stays_under_size_bound(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _scored_row(f"S-{index:02d}", 80.0 + index, bench_num=index + 1)
+                for index in range(4)
+            ],
+        )
+        payload = await READ_HANDLERS["query_results"](
+            session_id, ResultQueryArgs(include_rows=True, row_limit=10)
+        )
+        assert len(payload["rows"]) == 4
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert len(serialized.encode("utf-8")) < SIZE_BOUND_BYTES
+        assert "by_section" in payload["weighted_score"]
+
+    async def test_by_section_dropped_when_payload_exceeds_bound(
+        self, api_isolated_db, monkeypatch
+    ):
+        import api.ai_agent_handlers as handlers_module
+
+        session_id = _seed_weighted_session()
+        full = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        full_size = len(json.dumps(full, ensure_ascii=False).encode("utf-8"))
+        assert "by_section" in full["weighted_score"]
+        monkeypatch.setattr(handlers_module, "_MAX_PAYLOAD_BYTES", full_size)
+        trimmed = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        assert "by_section" not in trimmed["weighted_score"]
+        kept = trimmed["weighted_score"]
+        assert kept["global_score"] == full["weighted_score"]["global_score"]
+        assert kept["n_profiles"] == full["weighted_score"]["n_profiles"]
+        assert kept["n_benches"] == full["weighted_score"]["n_benches"]
+        assert kept["weights"] == full["weighted_score"]["weights"]
+        assert kept["definition"] == full["weighted_score"]["definition"]
+        trimmed_size = len(json.dumps(trimmed, ensure_ascii=False).encode("utf-8"))
+        assert trimmed_size < full_size
+        assert trimmed["n_matched_rows"] == full["n_matched_rows"]
+        assert trimmed["warnings"] == full["warnings"]
+
+
+@pytest.mark.asyncio
+class TestQueryResultsPayloadPriority:
+    async def test_payload_key_order_puts_score_first(self, api_isolated_db):
+        session_id = _seed_weighted_session()
+        payload = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        assert list(payload.keys())[:3] == [
+            "weighted_score",
+            "n_total_rows",
+            "n_matched_rows",
+        ]
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert serialized.startswith('{"weighted_score":')
+        for early in ("n_matched_rows", "pct_by_parameter", "status_by_parameter"):
+            assert serialized.index(f'"{early}"') < serialized.index('"sections"')
+
+    async def test_large_session_payload_fits_budget_with_critical_keys(
+        self, api_isolated_db
+    ):
+        session_id = db.create_session()
+        db.save_results(
+            session_id,
+            [
+                _scored_row(
+                    f"S-{index:04d}",
+                    100.0 if index % 2 == 0 else 50.0,
+                    level=str(3065 + index % 80),
+                    bench_num=index % 4 + 1,
+                )
+                for index in range(120)
+            ],
+        )
+        payload = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+        assert payload["n_matched_rows"] == 120
+        assert payload["weighted_score"]["global_score"] == pytest.approx(75.0)
+        assert payload["weighted_score"]["n_profiles"] == 120
+        serialized = json.dumps(payload, ensure_ascii=False)
+        assert len(serialized.encode("utf-8")) < SIZE_BOUND_BYTES
+        head = serialized[:4000]
+        for critical in (
+            '"n_total_rows"',
+            '"n_matched_rows"',
+            '"weighted_score"',
+            '"global_score"',
+            '"pct_by_parameter"',
+            '"status_by_parameter"',
+        ):
+            assert critical in head

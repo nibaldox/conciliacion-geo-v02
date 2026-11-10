@@ -47,11 +47,14 @@ from core.compliance_status import (
     STATUS_NO_CUMPLE,
     STATUS_RAMPA_OK,
 )
+from core.report_data import compute_dashboard_weighted_score
 
 Handler = Callable[[str, Any], Awaitable[Dict[str, Any]]]
 
 _MAX_SECTION_ENTRIES = 30
 _MAX_LIST_ENTRIES = 50
+_MAX_PAYLOAD_BYTES = 4096
+_NO_SCOREABLE_BENCHES_WARNING = "no hay bancos MATCH puntuables con los filtros aplicados"
 
 _UNMEASURED_KEY = "sin_medir"
 
@@ -487,21 +490,51 @@ async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
     }
 
 
+def _dashboard_weighted_score_sync(
+    session_id: str,
+    sectors: Optional[List[str]],
+    sections: Optional[List[str]],
+    levels: Optional[List[str]],
+    benches: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Dashboard weighted score over the same filtered rows the router uses."""
+    from api.routers.process import _filter_comparisons
+
+    rows = db.get_results(session_id)
+    filtered = _filter_comparisons(rows, sectors, sections, levels, benches)
+    return compute_dashboard_weighted_score(filtered)
+
+
 async def get_design_achievement(session_id: str, args: AchievementFilterArgs) -> Dict[str, Any]:
     """Logro Diseño summary via the router's computation, compacted.
 
     Accepts ``NoArgs`` too (all filters default to None via ``getattr``)
-    for call sites predating the filtered signature.
+    for call sites predating the filtered signature. ``global_score`` is
+    the LOGRO DE DISEÑO (0.4 crest + 0.3 toe + 0.3 berm over evaluable
+    rows); ``weighted_score`` carries the separate dashboard weighted
+    score over the same filtered rows.
     """
     from api.routers.process import _build_design_achievement_sync
 
+    sector = getattr(args, "sector", None)
+    section = getattr(args, "section", None)
+    level = getattr(args, "level", None)
+    bench = _bench_strings(getattr(args, "bench", None))
     response = await _run_off_loop(
         _build_design_achievement_sync,
         session_id,
-        getattr(args, "sector", None),
-        getattr(args, "section", None),
-        getattr(args, "level", None),
-        _bench_strings(getattr(args, "bench", None)),
+        sector,
+        section,
+        level,
+        bench,
+    )
+    weighted_score = await _run_off_loop(
+        _dashboard_weighted_score_sync,
+        session_id,
+        sector,
+        section,
+        level,
+        bench,
     )
     summary = response.get("summary") or {}
     sectors = [
@@ -516,6 +549,7 @@ async def get_design_achievement(session_id: str, args: AchievementFilterArgs) -
         for entry in response.get("sectors") or []
     ]
     return {
+        "score_kind": "logro_diseno",
         "n_total_rows": response.get("n_total_rows"),
         "status": (response.get("metadata") or {}).get("status"),
         "global_score": summary.get("global_score"),
@@ -529,6 +563,7 @@ async def get_design_achievement(session_id: str, args: AchievementFilterArgs) -
         "delta_toe_mean": summary.get("delta_toe_mean"),
         "tolerances": response.get("tolerances"),
         "tolerances_source": response.get("tolerances_source"),
+        "weighted_score": weighted_score,
         "sectors": sectors,
         "warnings": response.get("warnings"),
     }
@@ -592,6 +627,46 @@ async def get_proposed_compliance(session_id: str, args: AchievementFilterArgs) 
     return out
 
 
+_PAYLOAD_LIST_FLOORS = (("sections", 8), ("levels", 12), ("rows", 10))
+
+
+def _payload_size(payload: Dict[str, Any]) -> int:
+    return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+
+def _fit_query_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Iteratively trim bulky lists until the payload fits the byte budget.
+
+    Priority order: drop ``weighted_score.by_section`` first, then halve
+    ``sections`` / ``levels`` / ``rows`` in turn (floors 8 / 12 / 10),
+    re-measuring after every step and stopping as soon as the payload
+    fits. ``weighted_score`` (without ``by_section``), ``pct_by_parameter``
+    and ``status_by_parameter`` are never removed: an oversized payload is
+    better than losing the score the model must answer with.
+    """
+    if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
+        return payload
+
+    weighted = payload.get("weighted_score")
+    if isinstance(weighted, dict):
+        weighted.pop("by_section", None)
+        if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
+            return payload
+
+    progress = True
+    while _payload_size(payload) >= _MAX_PAYLOAD_BYTES and progress:
+        progress = False
+        for key, floor in _PAYLOAD_LIST_FLOORS:
+            entries = payload.get(key)
+            if not isinstance(entries, list) or len(entries) <= floor:
+                continue
+            payload[key] = entries[: max(floor, len(entries) // 2)]
+            progress = True
+            if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
+                return payload
+    return payload
+
+
 async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any]:
     """Filtered READ over the session's comparison rows (UI table filters).
 
@@ -599,7 +674,10 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
     table semantics via ``_filter_comparisons``; ``parameter`` + ``status``
     additionally keep rows whose parameter status equals ``status``. The
     available levels are always reported from ALL session rows so the
-    agent can discover which levels exist. ``pct_by_parameter`` returns
+    agent can discover which levels exist. ``weighted_score`` carries the
+    dashboard's global weighted score (the UI figure) computed over the
+    filtered rows so the model never has to compute it itself.
+    ``pct_by_parameter`` returns
     precomputed percentages over evaluable rows (statuses other than
     ``-``, empty or None) so the model never has to compute them itself.
     """
@@ -668,13 +746,18 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
             for row in filtered[: args.row_limit]
         ]
 
+    weighted_score = compute_dashboard_weighted_score(filtered)
+
     warnings: List[str] = []
     if unfiltered_count == 0:
         warnings.append("no_results")
     elif not filtered:
         warnings.append("all_rows_filtered_out")
+    elif weighted_score["global_score"] is None:
+        warnings.append(_NO_SCOREABLE_BENCHES_WARNING)
 
-    return {
+    payload = {
+        "weighted_score": weighted_score,
         "n_total_rows": unfiltered_count,
         "n_matched_rows": len(filtered),
         "filters": {
@@ -685,10 +768,10 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
             "parameter": args.parameter,
             "status": args.status,
         },
-        "by_section_status": {
-            _json_key(key): value for key, value in counters["section_status"].items()
+        "pct_by_parameter": {
+            param: _pct_entry(counters[status_field])
+            for param, status_field in _PARAMETER_STATUS_FIELDS.items()
         },
-        "by_type": {_json_key(key): value for key, value in counters["type"].items()},
         "status_by_parameter": {
             "height": {
                 _json_key(key): value
@@ -703,9 +786,9 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
                 for key, value in counters["berm_status"].items()
             },
         },
-        "pct_by_parameter": {
-            param: _pct_entry(counters[status_field])
-            for param, status_field in _PARAMETER_STATUS_FIELDS.items()
+        "by_type": {_json_key(key): value for key, value in counters["type"].items()},
+        "by_section_status": {
+            _json_key(key): value for key, value in counters["section_status"].items()
         },
         "sections": [
             {
@@ -721,6 +804,7 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
         "units": {"height": "m", "angle": "deg", "berm": "m"},
         "warnings": warnings,
     }
+    return _fit_query_payload(payload)
 
 
 _HANDLERS: Dict[str, Handler] = {

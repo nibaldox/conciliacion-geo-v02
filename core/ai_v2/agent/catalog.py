@@ -137,10 +137,15 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
     ToolSpec(
         name="get_design_achievement",
         description=(
-            "Return the design achievement summary: design vs as-built "
-            "compliance rates per sector and parameter. Accepts optional "
-            "filters by sector, section, level (bench floor elevation as "
-            "text) and bench number."
+            "Return the DESIGN ACHIEVEMENT summary: design vs as-built "
+            "compliance rates per sector and parameter. Its global_score "
+            "is the logro de diseño (0.4 crest + 0.3 toe + 0.3 berm over "
+            "evaluable rows) — a different indicator from the dashboard's "
+            "weighted score; call it \"logro de diseño\", never the "
+            "dashboard score. Accepts optional filters by sector, "
+            "section, level (bench floor elevation as text) and bench "
+            "number. It also returns weighted_score with the dashboard's "
+            "weighted score over the same filtered rows."
         ),
         args_model=AchievementFilterArgs,
         risk=ToolRisk.READ,
@@ -167,8 +172,13 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
             "Returns aggregates (status by section/parameter/type), "
             "pct_by_parameter with precomputed percentages over evaluable "
             "rows (statuses other than \"-\") so you never have to compute "
-            "them yourself, the list of available levels with counts, and "
-            "optionally (include_rows=true) up to row_limit rows with "
+            "them yourself, weighted_score with the DASHBOARD'S WEIGHTED "
+            "SCORE (the global figure the user sees in the UI; per bench "
+            "berma 60 + ángulo 10 + altura 30 when CUMPLE, averaged per "
+            "section then across sections) — use it whenever the user "
+            "asks for the weighted score or how a level is doing, the "
+            "list of available levels with counts, and optionally "
+            "(include_rows=true) up to row_limit rows with "
             "design vs as-built values and deviations. Use it when the "
             "user asks about a specific level, bench, sector or status."
         ),
