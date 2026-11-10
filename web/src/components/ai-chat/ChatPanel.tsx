@@ -226,57 +226,63 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
       className="fixed inset-x-0 bottom-0 z-[90] flex max-h-[72vh] flex-col rounded-t-xl border border-border bg-surface-raised text-text-primary shadow-lg sm:inset-x-auto sm:rounded-xl"
       style={panelStyle}
     >
-      <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">{t('aiChat.title')}</h2>
-        {isLmStudioLocal && (
-          <span
-            data-testid="ai-chat-local-badge"
-            className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] font-medium text-text-secondary"
+      <header className="shrink-0 border-b border-border px-3 py-2">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">
+            {t('aiChat.title')}
+          </h2>
+          <button
+            type="button"
+            data-testid="ai-chat-close"
+            aria-label={t('aiChat.close')}
+            onClick={onClose}
+            className="shrink-0 rounded px-1.5 py-0.5 text-sm text-text-muted hover:text-text-primary"
           >
-            {t('aiChat.header.local_badge')}
-          </span>
-        )}
-        {headerModel && (
-          <span
-            data-testid="ai-chat-model-chip"
-            className="truncate font-mono text-[11px] text-text-muted"
-            title={headerModel}
-          >
-            {headerModel}
-          </span>
-        )}
-        <span
-          data-testid="ai-chat-status"
-          className="ml-auto flex items-center gap-1 text-[11px] text-text-muted"
-        >
-          {!providerStateLoaded ? (
-            <Spinner size="sm" />
-          ) : chatEnabled && supportsTools ? (
-            t('aiChat.header.configured')
-          ) : (
-            t('aiChat.header.unavailable')
+            ×
+          </button>
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+          {isLmStudioLocal && (
+            <span
+              data-testid="ai-chat-local-badge"
+              className="shrink-0 rounded bg-surface-muted px-1.5 py-0.5 font-medium text-text-secondary"
+            >
+              {t('aiChat.header.local_badge')}
+            </span>
           )}
-        </span>
-        <button
-          type="button"
-          data-testid="ai-chat-clear"
-          onClick={handleClear}
-          onBlur={() => setConfirmingClear(false)}
-          className="rounded px-1.5 py-0.5 text-[11px] text-text-muted hover:text-text-primary"
-        >
-          {confirmingClear
-            ? t('aiChat.clear_confirm')
-            : t('aiChat.clear')}
-        </button>
-        <button
-          type="button"
-          data-testid="ai-chat-close"
-          aria-label={t('aiChat.close')}
-          onClick={onClose}
-          className="rounded px-1.5 py-0.5 text-sm text-text-muted hover:text-text-primary"
-        >
-          ×
-        </button>
+          {headerModel && (
+            <span
+              data-testid="ai-chat-model-chip"
+              className="min-w-0 truncate font-mono text-text-muted"
+              title={headerModel}
+            >
+              {headerModel}
+            </span>
+          )}
+          <span
+            data-testid="ai-chat-status"
+            className="ml-auto flex shrink-0 items-center gap-1 text-text-muted"
+          >
+            {!providerStateLoaded ? (
+              <Spinner size="sm" />
+            ) : chatEnabled && supportsTools ? (
+              t('aiChat.header.configured')
+            ) : (
+              t('aiChat.header.unavailable')
+            )}
+          </span>
+          <button
+            type="button"
+            data-testid="ai-chat-clear"
+            onClick={handleClear}
+            onBlur={() => setConfirmingClear(false)}
+            className="shrink-0 rounded px-1.5 py-0.5 text-text-muted hover:text-text-primary"
+          >
+            {confirmingClear
+              ? t('aiChat.clear_confirm')
+              : t('aiChat.clear')}
+          </button>
+        </div>
       </header>
 
       <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-2">
