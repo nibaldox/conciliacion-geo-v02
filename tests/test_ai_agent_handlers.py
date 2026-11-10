@@ -160,6 +160,19 @@ def _checkpoint(db_path: Path) -> None:
         conn.close()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_db_per_test(api_isolated_db):
+    """Give every test in this module a fresh schema before it runs.
+
+    ``session_a``/``session_b`` and several tests call ``db.*`` directly, so
+    they must never rely on a developer's local ``data/`` database (CI has
+    none). Autouse fixtures are instantiated before requested ones, so the
+    patched ``DB_PATH`` and ``init_db()`` are in place by the time any
+    session fixture seeds rows.
+    """
+    yield api_isolated_db
+
+
 @pytest.fixture()
 def checkpointed_db_path(api_isolated_db) -> Path:
     _checkpoint(Path(db.DB_PATH))
