@@ -137,6 +137,21 @@ deadline) is noticed promptly, long enough to avoid busy-waiting.
 _OBSERVATION_MAX_CHARS = 4000
 _SUMMARY_MAX_CHARS = 200
 
+_OBSERVATION_TRUNCATED_SUFFIX = "...[truncated]"
+
+_OBSERVATION_PRESERVE_KEYS = frozenset(
+    {
+        "weighted_score",
+        "pct_by_parameter",
+        "status_by_parameter",
+        "n_total_rows",
+        "n_matched_rows",
+        "warnings",
+    }
+)
+
+_OBSERVATION_NESTED_KEEP_STEPS = (64, 32, 16, 8, 4)
+
 MSG_TOOL_UNAVAILABLE = (
     "Herramienta no disponible: no está en el catálogo del agente."
 )
@@ -215,12 +230,67 @@ def _compact_summary(observation: dict[str, Any]) -> str:
     return text
 
 
+def _is_json_scalar(value: Any) -> bool:
+    return value is None or isinstance(value, (bool, int, float, str))
+
+
+def _bounded_nested(value: Any, keep: int) -> Any:
+    """Recursively cap nested lists/dicts to their first ``keep`` entries."""
+    if isinstance(value, dict):
+        return {
+            key: _bounded_nested(item, keep)
+            for key, item in list(value.items())[:keep]
+        }
+    if isinstance(value, list):
+        return [_bounded_nested(item, keep) for item in value[:keep]]
+    return value
+
+
+def _structured_truncate(text: str, keep: int) -> dict[str, Any] | None:
+    """Rebuild a serialized JSON object keeping its scalar + priority keys.
+
+    Scalar-valued keys (str/int/float/bool/None) are kept verbatim, keys in
+    ``_OBSERVATION_PRESERVE_KEYS`` are kept with their nested lists/dicts
+    capped, and every other non-scalar key (bulk listings) is dropped.
+    Returns ``None`` when ``text`` is not parseable JSON or not a JSON
+    object, so the caller falls back to the flat cut.
+    """
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    out: dict[str, Any] = {}
+    for key, value in parsed.items():
+        if _is_json_scalar(value):
+            out[key] = value
+        elif key in _OBSERVATION_PRESERVE_KEYS:
+            out[key] = _bounded_nested(value, keep)
+    return out
+
+
 def _observation_content(observation: dict[str, Any]) -> str:
-    """Bounded JSON string for the role:tool message content."""
+    """Bounded JSON string for the role:tool message content.
+
+    Oversized observations are first rebuilt structurally (scalar keys and
+    the score/percentage keys survive; bulky nested listings are capped)
+    and only fall back to the blind flat cut when the result still does
+    not fit, so the model keeps seeing ``weighted_score`` even when a
+    handler returns a huge payload.
+    """
     text = _dumps_safe(observation)
-    if len(text) > _OBSERVATION_MAX_CHARS:
-        text = text[:_OBSERVATION_MAX_CHARS] + "...[truncated]"
-    return text
+    if len(text) <= _OBSERVATION_MAX_CHARS:
+        return text
+    for keep in _OBSERVATION_NESTED_KEEP_STEPS:
+        bounded = _structured_truncate(text, keep)
+        if bounded is None:
+            break
+        candidate = _dumps_safe(bounded)
+        if len(candidate) <= _OBSERVATION_MAX_CHARS:
+            return candidate
+    cut = _OBSERVATION_MAX_CHARS - len(_OBSERVATION_TRUNCATED_SUFFIX)
+    return text[:cut] + _OBSERVATION_TRUNCATED_SUFFIX
 
 
 def _assistant_tool_calls_message(

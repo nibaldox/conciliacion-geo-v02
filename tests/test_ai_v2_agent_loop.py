@@ -1123,3 +1123,83 @@ async def test_streamed_tool_call_turn_text_is_not_duplicated():
     assistant = provider.requests[1][2]
     assert assistant["role"] == "assistant"
     assert assistant["content"] == "Reviso el mesh."
+
+
+class TestObservationContent:
+    """Structured truncation of oversized tool observations."""
+
+    @staticmethod
+    def _giant_observation() -> dict[str, Any]:
+        observation: dict[str, Any] = {
+            f"f{index:03d}": index for index in range(200)
+        }
+        observation["weighted_score"] = {
+            "global_score": 65.56,
+            "n_profiles": 120,
+            "n_benches": 120,
+            "weights": {"berm": 60, "angle": 10, "height": 30},
+            "by_section": {f"S-{i:04d}": float(i % 100) for i in range(500)},
+            "definition": "mean of per-section mean bench score",
+        }
+        observation["pct_by_parameter"] = {
+            "height": {
+                "cumple": 10,
+                "no_cumple": 2,
+                "n_evaluable": 12,
+                "pct_cumple": 83.33,
+            },
+            "angle": {
+                "cumple": 8,
+                "no_cumple": 4,
+                "n_evaluable": 12,
+                "pct_cumple": 66.67,
+            },
+            "berm": {
+                "cumple": 9,
+                "no_cumple": 3,
+                "n_evaluable": 12,
+                "pct_cumple": 75.0,
+            },
+        }
+        return observation
+
+    def test_structured_truncation_preserves_score_keys(self):
+        from core.ai_v2.agent.loop import (
+            _OBSERVATION_MAX_CHARS,
+            _observation_content,
+        )
+
+        observation = self._giant_observation()
+        raw = json.dumps(observation, ensure_ascii=False)
+        assert len(raw) > _OBSERVATION_MAX_CHARS
+
+        result = _observation_content(observation)
+        assert len(result) <= _OBSERVATION_MAX_CHARS
+        parsed = json.loads(result)
+        assert parsed["weighted_score"]["global_score"] == 65.56
+        assert parsed["pct_by_parameter"]["height"]["pct_cumple"] == 83.33
+        assert parsed["f199"] == 199
+
+    def test_small_observation_passes_through_untouched(self):
+        from core.ai_v2.agent.loop import _observation_content
+
+        observation = {"weighted_score": {"global_score": 65.56}, "warnings": []}
+        assert _observation_content(observation) == json.dumps(
+            observation, ensure_ascii=False
+        )
+
+    def test_structured_truncate_tolerates_non_parseable_json(self):
+        from core.ai_v2.agent.loop import _structured_truncate
+
+        assert _structured_truncate("not json at all {", 16) is None
+        assert _structured_truncate("[1, 2, 3]", 16) is None
+
+    def test_flat_fallback_when_scalars_alone_exceed_budget(self):
+        from core.ai_v2.agent.loop import (
+            _OBSERVATION_MAX_CHARS,
+            _observation_content,
+        )
+
+        result = _observation_content({"huge": "x" * 10000})
+        assert len(result) <= _OBSERVATION_MAX_CHARS
+        assert result.endswith("...[truncated]")
