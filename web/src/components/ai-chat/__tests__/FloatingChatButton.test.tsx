@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const { mockGet, mockGetSessionId, mockFetch } = vi.hoisted(() => ({
@@ -78,6 +78,44 @@ describe('FloatingChatButton', () => {
     await userEvent.click(screen.getByTestId('ai-chat-close'));
     expect(screen.queryByTestId('ai-chat-panel')).toBeNull();
     expect(screen.getByTestId('ai-chat-button')).toBeInTheDocument();
+    vi.unstubAllEnvs();
+  });
+
+  it('renders the pet mascot inside the launcher button with the aria-label', () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    renderWithProviders(<FloatingChatButton />);
+    const button = screen.getByTestId('ai-chat-button');
+    expect(button.querySelector('[data-testid="ai-chat-pet"]')).not.toBeNull();
+    expect(button).toHaveAttribute('aria-label', 'Abrir asistente de IA');
+    vi.unstubAllEnvs();
+  });
+
+  it('shows the unread badge when streaming starts while closed and clears it once opened', async () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    renderWithProviders(<FloatingChatButton />);
+    expect(screen.queryByTestId('ai-chat-pet-unread')).toBeNull();
+    act(() => {
+      useAIChat.setState({ streaming: true });
+    });
+    expect(screen.getByTestId('ai-chat-pet-unread')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('ai-chat-button'));
+    expect(screen.queryByTestId('ai-chat-pet-unread')).toBeNull();
+    await userEvent.click(screen.getByTestId('ai-chat-close'));
+    expect(screen.queryByTestId('ai-chat-pet-unread')).toBeNull();
+    expect(screen.getByTestId('ai-chat-button')).toBeInTheDocument();
+    vi.unstubAllEnvs();
+  });
+
+  it('shows the unread badge when an agent message arrives while closed', () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    renderWithProviders(<FloatingChatButton />);
+    act(() => {
+      useAIChat.getState().applyAgentEvent({
+        type: 'text',
+        content: 'La conciliación terminó.',
+      });
+    });
+    expect(screen.getByTestId('ai-chat-pet-unread')).toBeInTheDocument();
     vi.unstubAllEnvs();
   });
 
