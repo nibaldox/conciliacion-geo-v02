@@ -133,6 +133,52 @@ class TurnThenHangProvider(BaseProvider):
         return True
 
 
+class DeltaChatProvider(BaseProvider):
+    """Calls ``on_text_delta`` with scripted fragments, then returns.
+
+    Shape of a real streaming provider: each scripted turn pushes its
+    text fragments incrementally while the turn is still running, and
+    the final ``ChatTurn`` carries the full accumulated text.
+    """
+
+    def __init__(
+        self,
+        turns: list[tuple[list[str], ChatTurn]],
+        *,
+        call_deltas: bool = True,
+    ) -> None:
+        self._turns = [(list(deltas), turn) for deltas, turn in turns]
+        self._call_deltas = call_deltas
+        self.seen_on_text_delta: list[bool] = []
+        self.requests: list[list[dict[str, Any]]] = []
+
+    @property
+    def supports_tool_calls(self) -> bool:
+        return True
+
+    async def stream_chat(
+        self, messages: list[dict[str, Any]], **kwargs: Any
+    ) -> ChatTurn:
+        self.requests.append([dict(m) for m in messages])
+        on_text_delta = kwargs.get("on_text_delta")
+        self.seen_on_text_delta.append(on_text_delta is not None)
+        deltas, turn = self._turns.pop(0)
+        if self._call_deltas and on_text_delta is not None:
+            for delta in deltas:
+                on_text_delta(delta)
+        return turn
+
+    async def stream(self, messages, *, model, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("report stream() must not be used by the loop")
+        yield  # noqa: unreachable - makes this an async generator
+
+    async def list_models(self) -> list[str]:
+        return []
+
+    async def health_check(self) -> bool:
+        return True
+
+
 class RecordingPendingStore(PendingRunStore):
     """In-memory fake of the frozen T0 interface."""
 
@@ -978,3 +1024,102 @@ async def test_tool_calls_turn_text_is_neutralized_in_history():
     assistant = provider.requests[1][2]
     assert assistant["role"] == "assistant"
     assert assistant["content"] == "Empieza con el mesh."
+
+
+# ---------------------------------------------------------------------------
+# Streaming: incremental text deltas -> multiple TextEvents, no duplication
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_streamed_deltas_emit_multiple_neutral_text_events():
+    """Deltas stream as several TextEvents; concatenation is the final text.
+
+    The provider pushes voseo fragments word by word: every fragment is
+    neutralized at a safe word boundary (never mid-word), so the emitted
+    concatenation equals the persisted neutral history exactly — with no
+    duplicated tail.
+    """
+    provider = DeltaChatProvider(
+        [(["Hola ", "tenés ", "razón"], ChatTurn(text="Hola tenés razón"))]
+    )
+    sunk: list[list[dict[str, Any]]] = []
+    events = await collect(
+        run_agent_turn(
+            session_id=SESSION,
+            messages=list(BASE_MESSAGES),
+            provider=provider,
+            model="test-model",
+            executor={},
+            pending_store=RecordingPendingStore(),
+            state_provider=StateStub(ToolState()),
+            conversation_sink=sunk.append,
+        )
+    )
+    assert provider.seen_on_text_delta == [True]
+    text_events = [e for e in events if isinstance(e, TextEvent)]
+    assert len(text_events) >= 2
+    assert "".join(e.content for e in text_events) == "Hola tienes razón"
+    assert all("tenés" not in e.content for e in text_events)
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "stop"
+    assert sunk
+    assistant = [m for m in sunk[0] if m["role"] == "assistant"]
+    assert assistant[-1]["content"] == "Hola tienes razón"
+
+
+@pytest.mark.asyncio
+async def test_provider_without_deltas_falls_back_to_one_full_text_event():
+    """A provider that never calls on_text_delta keeps the old behaviour."""
+    provider = DeltaChatProvider(
+        [([], ChatTurn(text="Empezá cargando el mesh design."))],
+        call_deltas=False,
+    )
+    events, _, _, _ = await run_simple(provider, {})
+    assert provider.seen_on_text_delta == [True]
+    text_events = [e for e in events if isinstance(e, TextEvent)]
+    assert [e.content for e in text_events] == [
+        "Empieza cargando el mesh design."
+    ]
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_streamed_tool_call_turn_text_is_not_duplicated():
+    """Text streamed around a tool-call turn never re-emits at the end."""
+    provider = DeltaChatProvider(
+        [
+            (
+                ["Reviso ", "el mesh."],
+                ChatTurn(
+                    text="Reviso el mesh.",
+                    tool_calls=[
+                        tool_call("get_workflow_state", "", call_id="call_1")
+                    ],
+                ),
+            ),
+            (["Listo."], ChatTurn(text="Listo.")),
+        ]
+    )
+    events, provider, _, _ = await run_simple(
+        provider, {"get_workflow_state": RecordingHandler()}
+    )
+    assert provider.seen_on_text_delta == [True, True]
+    text_events = [e for e in events if isinstance(e, TextEvent)]
+    assert [e.content for e in text_events] == [
+        "Reviso ",
+        "el ",
+        "mesh.",
+        "Listo.",
+    ]
+    assert "".join(e.content for e in text_events) == "Reviso el mesh.Listo."
+    assert "Reviso el mesh." not in [e.content for e in text_events]
+    tool_calls = [e for e in events if isinstance(e, ToolCallEvent)]
+    assert len(tool_calls) == 1
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(results) == 1 and results[0].ok is True
+    assert events[-1].finish_reason == "stop"
+    assistant = provider.requests[1][2]
+    assert assistant["role"] == "assistant"
+    assert assistant["content"] == "Reviso el mesh."

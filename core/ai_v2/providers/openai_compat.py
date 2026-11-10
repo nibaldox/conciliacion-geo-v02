@@ -3,6 +3,7 @@ MiniMax, GLM, Grok — anything that exposes an OpenAI-style /v1 endpoint."""
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -132,6 +133,7 @@ class OpenAICompatibleProvider(BaseProvider):
         max_tokens: int = 4096,
         timeout_s: float = 120.0,
         tool_choice: str = "auto",
+        on_text_delta: Callable[[str], None] | None = None,
     ) -> "ChatTurn":
         """Complete one chat turn with tools, accumulating the stream.
 
@@ -144,6 +146,13 @@ class OpenAICompatibleProvider(BaseProvider):
         validity flag — truncated or invalid JSON is surfaced, never
         silently re-serialized (imported lazily to avoid an import
         cycle with ``core.ai_v2.models``).
+
+        ``on_text_delta`` (see
+        :meth:`core.ai_v2.providers.base.BaseProvider.stream_chat`) is
+        invoked immediately with every non-empty text fragment as the
+        stream produces it; the fragment is still accumulated into the
+        returned ``ChatTurn``. A raising consumer is swallowed so a
+        failing callback can never break the turn.
         """
         from core.ai_v2.agent.turn import ChatTurn, ToolCallRequest
         from core.ai_v2.models import AIUsage
@@ -170,6 +179,11 @@ class OpenAICompatibleProvider(BaseProvider):
                 if delta is not None:
                     if delta.content:
                         text_parts.append(delta.content)
+                        if on_text_delta is not None:
+                            try:
+                                on_text_delta(delta.content)
+                            except Exception:
+                                pass
                     for fragment in delta.tool_calls or []:
                         index = int(fragment.index)
                         slot = calls_by_index.setdefault(

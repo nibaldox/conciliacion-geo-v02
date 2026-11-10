@@ -40,6 +40,17 @@ Every tool call of a turn is answered before the next iteration, so a
 multi-tool-call turn always produces one ``role: tool`` message per
 ``tool_call_id``.
 
+Final text is streamed incrementally: each ``stream_chat`` iteration
+forwards every non-empty text fragment through the provider's
+``on_text_delta`` callback into an in-loop queue, and the loop yields
+one ``TextEvent`` per word-boundary segment (voseo-neutralized at safe
+word boundaries, since ``neutralize_spanish`` may change fragment
+lengths). The remaining tail is flushed when the turn completes and NO
+full-text event is emitted again, so the concatenation of all
+``TextEvent`` fragments equals the persisted text exactly. Providers
+that never call the callback keep the previous single full-text
+``TextEvent``.
+
 Resumption (plan sections 4.3/5-T3): ``resume_pending_turn`` atomically
 claims the pending confirmation, revalidates the approved arguments
 (canonical SHA-256) and the session ``ToolState`` fingerprint —
@@ -115,6 +126,13 @@ DEFAULT_MAX_ITERATIONS = 8
 DEFAULT_TIMEOUT_S = 120.0
 MAX_TURN_CONFIRMATIONS = 2
 """Guardrail 4: max REPLACE/EXPENSIVE_REPLACE pauses per user turn."""
+
+_STREAM_POLL_S = 0.05
+"""Max idle wait per queue poll while a provider turn is streaming.
+
+Short enough that turn completion (and the per-iteration timeout
+deadline) is noticed promptly, long enough to avoid busy-waiting.
+"""
 
 _OBSERVATION_MAX_CHARS = 4000
 _SUMMARY_MAX_CHARS = 200
@@ -386,18 +404,69 @@ async def _drive_iterations(
     start_ns = time.perf_counter_ns()
 
     for _iteration in range(max_iterations):
-        try:
-            turn = await asyncio.wait_for(
-                provider.stream_chat(
-                    conversation,
-                    model=model,
-                    tools=resolved_tools,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    timeout_s=timeout_s,
-                ),
-                timeout=timeout_s,
+        queue: asyncio.Queue[str] = asyncio.Queue()
+
+        def _push_delta(chunk: str) -> None:
+            queue.put_nowait(chunk)
+
+        turn_task = asyncio.create_task(
+            provider.stream_chat(
+                conversation,
+                model=model,
+                tools=resolved_tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout_s=timeout_s,
+                on_text_delta=_push_delta,
             )
+        )
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        buffer = ""
+        streamed_text = False
+        timed_out = False
+        try:
+            while not (turn_task.done() and queue.empty()):
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                try:
+                    chunk = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=min(_STREAM_POLL_S, remaining),
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                buffer += chunk
+                cut = max(
+                    buffer.rfind(" "),
+                    buffer.rfind("\n"),
+                    buffer.rfind("\t"),
+                ) + 1
+                if cut > 0:
+                    segment = buffer[:cut]
+                    buffer = buffer[cut:]
+                    normalized = neutralize_spanish(segment)
+                    if normalized:
+                        streamed_text = True
+                        yield TextEvent(content=normalized)
+        finally:
+            if not turn_task.done():
+                turn_task.cancel()
+                try:
+                    await turn_task
+                except BaseException:
+                    pass
+
+        if timed_out:
+            yield ErrorEvent(content=MSG_PROVIDER_TIMEOUT)
+            yield DoneEvent(
+                finish_reason="error",
+                usage=_with_duration(usage_total, _elapsed_ms(start_ns)),
+            )
+            return
+        try:
+            turn = await turn_task
         except asyncio.TimeoutError:
             yield ErrorEvent(content=MSG_PROVIDER_TIMEOUT)
             yield DoneEvent(
@@ -413,6 +482,12 @@ async def _drive_iterations(
             )
             return
 
+        if buffer:
+            tail = neutralize_spanish(buffer)
+            if tail:
+                streamed_text = True
+                yield TextEvent(content=tail)
+
         usage_total = _accumulate_usage(usage_total, turn.usage)
 
         if not turn.tool_calls:
@@ -421,7 +496,8 @@ async def _drive_iterations(
                 conversation.append(
                     {"role": "assistant", "content": final_text}
                 )
-            yield TextEvent(content=final_text)
+            if not streamed_text and final_text:
+                yield TextEvent(content=final_text)
             yield DoneEvent(
                 finish_reason="stop",
                 usage=_with_duration(usage_total, _elapsed_ms(start_ns)),
