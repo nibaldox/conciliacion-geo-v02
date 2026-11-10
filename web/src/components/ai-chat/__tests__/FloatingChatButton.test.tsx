@@ -74,10 +74,41 @@ describe('FloatingChatButton', () => {
     expect(button).toHaveAttribute('aria-label', 'Abrir asistente de IA');
     await userEvent.click(button);
     expect(screen.getByTestId('ai-chat-panel')).toBeInTheDocument();
-    expect(screen.queryByTestId('ai-chat-button')).toBeNull();
+    expect(button).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-label', 'Cerrar asistente');
     await userEvent.click(screen.getByTestId('ai-chat-close'));
     expect(screen.queryByTestId('ai-chat-panel')).toBeNull();
     expect(screen.getByTestId('ai-chat-button')).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-label', 'Abrir asistente de IA');
+    vi.unstubAllEnvs();
+  });
+
+  it('morphs into the close control: X visible only when open, pet only when closed', async () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    mockGet.mockResolvedValue({
+      data: {
+        providers: ['lmstudio'],
+        supports_tool_calls: { lmstudio: true },
+        chat_enabled: true,
+        chat_provider: 'lmstudio',
+        chat_local_only: true,
+        chat_model: 'qwen3-32b',
+      },
+    });
+    renderWithProviders(<FloatingChatButton />);
+    const button = screen.getByTestId('ai-chat-button');
+    expect(screen.getByTestId('ai-chat-pet-layer')).not.toHaveClass('opacity-0');
+    expect(screen.getByTestId('ai-chat-close-icon')).toHaveClass('opacity-0');
+
+    await userEvent.click(button);
+    expect(screen.getByTestId('ai-chat-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-chat-close-icon')).not.toHaveClass('opacity-0');
+    expect(screen.getByTestId('ai-chat-pet-layer')).toHaveClass('opacity-0');
+
+    await userEvent.click(button);
+    expect(screen.queryByTestId('ai-chat-panel')).toBeNull();
+    expect(screen.getByTestId('ai-chat-close-icon')).toHaveClass('opacity-0');
+    expect(screen.getByTestId('ai-chat-pet-layer')).not.toHaveClass('opacity-0');
     vi.unstubAllEnvs();
   });
 

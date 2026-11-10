@@ -39,8 +39,82 @@ beforeEach(() => {
   useAIChat.getState().reset();
 });
 
+describe('ToolCallCard — collapsed by default', () => {
+  const STATE_OK_MESSAGE = {
+    kind: 'tool' as const,
+    id: 't_c',
+    invocationId: 'inv_state',
+    name: 'get_workflow_state',
+    status: 'ok' as const,
+    summary: '{"n_sections": 3}',
+    error: null,
+  };
+
+  it('hides the summary behind the toggle until it is expanded', async () => {
+    renderWithProviders(<ToolCallCard message={STATE_OK_MESSAGE} />);
+    const toggle = screen.getByTestId('ai-chat-tool-toggle');
+    const details = screen.getByTestId('ai-chat-tool-details');
+    expect(details).toHaveAttribute('hidden');
+    expect(details).not.toBeVisible();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-controls', details.id);
+
+    await userEvent.click(toggle);
+    expect(details).not.toHaveAttribute('hidden');
+    expect(details).toBeVisible();
+    expect(screen.getByText('{"n_sections": 3}')).toBeVisible();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+    await userEvent.click(toggle);
+    expect(details).toHaveAttribute('hidden');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('shows the running state collapsed with spinner text and keeps aria-expanded', () => {
+    renderWithProviders(
+      <ToolCallCard
+        message={{
+          kind: 'tool',
+          id: 't_r',
+          invocationId: 'inv_run',
+          name: 'run_reconciliation',
+          status: 'running',
+          summary: '',
+          error: null,
+        }}
+      />,
+    );
+    const toggle = screen.getByTestId('ai-chat-tool-toggle');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveTextContent('ejecutando «run_reconciliation»…');
+    expect(screen.getByTestId('ai-chat-tool-details')).toHaveAttribute('hidden');
+  });
+
+  it('shows the Download button only once the card is expanded', async () => {
+    renderWithProviders(
+      <ToolCallCard
+        message={{
+          kind: 'tool',
+          id: 't_d',
+          invocationId: 'inv_export',
+          name: 'export_report',
+          status: 'ok',
+          summary: EXPORT_OK_SUMMARY,
+          error: null,
+        }}
+      />,
+    );
+    expect(screen.getByTestId('ai-chat-tool-download')).not.toBeVisible();
+    await userEvent.click(screen.getByTestId('ai-chat-tool-toggle'));
+    expect(screen.getByTestId('ai-chat-tool-download')).toBeVisible();
+    expect(screen.getByTestId('ai-chat-tool-download')).toHaveTextContent(
+      'Descargar archivo',
+    );
+  });
+});
+
 describe('ToolCallCard — export_report download action', () => {
-  it('renders the Download button under an ok export result', () => {
+  it('renders the Download button under an ok export result', async () => {
     renderWithProviders(
       <ToolCallCard
         message={{
@@ -54,6 +128,7 @@ describe('ToolCallCard — export_report download action', () => {
         }}
       />,
     );
+    await userEvent.click(screen.getByTestId('ai-chat-tool-toggle'));
     expect(screen.getByTestId('ai-chat-tool-download')).toHaveTextContent(
       'Descargar archivo',
     );
@@ -120,6 +195,7 @@ describe('ToolCallCard — export_report download action', () => {
           }}
         />,
       );
+      await userEvent.click(screen.getByTestId('ai-chat-tool-toggle'));
       await userEvent.click(screen.getByTestId('ai-chat-tool-download'));
       await waitFor(() => {
         expect(createObjectURL).toHaveBeenCalledTimes(1);
@@ -161,6 +237,7 @@ describe('ToolCallCard — export_report download action', () => {
         }}
       />,
     );
+    await userEvent.click(screen.getByTestId('ai-chat-tool-toggle'));
     await userEvent.click(screen.getByTestId('ai-chat-tool-download'));
     await waitFor(() => {
       expect(useAIChat.getState().notice?.key).toBe(

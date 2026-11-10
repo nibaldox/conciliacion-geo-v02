@@ -47,22 +47,38 @@ function ExportDownloadButton({ message }: { message: ToolCardMessage }) {
 }
 
 /**
- * One agent tool step: "ejecutando…" while in flight, then the result
- * summary (ok) or the error (failure). Content is ALWAYS plain text —
- * tool summaries come from the server and are never rendered as HTML
- * or markdown. An ok export_report result additionally renders a
- * Download action that fetches the export endpoint with the session
- * headers and saves the blob under the server-provided filename.
+ * One agent tool step: a collapsed, dimmed one-line card — spinner +
+ * "ejecutando «name»…" while in flight, then tool name + status. The
+ * result summary (ok) or the error (failure) and the export download
+ * action live inside a details panel collapsed by default (hidden
+ * attribute). Content is ALWAYS plain text — tool summaries come from
+ * the server and are never rendered as HTML or markdown.
  */
 export function ToolCallCard({ message }: { message: ToolCardMessage }) {
   const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const detailsId = `ai-chat-tool-details-${message.id}`;
   return (
     <div
       data-slot="ai-chat-tool-card"
       data-status={message.status}
-      className="rounded-lg border border-border bg-surface px-3 py-2 text-xs"
+      className="rounded-lg border border-border/60 bg-surface-muted px-2.5 py-1.5 text-[11px] text-text-secondary"
     >
-      <div className="flex items-center gap-2">
+      <button
+        type="button"
+        data-testid="ai-chat-tool-toggle"
+        aria-expanded={expanded}
+        aria-controls={detailsId}
+        title={t(expanded ? 'aiChat.tool.collapse' : 'aiChat.tool.expand')}
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 rounded text-left font-medium text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <span
+          aria-hidden="true"
+          className="w-3 shrink-0 text-text-muted"
+        >
+          {expanded ? '▾' : '▸'}
+        </span>
         {message.status === 'running' ? (
           <Spinner size="sm" />
         ) : (
@@ -75,31 +91,35 @@ export function ToolCallCard({ message }: { message: ToolCardMessage }) {
             }`}
           />
         )}
-        <span className="font-medium text-text-primary">
+        <span className="min-w-0 flex-1 truncate">
           {message.status === 'running'
             ? t('aiChat.tool.running', { name: message.name })
             : message.name}
         </span>
         {message.status === 'ok' && (
-          <span className="text-text-muted">{t('aiChat.tool.status_ok')}</span>
+          <span className="shrink-0 text-text-muted">
+            {t('aiChat.tool.status_ok')}
+          </span>
         )}
         {message.status === 'error' && (
-          <span className="text-[var(--status-nok-text)]">
+          <span className="shrink-0 text-[var(--status-nok-text)]">
             {t('aiChat.tool.status_error')}
           </span>
         )}
+      </button>
+      <div id={detailsId} data-testid="ai-chat-tool-details" hidden={!expanded}>
+        {message.summary && (
+          <p className="mt-1 whitespace-pre-wrap break-words text-text-secondary">
+            {message.summary}
+          </p>
+        )}
+        {message.status === 'error' && message.error && (
+          <p className="mt-1 whitespace-pre-wrap break-words text-[var(--status-nok-text)]">
+            {message.error}
+          </p>
+        )}
+        {message.status === 'ok' && <ExportDownloadButton message={message} />}
       </div>
-      {message.status !== 'running' && message.summary && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-text-secondary">
-          {message.summary}
-        </p>
-      )}
-      {message.status === 'error' && message.error && (
-        <p className="mt-1 whitespace-pre-wrap break-words text-[var(--status-nok-text)]">
-          {message.error}
-        </p>
-      )}
-      {message.status === 'ok' && <ExportDownloadButton message={message} />}
     </div>
   );
 }

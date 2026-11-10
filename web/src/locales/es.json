@@ -1780,6 +1780,8 @@
      "status_ok": "Completado",
      "status_error": "Error",
      "denied_note": "Operación cancelada por el usuario; no se modificó nada.",
+     "expand": "Ver detalle",
+     "collapse": "Ocultar detalle",
      "download": "Descargar archivo",
      "downloading": "Descargando…"
     },

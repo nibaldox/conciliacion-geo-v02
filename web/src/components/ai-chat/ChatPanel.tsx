@@ -105,6 +105,12 @@ function NoticeBanner({ notice }: { notice: ChatNotice }) {
 
 interface ChatPanelProps {
   onClose: () => void;
+  /**
+   * Desktop-only extra gap subtracted from the stored rect height so the
+   * panel's bottom edge clears the floating launcher button (which stays
+   * fixed above it at z-[95]). Ignored on mobile (bottom sheet).
+   */
+  bottomOffsetPx?: number;
 }
 
 const RESIZE_HANDLES: ReadonlyArray<{
@@ -131,7 +137,7 @@ const RESIZE_HANDLES: ReadonlyArray<{
  * full-width bottom sheet. Escape closes the panel and focus is
  * restored to the previously focused element.
  */
-export function ChatPanel({ onClose }: ChatPanelProps) {
+export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
   const { t } = useTranslation();
   const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
@@ -200,6 +206,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
     void clearConversation();
   };
 
+  const bottomGap = Math.max(0, Math.round(bottomOffsetPx));
   const panelStyle: CSSProperties = {
     paddingBottom: 'env(safe-area-inset-bottom)',
     ...(resizable.isDesktop
@@ -208,8 +215,8 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
           left: resizable.rect.left,
           top: resizable.rect.top,
           width: resizable.rect.width,
-          height: resizable.rect.height,
-          maxHeight: resizable.rect.height,
+          height: resizable.rect.height - bottomGap,
+          maxHeight: resizable.rect.height - bottomGap,
         }
       : {}),
   };
@@ -285,7 +292,7 @@ export function ChatPanel({ onClose }: ChatPanelProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-2">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
         {notice && <NoticeBanner notice={notice} />}
         {!providerStateLoaded && (
           <div

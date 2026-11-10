@@ -236,7 +236,7 @@ export function TopoUploadZone() {
     upload.isPending || inspectDxf.isPending || confirmDxf.isPending;
 
   return (
-    <div data-slot="ai-chat-upload-zone" className="border-t border-border pt-2">
+    <div data-slot="ai-chat-upload-zone" className="shrink-0 border-t border-border pt-2">
       <div className="flex items-center gap-2">
         <button
           type="button"
