@@ -59,6 +59,7 @@ jobs:
           # zero observability code by default.
           VITE_SENTRY_DSN: ${{ vars.VITE_SENTRY_DSN || secrets.VITE_SENTRY_DSN || '' }}
           VITE_ANALYTICS_URL: ${{ vars.VITE_ANALYTICS_URL || secrets.VITE_ANALYTICS_URL || '' }}
+          VITE_AI_CHAT: ${{ vars.VITE_AI_CHAT || secrets.VITE_AI_CHAT || '' }}
           VITE_RELEASE: ${{ github.sha }}
         run: npm run build
 

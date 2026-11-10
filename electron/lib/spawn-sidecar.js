@@ -37,7 +37,14 @@ function spawnSidecar({ resourcesPath, logFile, env = {} } = {}) {
   const proc = spawn(sidecar, [], {
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
-    env: { MALLOC_ARENA_MAX: '2', ...process.env, ...env },
+    env: {
+      MALLOC_ARENA_MAX: '2',
+      ...process.env,
+      ...env,
+      CONCILIACION_AI_CHAT_ENABLED: 'true',
+      CONCILIACION_AI_LOCAL_ONLY: '1',
+      CONCILIACION_WORKERS: '1',
+    },
   });
   if (logFile) {
     const out = fs.createWriteStream(logFile, { flags: 'a' });

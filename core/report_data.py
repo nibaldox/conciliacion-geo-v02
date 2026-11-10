@@ -330,6 +330,42 @@ def _web_profile_scores(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     return {section: sum(scores) / len(scores) for section, scores in grouped.items()}
 
 
+def compute_dashboard_weighted_score(
+    rows: Iterable[Mapping[str, Any]],
+) -> dict:
+    """Dashboard weighted score over raw comparison rows (dicts like ``db.get_results``).
+
+    Exact port of ``Dashboard.tsx::computeGlobalScore``: per section, the
+    mean of the MATCH bench scores (``_web_bench_score``: berma 60 +
+    ángulo 10 + altura 30 when CUMPLE, or the persisted ``bench_score``);
+    then a simple mean across sections. This is the number the user sees
+    as "Score ponderado global" in the UI, and is a different figure from
+    the Logro Diseño score (``build_design_achievement_summary``).
+    """
+    materialized = [row for row in (rows or ()) if isinstance(row, Mapping)]
+    scores = _web_profile_scores(materialized)
+    global_score: Optional[float] = None
+    if scores:
+        global_score = round(sum(scores.values()) / len(scores), 2)
+    by_section = {section: round(score, 2) for section, score in sorted(scores.items())}
+    n_benches = sum(
+        1
+        for row in materialized
+        if row.get("type") == "MATCH" and _web_bench_score(row) is not None
+    )
+    return {
+        "global_score": global_score,
+        "n_profiles": len(scores),
+        "n_benches": n_benches,
+        "weights": dict(_WEB_SCORE_WEIGHTS),
+        "by_section": by_section,
+        "definition": (
+            "mean of per-section mean bench score; bench score = "
+            "berm 60 + angle 10 + height 30 when CUMPLE"
+        ),
+    }
+
+
 def _profile_statuses(
     rows: Sequence[Mapping[str, Any]], by_sector: bool = False
 ) -> dict[Any, str]:

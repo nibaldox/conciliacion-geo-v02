@@ -25,6 +25,7 @@ vi.mock('../../../api/client', () => ({
 }));
 
 import { AIReporter } from '../AIReporter';
+import { filterReportProviders } from '../useAIConfig';
 import { useSession } from '../../../stores/session';
 
 i18n.use(initReactI18next).init({
@@ -93,6 +94,8 @@ i18n.use(initReactI18next).init({
             cached_badge: 'served from cache',
             estimated_badge: 'estimado',
           },
+          local_only_notice:
+            'Política corporativa: IA solo local (LM Studio).',
         },
       },
     },
@@ -164,7 +167,12 @@ describe('AIReporter', () => {
           },
         };
       if (url === '/ai/providers')
-        return { data: { providers: ['openai', 'ollama'] } };
+        return {
+          data: {
+            providers: ['openai', 'ollama'],
+            chat_local_only: false,
+          },
+        };
       if (url === '/process/results')
         return { data: options?.results ?? sampleComparison() };
       if (url === '/sections') return { data: [] };
@@ -448,5 +456,77 @@ describe('AIReporter', () => {
     const tps = await screen.findByTestId('ai-reporter-tps');
     expect(tps).toBeInTheDocument();
     expect(tps.textContent).toMatch(/tok\/s/);
+  });
+
+  it('shows the local-only notice and lmstudio-only providers when the flag is undefined', async () => {
+    mockGet.mockImplementation(async (url: string) => {
+      if (url === '/ai/health')
+        return { data: { status: 'ok', version: '2.0.0', providers: [] } };
+      if (url === '/ai/providers')
+        return { data: { providers: ['openai', 'ollama', 'lmstudio'] } };
+      if (url === '/process/results')
+        return { data: sampleComparison() };
+      if (url === '/sections') return { data: [] };
+      return { data: {} };
+    });
+
+    renderWith(<AIReporter />, qc);
+
+    const form = await screen.findByTestId('ai-reporter-form');
+    expect(form).toBeInTheDocument();
+    expect(
+      screen.getByTestId('ai-reporter-local-only-notice'),
+    ).toHaveTextContent('IA solo local');
+    const select = screen.getByRole('combobox');
+    const options = Array.from(select.querySelectorAll('option')).map(
+      (option) => option.value,
+    );
+    expect(options).toEqual(['lmstudio']);
+    await waitFor(() => {
+      expect(mockPost).not.toHaveBeenCalled();
+    });
+  });
+
+  it('hides the local-only notice and offers all providers when the flag is explicitly false', async () => {
+    setupHealthy();
+
+    renderWith(<AIReporter />, qc);
+
+    await screen.findByTestId('ai-reporter-form');
+    expect(
+      screen.queryByTestId('ai-reporter-local-only-notice'),
+    ).not.toBeInTheDocument();
+    const select = screen.getByRole('combobox');
+    const options = Array.from(select.querySelectorAll('option')).map(
+      (option) => option.value,
+    );
+    expect(options).toEqual(['openai', 'ollama']);
+  });
+});
+
+describe('filterReportProviders — conservative local-only fallback', () => {
+  it('filters to lmstudio-only when the flag is undefined (loading/error)', () => {
+    expect(
+      filterReportProviders(['openai', 'ollama', 'lmstudio'], undefined),
+    ).toEqual(['lmstudio']);
+  });
+
+  it('filters to lmstudio-only when the flag is explicitly true', () => {
+    expect(
+      filterReportProviders(['openai', 'ollama', 'lmstudio'], true),
+    ).toEqual(['lmstudio']);
+  });
+
+  it('passes the list through unchanged ONLY when the flag is explicitly false', () => {
+    expect(
+      filterReportProviders(['openai', 'ollama', 'lmstudio'], false),
+    ).toEqual(['openai', 'ollama', 'lmstudio']);
+  });
+
+  it('keeps undefined providers untouched and returns empty when lmstudio is absent', () => {
+    expect(filterReportProviders(undefined, undefined)).toBeUndefined();
+    expect(filterReportProviders(undefined, true)).toBeUndefined();
+    expect(filterReportProviders(undefined, false)).toBeUndefined();
+    expect(filterReportProviders(['openai'], undefined)).toEqual([]);
   });
 });

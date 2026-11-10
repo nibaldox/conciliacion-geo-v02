@@ -12,9 +12,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+import api.database as db
 from api.database import init_db, cleanup_old_sessions, open_sentinel, close_sentinel
 from api import dxf_uploads
 from api._async_db import run_db
+from api.ai_agent_conversations import CONVERSATION_TTL_HOURS
 from api.middleware import install_health_endpoints, install_middleware
 from api.middleware_auth import install_api_key_auth
 from api.middleware_ratelimit import install_rate_limiter
@@ -22,6 +24,9 @@ from api.routers import ai, blast, mapping, meshes, sections, process, export, s
 from core.config import DEFAULTS, DEPLOY
 
 logger = logging.getLogger(__name__)
+
+AI_CONVERSATION_CLEANUP_INTERVAL_S = 6 * 60 * 60
+"""Period between background purges of expired AI conversations (6 hours)."""
 
 # ── Logging setup (plain text locally, JSON in production) ────────────
 logging.basicConfig(
@@ -75,29 +80,58 @@ else:
 # Lifespan: init DB on startup, cleanup on shutdown
 # ---------------------------------------------------------------------------
 
+async def cleanup_pending_imports(stop: asyncio.Event):
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=60)
+        except TimeoutError:
+            pass
+        if stop.is_set():
+            break
+        try:
+            await run_db(dxf_uploads.cleanup_expired)
+        except Exception:
+            logger.exception("Pending-import cleanup failed; continuing")
+
+
+async def cleanup_ai_conversations_periodic(stop: asyncio.Event):
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(
+                stop.wait(), timeout=AI_CONVERSATION_CLEANUP_INTERVAL_S
+            )
+        except TimeoutError:
+            pass
+        if stop.is_set():
+            break
+        try:
+            await run_db(db.delete_old_ai_conversations, CONVERSATION_TTL_HOURS)
+        except Exception:
+            logger.exception("AI conversation purge failed; continuing")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     stop_cleanup = asyncio.Event()
     cleanup_task = None
-
-    async def cleanup_pending_imports():
-        while not stop_cleanup.is_set():
-            await run_db(dxf_uploads.cleanup_expired)
-            try:
-                await asyncio.wait_for(stop_cleanup.wait(), timeout=60)
-            except TimeoutError:
-                pass
+    ai_conversations_task = None
 
     try:
         open_sentinel()
-        cleanup_task = asyncio.create_task(cleanup_pending_imports())
+        await run_db(db.delete_old_ai_conversations, CONVERSATION_TTL_HOURS)
+        cleanup_task = asyncio.create_task(cleanup_pending_imports(stop_cleanup))
+        ai_conversations_task = asyncio.create_task(
+            cleanup_ai_conversations_periodic(stop_cleanup)
+        )
         yield
     finally:
         try:
             stop_cleanup.set()
             if cleanup_task is not None:
                 await cleanup_task
+            if ai_conversations_task is not None:
+                await ai_conversations_task
             await run_db(dxf_uploads.cleanup_all)
             await run_db(cleanup_old_sessions)
         finally:
@@ -203,6 +237,7 @@ app.add_middleware(
     ],
     expose_headers=[
         "X-Session-ID",
+        "X-Conversation-Id",
         "Content-Disposition",
         "X-Export-Filters-Applied",
     ],

@@ -156,6 +156,40 @@ export function pickFirstAvailableProvider(
 }
 
 /**
+ * Corporate local-only policy for REPORTS (mirrors the chat policy).
+ *
+ * When the backend reports ``chat_local_only`` (CONCILIACION_AI_LOCAL_ONLY
+ * active), every non-LM Studio provider would be rejected with 400 — so
+ * the selector must not offer unusable options at all. Conservative by
+ * default: an UNDEFINED flag (providers query still loading or failed,
+ * or an older payload without the key) is treated as local-only too —
+ * the production default IS local-only, so only an explicit ``false``
+ * passes the list through unchanged. Whenever the filter is active the
+ * result is ``lmstudio``-only (or empty when LM Studio is absent).
+ */
+export function filterReportProviders(
+  providers: string[] | undefined,
+  chatLocalOnly: boolean | undefined,
+): string[] | undefined {
+  if (!providers) return providers;
+  if (chatLocalOnly !== false) {
+    return providers.filter((provider) => provider === 'lmstudio');
+  }
+  return providers;
+}
+
+/**
+ * True when the report provider selector is restricted by the corporate
+ * local-only policy: the flag is undefined (loading/error) or true.
+ * Drives the AIReporter notice so the restriction is ALWAYS explained.
+ */
+export function isLocalOnlyFilterActive(
+  chatLocalOnly: boolean | undefined,
+): boolean {
+  return chatLocalOnly !== false;
+}
+
+/**
  * Build the set of distinct filter options from a list of comparison rows.
  * Pure helper, exported for reuse and easy testing.
  */

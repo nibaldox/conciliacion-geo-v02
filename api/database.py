@@ -154,6 +154,17 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_blast_simulations_session
             ON blast_simulations(session_id);
+
+        CREATE TABLE IF NOT EXISTS ai_conversations (
+            conversation_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            messages TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_conversations_session
+            ON ai_conversations(session_id);
     """)
     mesh_columns = {row["name"] for row in conn.execute("PRAGMA table_info(meshes)")}
     if "import_options" not in mesh_columns:
@@ -628,6 +639,27 @@ def get_process_status(session_id: str) -> Dict:
     }
 
 
+def try_begin_process(session_id: str) -> bool:
+    """Atomically claim the session for a new pipeline run.
+
+    Performs the conditional transition to ``'running'`` in a single
+    UPDATE: the row only matches when the session is not currently busy
+    (``process_status`` NULL on legacy rows, or any non-busy value), so
+    exactly one of two concurrent callers wins and a check-then-run race
+    cannot launch the pipeline twice.
+    """
+    conn = get_connection()
+    cursor = conn.execute(
+        "UPDATE sessions SET process_status = 'running', updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ? AND (process_status IS NULL OR process_status NOT IN ('running', 'processing'))",
+        (session_id,),
+    )
+    claimed = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return claimed
+
+
 # --- Results operations ---
 
 
@@ -841,3 +873,98 @@ def list_blast_simulations(session_id: str) -> List[Dict[str, Any]]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# --- AI agent conversations (T4) ---
+
+
+def save_ai_conversation(
+    conversation_id: str, session_id: str, messages: List[Dict[str, Any]]
+) -> None:
+    """Insert or replace the JSON message list of one conversation.
+
+    The upsert only ever mutates a row already bound to ``session_id``:
+    the conflict branch matches on the stored session so a caller can
+    never move a conversation across sessions.
+    """
+    conn = get_connection()
+    try:
+        conn.execute(
+            """
+            INSERT INTO ai_conversations
+                (conversation_id, session_id, messages, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(conversation_id) DO UPDATE SET
+                messages = excluded.messages,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE ai_conversations.session_id = excluded.session_id
+            """,
+            (conversation_id, session_id, json.dumps(messages, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_ai_conversation(
+    conversation_id: str, session_id: str
+) -> Optional[List[Dict[str, Any]]]:
+    """Return the message list of a conversation owned by this session.
+
+    Unknown ids, foreign sessions and corrupt payloads are
+    indistinguishable: all return ``None`` so callers treat them as
+    NOT FOUND without revealing whether the conversation exists.
+    """
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT messages FROM ai_conversations "
+            "WHERE conversation_id = ? AND session_id = ?",
+            (conversation_id, session_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    try:
+        parsed = json.loads(row["messages"])
+    except ValueError:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    return [m for m in parsed if isinstance(m, dict)]
+
+
+def delete_ai_conversation(conversation_id: str, session_id: str) -> bool:
+    """Delete one conversation owned by ``session_id``; True iff removed.
+
+    Unknown ids and foreign sessions are indistinguishable: both delete
+    nothing and return ``False``, so callers can answer ``{"deleted":
+    false}`` without revealing whether the conversation exists.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM ai_conversations "
+            "WHERE conversation_id = ? AND session_id = ?",
+            (conversation_id, session_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_old_ai_conversations(max_age_hours: int = 24) -> int:
+    """Delete conversations whose ``updated_at`` is older than the TTL."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM ai_conversations WHERE updated_at < ?", (cutoff_str,)
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()

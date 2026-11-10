@@ -8,7 +8,7 @@ import { useAIReport, buildAIGeneratePayload, computeTps, estimateCost } from '.
 import { AIConfigForm } from './AIConfigForm';
 import { AIResultPanel } from './AIResultPanel';
 import { AIStatusCard, AIInfoCard } from './AIStatusCard';
-import { useAIConfig, type AIErrorState } from './useAIConfig';
+import { useAIConfig, filterReportProviders, isLocalOnlyFilterActive, type AIErrorState } from './useAIConfig';
 
 const HEALTH_REFETCH_MS = 30_000;
 
@@ -23,6 +23,7 @@ interface AIHealthResponse {
 
 interface AIProvidersResponse {
   providers?: string[];
+  chat_local_only?: boolean;
 }
 
 export type AIHealthState = 'pending' | 'ok' | 'unavailable';
@@ -61,6 +62,13 @@ export function AIReporter() {
       : 'ok';
 
   const providersQuery = useAIProviders(healthState === 'ok');
+  const chatLocalOnly = providersQuery.data?.chat_local_only;
+  const localOnlyFilterActive = isLocalOnlyFilterActive(chatLocalOnly);
+  const selectableProviders = useMemo(
+    () =>
+      filterReportProviders(providersQuery.data?.providers, chatLocalOnly),
+    [providersQuery.data?.providers, chatLocalOnly],
+  );
   const resultsQuery = useResults();
   const sectionsQuery = useSections();
   const hasResults = !!resultsQuery.data && resultsQuery.data.length > 0;
@@ -70,13 +78,13 @@ export function AIReporter() {
 
   // Auto-pick first available provider once providers load.
   useEffect(() => {
-    if (!cfg.provider && providersQuery.data?.providers?.length) {
+    if (!cfg.provider && selectableProviders?.length) {
       cfgDispatch({
         type: 'SET_PROVIDER',
-        value: providersQuery.data.providers[0],
+        value: selectableProviders[0],
       });
     }
-  }, [providersQuery.data, cfg.provider, cfgDispatch]);
+  }, [selectableProviders, cfg.provider, cfgDispatch]);
 
   const buildPayload = () =>
     buildAIGeneratePayload({
@@ -141,6 +149,15 @@ export function AIReporter() {
         />
       )}
 
+      {localOnlyFilterActive && (
+        <p
+          data-testid="ai-reporter-local-only-notice"
+          className="rounded-lg border border-border px-3 py-2 text-xs text-text-secondary"
+        >
+          {t('ai_reporter.local_only_notice')}
+        </p>
+      )}
+
       {showEmptyState && (
         <AIInfoCard
           testId="ai-reporter-empty"
@@ -153,7 +170,7 @@ export function AIReporter() {
         <AIConfigForm
           state={cfg}
           dispatch={cfgDispatch}
-          providers={providersQuery.data?.providers}
+          providers={selectableProviders}
           results={resultsQuery.data}
           filters={filters}
           onToggleFilter={toggleFilter}

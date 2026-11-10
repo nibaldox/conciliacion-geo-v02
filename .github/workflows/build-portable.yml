@@ -62,6 +62,7 @@ jobs:
           # asset hashes, which breaks full-page reloads (e.g. the
           # "Nueva sesión" button) and leaves the UI empty.
           VITE_PWA: "false"
+          VITE_AI_CHAT: "true"
 
       - name: Build Python sidecar
         run: |

@@ -1,0 +1,840 @@
+"""Read-tool handlers for the AI agent (plan sections 4.1, 5.3 and 8-T1).
+
+Each handler implements exactly one READ tool of
+``core.ai_v2.agent.catalog`` over ``api.database`` and the router-internal
+computation helpers of ``api.routers.process``. No self-HTTP, no writes:
+every handler is strictly read-only against SQLite.
+
+Conventions shared by all handlers:
+
+- ``session_id`` is supplied by the caller (middleware context); it is
+  never read from the model arguments.
+- Return values are small JSON-safe dicts with stable keys: SQL counts,
+  per-row status tallies and compact per-item summaries. Meshes, blobs,
+  point arrays and full comparison rows never leave the database.
+- Unbounded lists are capped (worst entries first) with explicit
+  truncation flags so output size stays bounded on real sessions.
+- Not-found lookups return ``{"found": False, ...}`` instead of raising,
+  so the agent loop can surface a readable tool result.
+
+The ``api.routers.process`` computation helpers are imported lazily
+inside the handlers that use them: a module-level import would create a
+collection cycle (``api.routers`` imports ``ai`` at package init, and
+``ai.py`` imports this module back).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import sqlite3
+from collections import Counter
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar
+
+import api.database as db
+from fastapi import HTTPException
+from core.ai_v2.agent.catalog import TOOL_CATALOG
+from core.ai_v2.agent.models import (
+    AchievementFilterArgs,
+    MeshIdArgs,
+    NoArgs,
+    ResultQueryArgs,
+    SectionIdArgs,
+    ToolRisk,
+)
+from core.compliance_status import (
+    STATUS_CUMPLE,
+    STATUS_FUERA,
+    STATUS_NO_CUMPLE,
+    STATUS_RAMPA_OK,
+)
+from core.report_data import compute_dashboard_weighted_score
+
+Handler = Callable[[str, Any], Awaitable[Dict[str, Any]]]
+
+_MAX_SECTION_ENTRIES = 30
+_MAX_LIST_ENTRIES = 50
+_MAX_PAYLOAD_BYTES = 4096
+_NO_SCOREABLE_BENCHES_WARNING = "no hay bancos MATCH puntuables con los filtros aplicados"
+
+_UNMEASURED_KEY = "sin_medir"
+
+_STATUS_FIELDS: Tuple[str, ...] = (
+    "section_status",
+    "height_status",
+    "angle_status",
+    "berm_status",
+)
+_GROUP_FIELDS: Tuple[str, ...] = ("sector", "type")
+_ALL_FIELDS: Tuple[str, ...] = _STATUS_FIELDS + _GROUP_FIELDS
+
+_STATUS_RANK: Dict[str, int] = {
+    STATUS_NO_CUMPLE: 3,
+    STATUS_FUERA: 2,
+    STATUS_CUMPLE: 1,
+    STATUS_RAMPA_OK: 1,
+}
+
+
+def _status_rank(status: Any) -> int:
+    """Severity rank used to order sections worst-first."""
+    if not isinstance(status, str):
+        return 0
+    return _STATUS_RANK.get(status, 0)
+
+
+_RANK_TO_STATUS: Dict[int, Optional[str]] = {
+    3: STATUS_NO_CUMPLE,
+    2: STATUS_FUERA,
+    1: STATUS_CUMPLE,
+    0: None,
+}
+
+
+def _rank_to_status(rank: Any) -> Optional[str]:
+    """Inverse of :func:`_status_rank` for SQL aggregate results."""
+    if rank is None:
+        return None
+    return _RANK_TO_STATUS.get(int(rank))
+
+
+def _json_key(value: Any) -> str:
+    """JSON-safe counter key; missing statuses become ``sin_medir``."""
+    if value is None:
+        return _UNMEASURED_KEY
+    return str(value)
+
+
+def _bench_strings(benches: Any) -> Optional[List[str]]:
+    """Render integer bench filter values as the table's string form."""
+    if not benches:
+        return None
+    return [str(bench) for bench in benches]
+
+
+def _rounded(value: Any, digits: int) -> Any:
+    """Round float measurements for output; ints and nulls pass through."""
+    if isinstance(value, bool) or not isinstance(value, float):
+        return value
+    return round(value, digits)
+
+
+def _level_sort_key(level: str) -> Tuple[int, float, str]:
+    """Numeric levels ascending first; non-numeric levels after, by text."""
+    try:
+        return (0, float(level), "")
+    except (TypeError, ValueError):
+        return (1, 0.0, level)
+
+
+def _pct_entry(counter: Counter) -> Dict[str, Any]:
+    """Precomputed percentages over evaluable rows (not ``-``/empty/None)."""
+    counts = {
+        key: n
+        for key, n in counter.items()
+        if n and key is not None and key != "-" and key != ""
+    }
+    n_evaluable = sum(counts.values())
+    if n_evaluable == 0:
+        return {"n_evaluable": 0, "pct": {}}
+    pct = {
+        _json_key(key): round(n * 100.0 / n_evaluable, 1)
+        for key, n in counts.items()
+    }
+    return {"n_evaluable": n_evaluable, "pct": pct}
+
+
+_PARAMETER_STATUS_FIELDS: Dict[str, str] = {
+    "height": "height_status",
+    "angle": "angle_status",
+    "berm": "berm_status",
+}
+_MAX_LEVEL_ENTRIES = 60
+
+
+ResultT = TypeVar("ResultT")
+
+
+async def _run_off_loop(func: Callable[..., ResultT], *args: Any) -> ResultT:
+    """Run a router-internal sync computation off the event loop."""
+    return await asyncio.to_thread(func, *args)
+
+
+# ---------------------------------------------------------------------------
+# Session meshes (compact DB rows only — never trimesh)
+# ---------------------------------------------------------------------------
+
+
+def _mesh_summary(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Compact JSON-safe projection of one persisted mesh row."""
+    return {
+        "id": row["id"],
+        "type": row["type"],
+        "filename": row["filename"],
+        "n_vertices": row["n_vertices"],
+        "n_faces": row["n_faces"],
+        "bounds": row["bounds"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Results aggregation (SQL json_extract with bounded-iteration fallback)
+# ---------------------------------------------------------------------------
+
+
+def _sql_counters(conn: sqlite3.Connection, session_id: str) -> Dict[str, Counter]:
+    """Per-field status/group tallies via GROUP BY json_extract."""
+    counters: Dict[str, Counter] = {}
+    for field in _ALL_FIELDS:
+        rows = conn.execute(
+            "SELECT json_extract(data, '$." + field + "') AS value, COUNT(*) AS n "
+            "FROM results WHERE session_id = ? GROUP BY value",
+            (session_id,),
+        ).fetchall()
+        counter: Counter = Counter()
+        for row in rows:
+            counter[row["value"]] += row["n"]
+        counters[field] = counter
+    return counters
+
+
+def _sql_sections(
+    conn: sqlite3.Connection,
+    session_id: str,
+) -> Dict[str, Dict[str, Any]]:
+    """Per-section row count, worst status rank and score via one GROUP BY."""
+    rows = conn.execute(
+        "SELECT json_extract(data, '$.section') AS name, COUNT(*) AS n_rows, "
+        "MAX(CASE "
+        "WHEN json_extract(data, '$.section_status') = ? THEN 3 "
+        "WHEN json_extract(data, '$.section_status') = ? THEN 2 "
+        "WHEN json_extract(data, '$.section_status') IN (?, ?) THEN 1 "
+        "ELSE 0 END) AS worst_rank, "
+        "MAX(json_extract(data, '$.section_score')) AS score "
+        "FROM results WHERE session_id = ? GROUP BY name",
+        (
+            STATUS_NO_CUMPLE,
+            STATUS_FUERA,
+            STATUS_CUMPLE,
+            STATUS_RAMPA_OK,
+            session_id,
+        ),
+    ).fetchall()
+    sections: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        name = _json_key(row["name"])
+        sections[name] = {
+            "n_rows": int(row["n_rows"]),
+            "worst_rank": int(row["worst_rank"]) if row["worst_rank"] is not None else 0,
+            "score": row["score"],
+        }
+    return sections
+
+
+def _results_from_sql(session_id: str) -> Optional[Tuple[Dict[str, Counter], Dict[str, Dict[str, Any]]]]:
+    """Aggregate results with SQL json_extract; None when JSON1 is absent."""
+    conn = db.get_connection()
+    try:
+        counters = _sql_counters(conn, session_id)
+        sections = _sql_sections(conn, session_id)
+        return counters, sections
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
+def _absorb_row(
+    fields: Dict[str, Any],
+    counters: Dict[str, Counter],
+    sections: Dict[str, Dict[str, Any]],
+) -> None:
+    """Fold one row's extracted status fields into the tallies."""
+    for field in _ALL_FIELDS:
+        counters[field][fields.get(field)] += 1
+    name = _json_key(fields.get("section"))
+    entry = sections.setdefault(name, {"n_rows": 0, "worst_rank": 0, "score": None})
+    entry["n_rows"] += 1
+    rank = _status_rank(fields.get("section_status"))
+    entry["worst_rank"] = max(entry["worst_rank"], rank)
+    score = fields.get("section_score")
+    if isinstance(score, (int, float)):
+        current = entry["score"]
+        entry["score"] = score if current is None else max(current, score)
+
+
+def _results_from_rows(
+    session_id: str,
+    section: Optional[str] = None,
+) -> Tuple[Dict[str, Counter], Dict[str, Dict[str, Any]]]:
+    """Bounded fallback: stream rows one by one, keep only status fields.
+
+    Only the small status/group fields and the score are extracted per
+    row; the rest of each payload is discarded immediately.
+    """
+    counters: Dict[str, Counter] = {field: Counter() for field in _ALL_FIELDS}
+    sections: Dict[str, Dict[str, Any]] = {}
+    conn = db.get_connection()
+    try:
+        if section is None:
+            cursor = conn.execute(
+                "SELECT data FROM results WHERE session_id = ?", (session_id,)
+            )
+        else:
+            cursor = conn.execute(
+                "SELECT data FROM results WHERE session_id = ? AND section_name = ?",
+                (session_id, section),
+            )
+        for row in cursor:
+            payload = json.loads(row["data"])
+            fields = {field: payload.get(field) for field in _ALL_FIELDS}
+            fields["section"] = payload.get("section")
+            fields["section_score"] = payload.get("section_score")
+            _absorb_row(fields, counters, sections)
+    finally:
+        conn.close()
+    return counters, sections
+
+
+def _aggregate_results(
+    session_id: str,
+    section: Optional[str] = None,
+) -> Tuple[Dict[str, Counter], Dict[str, Dict[str, Any]]]:
+    """Aggregate tallies via SQL, falling back to bounded iteration."""
+    if section is None:
+        aggregated = _results_from_sql(session_id)
+        if aggregated is not None:
+            return aggregated
+    return _results_from_rows(session_id, section=section)
+
+
+def _section_compliance(
+    session_id: str,
+    section_name: str,
+) -> Dict[str, Any]:
+    """Worst status + score of one section, from its comparison rows only."""
+    counters, sections = _aggregate_results(session_id, section=section_name)
+    entry = sections.get(_json_key(section_name))
+    score = entry["score"] if entry else None
+    worst_rank = entry["worst_rank"] if entry else 0
+    return {
+        "worst_status": _rank_to_status(worst_rank),
+        "section_score": score,
+        "n_rows": entry["n_rows"] if entry else 0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
+
+async def get_workflow_state(session_id: str, args: NoArgs) -> Dict[str, Any]:
+    """Aggregate session state from SQL counts and small JSON columns."""
+    status = db.get_process_status(session_id)
+    n_results = db.get_results_count(session_id)
+    sections = db.get_sections(session_id)
+    meshes = db.get_all_meshes(session_id)
+    design = next((m for m in meshes if m["type"] == "design"), None)
+    topo = next((m for m in meshes if m["type"] == "topo"), None)
+    return {
+        "n_sections": len(sections),
+        "n_results": n_results,
+        "process_status": status["status"],
+        "has_design_mesh": design is not None,
+        "has_topo_mesh": topo is not None,
+        "process_detail": {
+            "current_section": status["current_section"],
+            "total_sections": status["total_sections"],
+            "completed_sections": status["completed_sections"],
+        },
+        "design_mesh_id": design["id"] if design else None,
+        "topo_mesh_id": topo["id"] if topo else None,
+        "ready_for_reconciliation": design is not None and topo is not None and len(sections) > 0,
+    }
+
+
+async def list_meshes(session_id: str, args: NoArgs) -> Dict[str, Any]:
+    """List the session's persisted mesh rows without BLOB data."""
+    meshes = db.get_all_meshes(session_id)
+    return {
+        "n_meshes": len(meshes),
+        "meshes": [_mesh_summary(row) for row in meshes],
+    }
+
+
+async def get_mesh_info(session_id: str, args: MeshIdArgs) -> Dict[str, Any]:
+    """Compact info for one mesh; scoped to the session for isolation."""
+    meshes = db.get_all_meshes(session_id)
+    row = next((m for m in meshes if m["id"] == args.mesh_id), None)
+    if row is None:
+        return {"found": False, "mesh_id": args.mesh_id}
+    summary = _mesh_summary(row)
+    summary["found"] = True
+    return summary
+
+
+async def list_sections(session_id: str, args: NoArgs) -> Dict[str, Any]:
+    """Compact per-section summaries from the small sessions JSON list."""
+    sections = db.get_sections(session_id)
+    entries: List[Dict[str, Any]] = []
+    for index, sec in enumerate(sections):
+        entries.append(
+            {
+                "id": str(index),
+                "name": sec.get("name"),
+                "sector": sec.get("sector", ""),
+                "origin": sec.get("origin"),
+                "azimuth": sec.get("azimuth"),
+                "length": sec.get("length"),
+                "length_up": sec.get("length_up"),
+                "length_down": sec.get("length_down"),
+            }
+        )
+    shown = entries[:_MAX_LIST_ENTRIES]
+    return {
+        "n_sections": len(sections),
+        "sections_shown": len(shown),
+        "sections_truncated": len(shown) < len(entries),
+        "sections": shown,
+    }
+
+
+async def get_results_summary(session_id: str, args: NoArgs) -> Dict[str, Any]:
+    """Aggregate comparison results: counts per status, sector and section."""
+    counters, sections = _aggregate_results(session_id)
+    ranked = sorted(
+        sections.items(),
+        key=lambda item: (-item[1]["worst_rank"], item[0]),
+    )
+    shown = ranked[:_MAX_SECTION_ENTRIES]
+    scores = [
+        entry["score"]
+        for entry in sections.values()
+        if isinstance(entry["score"], (int, float))
+    ]
+    score_stats: Optional[Dict[str, float]] = None
+    if scores:
+        score_stats = {
+            "mean": round(sum(scores) / len(scores), 1),
+            "min": round(min(scores), 1),
+            "max": round(max(scores), 1),
+        }
+    section_status = counters["section_status"]
+    return {
+        "n_results": sum(section_status.values()),
+        "by_section_status": {_json_key(k): v for k, v in section_status.items()},
+        "by_type": {_json_key(k): v for k, v in counters["type"].items()},
+        "by_sector": {_json_key(k): v for k, v in counters["sector"].items()},
+        "status_by_parameter": {
+            "height": {_json_key(k): v for k, v in counters["height_status"].items()},
+            "angle": {_json_key(k): v for k, v in counters["angle_status"].items()},
+            "berm": {_json_key(k): v for k, v in counters["berm_status"].items()},
+        },
+        "n_sections": len(sections),
+        "sections_shown": len(shown),
+        "sections_truncated": len(shown) < len(ranked),
+        "sections": [
+            {
+                "name": name,
+                "n_rows": entry["n_rows"],
+                "worst_status": _rank_to_status(entry["worst_rank"]),
+                "section_score": entry["score"],
+            }
+            for name, entry in shown
+        ],
+        "section_score": score_stats,
+    }
+
+
+async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
+    """One section summarized via the router's own profile computation."""
+    from api.routers.process import _build_profile_payload_sync
+
+    try:
+        index = int(args.section_id)
+    except ValueError:
+        return {"found": False, "section_id": args.section_id, "error": "invalid_section_id"}
+    sections = db.get_sections(session_id)
+    if index < 0 or index >= len(sections):
+        return {"found": False, "section_id": args.section_id, "error": "section_id_out_of_range"}
+    try:
+        payload = await _run_off_loop(_build_profile_payload_sync, session_id, sections[index])
+    except HTTPException as exc:
+        return {
+            "found": False,
+            "section_id": args.section_id,
+            "error": "profile_unavailable",
+            "detail": str(exc.detail)[:200],
+        }
+    compliance = _section_compliance(session_id, sections[index].get("name", ""))
+    warnings = payload.get("profile_warnings") or {}
+    design_points = len((payload.get("design") or {}).get("distances", []))
+    topo_points = len((payload.get("topo") or {}).get("distances", []))
+    return {
+        "found": True,
+        "section_id": args.section_id,
+        "name": payload.get("section_name"),
+        "sector": payload.get("sector"),
+        "origin": payload.get("origin"),
+        "azimuth": payload.get("azimuth"),
+        "n_points_design": design_points,
+        "n_points_topo": topo_points,
+        "n_benches_design": len(payload.get("benches_design") or []),
+        "n_benches_topo": len(payload.get("benches_topo") or []),
+        "floor_elevation": payload.get("floor_elevation"),
+        "crest_elevation_max": payload.get("crest_elevation_max"),
+        "n_warnings_design": len(warnings.get("design") or []),
+        "n_warnings_topo": len(warnings.get("topo") or []),
+        "worst_status": compliance["worst_status"],
+        "section_score": compliance["section_score"],
+    }
+
+
+def _dashboard_weighted_score_sync(
+    session_id: str,
+    sectors: Optional[List[str]],
+    sections: Optional[List[str]],
+    levels: Optional[List[str]],
+    benches: Optional[List[str]],
+) -> Dict[str, Any]:
+    """Dashboard weighted score over the same filtered rows the router uses."""
+    from api.routers.process import _filter_comparisons
+
+    rows = db.get_results(session_id)
+    filtered = _filter_comparisons(rows, sectors, sections, levels, benches)
+    return compute_dashboard_weighted_score(filtered)
+
+
+async def get_design_achievement(session_id: str, args: AchievementFilterArgs) -> Dict[str, Any]:
+    """Logro Diseño summary via the router's computation, compacted.
+
+    Accepts ``NoArgs`` too (all filters default to None via ``getattr``)
+    for call sites predating the filtered signature. ``global_score`` is
+    the LOGRO DE DISEÑO (0.4 crest + 0.3 toe + 0.3 berm over evaluable
+    rows); ``weighted_score`` carries the separate dashboard weighted
+    score over the same filtered rows.
+    """
+    from api.routers.process import _build_design_achievement_sync
+
+    sector = getattr(args, "sector", None)
+    section = getattr(args, "section", None)
+    level = getattr(args, "level", None)
+    bench = _bench_strings(getattr(args, "bench", None))
+    response = await _run_off_loop(
+        _build_design_achievement_sync,
+        session_id,
+        sector,
+        section,
+        level,
+        bench,
+    )
+    weighted_score = await _run_off_loop(
+        _dashboard_weighted_score_sync,
+        session_id,
+        sector,
+        section,
+        level,
+        bench,
+    )
+    summary = response.get("summary") or {}
+    sectors = [
+        {
+            "sector": entry.get("sector"),
+            "n_evaluable": entry.get("n_evaluable"),
+            "global_score": entry.get("global_score"),
+            "crest_pct": entry.get("crest_pct"),
+            "toe_pct": entry.get("toe_pct"),
+            "berm_pct": entry.get("berm_pct"),
+        }
+        for entry in response.get("sectors") or []
+    ]
+    return {
+        "score_kind": "logro_diseno",
+        "n_total_rows": response.get("n_total_rows"),
+        "status": (response.get("metadata") or {}).get("status"),
+        "global_score": summary.get("global_score"),
+        "n_total": summary.get("n_total"),
+        "n_evaluable": summary.get("n_evaluable"),
+        "coverage": summary.get("coverage"),
+        "crest_pct": summary.get("crest_pct"),
+        "toe_pct": summary.get("toe_pct"),
+        "berm_pct": summary.get("berm_pct"),
+        "delta_crest_mean": summary.get("delta_crest_mean"),
+        "delta_toe_mean": summary.get("delta_toe_mean"),
+        "tolerances": response.get("tolerances"),
+        "tolerances_source": response.get("tolerances_source"),
+        "weighted_score": weighted_score,
+        "sectors": sectors,
+        "warnings": response.get("warnings"),
+    }
+
+
+async def get_proposed_compliance(session_id: str, args: AchievementFilterArgs) -> Dict[str, Any]:
+    """Proposed-parameters compliance summary via the router's helper.
+
+    Accepts ``NoArgs`` too (all filters default to None via ``getattr``)
+    for call sites predating the filtered signature.
+    """
+    from api.routers.process import _build_proposed_compliance_sync
+
+    response = await _run_off_loop(
+        _build_proposed_compliance_sync,
+        session_id,
+        getattr(args, "sector", None),
+        getattr(args, "section", None),
+        getattr(args, "level", None),
+        _bench_strings(getattr(args, "bench", None)),
+    )
+    payload = response.model_dump()
+    out: Dict[str, Any] = {
+        "proposal_status": payload.get("proposal_status"),
+        "n_total_rows": payload.get("n_total_rows"),
+        "n_proposal_rows": payload.get("n_proposal_rows"),
+        "n_failed_rows": payload.get("n_failed_rows"),
+        "n_not_computed_rows": payload.get("n_not_computed_rows"),
+        "floor_tolerance_source": payload.get("floor_tolerance_source"),
+        "warnings": payload.get("warnings"),
+    }
+    summary = payload.get("summary")
+    if summary is not None:
+        coverage = summary.get("coverage") or {}
+        by_section = summary.get("by_section") or {}
+        ranked = sorted(
+            by_section.items(),
+            key=lambda item: -(item[1].get("proposed_section_score") if isinstance(item[1].get("proposed_section_score"), (int, float)) else -1.0),
+        )
+        shown = ranked[:_MAX_SECTION_ENTRIES]
+        out["summary"] = {
+            "proposed_global_score": summary.get("proposed_global_score"),
+            "n_rows": summary.get("n_rows"),
+            "n_evaluable": summary.get("n_evaluable"),
+            "n_not_excavated": summary.get("n_not_excavated"),
+            "n_unmeasured": summary.get("n_unmeasured"),
+            "n_split_benches": summary.get("n_split_benches"),
+            "excavation_debt_area_m2": summary.get("excavation_debt_area_m2"),
+            "floor_status_counts": summary.get("floor_status_counts"),
+            "coverage": {
+                "n_evaluable": coverage.get("n_evaluable"),
+                "n_design_benches": coverage.get("n_design_benches"),
+                "ratio": coverage.get("ratio"),
+            },
+            "per_sections_shown": len(shown),
+            "per_sections_truncated": len(shown) < len(by_section),
+            "per_section_scores": {name: entry.get("proposed_section_score") for name, entry in shown},
+        }
+    else:
+        out["summary"] = None
+    return out
+
+
+_PAYLOAD_LIST_FLOORS = (("sections", 8), ("levels", 12), ("rows", 10))
+
+
+def _payload_size(payload: Dict[str, Any]) -> int:
+    return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+
+def _fit_query_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Iteratively trim bulky lists until the payload fits the byte budget.
+
+    Priority order: drop ``weighted_score.by_section`` first, then halve
+    ``sections`` / ``levels`` / ``rows`` in turn (floors 8 / 12 / 10),
+    re-measuring after every step and stopping as soon as the payload
+    fits. ``weighted_score`` (without ``by_section``), ``pct_by_parameter``
+    and ``status_by_parameter`` are never removed: an oversized payload is
+    better than losing the score the model must answer with.
+    """
+    if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
+        return payload
+
+    weighted = payload.get("weighted_score")
+    if isinstance(weighted, dict):
+        weighted.pop("by_section", None)
+        if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
+            return payload
+
+    progress = True
+    while _payload_size(payload) >= _MAX_PAYLOAD_BYTES and progress:
+        progress = False
+        for key, floor in _PAYLOAD_LIST_FLOORS:
+            entries = payload.get(key)
+            if not isinstance(entries, list) or len(entries) <= floor:
+                continue
+            payload[key] = entries[: max(floor, len(entries) // 2)]
+            progress = True
+            if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
+                return payload
+    return payload
+
+
+async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any]:
+    """Filtered READ over the session's comparison rows (UI table filters).
+
+    Dimensions (level / bench / sector / section) reuse the exact web
+    table semantics via ``_filter_comparisons``; ``parameter`` + ``status``
+    additionally keep rows whose parameter status equals ``status``. The
+    available levels are always reported from ALL session rows so the
+    agent can discover which levels exist. ``weighted_score`` carries the
+    dashboard's global weighted score (the UI figure) computed over the
+    filtered rows so the model never has to compute it itself.
+    ``pct_by_parameter`` returns
+    precomputed percentages over evaluable rows (statuses other than
+    ``-``, empty or None) so the model never has to compute them itself.
+    """
+    from api.routers.process import _filter_comparisons
+
+    rows = await _run_off_loop(db.get_results, session_id)
+    unfiltered_count = len(rows)
+    filtered = _filter_comparisons(
+        rows,
+        args.sector,
+        args.section,
+        args.level,
+        _bench_strings(args.bench),
+    )
+    if args.parameter and args.status is not None:
+        status_field = _PARAMETER_STATUS_FIELDS[args.parameter]
+        filtered = [
+            row for row in filtered if _json_key(row.get(status_field)) == args.status
+        ]
+
+    counters: Dict[str, Counter] = {field: Counter() for field in _ALL_FIELDS}
+    sections: Dict[str, Dict[str, Any]] = {}
+    for row in filtered:
+        fields = {field: row.get(field) for field in _ALL_FIELDS}
+        fields["section"] = row.get("section")
+        fields["section_score"] = row.get("section_score")
+        _absorb_row(fields, counters, sections)
+    ranked = sorted(
+        sections.items(),
+        key=lambda item: (-item[1]["worst_rank"], item[0]),
+    )
+    shown = ranked[:_MAX_SECTION_ENTRIES]
+
+    level_counter: Counter = Counter()
+    for row in rows:
+        level_counter[_json_key(row.get("level"))] += 1
+    levels = [
+        {"level": level, "n_rows": n_rows}
+        for level, n_rows in sorted(
+            level_counter.items(), key=lambda item: _level_sort_key(item[0])
+        )[:_MAX_LEVEL_ENTRIES]
+    ]
+
+    rows_out: Optional[List[Dict[str, Any]]] = None
+    if args.include_rows:
+        rows_out = [
+            {
+                "section": _json_key(row.get("section")),
+                "bench_num": row.get("bench_num"),
+                "level": _json_key(row.get("level")),
+                "type": _json_key(row.get("type")),
+                "height_design": _rounded(row.get("height_design"), 2),
+                "height_real": _rounded(row.get("height_real"), 2),
+                "height_dev": _rounded(row.get("height_dev"), 2),
+                "height_status": _json_key(row.get("height_status")),
+                "angle_design": _rounded(row.get("angle_design"), 1),
+                "angle_real": _rounded(row.get("angle_real"), 1),
+                "angle_dev": _rounded(row.get("angle_dev"), 1),
+                "angle_status": _json_key(row.get("angle_status")),
+                "berm_design": _rounded(row.get("berm_design"), 2),
+                "berm_real": _rounded(row.get("berm_real"), 2),
+                "berm_dev": _rounded(row.get("berm_dev"), 2),
+                "berm_status": _json_key(row.get("berm_status")),
+                "bench_score": _rounded(row.get("bench_score"), 2),
+            }
+            for row in filtered[: args.row_limit]
+        ]
+
+    weighted_score = compute_dashboard_weighted_score(filtered)
+
+    warnings: List[str] = []
+    if unfiltered_count == 0:
+        warnings.append("no_results")
+    elif not filtered:
+        warnings.append("all_rows_filtered_out")
+    elif weighted_score["global_score"] is None:
+        warnings.append(_NO_SCOREABLE_BENCHES_WARNING)
+
+    payload = {
+        "weighted_score": weighted_score,
+        "n_total_rows": unfiltered_count,
+        "n_matched_rows": len(filtered),
+        "filters": {
+            "sector": list(args.sector or []),
+            "section": list(args.section or []),
+            "level": list(args.level or []),
+            "bench": list(args.bench or []),
+            "parameter": args.parameter,
+            "status": args.status,
+        },
+        "pct_by_parameter": {
+            param: _pct_entry(counters[status_field])
+            for param, status_field in _PARAMETER_STATUS_FIELDS.items()
+        },
+        "status_by_parameter": {
+            "height": {
+                _json_key(key): value
+                for key, value in counters["height_status"].items()
+            },
+            "angle": {
+                _json_key(key): value
+                for key, value in counters["angle_status"].items()
+            },
+            "berm": {
+                _json_key(key): value
+                for key, value in counters["berm_status"].items()
+            },
+        },
+        "by_type": {_json_key(key): value for key, value in counters["type"].items()},
+        "by_section_status": {
+            _json_key(key): value for key, value in counters["section_status"].items()
+        },
+        "sections": [
+            {
+                "name": name,
+                "n_rows": entry["n_rows"],
+                "worst_status": _rank_to_status(entry["worst_rank"]),
+                "section_score": entry["score"],
+            }
+            for name, entry in shown
+        ],
+        "levels": levels,
+        "rows": rows_out,
+        "units": {"height": "m", "angle": "deg", "berm": "m"},
+        "warnings": warnings,
+    }
+    return _fit_query_payload(payload)
+
+
+_HANDLERS: Dict[str, Handler] = {
+    "get_workflow_state": get_workflow_state,
+    "list_meshes": list_meshes,
+    "get_mesh_info": get_mesh_info,
+    "list_sections": list_sections,
+    "get_results_summary": get_results_summary,
+    "get_profile": get_profile,
+    "get_design_achievement": get_design_achievement,
+    "get_proposed_compliance": get_proposed_compliance,
+    "query_results": query_results,
+}
+
+READ_HANDLERS: Dict[str, Handler] = {
+    name: _HANDLERS[name]
+    for name, spec in TOOL_CATALOG.items()
+    if spec.risk is ToolRisk.READ
+}
+
+
+__all__ = [
+    "READ_HANDLERS",
+    "get_design_achievement",
+    "get_mesh_info",
+    "get_profile",
+    "get_proposed_compliance",
+    "get_results_summary",
+    "get_workflow_state",
+    "list_meshes",
+    "list_sections",
+    "query_results",
+]

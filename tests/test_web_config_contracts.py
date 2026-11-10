@@ -400,6 +400,7 @@ class TestCiGate:
             "VITE_SENTRY_DSN",
             "VITE_ANALYTICS_URL",
             "VITE_RELEASE",
+            "VITE_AI_CHAT",
         }
         unexpected = sorted(keys - allowed)
         assert unexpected == [], (

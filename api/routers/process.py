@@ -60,6 +60,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/process", tags=["process"])
 
+_MSG_PROCESS_RUNNING = (
+    "Ya existe un proceso de conciliación en ejecución; espera a que "
+    "termine antes de relanzarlo."
+)
+
 
 def _run_in_executor(func, *args):
     """Schedule a CPU/IO-bound callable on the default executor.
@@ -358,13 +363,33 @@ def _run_pipeline_sync(
     sections_raw: list,
     body_overrides: dict,
 ) -> dict:
-    """Run the full cut → extract → compare pipeline off the event loop.
+    """Thin stable alias around :func:`_execute_pipeline_sync`.
 
     Synchronous helper invoked via ``run_in_executor`` from
-    :func:`run_process`. Performs the same work the original sync handler
-    did: load meshes, merge settings, run per-section work in a
-    ``ThreadPoolExecutor``, persist extractions, and return a result dict
-    ready for JSON encoding.
+    :func:`run_process` and via ``asyncio.to_thread`` from the agent's
+    ``run_reconciliation`` handler.
+
+    CALLERS OWN THE FAILURE RESET: every caller must reset
+    ``process_status`` to ``idle`` on failure (:func:`run_process` does;
+    the agent's ``run_reconciliation`` handler does). Never add a
+    defensive reset here: a second idle-write after another request
+    claimed the session would clobber its ``running`` state and re-open
+    the concurrent-run hole this wrapper exists to close.
+    """
+    return _execute_pipeline_sync(session_id, sections_raw, body_overrides)
+
+
+def _execute_pipeline_sync(
+    session_id: str,
+    sections_raw: list,
+    body_overrides: dict,
+) -> dict:
+    """Run the full cut → extract → compare pipeline off the event loop.
+
+    Synchronous helper invoked by :func:`_run_pipeline_sync`. Performs the
+    same work the original sync handler did: load meshes, merge settings,
+    run per-section work in a ``ThreadPoolExecutor``, persist extractions,
+    and return a result dict ready for JSON encoding.
     """
     # Load both meshes (will raise 400 if missing)
     try:
@@ -521,6 +546,15 @@ async def run_process(request: Request, body: Optional[schemas.ProcessSettings] 
     Run the full geotechnical reconciliation pipeline:
     cut all sections → extract parameters → compare design vs as-built.
 
+    Claims the session atomically via ``db.try_begin_process`` BEFORE any
+    work happens, mirroring the agent's ``run_reconciliation`` handler:
+    exactly one caller (UI or AI agent) can transition the session to
+    ``running``, so the expensive pipeline is never launched twice. When
+    the claim fails the endpoint answers 409 with the same message the
+    handler uses. Whenever the run does not complete (no sections,
+    rejection, unexpected failure) the status is reset to ``idle`` so the
+    session is never left stuck at ``running``.
+
     Uses ThreadPoolExecutor for parallel section processing.
     Results and extraction cache are persisted to the database.
 
@@ -530,19 +564,32 @@ async def run_process(request: Request, body: Optional[schemas.ProcessSettings] 
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
-        # Validate preconditions
-        sections_raw = db.get_sections(session_id)
-        if not sections_raw:
-            raise HTTPException(400, "Load sections first")
+        claimed = db.try_begin_process(session_id)
+        if not claimed:
+            logger.warning(
+                "Process rejected: status=409 detail=%s", _MSG_PROCESS_RUNNING
+            )
+            raise HTTPException(409, detail=_MSG_PROCESS_RUNNING)
 
-        body_overrides: dict = {}
-        if body is not None:
-            body_dict = body.model_dump() if hasattr(body, "model_dump") else body.dict()
-            body_overrides = body_dict
+        try:
+            sections_raw = db.get_sections(session_id)
+            if not sections_raw:
+                raise HTTPException(400, "Load sections first")
 
-        return await _run_in_executor(
-            _run_pipeline_sync, session_id, sections_raw, body_overrides
-        )
+            body_overrides: dict = {}
+            if body is not None:
+                body_dict = body.model_dump() if hasattr(body, "model_dump") else body.dict()
+                body_overrides = body_dict
+
+            return await _run_in_executor(
+                _run_pipeline_sync, session_id, sections_raw, body_overrides
+            )
+        except HTTPException:
+            db.update_process_status(session_id, "idle")
+            raise
+        except Exception:
+            db.update_process_status(session_id, "idle")
+            raise
     except HTTPException as exc:
         logger.warning("Process rejected: status=%s detail=%s", exc.status_code, exc.detail)
         raise

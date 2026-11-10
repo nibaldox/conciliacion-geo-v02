@@ -122,3 +122,88 @@ test('spawnSidecar merges env vars', { skip: isWindows }, async () => {
   const contents = await waitForLogContents(logFile, ['hello']);
   assert.ok(contents.includes('hello'), 'log file should contain merged env var value');
 });
+
+test('spawnSidecar sovereignty pins override degrading parent env', { skip: isWindows }, async () => {
+  const dir = makeTempDir();
+  const logFile = path.join(dir, 'pins.log');
+  const keys = ['CONCILIACION_AI_CHAT_ENABLED', 'CONCILIACION_AI_LOCAL_ONLY', 'CONCILIACION_WORKERS'];
+  createFakeBinary(dir, `
+for (const key of ${JSON.stringify(keys)}) {
+  console.log(key + '=' + process.env[key]);
+}
+`);
+  const previous = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  process.env.CONCILIACION_AI_CHAT_ENABLED = 'false';
+  process.env.CONCILIACION_AI_LOCAL_ONLY = '0';
+  process.env.CONCILIACION_WORKERS = '8';
+  try {
+    const proc = spawnSidecar({ resourcesPath: dir, logFile });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    proc.kill();
+    await waitForExit(proc);
+
+    const contents = await waitForLogContents(logFile, [
+      'CONCILIACION_AI_CHAT_ENABLED=true',
+      'CONCILIACION_AI_LOCAL_ONLY=1',
+      'CONCILIACION_WORKERS=1',
+    ]);
+    assert.ok(contents.includes('CONCILIACION_AI_CHAT_ENABLED=true'), 'pin CONCILIACION_AI_CHAT_ENABLED=true must win after both spreads');
+    assert.ok(contents.includes('CONCILIACION_AI_LOCAL_ONLY=1'), 'pin CONCILIACION_AI_LOCAL_ONLY=1 must win after both spreads');
+    assert.ok(contents.includes('CONCILIACION_WORKERS=1'), 'pin CONCILIACION_WORKERS=1 must win after both spreads');
+  } finally {
+    for (const [k, v] of Object.entries(previous)) {
+      if (v === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = v;
+      }
+    }
+  }
+});
+
+test('spawnSidecar preserves inherited CONCILIACION_LMSTUDIO_BASE_URL', { skip: isWindows }, async () => {
+  const dir = makeTempDir();
+  const logFile = path.join(dir, 'lmstudio.log');
+  createFakeBinary(dir, `console.log('LMSTUDIO_BASE_URL=' + process.env.CONCILIACION_LMSTUDIO_BASE_URL);`);
+  const previous = process.env.CONCILIACION_LMSTUDIO_BASE_URL;
+  process.env.CONCILIACION_LMSTUDIO_BASE_URL = 'http://10.0.0.5:1234/v1';
+  try {
+    const proc = spawnSidecar({ resourcesPath: dir, logFile });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    proc.kill();
+    await waitForExit(proc);
+
+    const contents = await waitForLogContents(logFile, ['LMSTUDIO_BASE_URL=http://10.0.0.5:1234/v1']);
+    assert.ok(contents.includes('LMSTUDIO_BASE_URL=http://10.0.0.5:1234/v1'), 'inherited LM Studio URL must pass through to spawned env');
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CONCILIACION_LMSTUDIO_BASE_URL;
+    } else {
+      process.env.CONCILIACION_LMSTUDIO_BASE_URL = previous;
+    }
+  }
+});
+
+test('spawnSidecar defaults MALLOC_ARENA_MAX to 2 when parent does not set it', { skip: isWindows }, async () => {
+  const dir = makeTempDir();
+  const logFile = path.join(dir, 'malloc.log');
+  createFakeBinary(dir, `console.log('MALLOC_ARENA_MAX=' + process.env.MALLOC_ARENA_MAX);`);
+  const previous = process.env.MALLOC_ARENA_MAX;
+  delete process.env.MALLOC_ARENA_MAX;
+  try {
+    const proc = spawnSidecar({ resourcesPath: dir, logFile });
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    proc.kill();
+    await waitForExit(proc);
+
+    const contents = await waitForLogContents(logFile, ['MALLOC_ARENA_MAX=2']);
+    assert.ok(contents.includes('MALLOC_ARENA_MAX=2'), 'default MALLOC_ARENA_MAX=2 must apply without parent override');
+  } finally {
+    if (previous !== undefined) {
+      process.env.MALLOC_ARENA_MAX = previous;
+    }
+  }
+});

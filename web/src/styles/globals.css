@@ -487,3 +487,187 @@ body {
   color: var(--color-accent-bright);
   border-color: var(--color-accent);
 }
+
+/* ── AI chat pet (floating launcher mascot) ──────────────────── */
+.ai-chat-launcher {
+  background-image: linear-gradient(140deg, var(--color-accent) 0%, var(--color-accent-bright) 100%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent-bright) 45%, transparent),
+    var(--shadow-lg);
+  transition: filter 180ms ease, box-shadow 180ms ease;
+}
+.ai-chat-launcher:hover {
+  filter: brightness(1.06);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-accent-bright) 65%, transparent),
+    var(--shadow-lg);
+}
+.ai-pet {
+  /* Character brand palette — the mascot keeps its own colors on
+     purpose; these are the blob pet's colors, NOT theme tokens. */
+  --ai-pet-fur-hi: #ffffff;
+  --ai-pet-fur-lo: #e8e8ec;
+  --ai-pet-ink: #17171c;
+  --ai-pet-helmet: #f2b21b;
+  --ai-pet-helmet-deep: color-mix(in srgb, #f2b21b 84%, black);
+  --ai-pet-helmet-band: color-mix(in srgb, #f2b21b 90%, black);
+  --ai-pet-helmet-hi: #f9cd6b;
+  --ai-pet-lamp: #ffe9ae;
+  --ai-pet-lamp-glow: #ffc94d;
+  --ai-pet-badge: #2f8fe0;
+  display: block;
+}
+.ai-pet__tilt {
+  display: block;
+  transform: rotate(-6deg);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+.ai-chat-launcher:hover .ai-pet__tilt,
+.ai-chat-launcher:focus-visible .ai-pet__tilt {
+  transform: rotate(0deg) scale(1.05);
+}
+.ai-pet__body {
+  display: block;
+  transform-origin: 50% 60%;
+  animation: ai-pet-breathe 6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform;
+}
+.ai-pet__svg {
+  display: block;
+  width: 2.75rem;
+  height: 2.75rem;
+}
+.ai-pet__fur { fill: url(#ai-pet-fur); }
+.ai-pet__fur-hi { stop-color: var(--ai-pet-fur-hi); }
+.ai-pet__fur-lo { stop-color: var(--ai-pet-fur-lo); }
+.ai-pet__shade { fill: var(--ai-pet-ink); opacity: 0.12; }
+.ai-pet__sheen { fill: url(#ai-pet-sheen); }
+.ai-pet__sheen-hi { stop-color: #ffffff; stop-opacity: 0.85; }
+.ai-pet__sheen-lo { stop-color: #ffffff; stop-opacity: 0; }
+.ai-pet__eyes {
+  transition: transform 80ms ease-out;
+  will-change: transform;
+}
+.ai-pet__eye {
+  fill: var(--ai-pet-ink);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ai-pet-blink 6s infinite;
+}
+.ai-pet__helmet-dome { fill: var(--ai-pet-helmet); }
+.ai-pet__helmet-band { fill: var(--ai-pet-helmet-band); }
+.ai-pet__helmet-ridge { fill: var(--ai-pet-helmet-hi); }
+.ai-pet__helmet-brim { fill: var(--ai-pet-helmet-deep); }
+.ai-pet__lamp-bracket { fill: var(--ai-pet-ink); }
+.ai-pet__lamp-glow {
+  fill: var(--ai-pet-lamp-glow);
+  opacity: 0.3;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ai-pet__lamp { fill: var(--ai-pet-lamp); }
+.ai-pet__lamp-core { fill: #ffffff; }
+.ai-pet__badge-pill { fill: var(--ai-pet-badge); }
+.ai-pet__dot { fill: var(--color-accent-fg); }
+.ai-pet--working .ai-pet__dot {
+  animation: ai-pet-dots 1.2s linear infinite;
+}
+.ai-pet--working .ai-pet__dot:nth-of-type(2) { animation-delay: 0.15s; }
+.ai-pet--working .ai-pet__dot:nth-of-type(3) { animation-delay: 0.3s; }
+.ai-pet--working .ai-pet__lamp-glow {
+  animation: ai-pet-lamp 1.6s ease-in-out infinite;
+}
+
+@keyframes ai-pet-breathe {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-1.5px) scale(1.015); }
+}
+@keyframes ai-pet-blink {
+  0%, 96.4%, 100% {
+    transform: scaleY(1);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  97.9% { transform: scaleY(0.05); }
+  99.4% { transform: scaleY(1); }
+}
+@keyframes ai-pet-dots {
+  0%, 100% { opacity: 0.3; }
+  40% { opacity: 1; }
+}
+@keyframes ai-pet-lamp {
+  0%, 100% { opacity: 0.15; transform: scale(0.9); }
+  50% { opacity: 0.6; transform: scale(1.1); }
+}
+
+/* ── pet ↔ close icon choreography (FloatingChatButton layers) ── */
+.ai-chat-fade {
+  will-change: transform, opacity;
+}
+.ai-chat-pose--pet-hidden {
+  transform: scale(0.72) rotate(-14deg) translateY(2px);
+}
+.ai-chat-pose--x-hidden {
+  transform: scale(0.6) rotate(90deg);
+}
+.ai-chat-anim--pet-out { animation: ai-chat-pet-out 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.ai-chat-anim--x-in { animation: ai-chat-x-in 240ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
+.ai-chat-anim--x-out { animation: ai-chat-x-out 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.ai-chat-anim--pet-in { animation: ai-chat-pet-in 240ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
+@keyframes ai-chat-pet-out {
+  from { opacity: 1; transform: scale(1) rotate(0deg); }
+  to { opacity: 0; transform: scale(0.72) rotate(-14deg) translateY(2px); }
+}
+@keyframes ai-chat-pet-in {
+  from { opacity: 0; transform: scale(0.72) rotate(-14deg) translateY(2px); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+@keyframes ai-chat-x-in {
+  from { opacity: 0; transform: scale(0.6) rotate(-90deg); }
+  to { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+@keyframes ai-chat-x-out {
+  from { opacity: 1; transform: scale(1) rotate(0deg); }
+  to { opacity: 0; transform: scale(0.6) rotate(90deg); }
+}
+.ai-chat-halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-bright) 60%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+.ai-chat-halo--pulse {
+  animation: ai-chat-halo-pulse 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes ai-chat-halo-pulse {
+  0% { opacity: 0.35; transform: scale(0.86); }
+  60% { opacity: 0.15; }
+  100% { opacity: 0; transform: scale(1.16); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-pet__body,
+  .ai-pet__eye,
+  .ai-pet--working .ai-pet__dot,
+  .ai-pet--working .ai-pet__lamp-glow {
+    animation: none;
+    will-change: auto;
+  }
+  .ai-pet__tilt {
+    transform: none;
+    transition: none;
+    will-change: auto;
+  }
+  .ai-pet__eyes {
+    transition: none;
+    will-change: auto;
+  }
+  .ai-chat-fade,
+  .ai-chat-halo {
+    animation: none;
+    transition: none;
+    will-change: auto;
+  }
+}

@@ -27,6 +27,7 @@ import { EmptyState, type EmptyStateProps } from './components/ui/EmptyState';
 import { useStartDemo } from './components/demo/TryDemoButton';
 
 import { ExportPanel } from './components/export/ExportPanel';
+import { FloatingChatButton } from './components/ai-chat/FloatingChatButton';
 
 function WorkspaceEmptyState(props: EmptyStateProps) {
   return (
@@ -266,6 +267,7 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
           </Suspense>
         </ErrorBoundary>
       </AppLayout>
+      <FloatingChatButton />
     </QueryClientProvider>
   );
 }

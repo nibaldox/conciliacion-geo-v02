@@ -386,7 +386,6 @@
     "source_design_column": "design column",
     "source_knn_proxy": "nearest-neighbor estimate",
     "source_mixed": "mixed",
-
     "viewPanel": {
       "title": "Blast hole display",
       "show": "Show panel",
@@ -1278,7 +1277,8 @@
       "ok": "AI service available",
       "unavailable": "AI service unavailable",
       "pending": "Checking..."
-    }
+    },
+    "local_only_notice": "Corporate policy: local AI only (LM Studio)."
   },
   "profileView": {
     "empty": {
@@ -1734,5 +1734,88 @@
   "profiles": {
     "mode_grid": "Grid",
     "mode_detail": "Detail"
+  },
+  "aiChat": {
+    "open": "Open AI assistant",
+    "close": "Close assistant",
+    "title": "Geotechnical assistant",
+    "header": {
+      "local_badge": "LM Studio · Local",
+      "configured": "CONFIGURED",
+      "unavailable": "UNAVAILABLE",
+      "status_loading": "Checking status…"
+    },
+    "clear": "Clear",
+    "clear_confirm": "Delete from server?",
+    "notice": {
+      "dismiss": "Dismiss notice",
+      "chat_disabled": "Chat is not available in this deployment.",
+      "provider_no_tools": "The AI provider does not support tool calls; the assistant cannot run actions in this session.",
+      "provider_unreachable": "Could not reach the local model. Check that LM Studio is running with a loaded model that emits tool calls.",
+      "providers_unavailable": "Could not query the chat status from the server.",
+      "placeholder_model_warn": "The server has no CONCILIACION_LMSTUDIO_DEFAULT_MODEL configured. Type below the name of the model loaded in LM Studio; it is used only for this session.",
+      "placeholder_model_required": "Enter the model loaded in LM Studio before sending messages.",
+      "request_failed": "The server rejected the request: {{detail}}",
+      "network_error": "No connection to the server; please try again.",
+      "cleared": "Conversation removed from the server. Starting a new conversation.",
+      "download_failed": "The generated file could not be downloaded; please try again."
+      },
+    "model": {
+      "session_label": "Model loaded in LM Studio (this session only)"
+    },
+    "input": {
+      "placeholder": "Type your message…",
+      "aria": "Message for the assistant",
+      "send": "Send",
+      "stop": "Stop"
+    },
+    "messages": {
+      "empty": "New conversation. Ask about the workflow status or request loading a topography.",
+      "you": "You",
+      "agent": "Assistant",
+      "streaming": "The assistant is working…"
+    },
+    "tool": {
+     "running": "running \"{{name}}\"…",
+     "status_ok": "Completed",
+     "status_error": "Error",
+     "denied_note": "Operation cancelled by the user; nothing was changed.",
+     "expand": "Show details",
+     "collapse": "Hide details",
+     "download": "Download file",
+     "downloading": "Downloading…"
+    },
+    "confirm": {
+      "title": "Confirmation required",
+      "approve": "Confirm",
+      "deny": "Cancel",
+      "approved_chip": "Approved; running…"
+    },
+    "upload": {
+      "type_design": "Design",
+      "type_topo": "Topography",
+      "drop_hint": "STL · OBJ · PLY · DXF",
+      "select_file": "Select {{role}} mesh",
+      "uploading": "Uploading {{role}} mesh…",
+      "inspecting": "Inspecting DXF…",
+      "replace_warning": "Uploading will replace the existing {{role}} mesh ({{filename}}) in this session.",
+      "replace_confirm": "Replace",
+      "replace_cancel": "Cancel",
+      "unsupported": "Unsupported format. Accepted formats: {{formats}}.",
+      "failed": "The mesh could not be uploaded."
+    },
+    "observation": {
+      "mesh_loaded": "{{role}} mesh loaded into the session: mesh_id={{meshId}} · vertices={{vertices}} · faces={{faces}} · bounds {{bounds}}. The assistant can use it as context."
+    },
+    "resize": {
+      "north": "Resize panel (top edge)",
+      "south": "Resize panel (bottom edge)",
+      "east": "Resize panel (right edge)",
+      "west": "Resize panel (left edge)",
+      "ne": "Resize panel (top-right corner)",
+      "nw": "Resize panel (top-left corner)",
+      "se": "Resize panel (bottom-right corner)",
+      "sw": "Resize panel (bottom-left corner)"
+    }
   }
 }

@@ -386,7 +386,6 @@
     "source_design_column": "columna de diseño",
     "source_knn_proxy": "estimación por vecinos",
     "source_mixed": "mixta",
-
     "viewPanel": {
       "title": "Visualización de pozos",
       "show": "Mostrar panel",
@@ -1278,7 +1277,8 @@
       "ok": "AI service disponible",
       "unavailable": "AI service no disponible",
       "pending": "Verificando..."
-    }
+    },
+    "local_only_notice": "Política corporativa: IA solo local (LM Studio)."
   },
   "profileView": {
     "empty": {
@@ -1734,5 +1734,88 @@
   "profiles": {
     "mode_grid": "Grilla",
     "mode_detail": "Detalle"
+  },
+  "aiChat": {
+    "open": "Abrir asistente de IA",
+    "close": "Cerrar asistente",
+    "title": "Asistente geotécnico",
+    "header": {
+      "local_badge": "LM Studio · Local",
+      "configured": "CONFIGURADO",
+      "unavailable": "NO DISPONIBLE",
+      "status_loading": "Verificando estado…"
+    },
+    "clear": "Limpiar",
+    "clear_confirm": "¿Eliminar del servidor?",
+    "notice": {
+     "dismiss": "Descartar aviso",
+     "chat_disabled": "El chat no está disponible en este despliegue.",
+     "provider_no_tools": "El proveedor de IA no soporta llamadas a herramientas; el asistente no puede ejecutar acciones en esta sesión.",
+     "provider_unreachable": "No se pudo contactar el modelo local. Verifica que LM Studio esté en ejecución y con un modelo cargado que emita tool-calls.",
+     "providers_unavailable": "No se pudo consultar el estado del chat en el servidor.",
+     "placeholder_model_warn": "El servidor no tiene CONCILIACION_LMSTUDIO_DEFAULT_MODEL configurado. Escribe abajo el nombre del modelo cargado en LM Studio; se usa solo durante esta sesión.",
+     "placeholder_model_required": "Indica el modelo cargado en LM Studio antes de enviar mensajes.",
+     "request_failed": "El servidor rechazó la solicitud: {{detail}}",
+     "network_error": "Sin conexión con el servidor; inténtalo de nuevo.",
+     "cleared": "Conversación eliminada del servidor. Comenzando una conversación nueva.",
+     "download_failed": "No se pudo descargar el archivo generado; inténtalo de nuevo."
+    },
+    "model": {
+      "session_label": "Modelo cargado en LM Studio (solo esta sesión)"
+    },
+    "input": {
+      "placeholder": "Escribe tu mensaje…",
+      "aria": "Mensaje para el asistente",
+      "send": "Enviar",
+      "stop": "Detener"
+    },
+    "messages": {
+      "empty": "Conversación nueva. Pregunta por el estado del flujo o pide cargar una topografía.",
+      "you": "Tú",
+      "agent": "Asistente",
+      "streaming": "El asistente está trabajando…"
+    },
+    "tool": {
+     "running": "ejecutando «{{name}}»…",
+     "status_ok": "Completado",
+     "status_error": "Error",
+     "denied_note": "Operación cancelada por el usuario; no se modificó nada.",
+     "expand": "Ver detalle",
+     "collapse": "Ocultar detalle",
+     "download": "Descargar archivo",
+     "downloading": "Descargando…"
+    },
+    "confirm": {
+      "title": "Confirmación requerida",
+      "approve": "Confirmar",
+      "deny": "Cancelar",
+      "approved_chip": "Aprobada; ejecutando…"
+    },
+    "upload": {
+      "type_design": "Diseño",
+      "type_topo": "Topografía",
+      "drop_hint": "STL · OBJ · PLY · DXF",
+      "select_file": "Seleccionar malla de {{role}}",
+      "uploading": "Subiendo malla de {{role}}…",
+      "inspecting": "Analizando DXF…",
+      "replace_warning": "La subida reemplazará la malla de {{role}} existente ({{filename}}) en esta sesión.",
+      "replace_confirm": "Reemplazar",
+      "replace_cancel": "Cancelar",
+      "unsupported": "Formato no soportado. Formatos aceptados: {{formats}}.",
+      "failed": "No se pudo cargar la malla."
+    },
+    "observation": {
+      "mesh_loaded": "Malla de {{role}} cargada en la sesión: mesh_id={{meshId}} · vértices={{vertices}} · caras={{faces}} · extensión {{bounds}}. El asistente puede usarla como contexto."
+    },
+    "resize": {
+      "north": "Redimensionar panel (borde superior)",
+      "south": "Redimensionar panel (borde inferior)",
+      "east": "Redimensionar panel (borde derecho)",
+      "west": "Redimensionar panel (borde izquierdo)",
+      "ne": "Redimensionar panel (esquina superior derecha)",
+      "nw": "Redimensionar panel (esquina superior izquierda)",
+      "se": "Redimensionar panel (esquina inferior derecha)",
+      "sw": "Redimensionar panel (esquina inferior izquierda)"
+    }
   }
 }

@@ -11,6 +11,8 @@ RUN npm ci
 COPY web/ .
 ARG VITE_BASE=/
 ENV VITE_BASE=$VITE_BASE
+ARG VITE_AI_CHAT=false
+ENV VITE_AI_CHAT=$VITE_AI_CHAT
 RUN npm run build
 
 # Production stage
