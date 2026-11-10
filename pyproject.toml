@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "reportlab",
     "networkx",
+    "slowapi==0.1.10",
 ]
 
 [project.optional-dependencies]
