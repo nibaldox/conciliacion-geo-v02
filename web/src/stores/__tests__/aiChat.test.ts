@@ -515,3 +515,92 @@ describe('aiChat store — history restore after reload (T5)', () => {
     expect(useAIChat.getState().messages).toHaveLength(0);
   });
 });
+
+describe('aiChat store — incremental text merging', () => {
+  beforeEach(() => {
+    mockGet.mockResolvedValue({ data: providersBody() });
+    return useAIChat.getState().loadProviderState();
+  });
+
+  function agentMessages(): Extract<ChatMessage, { kind: 'agent' }>[] {
+    return useAIChat
+      .getState()
+      .messages.filter((m): m is Extract<ChatMessage, { kind: 'agent' }> =>
+        m.kind === 'agent',
+      );
+  }
+
+  it('merges two consecutive text events into ONE agent message with a stable id', () => {
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'Hola ' });
+    const firstId = agentMessages()[0]?.id;
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'mundo' });
+    const merged = agentMessages();
+    expect(merged).toHaveLength(1);
+    expect(merged[0].text).toBe('Hola mundo');
+    expect(merged[0].id).toBe(firstId);
+    expect(useAIChat.getState().activeTextId).toBe(firstId);
+  });
+
+  it('text + tool_call + text yields two agent bubbles around the tool card', () => {
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'Consulto el estado.' });
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_call',
+      invocation_id: 'inv_m',
+      name: 'get_workflow_state',
+      args: {},
+      requires_confirmation: false,
+    });
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'Listo, el estado es X.' });
+    const kinds = useAIChat.getState().messages.map((m) => m.kind);
+    expect(kinds).toEqual(['agent', 'tool', 'agent']);
+    const agents = agentMessages();
+    expect(agents).toHaveLength(2);
+    expect(agents[0].text).toBe('Consulto el estado.');
+    expect(agents[1].text).toBe('Listo, el estado es X.');
+    expect(agents[1].id).not.toBe(agents[0].id);
+    expect(useAIChat.getState().activeTextId).toBe(agents[1].id);
+  });
+
+  it('done closes the bubble: text + done + text (new turn) → 2 agent messages', () => {
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'primer turno' });
+    useAIChat.getState().applyAgentEvent({
+      type: 'done',
+      finish_reason: 'stop',
+      usage: null,
+      cached: false,
+    });
+    expect(useAIChat.getState().activeTextId).toBeNull();
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'segundo turno' });
+    const agents = agentMessages();
+    expect(agents).toHaveLength(2);
+    expect(agents[0].text).toBe('primer turno');
+    expect(agents[1].text).toBe('segundo turno');
+    expect(agents[1].id).not.toBe(agents[0].id);
+  });
+
+  it('tool_result does not resurrect the closed bubble: text after tool_call opens a new bubble', () => {
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'pre-tool' });
+    const preToolId = agentMessages()[0]?.id;
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_call',
+      invocation_id: 'inv_r2',
+      name: 'get_workflow_state',
+      args: {},
+      requires_confirmation: false,
+    });
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_result',
+      invocation_id: 'inv_r2',
+      name: 'get_workflow_state',
+      ok: true,
+      summary: 'estado',
+      duration_ms: 10,
+      error: null,
+    });
+    useAIChat.getState().applyAgentEvent({ type: 'text', content: 'post-tool' });
+    const agents = agentMessages();
+    expect(agents).toHaveLength(2);
+    expect(agents[0].id).toBe(preToolId);
+    expect(agents[1].text).toBe('post-tool');
+  });
+});

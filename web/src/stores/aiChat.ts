@@ -199,6 +199,7 @@ async function restoreConversation(
   }
   set({
     messages,
+    activeTextId: null,
     pendingConfirmation: pending
       ? {
           invocationId: pending.invocation_id,
@@ -212,6 +213,7 @@ async function restoreConversation(
 interface AIChatState {
   conversationId: string | null;
   messages: ChatMessage[];
+  activeTextId: string | null;
   streaming: boolean;
   pendingConfirmation: PendingConfirmation | null;
   providerState: AIProvidersState | null;
@@ -241,6 +243,7 @@ interface AIChatState {
 const initialState = {
   conversationId: null,
   messages: [] as ChatMessage[],
+  activeTextId: null as string | null,
   streaming: false,
   pendingConfirmation: null as PendingConfirmation | null,
   providerState: null as AIProvidersState | null,
@@ -338,6 +341,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
     set({
       streaming: true,
       notice: null,
+      activeTextId: null,
       abortController: controller,
       messages: [
         ...state.messages,
@@ -434,6 +438,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
     set({
       conversationId: null,
       messages: [],
+      activeTextId: null,
       pendingConfirmation: null,
       notice: { severity: 'info', key: 'aiChat.notice.cleared' },
     });
@@ -444,15 +449,35 @@ export const useAIChat = create<AIChatState>((set, get) => ({
   applyAgentEvent: (event: AgentEvent) => {
     switch (event.type) {
       case 'text':
-        set((state) => ({
-          messages: [
-            ...state.messages,
-            { kind: 'agent', id: makeMessageId(), text: event.content },
-          ],
-        }));
+        set((state) => {
+          const activeId = state.activeTextId;
+          if (activeId !== null) {
+            const index = state.messages.findIndex(
+              (m) => m.kind === 'agent' && m.id === activeId,
+            );
+            if (index >= 0) {
+              const target = state.messages[index] as Extract<
+                ChatMessage,
+                { kind: 'agent' }
+              >;
+              const messages = [...state.messages];
+              messages[index] = { ...target, text: target.text + event.content };
+              return { messages };
+            }
+          }
+          const id = makeMessageId();
+          return {
+            activeTextId: id,
+            messages: [
+              ...state.messages,
+              { kind: 'agent', id, text: event.content },
+            ],
+          };
+        });
         break;
       case 'tool_call':
         set((state) => ({
+          activeTextId: null,
           messages: [
             ...state.messages,
             {
@@ -503,6 +528,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
       }
       case 'confirmation_required':
         set((state) => ({
+          activeTextId: null,
           messages: [
             ...state.messages,
             {
@@ -523,6 +549,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
         break;
       case 'error':
         set((state) => ({
+          activeTextId: null,
           messages: [
             ...state.messages,
             { kind: 'agent', id: makeMessageId(), text: event.content },
@@ -534,9 +561,11 @@ export const useAIChat = create<AIChatState>((set, get) => ({
         }));
         break;
       case 'done':
-        if (event.finish_reason !== 'confirmation_required') {
-          set({ pendingConfirmation: null });
-        }
+        set(
+          event.finish_reason !== 'confirmation_required'
+            ? { pendingConfirmation: null, activeTextId: null }
+            : { activeTextId: null },
+        );
         break;
     }
   },
