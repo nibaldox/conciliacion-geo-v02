@@ -86,6 +86,7 @@ from core.ai_v2.agent.events import (
 )
 from core.ai_v2.agent.models import ToolSpec, ToolState
 from core.ai_v2.agent.policy import decide, decide_unknown
+from core.ai_v2.agent.style import neutralize_spanish
 from core.ai_v2.agent.turn import ToolCallRequest
 from core.ai_v2.models import AIUsage
 from core.ai_v2.providers.base import BaseProvider
@@ -415,11 +416,12 @@ async def _drive_iterations(
         usage_total = _accumulate_usage(usage_total, turn.usage)
 
         if not turn.tool_calls:
+            final_text = neutralize_spanish(turn.text)
             if turn.text:
                 conversation.append(
-                    {"role": "assistant", "content": turn.text}
+                    {"role": "assistant", "content": final_text}
                 )
-            yield TextEvent(content=turn.text)
+            yield TextEvent(content=final_text)
             yield DoneEvent(
                 finish_reason="stop",
                 usage=_with_duration(usage_total, _elapsed_ms(start_ns)),
@@ -427,7 +429,9 @@ async def _drive_iterations(
             return
 
         conversation.append(
-            _assistant_tool_calls_message(turn.text, turn.tool_calls)
+            _assistant_tool_calls_message(
+                neutralize_spanish(turn.text), turn.tool_calls
+            )
         )
 
         for call in turn.tool_calls:

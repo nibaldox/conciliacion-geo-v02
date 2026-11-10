@@ -925,3 +925,56 @@ async def test_cancelled_turn_persists_conversation_via_sink():
     )
     assert handler.calls == []
     assert provider.calls == 1
+
+
+# ---------------------------------------------------------------------------
+# Style: agent text is normalized to neutral Spanish
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_final_text_and_history_are_neutralized():
+    provider = ScriptedChatProvider(
+        [ChatTurn(text="Empezá cargando el mesh design.")]
+    )
+    sunk: list[list[dict[str, Any]]] = []
+    events = await collect(
+        run_agent_turn(
+            session_id=SESSION,
+            messages=list(BASE_MESSAGES),
+            provider=provider,
+            model="test-model",
+            executor={},
+            pending_store=RecordingPendingStore(),
+            state_provider=StateStub(ToolState()),
+            conversation_sink=sunk.append,
+        )
+    )
+    text_events = [e for e in events if isinstance(e, TextEvent)]
+    assert [e.content for e in text_events] == [
+        "Empieza cargando el mesh design."
+    ]
+    assert sunk
+    assistant = [m for m in sunk[0] if m["role"] == "assistant"]
+    assert assistant[-1]["content"] == "Empieza cargando el mesh design."
+
+
+@pytest.mark.asyncio
+async def test_tool_calls_turn_text_is_neutralized_in_history():
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                text="Empezá con el mesh.",
+                tool_calls=[tool_call("get_workflow_state", "", call_id="call_1")],
+            ),
+            ChatTurn(text="Listo."),
+        ]
+    )
+    events, provider, _, _ = await run_simple(
+        provider, {"get_workflow_state": RecordingHandler()}
+    )
+    text_events = [e for e in events if isinstance(e, TextEvent)]
+    assert [e.content for e in text_events] == ["Listo."]
+    assistant = provider.requests[1][2]
+    assert assistant["role"] == "assistant"
+    assert assistant["content"] == "Empieza con el mesh."
