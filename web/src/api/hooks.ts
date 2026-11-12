@@ -64,6 +64,28 @@ function isDemoMeshId(meshId: string | null | undefined): boolean {
   return meshId === DEMO_MESH_IDS.design || meshId === DEMO_MESH_IDS.topo;
 }
 
+const SECTION_DEPENDENT_QUERY_KEYS: ReadonlyArray<ReadonlyArray<string>> = [
+  ['sections'],
+  ['results'],
+  ['profile'],
+  ['design-achievement'],
+  ['proposed-compliance'],
+  ['blast-correlation'],
+  ['blast-damage-model'],
+  ['horizontal-deviation-mesh'],
+];
+
+export function invalidateSectionDependents(qc: QueryClient): void {
+  const { demoMode, demoData, designMeshId } = useSession.getState();
+  const demoActive = Boolean(demoMode && demoData && isDemoMeshId(designMeshId));
+  for (const queryKey of SECTION_DEPENDENT_QUERY_KEYS) {
+    qc.invalidateQueries({ queryKey: [...queryKey] });
+  }
+  if (!demoActive) {
+    qc.invalidateQueries({ queryKey: ['process-status'] });
+  }
+}
+
 // Loop-based min/max: Math.min(...xs) spread throws RangeError past
 // ~100-150K elements, and real meshes routinely exceed that.
 function safeMin(xs: number[]): number {
@@ -313,7 +335,7 @@ export function useAutoSections() {
   return useMutation({
     mutationFn: (params: SectionAutoParams) =>
       client.post<{ sections: SectionResponse[] }>('/sections/auto', params).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sections'] }),
+    onSuccess: () => invalidateSectionDependents(qc),
   });
 }
 
@@ -322,7 +344,7 @@ export function useManualSections() {
   return useMutation({
     mutationFn: (sections: SectionCreate[]) =>
       client.post<{ sections: SectionResponse[] }>('/sections/manual', sections).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sections'] }),
+    onSuccess: () => invalidateSectionDependents(qc),
   });
 }
 
@@ -331,7 +353,7 @@ export function useClickSection() {
   return useMutation({
     mutationFn: (params: SectionClickParams) =>
       client.post<{ section: SectionResponse; total: number }>('/sections/click', params).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sections'] }),
+    onSuccess: () => invalidateSectionDependents(qc),
   });
 }
 
@@ -348,7 +370,7 @@ export function useFileSections() {
         headers: { 'Content-Type': 'multipart/form-data' },
       }).then(r => r.data);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sections'] }),
+    onSuccess: () => invalidateSectionDependents(qc),
   });
 }
 
@@ -357,7 +379,7 @@ export function useUpdateSection() {
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string } & SectionCreate) =>
       client.put(`/sections/${id}`, data).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sections'] }),
+    onSuccess: () => invalidateSectionDependents(qc),
   });
 }
 
@@ -365,7 +387,7 @@ export function useDeleteSection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => client.delete(`/sections/${id}`).then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sections'] }),
+    onSuccess: () => invalidateSectionDependents(qc),
   });
 }
 
@@ -373,7 +395,7 @@ export function useClearSections() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => client.delete('/sections').then(r => r.data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sections'] }),
+    onSuccess: () => invalidateSectionDependents(qc),
   });
 }
 
@@ -1043,7 +1065,7 @@ export function useCurveSection() {
       await client.post('/sections/curve', params);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['sections'] });
+      invalidateSectionDependents(queryClient);
     },
   });
 }

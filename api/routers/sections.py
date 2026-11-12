@@ -156,13 +156,68 @@ async def _get_design_mesh(session_id: str):
 
 
 async def _save_sections(session_id: str, sections: List[SectionLine]):
-    """Persist a list of SectionLine objects to the database."""
+    """Persist a list of SectionLine objects, replacing the stored list."""
     await run_db(db.save_sections, session_id, [_section_to_dict(s) for s in sections])
 
 
 async def _load_sections(session_id: str) -> List[dict]:
     """Load stored section dicts from the database."""
     return await run_db(db.get_sections, session_id)
+
+
+_BUSY_STATUSES = frozenset({"running", "processing"})
+
+
+async def _ensure_sections_mutable(session_id: str) -> None:
+    """Reject mutations while the processing pipeline owns the session."""
+    status = await run_db(db.get_process_status, session_id)
+    if status["status"] in _BUSY_STATUSES:
+        raise HTTPException(
+            409,
+            "Analysis is running; wait for it to finish before changing sections",
+        )
+
+
+def _unique_section_name(name: str, used: set) -> str:
+    """Return ``name`` or the first free ``name_{n}`` suffix."""
+    if name not in used:
+        return name
+    index = 1
+    while f"{name}_{index}" in used:
+        index += 1
+    return f"{name}_{index}"
+
+
+async def _append_sections(session_id: str, new_sections: List[SectionLine]) -> List[dict]:
+    """Append sections to the stored list, suffixing colliding names.
+
+    Mirrors ``ui/step2_sections/state.py::add_sections``: names already in
+    the list (or used earlier in the same batch) receive the first free
+    ``_{n}`` suffix. Any non-empty batch invalidates the analysis.
+    """
+    stored = await _load_sections(session_id)
+    if not new_sections:
+        return stored
+    used = {s["name"] for s in stored}
+    appended: List[dict] = []
+    for sec in new_sections:
+        sec.name = _unique_section_name(sec.name, used)
+        used.add(sec.name)
+        appended.append(_section_to_dict(sec))
+    await run_db(db.save_sections, session_id, stored + appended)
+    await run_db(db.invalidate_analysis, session_id)
+    return stored + appended
+
+
+async def _replace_sections(session_id: str, sections: List[SectionLine]) -> List[dict]:
+    """Replace the stored list, invalidating analysis only on a real change."""
+    stored = await _load_sections(session_id)
+    replacement = [_section_to_dict(s) for s in sections]
+    if replacement == stored:
+        return stored
+    await run_db(db.save_sections, session_id, replacement)
+    await run_db(db.invalidate_analysis, session_id)
+    return replacement
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +297,7 @@ async def sections_auto(request: Request, params: SectionAutoParams):
     - **local_slope**: compute azimuth from design mesh slope at each section origin.
     """
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    await _ensure_sections_mutable(session_id)
     design_mesh = await _get_design_mesh(session_id)
 
     start = np.array(params.start, dtype=float)
@@ -267,7 +323,7 @@ async def sections_auto(request: Request, params: SectionAutoParams):
         for sec in sections:
             sec.azimuth = compute_local_azimuth(design_mesh, sec.origin)
 
-    await _save_sections(session_id, sections)
+    await _append_sections(session_id, sections)
 
     stored = await _load_sections(session_id)
     return {
@@ -279,6 +335,7 @@ async def sections_auto(request: Request, params: SectionAutoParams):
 async def sections_manual(request: Request, sections_data: List[SectionCreate]):
     """Set sections from manual input (replaces any existing sections)."""
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    await _ensure_sections_mutable(session_id)
     sections: List[SectionLine] = []
     for idx, s in enumerate(sections_data):
         sec = SectionLine(
@@ -292,8 +349,7 @@ async def sections_manual(request: Request, sections_data: List[SectionCreate]):
         )
         sections.append(sec)
 
-    await _save_sections(session_id, sections)
-    stored = await _load_sections(session_id)
+    stored = await _replace_sections(session_id, sections)
     return {
         "message": f"{len(stored)} sections set",
         "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
@@ -309,6 +365,7 @@ async def add_section_click(request: Request, params: SectionClickParams):
     Appends to existing sections.
     """
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    await _ensure_sections_mutable(session_id)
     origin = np.array(params.origin, dtype=float)
     length = params.length
     sector = params.sector
@@ -319,7 +376,6 @@ async def add_section_click(request: Request, params: SectionClickParams):
     else:
         az = params.azimuth if params.azimuth is not None else 0.0
 
-    # Load existing sections
     existing = await _load_sections(session_id)
     n = len(existing) + 1
     sec = SectionLine(
@@ -332,11 +388,7 @@ async def add_section_click(request: Request, params: SectionClickParams):
         sector=sector,
     )
 
-    # Append and save
-    new_sections = existing + [_section_to_dict(sec)]
-    await run_db(db.save_sections, session_id, new_sections)
-
-    stored = await _load_sections(session_id)
+    stored = await _append_sections(session_id, [sec])
     return {
         "section": _section_to_response(len(stored) - 1, stored[-1]),
         "total": len(stored),
@@ -361,6 +413,7 @@ async def sections_from_file(
     ``generate_perpendicular_sections()``.
     """
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    await _ensure_sections_mutable(session_id)
     design_mesh = await _get_design_mesh(session_id)
 
     spacing_f = float(spacing)
@@ -400,7 +453,7 @@ async def sections_from_file(
         length_up=l_up_f, length_down=l_down_f
     )
 
-    await _save_sections(session_id, sections)
+    await _append_sections(session_id, sections)
 
     stored = await _load_sections(session_id)
     return {
@@ -419,6 +472,7 @@ async def update_section(request: Request, section_id: str, body: SectionCreate)
     Replaces the section at the given index with new data.
     """
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    await _ensure_sections_mutable(session_id)
     sections = await _load_sections(session_id)
 
     try:
@@ -431,7 +485,6 @@ async def update_section(request: Request, section_id: str, body: SectionCreate)
             404, f"Section index {idx} out of range (0-{len(sections) - 1})"
         )
 
-    # Preserve original name if not provided
     updated = {
         "name": body.name or sections[idx]["name"],
         "origin": list(body.origin),
@@ -441,8 +494,10 @@ async def update_section(request: Request, section_id: str, body: SectionCreate)
         "length_down": float(body.length_down) if body.length_down is not None else None,
         "sector": body.sector,
     }
-    sections[idx] = updated
-    await run_db(db.save_sections, session_id, sections)
+    if updated != sections[idx]:
+        sections[idx] = updated
+        await run_db(db.save_sections, session_id, sections)
+        await run_db(db.invalidate_analysis, session_id)
 
     return _section_to_response(idx, updated)
 
@@ -451,6 +506,7 @@ async def update_section(request: Request, section_id: str, body: SectionCreate)
 async def delete_section(request: Request, section_id: str):
     """Delete a single section by its index-based ID."""
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
+    await _ensure_sections_mutable(session_id)
     sections = await _load_sections(session_id)
 
     try:
@@ -465,6 +521,7 @@ async def delete_section(request: Request, section_id: str):
 
     removed = sections.pop(idx)
     await run_db(db.save_sections, session_id, sections)
+    await run_db(db.invalidate_analysis, session_id)
 
     return {
         "message": f"Section '{removed['name']}' deleted",
@@ -476,7 +533,11 @@ async def delete_section(request: Request, section_id: str):
 async def clear_sections(request: Request):
     """Clear all sections for the current session."""
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
-    await run_db(db.save_sections, session_id, [])
+    await _ensure_sections_mutable(session_id)
+    sections = await _load_sections(session_id)
+    if sections:
+        await run_db(db.save_sections, session_id, [])
+        await run_db(db.invalidate_analysis, session_id)
     return {"message": "All sections cleared"}
 
 
@@ -486,10 +547,8 @@ async def sections_curve(request: Request, params: SectionCurveParams):
     Generate sections perpendicular to an arbitrary polyline (e.g. contour curve segment).
     """
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
-    # We do not strictly need the design mesh unless az_method=local_slope,
-    # but the current generate_perpendicular_sections handles az automatically.
+    await _ensure_sections_mutable(session_id)
 
-    # We pass the polyline points to generate_perpendicular_sections
     points_array = np.array(params.points, dtype=float)
     if len(points_array) < 2:
         raise HTTPException(400, "Curve must have at least 2 points")
@@ -503,8 +562,7 @@ async def sections_curve(request: Request, params: SectionCurveParams):
         length_down=params.length_down
     )
 
-    await _save_sections(session_id, sections)
-    stored = await _load_sections(session_id)
+    stored = await _append_sections(session_id, sections)
     return {
         "sections": [_section_to_response(i, s) for i, s in enumerate(stored)],
     }

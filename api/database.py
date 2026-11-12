@@ -730,6 +730,30 @@ def get_extraction(session_id: str, section_name: str, ext_type: str) -> Optiona
     return json.loads(row["data"])
 
 
+def invalidate_analysis(session_id: str) -> None:
+    """Drop every artifact derived from the previous section set.
+
+    ``results`` and ``extraction_cache`` are keyed by section name with no
+    source fingerprint, so they become meaningless as soon as the section
+    list changes. Both tables are cleared and the pipeline status returns to
+    ``idle`` in a single transaction. Tables guarded by a source/version
+    fingerprint (blast uploads, simulations, settings) are left untouched.
+    """
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM results WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM extraction_cache WHERE session_id = ?", (session_id,))
+        conn.execute(
+            "UPDATE sessions SET process_status = 'idle', current_section = 0, "
+            "total_sections = 0, completed_sections = 0, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (session_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def get_all_extractions(session_id: str, ext_type: str) -> List[Tuple[str, Dict]]:
     """Get all cached extractions of a type for a session."""
     conn = get_connection()
