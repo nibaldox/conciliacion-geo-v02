@@ -29,6 +29,7 @@ from core.ai_v2.agent.models import (
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
+    SectionDefinitionArgs,
     SectionManualArgs,
     ToolRisk,
 )
@@ -190,8 +191,26 @@ async def test_add_section_click_auto_uses_local_slope(temp_db):
 # ---------------------------------------------------------------------------
 
 
+def _seed_analysis(session_id: str) -> None:
+    db.save_results(session_id, [{"section": "S-01", "section_status": "CUMPLE"}])
+    db.save_extraction(session_id, "S-01", "design", {"points": [[0.0, 0.0]]})
+    db.update_process_status(session_id, "complete", 1, 1, 1)
+
+
+def _assert_analysis_invalidated(session_id: str) -> None:
+    assert db.get_results(session_id) == []
+    assert db.get_extraction(session_id, "S-01", "design") is None
+    assert db.get_process_status(session_id)["status"] == "idle"
+
+
+def _assert_analysis_intact(session_id: str) -> None:
+    assert len(db.get_results(session_id)) == 1
+    assert db.get_extraction(session_id, "S-01", "design") is not None
+    assert db.get_process_status(session_id)["status"] == "complete"
+
+
 @pytest.mark.asyncio
-async def test_generate_sections_auto_replaces_sections(temp_db):
+async def test_generate_sections_auto_appends_sections(temp_db):
     _save_box_mesh(SESSION_A, "design")
     db.save_sections(SESSION_A, [_section_dict("S-01"), _section_dict("S-02", 10.0)])
     result = await generate_sections_auto(
@@ -199,14 +218,132 @@ async def test_generate_sections_auto_replaces_sections(temp_db):
         SectionAutoArgs(start=[-90.0, 0.0], end=[90.0, 0.0], n_sections=4),
     )
     assert result["ok"] is True
-    assert result["n_sections"] == 4
-    assert result["sections_shown"] == 4
+    assert result["n_sections"] == 6
+    assert result["sections_shown"] == 6
     assert result["sections_truncated"] is False
     stored = db.get_sections(SESSION_A)
-    assert len(stored) == 4
-    xs = sorted(section["origin"][0] for section in stored)
-    assert xs[0] <= -89.0 and xs[-1] >= 89.0
+    assert len(stored) == 6
+    names = [section["name"] for section in stored]
+    assert len(set(names)) == 6
+    assert names[:2] == ["S-01", "S-02"]
     assert db.get_sections(SESSION_B) == []
+
+
+@pytest.mark.asyncio
+async def test_generate_sections_auto_invalidates_analysis(temp_db):
+    _save_box_mesh(SESSION_A, "design")
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    _seed_analysis(SESSION_A)
+    result = await generate_sections_auto(
+        SESSION_A,
+        SectionAutoArgs(start=[-90.0, 0.0], end=[90.0, 0.0], n_sections=2),
+    )
+    assert result["ok"] is True
+    _assert_analysis_invalidated(SESSION_A)
+
+
+@pytest.mark.asyncio
+async def test_generate_sections_auto_suffixes_colliding_names(temp_db):
+    _save_box_mesh(SESSION_A, "design")
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    await generate_sections_auto(
+        SESSION_A,
+        SectionAutoArgs(start=[-90.0, 0.0], end=[90.0, 0.0], n_sections=1),
+    )
+    names = [section["name"] for section in db.get_sections(SESSION_A)]
+    assert len(names) == len(set(names)) == 2
+    assert names[0] == "S-01"
+
+
+@pytest.mark.asyncio
+async def test_generate_sections_manual_invalidates_when_changed(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    _seed_analysis(SESSION_A)
+    result = await generate_sections_manual(
+        SESSION_A,
+        SectionManualArgs(
+            sections=[
+                SectionDefinitionArgs(
+                    origin=[5.0, 0.0], azimuth=90.0, length=80.0, name="M-1"
+                )
+            ]
+        ),
+    )
+    assert result["ok"] is True
+    assert [s["name"] for s in db.get_sections(SESSION_A)] == ["M-1"]
+    _assert_analysis_invalidated(SESSION_A)
+
+
+@pytest.mark.asyncio
+async def test_generate_sections_manual_identical_keeps_analysis(temp_db):
+    definitions = [
+        {"origin": [5.0, 0.0], "azimuth": 90.0, "length": 80.0, "name": "M-1"}
+    ]
+    await generate_sections_manual(SESSION_A, SectionManualArgs(sections=[SectionDefinitionArgs(**d) for d in definitions]))
+    _seed_analysis(SESSION_A)
+    result = await generate_sections_manual(
+        SESSION_A, SectionManualArgs(sections=[SectionDefinitionArgs(**d) for d in definitions])
+    )
+    assert result["ok"] is True
+    assert result["n_sections"] == 1
+    _assert_analysis_intact(SESSION_A)
+
+
+@pytest.mark.asyncio
+async def test_add_section_click_invalidates_analysis(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    _seed_analysis(SESSION_A)
+    result = await add_section_click(
+        SESSION_A,
+        SectionClickArgs(origin=[10.0, 5.0], az_mode="manual", azimuth=45.0),
+    )
+    assert result["ok"] is True
+    _assert_analysis_invalidated(SESSION_A)
+
+
+@pytest.mark.asyncio
+async def test_add_section_click_suffixes_colliding_name(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-02")])
+    result = await add_section_click(
+        SESSION_A,
+        SectionClickArgs(origin=[10.0, 5.0], az_mode="manual", azimuth=45.0),
+    )
+    assert result["ok"] is True
+    assert result["section"]["name"] == "S-02_1"
+    names = [section["name"] for section in db.get_sections(SESSION_A)]
+    assert names == ["S-02", "S-02_1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busy_status", ["running", "processing"])
+async def test_busy_session_rejects_every_section_mutation(temp_db, busy_status):
+    _save_box_mesh(SESSION_A, "design")
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    _seed_analysis(SESSION_A)
+    db.update_process_status(SESSION_A, busy_status, 0, 2)
+    before = db.get_sections(SESSION_A)
+    manual_defs = [{"origin": [1.0, 0.0], "azimuth": 90.0, "length": 80.0}]
+
+    results = [
+        await generate_sections_auto(
+            SESSION_A,
+            SectionAutoArgs(start=[-90.0, 0.0], end=[90.0, 0.0], n_sections=3),
+        ),
+        await generate_sections_manual(
+            SESSION_A, SectionManualArgs(sections=[SectionDefinitionArgs(**d) for d in manual_defs])
+        ),
+        await add_section_click(
+            SESSION_A,
+            SectionClickArgs(origin=[10.0, 5.0], az_mode="manual", azimuth=45.0),
+        ),
+    ]
+    for result in results:
+        assert result["ok"] is False
+        assert result["error"] == "process_running"
+    assert db.get_sections(SESSION_A) == before
+    assert len(db.get_results(SESSION_A)) == 1
+    assert db.get_extraction(SESSION_A, "S-01", "design") is not None
+    assert db.get_process_status(SESSION_A)["status"] == busy_status
 
 
 @pytest.mark.asyncio
@@ -232,7 +369,7 @@ async def test_generate_sections_manual_replaces_and_bounds_summary(temp_db):
         for index in range(200)
     ]
     result = await generate_sections_manual(
-        SESSION_A, SectionManualArgs(sections=definitions)
+        SESSION_A, SectionManualArgs(sections=[SectionDefinitionArgs(**d) for d in definitions])
     )
     assert result["ok"] is True
     assert result["n_sections"] == 200

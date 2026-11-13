@@ -82,12 +82,17 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         name="generate_sections_auto",
         description=(
             "Generate sections evenly spaced along a start-end line over "
-            "the design mesh. Replaces ALL existing sections of the session."
+            "the design mesh. Appends them to the existing sections of the "
+            "session (does not replace them) and invalidates the previous "
+            "analysis results."
         ),
         args_model=SectionAutoArgs,
         risk=ToolRisk.REPLACE,
         state_keys=("n_sections",),
-        impact_summary="Sobrescribe {count} secciones existentes",
+        impact_summary=(
+            "Añade secciones e invalida el análisis actual "
+            "({count} secciones existentes)"
+        ),
     ),
     ToolSpec(
         name="generate_sections_manual",

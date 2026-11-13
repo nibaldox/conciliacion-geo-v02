@@ -959,4 +959,6 @@ async def test_pending_created_by_loop_carries_args_summary():
     )
     created = store.created_runs[-1]
     assert created.args_summary
-    assert created.args_summary == "Sobrescribe 3 secciones existentes"
+    assert created.args_summary == (
+        "Añade secciones e invalida el análisis actual (3 secciones existentes)"
+    )

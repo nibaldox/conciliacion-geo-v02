@@ -6,13 +6,17 @@ and persistence helpers — NEVER self-HTTP and NEVER reimplemented
 algorithms. ``session_id`` is injected by the loop (middleware
 context); it is never read from model arguments.
 
-Semantics honored here (verified against the routers):
+Section semantics mirror the REST router (``api.routers.sections``):
 
-- ``generate_sections_auto`` / ``generate_sections_manual`` go through
-  ``_save_sections`` → ``db.save_sections`` which REPLACES all sections
-  of the session; the loop-level confirmation policy gates that.
+- ``generate_sections_auto`` APPENDS to the stored sections, mirroring
+  ``POST /sections/auto``; colliding names get a ``_{n}`` suffix.
+- ``generate_sections_manual`` REPLACES the stored sections, mirroring
+  ``POST /sections/manual``; analysis is invalidated only on a real change.
 - ``add_section_click`` APPENDS one section, mirroring
-  ``POST /sections/click``.
+  ``POST /sections/click``; colliding names get a ``_{n}`` suffix.
+- Every effective section mutation invalidates the previous analysis
+  (``db.invalidate_analysis``). Mutations are rejected with
+  ``process_running`` while the session is ``running`` or ``processing``.
 - ``run_reconciliation`` reuses ``_run_pipeline_sync`` off the event
   loop, claims the session atomically via ``db.try_begin_process``
   (losing callers get a clean ``process_running`` observation), and
@@ -76,6 +80,10 @@ _MSG_PROCESS_RUNNING = (
     "Ya existe un proceso de conciliación en ejecución; espera a que "
     "termine antes de relanzarlo."
 )
+_MSG_SECTIONS_BUSY = (
+    "Hay un proceso de conciliación en ejecución; espera a que termine "
+    "antes de modificar las secciones."
+)
 _MSG_NO_SECTIONS = (
     "No hay secciones definidas: genera secciones antes de procesar."
 )
@@ -117,6 +125,19 @@ async def _stored_sections_summary(session_id: str) -> Dict[str, Any]:
     }
 
 
+async def _sections_busy_error(session_id: str) -> Dict[str, Any] | None:
+    """Return a ``process_running`` observation when sections are locked."""
+    try:
+        await _ensure_sections_mutable(session_id)
+    except HTTPException:
+        return {
+            "ok": False,
+            "error": "process_running",
+            "message": _MSG_SECTIONS_BUSY,
+        }
+    return None
+
+
 async def _design_mesh_or_error(session_id: str) -> tuple[Any, Dict[str, Any] | None]:
     """Load the design mesh; return (mesh, None) or (None, error dict)."""
     try:
@@ -135,7 +156,14 @@ async def _design_mesh_or_error(session_id: str) -> tuple[Any, Dict[str, Any] | 
 
 
 async def add_section_click(session_id: str, args: SectionClickArgs) -> Dict[str, Any]:
-    """Append ONE section, mirroring POST /sections/click."""
+    """Append ONE section, mirroring POST /sections/click.
+
+    Rejected with ``process_running`` while the session is busy. A colliding
+    name receives a ``_{n}`` suffix and the previous analysis is invalidated.
+    """
+    busy = await _sections_busy_error(session_id)
+    if busy is not None:
+        return busy
     if args.az_mode == "auto":
         design_mesh, error = await _design_mesh_or_error(session_id)
         if error is not None or design_mesh is None:
@@ -157,8 +185,7 @@ async def add_section_click(session_id: str, args: SectionClickArgs) -> Dict[str
         length_down=args.length_down,
         sector=args.sector,
     )
-    await run_db(db.save_sections, session_id, existing + [_section_to_dict(section)])
-    stored = await _load_sections(session_id)
+    stored = await _append_sections(session_id, [section])
     return {
         "ok": True,
         "section": _section_to_response(len(stored) - 1, stored[-1]),
@@ -169,7 +196,15 @@ async def add_section_click(session_id: str, args: SectionClickArgs) -> Dict[str
 async def generate_sections_auto(
     session_id: str, args: SectionAutoArgs
 ) -> Dict[str, Any]:
-    """Generate sections along a start-end line; REPLACES all sections."""
+    """Generate sections along a start-end line, APPENDING to the stored ones.
+
+    Mirrors POST /sections/auto: colliding names get a ``_{n}`` suffix and
+    the previous analysis is invalidated. Rejected with ``process_running``
+    while the session is busy.
+    """
+    busy = await _sections_busy_error(session_id)
+    if busy is not None:
+        return busy
     design_mesh, error = await _design_mesh_or_error(session_id)
     if error is not None or design_mesh is None:
         return error if error is not None else {
@@ -202,14 +237,22 @@ async def generate_sections_auto(
         return sections
 
     sections = await asyncio.to_thread(_generate)
-    await _save_sections(session_id, sections)
+    await _append_sections(session_id, sections)
     return await _stored_sections_summary(session_id)
 
 
 async def generate_sections_manual(
     session_id: str, args: SectionManualArgs
 ) -> Dict[str, Any]:
-    """Set sections from explicit definitions; REPLACES all sections."""
+    """Set sections from explicit definitions, REPLACING the stored ones.
+
+    Mirrors POST /sections/manual. The analysis is invalidated only when the
+    resulting list differs from the stored one. Rejected with
+    ``process_running`` while the session is busy.
+    """
+    busy = await _sections_busy_error(session_id)
+    if busy is not None:
+        return busy
     sections = [
         SectionLine(
             name=definition.name or f"S-{index + 1:02d}",
@@ -222,7 +265,7 @@ async def generate_sections_manual(
         )
         for index, definition in enumerate(args.sections)
     ]
-    await _save_sections(session_id, sections)
+    await _replace_sections(session_id, sections)
     return await _stored_sections_summary(session_id)
 
 
@@ -337,9 +380,10 @@ __all__ = [
 
 from api.routers.process import _run_pipeline_sync
 from api.routers.sections import (
+    _append_sections,
+    _ensure_sections_mutable,
     _get_design_mesh,
     _load_sections,
-    _save_sections,
-    _section_to_dict,
+    _replace_sections,
     _section_to_response,
 )
