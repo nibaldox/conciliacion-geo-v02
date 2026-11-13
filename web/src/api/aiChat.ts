@@ -13,6 +13,32 @@
 import { parseAgentEventLine, type AgentEvent } from './agentChat';
 import client, { getSessionId } from './client';
 
+export type AIModelsStatus = 'ok' | 'unavailable' | 'not_supported' | 'disabled';
+
+export interface AIModelEntry {
+  id: string;
+  label?: string | null;
+  tool_use?: boolean | null;
+}
+
+/**
+ * Additive `chat_models` block of GET /ai/providers.
+ *
+ * `status` reports the discovery outcome — `ok` means LM Studio answered
+ * and the list below is authoritative (an empty list means NOTHING is
+ * loaded). `selected` is the server-side choice: the environment
+ * override (`override`) or the only loaded instance (`auto`); it is
+ * `null` when the user must choose or type an id. Absent on older
+ * backends, which keep the legacy placeholder flow.
+ */
+export interface AIChatModelsState {
+  status: AIModelsStatus;
+  source: 'v1' | 'v0' | null;
+  models: AIModelEntry[];
+  selected: string | null;
+  selected_source: 'override' | 'auto' | null;
+}
+
 export interface AIProvidersState {
   providers: string[];
   supports_tool_calls: Record<string, boolean>;
@@ -20,6 +46,7 @@ export interface AIProvidersState {
   chat_provider: string | null;
   chat_local_only: boolean;
   chat_model: string;
+  chat_models?: AIChatModelsState;
 }
 
 export interface AgentChatRequestBody {

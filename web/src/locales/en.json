@@ -1743,7 +1743,12 @@
       "local_badge": "LM Studio · Local",
       "configured": "CONFIGURED",
       "unavailable": "UNAVAILABLE",
-      "status_loading": "Checking status…"
+      "status_loading": "Checking status…",
+      "no_model": "NO MODEL",
+      "no_connection": "NO CONNECTION",
+      "not_supported": "NOT SUPPORTED",
+      "choose_model": "CHOOSE MODEL",
+      "manual": "MANUAL MODEL"
     },
     "clear": "Clear",
     "clear_confirm": "Delete from server?",
@@ -1755,13 +1760,24 @@
       "providers_unavailable": "Could not query the chat status from the server.",
       "placeholder_model_warn": "The server has no CONCILIACION_LMSTUDIO_DEFAULT_MODEL configured. Type below the name of the model loaded in LM Studio; it is used only for this session.",
       "placeholder_model_required": "Enter the model loaded in LM Studio before sending messages.",
+      "models_none": "No chat model is loaded in LM Studio. Load one in LM Studio and check again.",
+      "models_unreachable": "LM Studio could not be queried to detect the loaded model. Check that it is running and try again.",
+      "models_unsupported": "The server answered, but does not expose the LM Studio models API. Check that the address really is LM Studio and not another service.",
+      "models_required": "Several chat models are loaded in LM Studio: choose one before sending messages.",
+      "model_changed": "The model detected in LM Studio changed from \"{{previous}}\" to \"{{current}}\" and the message was not sent. Check the model shown above and send again to confirm it.",
+      "model_no_tools": "The loaded model does not support tool calls; the assistant cannot run actions in this session.",
       "request_failed": "The server rejected the request: {{detail}}",
       "network_error": "No connection to the server; please try again.",
       "cleared": "Conversation removed from the server. Starting a new conversation.",
       "download_failed": "The generated file could not be downloaded; please try again."
       },
     "model": {
-      "session_label": "Model loaded in LM Studio (this session only)"
+      "session_label": "Model loaded in LM Studio (this session only)",
+      "selector_label": "Model loaded in LM Studio",
+      "selector_placeholder": "Select a model…",
+      "manual_label": "Loaded model name (manual, this session only)",
+      "no_tools_suffix": "no tools",
+      "refresh": "Check again"
     },
     "input": {
       "placeholder": "Type your message…",

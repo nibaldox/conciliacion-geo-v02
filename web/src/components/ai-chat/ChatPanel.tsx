@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
-import { LMSTUDIO_PLACEHOLDER_MODEL } from '../../api/aiChat';
 import type { ChatMessage, ChatNotice } from '../../stores/aiChat';
 import { useAIChat } from '../../stores/aiChat';
+import {
+  LMSTUDIO_PLACEHOLDER_MODEL,
+  type AIProvidersState,
+} from '../../api/aiChat';
+import {
+  modelOptionLabel,
+  resolveChatModelSelection,
+  type ChatModelSelection,
+} from '../../utils/chatModelSelection';
 import { Spinner } from '../ui/Spinner';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TopoUploadZone } from './TopoUploadZone';
@@ -14,6 +22,63 @@ const NOTICE_TONE: Record<ChatNotice['severity'], string> = {
   warning: 'border-[var(--color-status-warning)] text-text-primary',
   error: 'border-[var(--color-status-error)] text-text-primary',
 };
+
+type PanelStatus =
+  | 'loading'
+  | 'configured'
+  | 'unavailable'
+  | 'no_model'
+  | 'no_connection'
+  | 'not_supported'
+  | 'choose_model'
+  | 'manual';
+
+const PANEL_STATUS_KEY: Record<Exclude<PanelStatus, 'loading'>, string> = {
+  configured: 'aiChat.header.configured',
+  unavailable: 'aiChat.header.unavailable',
+  no_model: 'aiChat.header.no_model',
+  no_connection: 'aiChat.header.no_connection',
+  not_supported: 'aiChat.header.not_supported',
+  choose_model: 'aiChat.header.choose_model',
+  manual: 'aiChat.header.manual',
+};
+
+function derivePanelStatus(options: {
+  providerStateLoaded: boolean;
+  chatEnabled: boolean;
+  supportsTools: boolean;
+  modelsState: AIProvidersState['chat_models'] | null;
+  selection: ChatModelSelection;
+  manual: string;
+}): PanelStatus {
+  if (!options.providerStateLoaded) return 'loading';
+  if (!options.chatEnabled || !options.supportsTools) return 'unavailable';
+  const models = options.modelsState;
+  if (!models) {
+    if (options.selection.kind === 'legacy' && options.selection.needsManual) {
+      return options.manual ? 'manual' : 'no_model';
+    }
+    return 'configured';
+  }
+  if (options.selection.kind === 'unresolved' && options.selection.manual) {
+    return 'manual';
+  }
+  if (models.status === 'disabled') return 'unavailable';
+  if (
+    options.selection.kind === 'fixed' &&
+    models.selected_source === 'override' &&
+    models.status === 'ok'
+  ) {
+    return 'configured';
+  }
+  if (models.status === 'not_supported') return 'not_supported';
+  if (models.status !== 'ok') return 'no_connection';
+  if (models.models.length === 0) return 'no_model';
+  if (options.selection.kind === 'pick' && options.selection.model === null) {
+    return 'choose_model';
+  }
+  return 'configured';
+}
 
 function MessageBubble({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
@@ -63,7 +128,7 @@ function ConfirmationCardLazy({
 }: {
   message: Extract<ChatMessage, { kind: 'confirmation' }>;
 }) {
-  const busy = useAIChat((s) => s.streaming);
+  const busy = useAIChat((s) => s.streaming || s.sendInFlight || s.clearing);
   const approve = useAIChat((s) => s.approve);
   const deny = useAIChat((s) => s.deny);
   return (
@@ -87,6 +152,7 @@ function NoticeBanner({ notice }: { notice: ChatNotice }) {
     <div
       role="status"
       data-slot="ai-chat-notice"
+      data-testid="ai-chat-notice"
       data-severity={notice.severity}
       className={`flex items-start justify-between gap-2 rounded-lg border px-3 py-2 text-xs ${NOTICE_TONE[notice.severity]}`}
     >
@@ -142,20 +208,36 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
   const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
   const streaming = useAIChat((s) => s.streaming);
+  const sendInFlight = useAIChat((s) => s.sendInFlight);
+  const clearing = useAIChat((s) => s.clearing);
   const providerState = useAIChat((s) => s.providerState);
   const providerStateLoaded = useAIChat((s) => s.providerStateLoaded);
+  const providerStateLoading = useAIChat((s) => s.providerStateLoading);
   const sessionModel = useAIChat((s) => s.sessionModel);
   const notice = useAIChat((s) => s.notice);
+  const acceptedDraft = useAIChat((s) => s.acceptedDraft);
   const send = useAIChat((s) => s.send);
   const abort = useAIChat((s) => s.abort);
   const setSessionModel = useAIChat((s) => s.setSessionModel);
+  const loadProviderState = useAIChat((s) => s.loadProviderState);
   const clearConversation = useAIChat((s) => s.clearConversation);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const handledAcceptanceRef = useRef<string | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmingClear, setConfirmingClear] = useState(false);
+
+  useEffect(() => {
+    if (!acceptedDraft || handledAcceptanceRef.current === acceptedDraft.id) {
+      return;
+    }
+    handledAcceptanceRef.current = acceptedDraft.id;
+    setDraft((current) =>
+      current.trim() === acceptedDraft.text ? '' : current,
+    );
+  }, [acceptedDraft]);
 
   useEffect(() => {
     void useAIChat.getState().init();
@@ -180,24 +262,49 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
   const chatEnabled = providerState?.chat_enabled ?? false;
   const provider = providerState?.chat_provider ?? null;
   const localOnly = providerState?.chat_local_only ?? false;
-  const chatModel = providerState?.chat_model ?? null;
-  const placeholderModel = chatEnabled && chatModel === LMSTUDIO_PLACEHOLDER_MODEL;
+  const modelsState = providerState?.chat_models ?? null;
   const supportsTools = provider
     ? providerState?.supports_tool_calls[provider] !== false
     : true;
   const isLmStudioLocal = localOnly && provider === 'lmstudio';
-  const headerModel = placeholderModel && sessionModel.trim()
-    ? sessionModel.trim()
-    : chatModel;
+  const selection = resolveChatModelSelection(providerState, sessionModel);
+  const placeholderModel =
+    chatEnabled && selection.kind === 'legacy' && selection.needsManual;
+  const rawHeaderModel =
+    selection.kind === 'fixed' || selection.kind === 'pick'
+      ? selection.model
+      : selection.kind === 'unresolved'
+        ? selection.manual || null
+        : selection.needsManual
+          ? sessionModel.trim() || null
+          : selection.model;
+  const headerModel =
+    rawHeaderModel === LMSTUDIO_PLACEHOLDER_MODEL ? null : rawHeaderModel;
+  const chosenToolUse =
+    selection.kind === 'fixed' || selection.kind === 'pick'
+      ? selection.toolUse
+      : null;
+
+  const status = derivePanelStatus({
+    providerStateLoaded,
+    chatEnabled,
+    supportsTools,
+    modelsState,
+    selection,
+    manual: sessionModel.trim(),
+  });
+  const turnActive = streaming || sendInFlight;
+  const busy = turnActive || clearing;
 
   const handleSubmit = () => {
+    if (busy) return;
     const text = draft.trim();
     if (!text) return;
-    setDraft('');
     void send(text);
   };
 
   const handleClear = () => {
+    if (busy) return;
     if (!confirmingClear) {
       setConfirmingClear(true);
       return;
@@ -227,6 +334,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
       data-testid="ai-chat-panel"
       role="dialog"
       aria-label={t('aiChat.title')}
+      aria-busy={busy}
       onKeyDown={(e) => {
         if (e.key === 'Escape') onClose();
       }}
@@ -268,23 +376,33 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
           )}
           <span
             data-testid="ai-chat-status"
+            data-status={status}
             className="ml-auto flex shrink-0 items-center gap-1 text-text-muted"
           >
-            {!providerStateLoaded ? (
-              <Spinner size="sm" />
-            ) : chatEnabled && supportsTools ? (
-              t('aiChat.header.configured')
-            ) : (
-              t('aiChat.header.unavailable')
-            )}
+            {providerStateLoading ? <Spinner size="sm" /> : null}
+            {status === 'loading' ? null : t(PANEL_STATUS_KEY[status])}
           </span>
+          <button
+            type="button"
+            data-testid="ai-chat-models-refresh"
+            aria-label={t('aiChat.model.refresh')}
+            title={t('aiChat.model.refresh')}
+            onClick={() => void loadProviderState()}
+            disabled={providerStateLoading || busy}
+            className="shrink-0 rounded px-1.5 py-0.5 text-text-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ↻
+          </button>
           <button
             type="button"
             data-testid="ai-chat-clear"
             onClick={handleClear}
             onBlur={() => setConfirmingClear(false)}
-            className="shrink-0 rounded px-1.5 py-0.5 text-text-muted hover:text-text-primary"
+            disabled={busy}
+            aria-busy={clearing}
+            className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-text-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
           >
+            {clearing ? <Spinner size="sm" /> : null}
             {confirmingClear
               ? t('aiChat.clear_confirm')
               : t('aiChat.clear')}
@@ -339,9 +457,101 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
                 onChange={(e) => setSessionModel(e.target.value)}
                 aria-label={t('aiChat.model.session_label')}
                 placeholder="qwen3-32b"
-                className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs"
+                disabled={busy}
+                className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
               />
             </label>
+          </div>
+        )}
+        {chatEnabled && selection.kind === 'pick' && (
+          <div
+            role="status"
+            data-testid={
+              selection.model === null
+                ? 'ai-chat-models-notice'
+                : 'ai-chat-model-selector'
+            }
+            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${
+              selection.model === null
+                ? 'border-[var(--color-status-warning)]'
+                : 'border-border'
+            }`}
+          >
+            {selection.model === null && (
+              <div className="flex items-start justify-between gap-2">
+                <p>{t('aiChat.notice.models_required')}</p>
+              </div>
+            )}
+            <label
+              className={selection.model === null ? 'mt-2 block' : 'block'}
+            >
+              <span className="text-[11px] text-text-muted">
+                {t('aiChat.model.selector_label')}
+              </span>
+              <select
+                data-testid="ai-chat-model-select"
+                value={selection.model ?? ''}
+                onChange={(e) => setSessionModel(e.target.value, 'detected')}
+                aria-label={t('aiChat.model.selector_label')}
+                disabled={busy}
+                className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <option value="">{t('aiChat.model.selector_placeholder')}</option>
+                {selection.models.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {modelOptionLabel(model, selection.models)}
+                    {model.tool_use === false
+                      ? ` · ${t('aiChat.model.no_tools_suffix')}`
+                      : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
+        {chatEnabled &&
+          selection.kind === 'unresolved' &&
+          modelsState?.status !== 'disabled' && (
+            <div
+              role="status"
+              data-testid="ai-chat-models-notice"
+              className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p>
+                  {t(
+                    selection.status === 'ok'
+                      ? 'aiChat.notice.models_none'
+                      : selection.status === 'not_supported'
+                        ? 'aiChat.notice.models_unsupported'
+                        : 'aiChat.notice.models_unreachable',
+                  )}
+                </p>
+              </div>
+              <label className="mt-2 block">
+                <span className="text-[11px] text-text-muted">
+                  {t('aiChat.model.manual_label')}
+                </span>
+                <input
+                  type="text"
+                  data-testid="ai-chat-session-model-input"
+                  value={sessionModel}
+                  onChange={(e) => setSessionModel(e.target.value)}
+                  aria-label={t('aiChat.model.manual_label')}
+                  placeholder="qwen3-32b"
+                  disabled={busy}
+                  className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                />
+              </label>
+            </div>
+          )}
+        {chosenToolUse === false && (
+          <div
+            role="status"
+            data-testid="ai-chat-model-no-tools"
+            className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+          >
+            {t('aiChat.notice.model_no_tools')}
           </div>
         )}
         {messages.length === 0 && providerStateLoaded && (
@@ -391,20 +601,21 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
           aria-label={t('aiChat.input.aria')}
           className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm"
         />
-        {streaming ? (
+        {turnActive ? (
           <button
             type="button"
             data-testid="ai-chat-stop"
             onClick={abort}
-            className="shrink-0 rounded-md border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
+            className="flex shrink-0 items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
           >
+            <Spinner size="sm" />
             {t('aiChat.input.stop')}
           </button>
         ) : (
           <button
             type="submit"
             data-testid="ai-chat-send"
-            disabled={!draft.trim()}
+            disabled={clearing || !draft.trim()}
             className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('aiChat.input.send')}

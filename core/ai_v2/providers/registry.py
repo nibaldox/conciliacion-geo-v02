@@ -38,6 +38,14 @@ def _resolve_default_model(provider_type: ProviderType) -> str:
     return PROVIDER_PRESETS[provider_type]["default_model"]
 
 
+LMSTUDIO_PLACEHOLDER_MODEL = "loaded-model"
+"""Sentinel model name used when no concrete model is configured.
+
+It is NOT a model that LM Studio can serve: it only tells legacy clients
+that the concrete id must come from somewhere else (server override,
+discovery, or the user's explicit choice).
+"""
+
 PROVIDER_PRESETS: dict[ProviderType, dict[str, str]] = {
     ProviderType.OLLAMA: {
         "base_url": "http://localhost:11434/v1",
@@ -45,7 +53,7 @@ PROVIDER_PRESETS: dict[ProviderType, dict[str, str]] = {
     },
     ProviderType.LMSTUDIO: {
         "base_url": "http://localhost:1234/v1",
-        "default_model": "loaded-model",
+        "default_model": LMSTUDIO_PLACEHOLDER_MODEL,
     },
     ProviderType.OPENAI: {
         "base_url": "https://api.openai.com/v1",
@@ -117,14 +125,25 @@ def resolve_base_url(provider_type: ProviderType) -> str:
     return candidate or preset
 
 
+def resolve_api_key(provider_type: ProviderType) -> str:
+    """API key the provider uses for its OpenAI-compatible calls.
+
+    Shared by the provider factory and by capability discovery so both
+    contact the same server with the SAME credential. The value is only
+    ever placed in an outbound ``Authorization`` header: it is never
+    logged, exposed in API payloads or embedded in error details.
+    """
+    env_var = f"{provider_type.value.upper()}_API_KEY"
+    return os.environ.get(env_var, "not-needed")
+
+
 class ProviderRegistry:
     @classmethod
     def get(
         cls, provider_type: ProviderType, api_key: str | None = None
     ) -> OpenAICompatibleProvider:
         if api_key is None:
-            env_var = f"{provider_type.value.upper()}_API_KEY"
-            api_key = os.environ.get(env_var, "not-needed")
+            api_key = resolve_api_key(provider_type)
         return OpenAICompatibleProvider(
             base_url=resolve_base_url(provider_type),
             api_key=api_key,

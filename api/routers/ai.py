@@ -73,11 +73,20 @@ from core.ai_v2.config import AIConfig
 from core.ai_v2.providers.base import BaseProvider
 from core.ai_v2.providers.openai_compat import OpenAICompatibleProvider
 from core.ai_v2.providers.registry import (
+    LMSTUDIO_PLACEHOLDER_MODEL,
     PROVIDER_PRESETS,
     ProviderRegistry,
     ProviderType,
     TOOL_CALL_CAPABILITY,
+    resolve_api_key,
     resolve_base_url,
+)
+from core.ai_v2.providers.lmstudio_discovery import (
+    STATUS_DISABLED,
+    STATUS_OK,
+    STATUS_UNAVAILABLE,
+    DiscoveryResult,
+    discover_lmstudio_models,
 )
 from api import ai_agent_conversations as agent_conversations
 import api.database as db
@@ -189,9 +198,19 @@ async def providers() -> dict:
     ``chat_model`` report the chat feature state: the local-only policy
     pins the chat provider to ``lmstudio`` when active (else ``None``),
     and ``chat_model`` is the server-side model override
-    (``CONCILIACION_LMSTUDIO_DEFAULT_MODEL``) or the LM Studio preset
-    placeholder when unset.
+    (``CONCILIACION_LMSTUDIO_DEFAULT_MODEL``) while the local-only policy
+    is active, the single loaded LM Studio instance discovered on the
+    configured host, or the preset placeholder when neither applies.
+
+    ``chat_models`` is additive and reports what is ACTUALLY loaded:
+    ``status`` (``ok`` / ``unavailable`` / ``not_supported`` /
+    ``disabled``), the discovery ``source`` (``v1`` / ``v0``), the loaded
+    chat ``models`` (instance id + label + tool support) and the
+    server-side ``selected`` model with its ``selected_source``
+    (``override`` / ``auto``). The payload never carries the provider
+    base URL, API keys, tokens or raw upstream errors.
     """
+    chat_models, auto_model = await _chat_models_state()
     return {
         "providers": [p.value for p in PROVIDER_PRESETS],
         "supports_tool_calls": {
@@ -202,9 +221,11 @@ async def providers() -> dict:
         "chat_provider": _LOCAL_ONLY_PROVIDER if _local_only_active() else None,
         "chat_local_only": _local_only_active(),
         "chat_model": (
-            _lmstudio_model_override()
+            _effective_lmstudio_model_override()
+            or auto_model
             or PROVIDER_PRESETS[ProviderType.LMSTUDIO]["default_model"]
         ),
+        "chat_models": chat_models,
     }
 
 
@@ -320,10 +341,13 @@ LMSTUDIO_MODEL_ENV = "CONCILIACION_LMSTUDIO_DEFAULT_MODEL"
 
 When set (non-empty), /ai/chat AND the report endpoints
 (/ai/generate, /ai/generate/stream) replace the client-sent model
-with this value: the client can never substitute the configured
-model. Unset keeps the client's model (reports may then name any
-locally loaded LM Studio model). /ai/providers reports the same
-override or the LM Studio preset placeholder (``loaded-model``).
+with this value while the local-only policy is active: the client can
+never substitute the configured model. The preset placeholder
+(``loaded-model``) is never a valid value and counts as unset. Unset
+keeps the client's model (reports may then name any locally loaded LM
+Studio model). /ai/providers reports the same override, the single
+loaded instance discovered on the configured host, or the LM Studio
+preset placeholder when neither applies.
 """
 
 _LOCAL_ONLY_PROVIDER = "lmstudio"
@@ -458,8 +482,116 @@ def _local_only_active() -> bool:
 
 
 def _lmstudio_model_override() -> str | None:
-    """Configured chat model override, or None to keep the client's."""
-    return os.environ.get(LMSTUDIO_MODEL_ENV, "").strip() or None
+    """Configured chat model override, or None to keep the client's.
+
+    The preset placeholder is a sentinel, never a servable model id: an
+    operator value equal to it is treated as unset so it can neither be
+    reported nor forwarded as a real model.
+    """
+    value = os.environ.get(LMSTUDIO_MODEL_ENV, "").strip()
+    if not value or value == LMSTUDIO_PLACEHOLDER_MODEL:
+        return None
+    return value
+
+
+def _effective_lmstudio_model_override() -> str | None:
+    """Override actually applied by the chat path.
+
+    Chat only honours the server-managed model while the corporate
+    local-only policy is active; with the policy relaxed the client's
+    model wins, so discovery must report the same precedence instead of
+    advertising an override that will never be used.
+    """
+    if not _local_only_active():
+        return None
+    return _lmstudio_model_override()
+
+
+_MSG_CHAT_NO_LOADED_MODEL = (
+    "No hay ningún modelo de chat cargado en LM Studio. Carga uno y "
+    "vuelve a intentarlo."
+)
+_MSG_CHAT_SEVERAL_LOADED_MODELS = (
+    "Hay varios modelos de chat cargados en LM Studio; indica cuál usar "
+    "antes de enviar el mensaje."
+)
+_MSG_CHAT_DISCOVERY_UNAVAILABLE = (
+    "No se pudo verificar qué modelo está cargado en LM Studio. Revisa "
+    "que esté en ejecución y vuelve a intentarlo."
+)
+
+
+def _empty_chat_models(status: str) -> dict:
+    """Empty ``chat_models`` payload for disabled/failed states."""
+    return {
+        "status": status,
+        "source": None,
+        "models": [],
+        "selected": None,
+        "selected_source": None,
+    }
+
+
+async def _discover_loaded_models() -> DiscoveryResult | None:
+    """Run discovery fail-closed: an unexpected error never breaks /providers."""
+    try:
+        return await discover_lmstudio_models()
+    except Exception:
+        logger.warning("LM Studio model discovery failed unexpectedly")
+        return None
+
+
+async def _chat_models_state() -> tuple[dict, str | None]:
+    """Return (``chat_models`` payload, auto-selected model id or None).
+
+    Selection precedence mirrors the chat endpoint exactly: the
+    server-side override wins ONLY while the local-only policy is
+    active; with no effective override the single loaded chat instance
+    is selected automatically. Zero or several loaded instances are
+    NEVER guessed at (``selected`` stays ``None`` so the UI asks the
+    user explicitly).
+    """
+    if not _chat_enabled():
+        return _empty_chat_models(STATUS_DISABLED), None
+    result = await _discover_loaded_models()
+    if result is None:
+        return _empty_chat_models(STATUS_UNAVAILABLE), None
+    payload = result.as_payload()
+    payload["selected"] = None
+    payload["selected_source"] = None
+    auto_model: str | None = None
+    override = _effective_lmstudio_model_override()
+    if override:
+        payload["selected"] = override
+        payload["selected_source"] = "override"
+    elif result.status == STATUS_OK and len(result.models) == 1:
+        auto_model = result.models[0].id
+        payload["selected"] = auto_model
+        payload["selected_source"] = "auto"
+    return payload, auto_model
+
+
+async def _resolve_placeholder_chat_model(model: str) -> str:
+    """Replace the legacy ``loaded-model`` sentinel with a real instance id.
+
+    Older clients may still send the placeholder. Forwarding it verbatim
+    to LM Studio would produce an opaque 404; instead the server
+    discovers what is loaded and either answers the single instance id or
+    rejects the turn with a clear 400. Concrete ids pass through
+    untouched (no extra latency, no discovery).
+    """
+    if model != LMSTUDIO_PLACEHOLDER_MODEL:
+        return model
+    result = await _discover_loaded_models()
+    if result is None:
+        raise HTTPException(400, detail=_MSG_CHAT_DISCOVERY_UNAVAILABLE)
+    if result.status == STATUS_OK:
+        if len(result.models) == 1:
+            return result.models[0].id
+        if len(result.models) > 1:
+            raise HTTPException(400, detail=_MSG_CHAT_SEVERAL_LOADED_MODELS)
+        raise HTTPException(400, detail=_MSG_CHAT_NO_LOADED_MODEL)
+    raise HTTPException(400, detail=_MSG_CHAT_DISCOVERY_UNAVAILABLE)
 
 
 def _apply_lmstudio_model_override(req: AIRequest) -> AIRequest:
@@ -492,12 +624,9 @@ def _build_chat_provider(provider: str) -> BaseProvider:
     OpenAI client binds its base_url at construction time.
     """
     provider_type = ProviderType(provider)
-    api_key = os.environ.get(
-        f"{provider_type.value.upper()}_API_KEY", "not-needed"
-    )
     return OpenAICompatibleProvider(
         base_url=resolve_base_url(provider_type),
-        api_key=api_key,
+        api_key=resolve_api_key(provider_type),
         name=provider_type.value,
         supports_tool_calls=TOOL_CALL_CAPABILITY.get(provider_type, False),
     )
@@ -623,9 +752,9 @@ async def chat(req: AgentChatRequest, request: Request) -> StreamingResponse:
         )
     conversation_id, messages = loaded
     messages = agent_conversations.append_message(messages, "user", req.message)
-    model = (
-        _lmstudio_model_override() if _local_only_active() else None
-    ) or req.model
+    model = _effective_lmstudio_model_override() or req.model
+    if req.provider == _LOCAL_ONLY_PROVIDER:
+        model = await _resolve_placeholder_chat_model(model)
     provider = _build_chat_provider(req.provider)
 
     def conversation_sink(final_messages: list[dict[str, Any]]) -> None:

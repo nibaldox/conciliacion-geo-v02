@@ -220,9 +220,9 @@ describe('ChatPanel — placeholder model handling', () => {
     await userEvent.click(screen.getByTestId('ai-chat-send'));
     expect(mockFetch).not.toHaveBeenCalled();
     expect(screen.getByText('Indica el modelo cargado en LM Studio antes de enviar mensajes.')).toBeInTheDocument();
+    expect(input).toHaveValue('hola');
 
     await userEvent.type(screen.getByTestId('ai-chat-session-model-input'), 'qwen3-32b');
-    await userEvent.type(input, 'hola');
     await userEvent.click(screen.getByTestId('ai-chat-send'));
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const body = JSON.parse(

@@ -1743,7 +1743,12 @@
       "local_badge": "LM Studio · Local",
       "configured": "CONFIGURADO",
       "unavailable": "NO DISPONIBLE",
-      "status_loading": "Verificando estado…"
+      "status_loading": "Verificando estado…",
+      "no_model": "SIN MODELO",
+      "no_connection": "SIN CONEXIÓN",
+      "not_supported": "API NO COMPATIBLE",
+      "choose_model": "ELIGE MODELO",
+      "manual": "MODELO MANUAL"
     },
     "clear": "Limpiar",
     "clear_confirm": "¿Eliminar del servidor?",
@@ -1755,13 +1760,24 @@
      "providers_unavailable": "No se pudo consultar el estado del chat en el servidor.",
      "placeholder_model_warn": "El servidor no tiene CONCILIACION_LMSTUDIO_DEFAULT_MODEL configurado. Escribe abajo el nombre del modelo cargado en LM Studio; se usa solo durante esta sesión.",
      "placeholder_model_required": "Indica el modelo cargado en LM Studio antes de enviar mensajes.",
+     "models_none": "No hay ningún modelo de chat cargado en LM Studio. Carga uno en LM Studio y vuelve a consultar.",
+     "models_unreachable": "No se pudo consultar LM Studio para detectar el modelo cargado. Verifica que esté en ejecución y vuelve a intentarlo.",
+     "models_unsupported": "El servidor responde, pero no expone la API de modelos de LM Studio. Comprueba que sea LM Studio y no otro servicio en esa dirección.",
+     "models_required": "Hay varios modelos de chat cargados en LM Studio: elige uno antes de enviar mensajes.",
+     "model_changed": "El modelo detectado en LM Studio cambió de «{{previous}}» a «{{current}}» y el mensaje no se envió. Revisa el modelo mostrado y vuelve a enviar para confirmarlo.",
+     "model_no_tools": "El modelo cargado no soporta llamadas a herramientas; el asistente no podrá ejecutar acciones en esta sesión.",
      "request_failed": "El servidor rechazó la solicitud: {{detail}}",
      "network_error": "Sin conexión con el servidor; inténtalo de nuevo.",
      "cleared": "Conversación eliminada del servidor. Comenzando una conversación nueva.",
      "download_failed": "No se pudo descargar el archivo generado; inténtalo de nuevo."
     },
     "model": {
-      "session_label": "Modelo cargado en LM Studio (solo esta sesión)"
+      "session_label": "Modelo cargado en LM Studio (solo esta sesión)",
+      "selector_label": "Modelo cargado en LM Studio",
+      "selector_placeholder": "Selecciona un modelo…",
+      "manual_label": "Nombre del modelo cargado (manual, solo esta sesión)",
+      "no_tools_suffix": "sin herramientas",
+      "refresh": "Volver a consultar"
     },
     "input": {
       "placeholder": "Escribe tu mensaje…",
