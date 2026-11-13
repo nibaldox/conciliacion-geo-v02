@@ -13,7 +13,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 import api.database as db
-from api.database import init_db, cleanup_old_sessions, open_sentinel, close_sentinel
+from api.database import init_db, cleanup_old_sessions, open_sentinel, close_sentinel, vacuum_if_fragmented
 from api import dxf_uploads
 from api._async_db import run_db
 from api.ai_agent_conversations import CONVERSATION_TTL_HOURS
@@ -21,7 +21,7 @@ from api.middleware import install_health_endpoints, install_middleware
 from api.middleware_auth import install_api_key_auth
 from api.middleware_ratelimit import install_rate_limiter
 from api.routers import ai, blast, mapping, meshes, sections, process, export, settings, simulations, session
-from core.config import DEFAULTS, DEPLOY
+from core.config import DEFAULTS, DEPLOY, STORAGE_MAINTENANCE
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +110,29 @@ async def cleanup_ai_conversations_periodic(stop: asyncio.Event):
             logger.exception("AI conversation purge failed; continuing")
 
 
+async def _run_startup_vacuum() -> None:
+    config = STORAGE_MAINTENANCE
+    if not config.vacuum_on_startup:
+        return
+    try:
+        result = await run_db(
+            vacuum_if_fragmented,
+            config.vacuum_min_free_ratio,
+            config.vacuum_min_free_mb,
+        )
+    except Exception:
+        logger.warning("Startup VACUUM raised; continuing startup", exc_info=True)
+        return
+    if result.get("status") == "failed":
+        logger.warning("Startup VACUUM failed: %s", result)
+    else:
+        logger.info("Startup VACUUM: %s", result)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    await _run_startup_vacuum()
     stop_cleanup = asyncio.Event()
     cleanup_task = None
     ai_conversations_task = None

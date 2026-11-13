@@ -1,5 +1,6 @@
 """Centralized configuration defaults for the geotechnical pipeline."""
 
+import math
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional
@@ -19,6 +20,20 @@ def _env_int(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a finite float env var, falling back to default on parse error."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if not math.isfinite(value):
+        return default
+    return value
 
 
 def _env_max_upload_mb(name: str, default: int = 500, ceiling: int = 10240) -> int:
@@ -139,6 +154,34 @@ class DeployDefaults:
     # Runtime
     workers: int = field(default_factory=lambda: _env_int("CONCILIACION_WORKERS", 1))
     data_dir: str = field(default_factory=lambda: os.environ.get("CONCILIACION_DATA_DIR", ""))
+
+
+def _env_free_ratio(name: str, default: float) -> float:
+    """Read a free-page ratio restricted to the (0, 1] range."""
+    value = _env_float(name, default)
+    if not 0.0 < value <= 1.0:
+        return default
+    return value
+
+
+def _env_non_negative_float(name: str, default: float) -> float:
+    """Read a non-negative float, falling back to default when negative."""
+    value = _env_float(name, default)
+    if value < 0.0:
+        return default
+    return value
+
+
+@dataclass(frozen=True)
+class StorageMaintenanceDefaults:
+    """Startup compaction (VACUUM) policy for the SQLite database."""
+    vacuum_on_startup: bool = field(default_factory=lambda: _env_bool("CONCILIACION_VACUUM_ON_STARTUP", True))
+    vacuum_min_free_ratio: float = field(
+        default_factory=lambda: _env_free_ratio("CONCILIACION_VACUUM_MIN_FREE_RATIO", 0.5)
+    )
+    vacuum_min_free_mb: float = field(
+        default_factory=lambda: _env_non_negative_float("CONCILIACION_VACUUM_MIN_FREE_MB", 256.0)
+    )
 
 
 @dataclass(frozen=True)
@@ -428,6 +471,7 @@ TOLERANCES = Tolerances()
 VISUALIZATION = VisualizationDefaults()
 RAMP = RampDetection()
 DEPLOY = DeployDefaults()
+STORAGE_MAINTENANCE = StorageMaintenanceDefaults()
 EXPLOSIVE = ExplosiveEnergy()
 POWDER_FACTOR = PowderFactor()
 ADVISOR = BlastAdvisorDefaults()

@@ -5,6 +5,7 @@ import functools
 import tempfile
 import os
 import threading
+import time
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +32,90 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+_MIB = 2**20
+
+
+def _maintenance_result(
+    status: str,
+    reason: str,
+    started: float,
+    size_before_mb: Optional[float] = None,
+    size_after_mb: Optional[float] = None,
+    free_ratio: Optional[float] = None,
+    free_mb: Optional[float] = None,
+) -> Dict[str, Any]:
+    return {
+        "status": status,
+        "reason": reason,
+        "size_before_mb": size_before_mb,
+        "size_after_mb": size_after_mb,
+        "free_ratio": free_ratio,
+        "free_mb": free_mb,
+        "duration_s": round(time.perf_counter() - started, 3),
+    }
+
+
+def _threshold_skip_reason(
+    free_ratio: float, free_mb: float, min_free_ratio: float, min_free_mb: float
+) -> Optional[str]:
+    if free_ratio < min_free_ratio:
+        return "below_free_ratio_threshold"
+    if free_mb < min_free_mb:
+        return "below_free_mb_threshold"
+    return None
+
+
+def vacuum_if_fragmented(min_free_ratio: float, min_free_mb: float) -> Dict[str, Any]:
+    """Compact the database when free pages exceed both thresholds.
+
+    Runs ``VACUUM`` followed by ``wal_checkpoint(TRUNCATE)`` so the WAL file
+    is truncated too. Never raises: SQLite and OS errors are reported as
+    ``status="failed"`` with the exception class name as ``reason``.
+    """
+    started = time.perf_counter()
+    path = Path(DB_PATH)
+    if not path.exists():
+        return _maintenance_result("skipped", "no_database", started)
+    measured: Dict[str, float] = {}
+    try:
+        conn = get_connection()
+        try:
+            page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+            page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+            freelist_count = conn.execute("PRAGMA freelist_count").fetchone()[0]
+            size_before_mb = os.path.getsize(path) / _MIB
+            free_ratio = freelist_count / page_count if page_count else 0.0
+            free_mb = freelist_count * page_size / _MIB
+            measured.update(size_before_mb=size_before_mb, free_ratio=free_ratio, free_mb=free_mb)
+            skip_reason = _threshold_skip_reason(free_ratio, free_mb, min_free_ratio, min_free_mb)
+            if skip_reason is not None:
+                return _maintenance_result(
+                    "skipped",
+                    skip_reason,
+                    started,
+                    size_before_mb=size_before_mb,
+                    size_after_mb=size_before_mb,
+                    free_ratio=free_ratio,
+                    free_mb=free_mb,
+                )
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        finally:
+            conn.close()
+        size_after_mb = os.path.getsize(path) / _MIB
+    except (sqlite3.Error, OSError) as exc:
+        return _maintenance_result("failed", type(exc).__name__, started, **measured)
+    return _maintenance_result(
+        "vacuumed",
+        "free_space_above_threshold",
+        started,
+        size_before_mb=measured["size_before_mb"],
+        size_after_mb=size_after_mb,
+        free_ratio=measured["free_ratio"],
+        free_mb=measured["free_mb"],
+    )
 
 
 _SENTINEL_LOCK = threading.Lock()

@@ -91,6 +91,7 @@ Not re-exported (import from the submodule): anything in `core.geom_utils`, `cor
 
 Mounted under `/api/v1/*`. Session via `X-Session-ID` header (auto-generated if absent, stored in SQLite). Env vars read in `core/config.py` / `render.yaml`:
 - `CONCILIACION_DATA_DIR`, `CONCILIACION_CORS_ORIGINS`, `CONCILIACION_RATE_LIMIT_ENABLED`, `CONCILIACION_RATE_LIMIT_PER_MIN`, `CONCILIACION_MAX_UPLOAD_MB`, `CONCILIACION_LOG_LEVEL`, `CONCILIACION_LOG_FORMAT`, `CONCILIACION_WORKERS`, `CONCILIACION_USE_SUPABASE`, `CONCILIACION_USE_R2`, `CONCILIACION_AUTH_REQUIRED`
+- Startup compaction: `CONCILIACION_VACUUM_ON_STARTUP` (default `true`) runs `VACUUM` + WAL checkpoint at boot when free pages reach both `CONCILIACION_VACUUM_MIN_FREE_RATIO` (default `0.5`, range (0, 1]) and `CONCILIACION_VACUUM_MIN_FREE_MB` (default `256`, non-negative); failures are logged and never block startup.
 - Memory: `CONCILIACION_MESH_CACHE_MB` (default 512, MiB budget shared by the `api/routers/meshes.py` caches via `api/byte_cache.py`), `CONCILIACION_BLAST_CONCURRENCY` (default 2, simultaneous heavy `/blast/*` computations per process; extra requests wait), `MALLOC_ARENA_MAX=2` (set only at launch points: `Dockerfile-api`, `render.yaml`, `dev.sh`, `electron/lib/spawn-sidecar.js`; never from Python)
 - Observability: `SENTRY_DSN` (backend) + `VITE_SENTRY_DSN` + `VITE_ANALYTICS_URL` (frontend)
 
