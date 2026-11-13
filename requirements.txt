@@ -139,7 +139,7 @@ openai==2.41.1
     # via conciliacion-geotecnica
 openpyxl==3.1.5
     # via conciliacion-geotecnica
-packaging==26.2
+packaging==26.3
     # via
     #   altair
     #   matplotlib
