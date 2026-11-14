@@ -394,8 +394,7 @@ class TestBuildReportDataByLevel:
         assert report.nominal_levels == assignment.levels
         assert all(isinstance(level, NominalLevel) for level in report.nominal_levels)
         assert [level.label for level in report.nominal_levels] == ["3125", "3110", "3104"]
-        assert report.level_warnings == assignment.warnings
-        assert len(report.level_warnings) == 1
+        assert report.level_warnings == ()
         assert report.counts["n_rows"] == 96
         assert report.counts["n_missing"] == 96
 

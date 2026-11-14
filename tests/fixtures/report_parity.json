@@ -96,9 +96,9 @@
       {"section": "S-03", "parameter": "berm", "deviation": -2.0, "ratio": 0.3333}
     ],
     "conclusions_contains": [
-      "Puntaje ponderado global (0-100): 70.0",
+      "Puntaje ponderado global (0-100): 70,0",
       "no conformes (peor banco NO CUMPLE): 2 de 4",
-      "Altura de banco (75.0%)",
+      "Altura de banco (75,0%)",
       "Bancos de diseño no construidos: 1",
       "Bancos adicionales (no presentes en el diseño): 1"
     ]

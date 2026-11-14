@@ -34,10 +34,20 @@ class NominalLevel:
 
 
 @dataclass(frozen=True)
+class LevelWarning:
+    """A warning of the grouping; empty ``labels`` means it concerns the whole sector."""
+
+    sector: str
+    labels: tuple[str, ...]
+    message: str
+
+
+@dataclass(frozen=True)
 class NominalLevelAssignment:
     levels: tuple[NominalLevel, ...]
     row_level: dict[RowKey, str]
     warnings: tuple[str, ...]
+    structured_warnings: tuple[LevelWarning, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -157,8 +167,15 @@ def _assign_sector(
     rows: Sequence[Mapping[str, Any]],
     row_level: dict[RowKey, str],
     warnings: list[str],
+    structured: Optional[list[LevelWarning]] = None,
 ) -> list[NominalLevel]:
     suffix = _sector_suffix(sector)
+
+    def warn(message: str, labels: Sequence[str] = ()) -> None:
+        warnings.append(message)
+        if structured is not None:
+            structured.append(LevelWarning(sector, tuple(labels), message))
+
     entries: list[_Entry] = []
     invalid_level: list[str] = []
     invalid_bench: list[str] = []
@@ -183,12 +200,12 @@ def _assign_sector(
         )
 
     if invalid_level:
-        warnings.append(
+        warn(
             f"{len(invalid_level)} fila(s) sin cota numérica quedaron fuera de la "
             f"agrupación por cota nominal{suffix}: {_join_capped(invalid_level)}."
         )
     if invalid_bench:
-        warnings.append(
+        warn(
             f"{len(invalid_bench)} fila(s) sin número de banco quedaron fuera de la "
             f"agrupación por cota nominal{suffix}: {_join_capped(_unique(invalid_bench))}."
         )
@@ -205,7 +222,7 @@ def _assign_sector(
         ]
     else:
         groups = _split_by_gap(ordered, None)
-        warnings.append(
+        warn(
             f"Sin altura de banco de diseño válida{suffix}: las cotas no se agrupan "
             "y cada cota exacta se trata como una cota nominal."
         )
@@ -232,17 +249,19 @@ def _assign_sector(
 
         unresolved = _sections_sharing_design_benches(group)
         if unresolved:
-            warnings.append(
+            warn(
                 f"Cota nominal {label}{suffix}: {len(unresolved)} sección(es) tienen más de "
                 "un banco de diseño en la misma cota exacta y no se pudieron separar: "
-                f"{_join_capped(unresolved)}."
+                f"{_join_capped(unresolved)}.",
+                (label,),
             )
         shared_extra = _sections_with_shared_extra(group)
         if shared_extra:
-            warnings.append(
+            warn(
                 f"Cota nominal {label}{suffix}: {len(shared_extra)} sección(es) tienen un "
                 "banco adicional que comparte la cota nominal con otro banco de la misma "
-                f"sección: {_join_capped(shared_extra)}."
+                f"sección: {_join_capped(shared_extra)}.",
+                (label,),
             )
 
     for entry in entries:
@@ -252,8 +271,9 @@ def _assign_sector(
     labels = [level.label for level in levels]
     repeated_labels = _unique(label for label in labels if labels.count(label) > 1)
     if repeated_labels:
-        warnings.append(
-            f"Cotas nominales con la misma etiqueta{suffix}: {_join_capped(repeated_labels)}."
+        warn(
+            f"Cotas nominales con la misma etiqueta{suffix}: {_join_capped(repeated_labels)}.",
+            repeated_labels,
         )
     return levels
 
@@ -283,8 +303,14 @@ def assign_nominal_levels(rows: Iterable[Mapping[str, Any]]) -> NominalLevelAssi
     levels: list[NominalLevel] = []
     row_level: dict[RowKey, str] = {}
     warnings: list[str] = []
+    structured: list[LevelWarning] = []
     for sector in sorted(by_sector):
-        levels.extend(_assign_sector(sector, by_sector[sector], row_level, warnings))
+        levels.extend(
+            _assign_sector(sector, by_sector[sector], row_level, warnings, structured)
+        )
     return NominalLevelAssignment(
-        levels=tuple(levels), row_level=row_level, warnings=tuple(warnings)
+        levels=tuple(levels),
+        row_level=row_level,
+        warnings=tuple(warnings),
+        structured_warnings=tuple(structured),
     )

@@ -53,6 +53,8 @@ _TOL_KEY = {"height": "bench_height", "angle": "face_angle", "berm": "berm_width
 
 _WEB_SCORE_WEIGHTS = {"berm": 60, "angle": 10, "height": 30}
 
+BENCH_SCORE_PASS = 70.0
+
 
 def parse_bench_status(raw: Any) -> str:
     """Normalise a backend status string to CUMPLE / FUERA / NO_CUMPLE / UNKNOWN."""
@@ -213,6 +215,45 @@ def _filter_with_levels(
     return out
 
 
+def _selected_level_warnings(
+    rows: Sequence[Mapping[str, Any]],
+    filters: ReportFilters,
+    assignment: NominalLevelAssignment,
+) -> tuple[str, ...]:
+    """Assignment warnings that concern the nominal levels selected in each sector."""
+    structured = assignment.structured_warnings
+    if len(structured) != len(assignment.warnings):
+        return assignment.warnings
+    labels_by_sector: dict[str, set[str]] = {}
+    for level in assignment.levels:
+        labels_by_sector.setdefault(level.sector, set()).add(level.label)
+    effective: dict[str, set[str]] = {}
+    for sector in {warning.sector for warning in structured if warning.labels}:
+        selected = filters.levels_for(sector)
+        if not selected:
+            continue
+        labels = frozenset(labels_by_sector.get(sector, ()))
+        chosen = {value for value in selected if value in labels}
+        exact = [value for value in selected if value not in labels]
+        if exact:
+            for row in rows:
+                if _level_sector(row.get("sector")) != sector:
+                    continue
+                nominal = _nominal_level(row, assignment)
+                if nominal is not None and _level_matches(
+                    row.get("level"), nominal, exact, labels
+                ):
+                    chosen.add(nominal)
+        effective[sector] = chosen
+    return tuple(
+        warning.message
+        for warning in structured
+        if not warning.labels
+        or warning.sector not in effective
+        or any(label in effective[warning.sector] for label in warning.labels)
+    )
+
+
 def filter_comparisons(
     rows: Optional[Iterable[Mapping[str, Any]]],
     filters: ReportFilters,
@@ -269,6 +310,10 @@ class BenchRow:
     status_label: str
     level_nominal: Optional[str] = None
     design_below_min: bool = False
+    delta_crest: Optional[float] = None
+    delta_toe: Optional[float] = None
+    berm_min: Optional[float] = None
+    bench_score: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -336,6 +381,8 @@ class ReportData:
     excavation: tuple[SectionExcavation, ...] = ()
     excavation_totals: dict = field(default_factory=dict)
     sector_summaries: tuple[dict, ...] = ()
+    heatmaps: tuple[dict, ...] = ()
+    heatmap_notes: tuple[str, ...] = ()
 
     def resolve_section_plan_state(
         self, section: str, sector: Optional[str], infer_missing_sector: bool = True
@@ -403,6 +450,10 @@ def _to_bench_row(row: Mapping[str, Any]) -> BenchRow:
         status_label=_status_label(row_type, worst),
         level_nominal=row.get("level_nominal"),
         design_below_min=_design_below_min(row),
+        delta_crest=_as_float(row.get("delta_crest")),
+        delta_toe=_as_float(row.get("delta_toe")),
+        berm_min=_as_float(row.get("berm_min")),
+        bench_score=_web_bench_score(row) if row_type == "MATCH" else None,
     )
 
 
@@ -436,7 +487,7 @@ def _bench_score_status(row: Mapping[str, Any]) -> str:
     if row.get("type") != "MATCH":
         return "UNKNOWN"
     score = _web_bench_score(row)
-    return "UNKNOWN" if score is None else "CUMPLE" if score >= 70 else "NO_CUMPLE"
+    return "UNKNOWN" if score is None else "CUMPLE" if score >= BENCH_SCORE_PASS else "NO_CUMPLE"
 
 
 def _web_profile_scores(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
@@ -691,9 +742,11 @@ def _conclusions(
     design_achievement: Optional[dict],
     counts: Mapping[str, int],
 ) -> tuple[str, ...]:
+    from core.report_texts import fmt_es
+
     out: list[str] = []
     if global_score is not None:
-        out.append(f"Puntaje ponderado global (0-100): {global_score:.1f}.")
+        out.append(f"Puntaje ponderado global (0-100): {fmt_es(global_score, 1)}.")
     total = len(profiles)
     if total:
         out.append(
@@ -702,15 +755,19 @@ def _conclusions(
     ranked = [p for p in parameters if p.pct_cumple is not None]
     if ranked:
         lowest = min(ranked, key=lambda p: p.pct_cumple if p.pct_cumple is not None else float("inf"))
-        out.append(f"Parámetro con menor cumplimiento: {lowest.label} ({lowest.pct_cumple:.1f}%).")
+        out.append(f"Parámetro con menor cumplimiento: {lowest.label} ({fmt_es(lowest.pct_cumple, 1, '%')}).")
     sectors = (design_achievement or {}).get("sectors") or []
     scored = [s for s in sectors if s.get("global_score") is not None]
-    if scored:
+    if scored and len(sectors) > 1:
         lowest_sector = min(scored, key=lambda s: s["global_score"])
-        out.append(
-            f"Sector con menor logro de diseño: {lowest_sector.get('sector', '')} "
-            f"({lowest_sector['global_score']}/100)."
-        )
+        name = _sector_identity(lowest_sector.get("sector"))
+        score = _as_float(lowest_sector["global_score"])
+        if name and score is not None:
+            decimals = 0 if float(score).is_integer() else 1
+            out.append(
+                f"Sector con menor logro de diseño: {name} "
+                f"({fmt_es(score, decimals)}/100)."
+            )
     if counts.get("n_missing", 0):
         out.append(f"Bancos de diseño no construidos: {counts['n_missing']}.")
     if counts.get("n_extra", 0):
@@ -1040,6 +1097,9 @@ def build_report_data(
     plan_inputs: Optional[dict] = None,
     blast: Optional[dict] = None,
     depth_extractions: Optional[Mapping[tuple[str, str], Sequence[Any]]] = None,
+    *,
+    heatmaps: Optional[Iterable[dict]] = None,
+    heatmap_notes: Optional[Iterable[str]] = None,
 ) -> ReportData:
     """Assemble the frozen report model from persisted comparison rows."""
     settings = settings or {}
@@ -1159,7 +1219,7 @@ def build_report_data(
         warnings=_warnings(len(unfiltered), filtered, filters),
         section_plan_states=section_plan_states,
         nominal_levels=level_assignment.levels,
-        level_warnings=level_assignment.warnings,
+        level_warnings=_selected_level_warnings(unfiltered, filters, level_assignment),
         headline=_headline(bench_rows, statuses),
         matrix=_matrix(bench_rows, rows, identities),
         deviations=_deviations(bench_rows),
@@ -1169,4 +1229,6 @@ def build_report_data(
         sector_summaries=_sector_summaries(
             bench_rows, identities, filters, ct_tol, excavation
         ),
+        heatmaps=tuple(heatmaps or ()),
+        heatmap_notes=tuple(heatmap_notes or ()),
     )

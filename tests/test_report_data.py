@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -529,3 +530,156 @@ def test_parity_fixture_aggregates(data):
     assert rd.excavation == ()
     assert rd.excavation_totals["n_sections"] == 0
     assert rd.excavation_totals["volume_over_m3"] is None
+
+
+def test_bench_row_carries_crest_toe_deviation_and_berm_minimum(data):
+    _, rd = data
+    first, missing, extra = rd.rows[0], rd.rows[4], rd.rows[5]
+    assert (first.delta_crest, first.delta_toe, first.berm_min) == (0.5, 0.2, 7.0)
+    assert (rd.rows[1].delta_crest, rd.rows[1].delta_toe) == (-0.8, -0.3)
+    assert (rd.rows[3].delta_crest, rd.rows[3].delta_toe) == (0.0, 0.0)
+    assert (missing.delta_crest, missing.delta_toe, missing.berm_min) == (None, None, None)
+    assert (extra.delta_crest, extra.delta_toe, extra.berm_min) == (None, None, None)
+
+
+def test_bench_row_crest_toe_and_berm_minimum_are_none_when_missing_or_not_finite():
+    fx = _fixture()
+    rows = [dict(row) for row in fx["rows"]]
+    rows[0].update(delta_crest=float("nan"), delta_toe=float("inf"), berm_min=float("-inf"))
+    for key in ("delta_crest", "delta_toe", "berm_min"):
+        rows[1].pop(key)
+    rows[2].update(delta_crest="x", delta_toe=None, berm_min="6.5")
+    rd = build_report_data(rows, {"tolerances": fx["tolerances"]}, ReportFilters(), {})
+    for bench in rd.rows[:2]:
+        assert (bench.delta_crest, bench.delta_toe, bench.berm_min) == (None, None, None)
+    assert (rd.rows[2].delta_crest, rd.rows[2].delta_toe, rd.rows[2].berm_min) == (None, None, 6.5)
+    assert rd.rows[0].design_below_min is False
+    assert rd.rows[2].design_below_min is False
+
+
+def _level_rows(sector=""):
+    rows = []
+    for section in ("S-01", "S-02", "S-03"):
+        rows.append({"sector": sector, "section": section, "bench_num": 1, "type": "MATCH",
+                     "level": "3125", "height_design": 15.0, "bench_score": 100})
+        rows.append({"sector": sector, "section": section, "bench_num": 2, "type": "MATCH",
+                     "level": "3110", "height_design": 15.0, "bench_score": 100})
+    rows.append({"sector": sector, "section": "S-02", "bench_num": 999, "type": "EXTRA",
+                 "level": "3122", "height_design": None})
+    return rows
+
+
+def test_level_warnings_unfiltered_keep_every_assignment_warning():
+    report = build_report_data(_level_rows(), {}, ReportFilters(), {})
+    assert len(report.level_warnings) == 1
+    assert report.level_warnings[0].startswith("Cota nominal 3125:")
+
+
+def test_level_warnings_drop_levels_outside_the_selection():
+    report = build_report_data(_level_rows(), {}, ReportFilters(levels=("3110",)), {})
+    assert report.counts["n_rows"] == 3
+    assert report.level_warnings == ()
+
+
+def test_level_warnings_keep_the_selected_level():
+    report = build_report_data(_level_rows(), {}, ReportFilters(levels=("3125",)), {})
+    assert len(report.level_warnings) == 1
+    assert "S-02" in report.level_warnings[0]
+
+
+def test_level_warnings_follow_each_sector_selection():
+    rows = _level_rows("A") + _level_rows("B")
+    filters = ReportFilters(levels_by_sector=(("A", ("3110",)), ("B", ())))
+    report = build_report_data(rows, {}, filters, {})
+    assert len(report.level_warnings) == 1
+    assert "(sector B)" in report.level_warnings[0]
+
+    both = build_report_data(rows, {}, ReportFilters(levels=("3110",), levels_by_sector=(("B", ("3125",)),)), {})
+    assert [("(sector B)" in text) for text in both.level_warnings] == [True]
+
+
+def test_level_warnings_resolve_exact_level_text_to_its_nominal_level():
+    report = build_report_data(_level_rows(), {}, ReportFilters(levels=("3122",)), {})
+    assert report.counts["n_rows"] == 1
+    assert len(report.level_warnings) == 1
+
+
+def test_level_warnings_keep_sector_wide_warnings_under_a_level_filter():
+    rows = _level_rows() + [{"sector": "", "section": "S-03", "bench_num": 3, "type": "MATCH",
+                             "level": "sin cota", "height_design": 15.0}]
+    report = build_report_data(rows, {}, ReportFilters(levels=("3110",)), {})
+    assert len(report.level_warnings) == 1
+    assert "sin cota numérica" in report.level_warnings[0]
+
+
+def test_conclusions_use_spanish_decimals(data):
+    _, rd = data
+    assert "Puntaje ponderado global (0-100): 70,0." in rd.conclusions
+    assert "Parámetro con menor cumplimiento: Altura de banco (75,0%)." in rd.conclusions
+    assert not any(re.search(r"\d\.\d", text) for text in rd.conclusions)
+
+
+def test_conclusions_name_the_lowest_sector_only_with_several_named_sectors(data):
+    fx, rd = data
+    ranking = [text for text in rd.conclusions if text.startswith("Sector con menor logro de diseño")]
+    assert len(ranking) == 1
+    lowest = min(
+        (s for s in rd.design_achievement["sectors"] if s.get("global_score") is not None),
+        key=lambda s: s["global_score"],
+    )
+    assert ranking[0].startswith(f"Sector con menor logro de diseño: {lowest['sector']} (")
+    assert ranking[0].endswith("/100).") and "." not in ranking[0][:-1]
+
+
+@pytest.mark.parametrize("sector", ["", None, "Único"])
+def test_conclusions_omit_sector_ranking_for_single_or_unnamed_sector(sector):
+    rows = [{"sector": sector, "section": f"S-{i}", "bench_num": 1, "type": "MATCH", "level": "100",
+             "height_design": 15.0, "bench_score": 80, "delta_crest": 0.1, "delta_toe": 0.1,
+             "berm_status": "CUMPLE", "height_status": "CUMPLE", "angle_status": "CUMPLE"}
+            for i in range(2)]
+    report = build_report_data(rows, {"tolerances": {"crest_toe_deviation": {"neg": 1.0, "pos": 1.0}}}, ReportFilters(), {})
+    assert report.conclusions
+    assert not any("Sector con menor logro" in text for text in report.conclusions)
+
+
+def test_conclusions_omit_sector_ranking_when_the_lowest_sector_is_unnamed():
+    from core.report_data import _conclusions
+
+    achievement = {"sectors": [{"sector": "", "global_score": 40}, {"sector": "A", "global_score": 90.5}]}
+    assert _conclusions((), {}, (), None, achievement, {}) == ()
+    achievement["sectors"][0]["sector"] = "B"
+    achievement["sectors"][0]["global_score"] = 40.5
+    assert _conclusions((), {}, (), None, achievement, {}) == (
+        "Sector con menor logro de diseño: B (40,5/100).",
+    )
+
+
+def test_bench_row_exposes_the_web_bench_score():
+    from core.report_data import BenchRow, _web_bench_score
+    import dataclasses
+
+    assert dataclasses.fields(BenchRow)[-1].name == "bench_score"
+    rows = [
+        {"type": "MATCH", "section": "S", "bench_num": 1, "bench_score": 55},
+        {"type": "MATCH", "section": "S", "bench_num": 2, "height_status": "CUMPLE",
+         "angle_status": "NO CUMPLE", "berm_status": "CUMPLE"},
+        {"type": "MATCH", "section": "S", "bench_num": 3, "berm_status": "CUMPLE"},
+        {"type": "MATCH", "section": "S", "bench_num": 4, "bench_score": float("nan")},
+        {"type": "MISSING", "section": "S", "bench_num": 5, "bench_score": 80},
+        {"type": "EXTRA", "section": "S", "bench_num": 999, "bench_score": 80},
+    ]
+    report = build_report_data(rows, {}, ReportFilters(), {})
+    assert [row.bench_score for row in report.rows] == [55.0, 90.0, None, None, None, None]
+    assert all(isinstance(row.bench_score, float) for row in report.rows[:2])
+    assert [row.bench_score for row in report.rows[:4]] == [_web_bench_score(row) for row in rows[:4]]
+
+
+def test_bench_score_pass_constant_drives_the_bench_status(monkeypatch):
+    import core.report_data as report_data
+
+    assert report_data.BENCH_SCORE_PASS == 70.0
+    assert isinstance(report_data.BENCH_SCORE_PASS, float)
+    row = {"type": "MATCH", "section": "S", "bench_num": 1, "bench_score": 75}
+    assert build_report_data([row], {}, ReportFilters(), {}).rows[0].worst_status == "CUMPLE"
+    monkeypatch.setattr(report_data, "BENCH_SCORE_PASS", 80.0)
+    assert build_report_data([row], {}, ReportFilters(), {}).rows[0].worst_status == "NO_CUMPLE"

@@ -4,6 +4,7 @@ import dataclasses
 import pytest
 
 from core.report_levels import (
+    LevelWarning,
     NominalLevel,
     NominalLevelAssignment,
     assign_nominal_levels,
@@ -516,3 +517,53 @@ class TestPurity:
             assignment.levels[0].label = "x"
         with pytest.raises(dataclasses.FrozenInstanceError):
             assignment.warnings = ()
+
+
+class TestStructuredWarnings:
+    def test_structured_warnings_mirror_the_text_warnings_in_order(self):
+        rows = _real_session_rows() + [_row("S-01", 4, "MATCH", "abc")]
+
+        assignment = assign_nominal_levels(rows)
+
+        assert assignment.structured_warnings
+        assert all(isinstance(item, LevelWarning) for item in assignment.structured_warnings)
+        assert tuple(item.message for item in assignment.structured_warnings) == assignment.warnings
+
+    def test_shared_extra_warning_knows_its_sector_and_label(self):
+        rows = [dict(row, sector="Norte") for row in _real_session_rows()]
+
+        assignment = assign_nominal_levels(rows)
+
+        assert [(item.sector, item.labels) for item in assignment.structured_warnings] == [
+            ("Norte", ("3125",))
+        ]
+        assert "S-22" in assignment.structured_warnings[0].message
+
+    def test_sector_wide_warnings_carry_no_label(self):
+        rows = [
+            _row("S-01", 1, "MATCH", "3110", None, sector="A"),
+            _row("S-01", 2, "MATCH", "sin cota", None, sector="A"),
+        ]
+
+        assignment = assign_nominal_levels(rows)
+
+        assert len(assignment.structured_warnings) == 2
+        assert all(item.sector == "A" and item.labels == () for item in assignment.structured_warnings)
+
+    def test_repeated_label_warning_lists_the_repeated_labels(self):
+        rows = [
+            _row("S-01", 1, "MATCH", "100.2", 0.9),
+            _row("S-01", 2, "MATCH", "99.8", 0.9),
+        ]
+
+        assignment = assign_nominal_levels(rows)
+
+        repeated = [item for item in assignment.structured_warnings if "misma etiqueta" in item.message]
+        assert [item.labels for item in repeated] == [("100",)]
+
+    def test_structured_warnings_default_keeps_the_frozen_constructor(self):
+        assignment = NominalLevelAssignment(levels=(), row_level={}, warnings=())
+
+        assert assignment.structured_warnings == ()
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            assign_nominal_levels(_real_session_rows()).structured_warnings[0].labels = ()
