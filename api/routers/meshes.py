@@ -15,6 +15,8 @@ blocks the event loop.
 """
 
 import asyncio
+import hashlib
+import logging
 import os
 import tempfile
 import json
@@ -46,6 +48,7 @@ from core import (
 from core.config import DEFAULTS, DETECTION, HORIZONTAL_DEVIATION
 
 router = APIRouter(prefix="/meshes", tags=["meshes"])
+logger = logging.getLogger(__name__)
 
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
@@ -811,6 +814,127 @@ def _build_horizontal_deviation_cached(
     )
 
 
+def _horizontal_deviation_cached_args(
+    session_id: str,
+    topo_id: str,
+    design_mesh_id: str,
+    sector: Optional[str],
+    bench_num: Optional[int],
+    longitudinal_step: float,
+    vertical_step: float,
+) -> tuple[str, str, str, str, Optional[int], float, float, str]:
+    """Build the exact ``_build_horizontal_deviation_cached`` arguments from the session state."""
+    mesh_by_id = {row["id"]: row for row in db.get_all_meshes(session_id)}
+    topo_info = mesh_by_id.get(topo_id)
+    design_info = mesh_by_id.get(design_mesh_id)
+    if topo_info is None or design_info is None:
+        raise HTTPException(404, "Mesh not found in this session")
+    if topo_info.get("type") != "topo" or design_info.get("type") != "design":
+        raise HTTPException(404, "Mesh not found in this session")
+
+    sections = db.get_sections(session_id)
+    if not sections:
+        raise HTTPException(422, "insufficient_sections: configure at least two sections in one sector before requesting the 3D comparison")
+    sector_names = list(dict.fromkeys(str(row.get("sector", "")) for row in sections))
+    if sector is None:
+        if len(sector_names) == 1:
+            sector = sector_names[0]
+        else:
+            raise HTTPException(422, "sector_required: select a sector to build the 3D comparison")
+    sector = str(sector).strip()
+    sector_sections = [row for row in sections if str(row.get("sector", "")) == sector]
+    if len(sector_sections) < 2:
+        raise HTTPException(422, f"insufficient_sections: sector '{sector}' needs at least two configured sections for the 3D comparison")
+
+    stored_settings = db.get_settings(session_id)
+    process_settings = (stored_settings or {}).get("process", {})
+    detection_options = vars(DETECTION).copy()
+    setting_map = {
+        "resolution": "profile_resolution",
+        "face_threshold": "face_threshold",
+        "berm_threshold": "berm_threshold",
+        "max_berm_width": "max_berm_width",
+        "max_single_bench_width": "max_single_bench_width",
+    }
+    for setting_key, option_key in setting_map.items():
+        if setting_key in process_settings:
+            value = _finite_float(process_settings[setting_key], math.nan)
+            if not math.isfinite(value) or value <= 0:
+                raise HTTPException(422, f"invalid_detection_setting: {setting_key}")
+            detection_options[option_key] = value
+
+    config_payload = json.dumps({
+        "detection": detection_options,
+        "horizontal_deviation": vars(HORIZONTAL_DEVIATION),
+    }, sort_keys=True, separators=(",", ":"))
+    return (
+        topo_id,
+        design_mesh_id,
+        json.dumps(sections, sort_keys=True, separators=(",", ":")),
+        sector,
+        bench_num,
+        float(longitudinal_step),
+        float(vertical_step),
+        config_payload,
+    )
+
+
+def _horizontal_deviation_key_from_args(cached_args: tuple) -> str:
+    canonical = json.dumps(list(cached_args), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def horizontal_deviation_cache_key(
+    session_id: str,
+    sector: Optional[str],
+    bench_num: Optional[int],
+    longitudinal_step: float,
+    vertical_step: float,
+) -> Optional[str]:
+    """Return the persistence key of the session's current heatmap inputs without computing it.
+
+    ``None`` means the session cannot produce a heatmap for those parameters:
+    a design or topo mesh is missing, the sector has fewer than two sections,
+    the sector is ambiguous, or a stored detection setting is invalid.
+    """
+    mesh_id_by_type = {row.get("type"): row["id"] for row in db.get_all_meshes(session_id)}
+    topo_id = mesh_id_by_type.get("topo")
+    design_mesh_id = mesh_id_by_type.get("design")
+    if topo_id is None or design_mesh_id is None:
+        return None
+    try:
+        cached_args = _horizontal_deviation_cached_args(
+            session_id,
+            topo_id,
+            design_mesh_id,
+            sector,
+            bench_num,
+            longitudinal_step,
+            vertical_step,
+        )
+    except HTTPException:
+        return None
+    return _horizontal_deviation_key_from_args(cached_args)
+
+
+def _persist_horizontal_deviation(session_id: str, cached_args: tuple, payload: dict) -> None:
+    topo_id, design_mesh_id, _, sector, bench_num, longitudinal_step, vertical_step, _ = cached_args
+    db.save_horizontal_deviation(
+        session_id,
+        sector,
+        _horizontal_deviation_key_from_args(cached_args),
+        {
+            "topo_id": topo_id,
+            "design_mesh_id": design_mesh_id,
+            "sector": sector,
+            "bench_num": bench_num,
+            "longitudinal_step": longitudinal_step,
+            "vertical_step": vertical_step,
+        },
+        payload,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -1228,62 +1352,18 @@ async def mesh_horizontal_deviation(
         raise HTTPException(422, "vertical_step must be between 0.25 and 5 metres")
 
     session_id = request.state.session_id
-    mesh_rows = await run_db(db.get_all_meshes, session_id)
-    mesh_by_id = {row["id"]: row for row in mesh_rows}
-    topo_info = mesh_by_id.get(topo_id)
-    design_info = mesh_by_id.get(design_mesh_id)
-    if topo_info is None or design_info is None:
-        raise HTTPException(404, "Mesh not found in this session")
-    if topo_info.get("type") != "topo" or design_info.get("type") != "design":
-        raise HTTPException(404, "Mesh not found in this session")
-
-    sections = await run_db(db.get_sections, session_id)
-    if not sections:
-        raise HTTPException(422, "insufficient_sections: configure at least two sections in one sector before requesting the 3D comparison")
-    sector_names = list(dict.fromkeys(str(row.get("sector", "")) for row in sections))
-    if sector is None:
-        if len(sector_names) == 1:
-            sector = sector_names[0]
-        else:
-            raise HTTPException(422, "sector_required: select a sector to build the 3D comparison")
-    sector = str(sector).strip()
-    sector_sections = [row for row in sections if str(row.get("sector", "")) == sector]
-    if len(sector_sections) < 2:
-        raise HTTPException(422, f"insufficient_sections: sector '{sector}' needs at least two configured sections for the 3D comparison")
-
-    stored_settings = await run_db(db.get_settings, session_id)
-    process_settings = (stored_settings or {}).get("process", {})
-    detection_options = vars(DETECTION).copy()
-    setting_map = {
-        "resolution": "profile_resolution",
-        "face_threshold": "face_threshold",
-        "berm_threshold": "berm_threshold",
-        "max_berm_width": "max_berm_width",
-        "max_single_bench_width": "max_single_bench_width",
-    }
-    for setting_key, option_key in setting_map.items():
-        if setting_key in process_settings:
-            value = _finite_float(process_settings[setting_key], math.nan)
-            if not math.isfinite(value) or value <= 0:
-                raise HTTPException(422, f"invalid_detection_setting: {setting_key}")
-            detection_options[option_key] = value
-
-    config_payload = json.dumps({
-        "detection": detection_options,
-        "horizontal_deviation": vars(HORIZONTAL_DEVIATION),
-    }, sort_keys=True, separators=(",", ":"))
+    cached_args = await run_db(
+        _horizontal_deviation_cached_args,
+        session_id,
+        topo_id,
+        design_mesh_id,
+        sector,
+        bench_num,
+        longitudinal_step,
+        vertical_step,
+    )
     try:
-        return await run_db(
-            _build_horizontal_deviation_cached,
-            topo_id,
-            design_mesh_id,
-            json.dumps(sections, sort_keys=True, separators=(",", ":")),
-            sector,
-            bench_num,
-            float(longitudinal_step),
-            float(vertical_step),
-            config_payload,
-        )
+        payload = await run_db(_build_horizontal_deviation_cached, *cached_args)
     except OverflowError as exc:
         raise HTTPException(413, str(exc))
     except ValueError as exc:
@@ -1292,6 +1372,11 @@ async def mesh_horizontal_deviation(
         raise
     except Exception as exc:
         raise HTTPException(500, f"Unable to calculate horizontal deviation: {exc}")
+    try:
+        await run_db(_persist_horizontal_deviation, session_id, cached_args, payload)
+    except Exception:
+        logger.exception("Unable to persist horizontal deviation result")
+    return payload
 
 
 @router.delete("/{mesh_id}")
