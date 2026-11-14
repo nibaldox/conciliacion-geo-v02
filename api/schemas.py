@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Optional, Dict, Any, Literal
 from enum import Enum
 
@@ -140,6 +140,7 @@ class ComparisonResult(BaseModel):
     bench_num_topo: Optional[int] = None
     type: str  # "MATCH" | "MISSING" | "EXTRA"
     level: str
+    level_nominal: Optional[str] = None
     height_design: Optional[float] = None
     height_real: Optional[float] = None
     height_dev: Optional[float] = None
@@ -286,6 +287,10 @@ class ExportRequest(BaseModel):
     phase: str = ""
 
 
+MAX_LEVEL_FILTER_SECTORS = 50
+MAX_LEVEL_FILTER_LEVELS_PER_SECTOR = 50
+
+
 class ExportFilters(BaseModel):
     """Active export filters sent by the web UI as camelCase JSON.
 
@@ -307,6 +312,24 @@ class ExportFilters(BaseModel):
     sectors: List[str] = Field(default_factory=list, alias="sector")
     sections: List[str] = Field(default_factory=list, alias="section")
     levels: List[str] = Field(default_factory=list, alias="level")
+    levels_by_sector: Dict[str, List[str]] = Field(
+        default_factory=dict, alias="levelsBySector"
+    )
+
+    @field_validator("levels_by_sector")
+    @classmethod
+    def _limit_levels_by_sector(cls, value: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        if len(value) > MAX_LEVEL_FILTER_SECTORS:
+            raise ValueError(
+                f"levelsBySector accepts at most {MAX_LEVEL_FILTER_SECTORS} sectors"
+            )
+        for sector, levels in value.items():
+            if len(levels) > MAX_LEVEL_FILTER_LEVELS_PER_SECTOR:
+                raise ValueError(
+                    f"levelsBySector accepts at most {MAX_LEVEL_FILTER_LEVELS_PER_SECTOR} "
+                    f"levels per sector (sector {sector!r})"
+                )
+        return value
 
 
 class SettingsResponse(BaseModel):

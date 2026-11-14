@@ -171,7 +171,7 @@ class TestExportExcelFilters:
         assert applied["show_spill_areas"] is False
         assert applied["selected_bench_numbers"] == [1]
 
-    def test_header_does_not_claim_unsupported_result_filters(
+    def test_header_echoes_result_filters_and_workbook_rows_are_filtered(
         self, client, headers, monkeypatch
     ):
         captured: Dict[str, Any] = {}
@@ -180,6 +180,7 @@ class TestExportExcelFilters:
             with open(path, "wb") as output:
                 output.write(b"report")
             captured["rows"] = list(results)
+            captured["sections"] = [params.section_name for params in params_d]
 
         monkeypatch.setattr(export_router, "export_results", fake_export)
         _seed_multi(headers["x-session-id"])
@@ -190,21 +191,24 @@ class TestExportExcelFilters:
                 "filters": json.dumps({
                     "sector": ["A"],
                     "section": ["S-01"],
-                    "level": ["L2"],
-                    "selectedBenchNumbers": [1],
+                    "level": ["L1"],
+                    "levelsBySector": {"A": ["L2"], "B": ["L3"]},
+                    "selectedBenchNumbers": [2],
                 })
             },
         )
 
         assert response.status_code == 200, response.text
-        assert [(row["section"], row["bench_num"]) for row in captured["rows"]] == [
-            ("S-01", 1), ("S-02", 1),
-        ]
+        assert [
+            (row["section"], row["level"], row["bench_num"]) for row in captured["rows"]
+        ] == [("S-01", "L2", 2)]
+        assert captured["sections"] == ["S-01"]
         applied = json.loads(response.headers["X-Export-Filters-Applied"])
-        assert not applied.get("sectors")
-        assert not applied.get("sections")
-        assert not applied.get("levels")
-        assert applied["selected_bench_numbers"] == [1]
+        assert applied["sectors"] == ["A"]
+        assert applied["sections"] == ["S-01"]
+        assert applied["levels"] == ["L1"]
+        assert applied["levels_by_sector"] == {"A": ["L2"], "B": ["L3"]}
+        assert applied["selected_bench_numbers"] == [2]
 
     def test_selected_bench_numbers_excludes_others(self, client, headers, monkeypatch):
         captured: Dict[str, Any] = {}

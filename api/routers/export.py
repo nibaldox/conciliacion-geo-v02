@@ -7,6 +7,7 @@ Endpoints:
     GET /export/dxf     Export profiles as 3D DXF with compliance layers
     GET /export/images  Export section plot images as ZIP
     GET /export/pdf     Export unified executive PDF report
+    GET /export/levels  Nominal levels per sector for the export filters
 """
 
 import asyncio
@@ -14,9 +15,12 @@ import io
 import json
 import logging
 import os
+import math
 import tempfile
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from statistics import median
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -37,6 +41,7 @@ from core import (
     generate_section_images_zip,
 )
 from core.report_data import ReportFilters, build_report_data, filter_comparisons
+from core.report_levels import BENCH_TYPES, assign_nominal_levels
 from core.section_cutter import azimuth_to_direction
 from core.param_extractor import ExtractionResult
 from core.reconciliation_summary import compute_section_scores
@@ -99,17 +104,203 @@ def _parse_filters(raw: Optional[str]) -> ExportFilters:
         raise HTTPException(400, f"Invalid filter values: {exc}") from exc
 
 
-def _filter_comparisons(
-    comparisons: List[Dict[str, Any]],
-    filters: ExportFilters,
+VIEW_WINDOW_DISTANCE_MARGIN_M = 10.0
+VIEW_WINDOW_HEIGHT_MARGIN_FRACTION = 0.5
+
+SectionKey = Tuple[str, str]
+ViewWindow = Tuple[float, float, float, float]
+
+
+@dataclass
+class _LevelSelection:
+    """Benches of one section that remain under an active level filter."""
+
+    design: Set[int] = field(default_factory=set)
+    topo: Set[int] = field(default_factory=set)
+    heights: List[float] = field(default_factory=list)
+
+
+def _finite(value: Any) -> Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _bench_number(value: Any) -> Optional[int]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _sector_key(value: Any) -> str:
+    return str(value).strip() if value is not None else ""
+
+
+def _has_level_filter(report_filters: ReportFilters) -> bool:
+    return bool(report_filters.levels) or any(
+        selection for _sector, selection in report_filters.levels_by_sector
+    )
+
+
+def _level_filter_active(report_filters: ReportFilters, sector: Any) -> bool:
+    """Whether the sector has a non-empty level selection of its own or global."""
+    name = str(sector) if sector is not None and str(sector).strip() else ""
+    return bool(report_filters.levels_for(name))
+
+
+def _rescore_sections(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Recompute ``section_score`` over the benches that remain in each section."""
+    cleared = [{**row, "section_score": None} for row in rows]
+    scores = compute_section_scores(cleared)
+    return [{**row, "section_score": scores.get(row.get("section"))} for row in cleared]
+
+
+def _export_rows(
+    results: List[Dict[str, Any]], report_filters: ReportFilters
 ) -> List[Dict[str, Any]]:
-    selected = filters.selected_bench_numbers
-    if not selected:
-        return comparisons
-    allowed = set(selected)
-    selected_rows = [{**row, "section_score": None} for row in comparisons if row.get("bench_num") in allowed]
-    scores = compute_section_scores(selected_rows)
-    return [{**row, "section_score": scores.get(row.get("section"))} for row in selected_rows]
+    """Filtered comparison rows; scores are recomputed where benches were removed.
+
+    A bench filter rescoring applies to every row; a level filter only to the
+    rows of the sectors whose level selection is active.
+    """
+    filtered = filter_comparisons(results, report_filters)
+    if report_filters.benches:
+        return _rescore_sections(filtered)
+    if not _has_level_filter(report_filters):
+        return filtered
+    cropped = [
+        index
+        for index, row in enumerate(filtered)
+        if _level_filter_active(report_filters, row.get("sector"))
+    ]
+    rescored = _rescore_sections([filtered[index] for index in cropped])
+    for index, row in zip(cropped, rescored):
+        filtered[index] = row
+    return filtered
+
+
+def _level_bench_selection(
+    filtered_rows: Optional[List[Dict[str, Any]]],
+    report_filters: ReportFilters,
+) -> Optional[Dict[SectionKey, _LevelSelection]]:
+    """Per-section benches kept by the level filter, or ``None`` without one.
+
+    Only rows of sectors with an active level selection take part.
+    """
+    if not _has_level_filter(report_filters):
+        return None
+    selection: Dict[SectionKey, _LevelSelection] = {}
+    for row in filtered_rows or []:
+        if not _level_filter_active(report_filters, row.get("sector")):
+            continue
+        key = (str(row.get("section", "")), _sector_key(row.get("sector")))
+        entry = selection.setdefault(key, _LevelSelection())
+        if row.get("type") != "EXTRA":
+            design_number = _bench_number(row.get("bench_num"))
+            if design_number is not None:
+                entry.design.add(design_number)
+        topo_number = _bench_number(row.get("bench_num_topo"))
+        if topo_number is not None:
+            entry.topo.add(topo_number)
+        height = _finite(row.get("height_design"))
+        if height is not None and height > 0:
+            entry.heights.append(height)
+    return selection
+
+
+def _section_level_selection(
+    selection: Optional[Dict[SectionKey, _LevelSelection]],
+    report_filters: ReportFilters,
+    sector: Any,
+) -> Optional[Dict[SectionKey, _LevelSelection]]:
+    """Level selection that applies to a section of ``sector``, or ``None``."""
+    if selection is None or not _level_filter_active(report_filters, sector):
+        return None
+    return selection
+
+
+def _section_selected(
+    name: str,
+    sector: Any,
+    report_filters: ReportFilters,
+    filtered_sections: Set[Any],
+) -> bool:
+    if report_filters.sections and name not in report_filters.sections:
+        return False
+    if report_filters.sectors and (sector or "") not in report_filters.sectors:
+        return False
+    if not report_filters.is_empty() and name not in filtered_sections:
+        return False
+    return True
+
+
+def _crop_to_level_selection(
+    params_design: ExtractionResult,
+    params_topo: ExtractionResult,
+    selection: Optional[Dict[SectionKey, _LevelSelection]],
+    key: SectionKey,
+) -> None:
+    if selection is None:
+        return
+    kept = selection.get(key, _LevelSelection())
+    params_design.benches = [b for b in params_design.benches if b.bench_number in kept.design]
+    params_topo.benches = [b for b in params_topo.benches if b.bench_number in kept.topo]
+
+
+def _view_window(
+    params_design: ExtractionResult,
+    params_topo: ExtractionResult,
+    selection: Optional[Dict[SectionKey, _LevelSelection]],
+    key: SectionKey,
+) -> Tuple[Optional[ViewWindow], List[str]]:
+    """Window (d_min, d_max, z_min, z_max) around the benches left by the level filter."""
+    if selection is None:
+        return None, []
+    benches = list(params_design.benches) + list(params_topo.benches)
+    distances = [
+        value
+        for bench in benches
+        for value in (_finite(bench.crest_distance), _finite(bench.toe_distance))
+        if value is not None
+    ]
+    toes = [v for v in (_finite(b.toe_elevation) for b in benches) if v is not None]
+    crests = [v for v in (_finite(b.crest_elevation) for b in benches) if v is not None]
+    if not distances or not toes or not crests:
+        return None, []
+
+    heights = [
+        value
+        for value in (_finite(bench.bench_height) for bench in params_design.benches)
+        if value is not None and value > 0
+    ]
+    if not heights:
+        heights = list(selection.get(key, _LevelSelection()).heights)
+    if not heights:
+        heights = [h for entry in selection.values() for h in entry.heights]
+
+    warnings: List[str] = []
+    if heights:
+        margin = VIEW_WINDOW_HEIGHT_MARGIN_FRACTION * float(median(heights))
+    else:
+        margin = 0.0
+        warnings.append(
+            f"Sección {key[0]}: sin altura de banco de diseño válida; la ventana "
+            "vertical del perfil no lleva margen."
+        )
+    window = (
+        min(distances) - VIEW_WINDOW_DISTANCE_MARGIN_M,
+        max(distances) + VIEW_WINDOW_DISTANCE_MARGIN_M,
+        min(toes) - margin,
+        max(crests) + margin,
+    )
+    return window, warnings
 
 
 def _apply_bench_filters(
@@ -137,6 +328,7 @@ def _filters_header(
         "sectors": filters.sectors if include_result_filters else [],
         "sections": filters.sections if include_result_filters else [],
         "levels": filters.levels if include_result_filters else [],
+        "levels_by_sector": filters.levels_by_sector if include_result_filters else {},
         "selected_bench_numbers": filters.selected_bench_numbers,
         "show_spill_areas": filters.show_spill_areas,
         "show_blast_holes": filters.show_blast_holes,
@@ -154,6 +346,10 @@ def _report_filters(filters: ExportFilters) -> ReportFilters:
         sections=tuple(filters.sections),
         levels=tuple(filters.levels),
         benches=tuple(filters.selected_bench_numbers),
+        levels_by_sector=tuple(
+            (sector, tuple(dict.fromkeys(filters.levels_by_sector[sector])))
+            for sector in sorted(filters.levels_by_sector)
+        ),
     )
 
 
@@ -228,23 +424,27 @@ def _build_section_geometry(
     filters: ExportFilters,
     report_filters: ReportFilters,
     filtered_sections: set,
+    filtered_rows: Optional[List[Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """Rebuild the per-section geometry list, honouring the active filters.
 
     Sections excluded by the sector/section/level/bench filters are dropped
     so the report's section detail matches the exported comparison rows.
+    The level filter is decided per section sector: where
+    ``report_filters.levels_for(sector)`` is not empty the section keeps only
+    the benches of its filtered rows (design by ``bench_num``, as-built by
+    ``bench_num_topo``) and gets a ``view_window`` around them; any other
+    section keeps all its benches and ``view_window`` is ``None``.
     """
     from core import cut_both_surfaces
 
+    level_selection = _level_bench_selection(filtered_rows, report_filters)
     all_data: List[Dict[str, Any]] = []
     for sec_dict in sections_raw:
         sec = _section_from_dict(sec_dict)
-        if report_filters.sections and sec.name not in report_filters.sections:
+        if not _section_selected(sec.name, sec.sector, report_filters, filtered_sections):
             continue
-        if report_filters.sectors and (sec.sector or "") not in report_filters.sectors:
-            continue
-        if not report_filters.is_empty() and sec.name not in filtered_sections:
-            continue
+        section_key = (sec.name, _sector_key(sec.sector))
 
         pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
         design_ext = db.get_extraction(session_id, sec.name, "design")
@@ -276,11 +476,21 @@ def _build_section_geometry(
             overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
         )
 
+        section_levels = _section_level_selection(
+            level_selection, report_filters, sec.sector
+        )
+        _crop_to_level_selection(p_design, p_topo, section_levels, section_key)
         p_design, p_topo = _apply_bench_filters([p_design, p_topo], filters)
+        view_window, window_warnings = _view_window(
+            p_design, p_topo, section_levels, section_key
+        )
 
         all_data.append(
             {
                 "section_name": sec.name,
+                "sector": sec.sector or "",
+                "view_window": view_window,
+                "warnings": window_warnings,
                 "params_design": p_design,
                 "params_topo": p_topo,
                 "profile_d": (
@@ -322,7 +532,10 @@ def _build_excel_payload_sync(
     if not results:
         raise HTTPException(400, "No results to export — run the pipeline first")
 
-    results = _filter_comparisons(results, export_filters)
+    report_filters = _report_filters(export_filters)
+    results = _export_rows(results, report_filters)
+    filtered_sections = {row.get("section") for row in results}
+    level_selection = _level_bench_selection(results, report_filters)
 
     settings = db.get_settings(session_id) or {}
     tolerances = settings.get("tolerances", {})
@@ -335,6 +548,8 @@ def _build_excel_payload_sync(
     for sec in sections_raw:
         sec_name = sec["name"]
         sector = sec.get("sector", "")
+        if not _section_selected(sec_name, sector, report_filters, filtered_sections):
+            continue
 
         design_ext = db.get_extraction(session_id, sec_name, "design")
         if design_ext:
@@ -365,6 +580,12 @@ def _build_excel_payload_sync(
             )
         else:
             params_topo.append(ExtractionResult(section_name=sec_name, sector=sector))
+
+        _crop_to_level_selection(
+            params_design[-1], params_topo[-1],
+            _section_level_selection(level_selection, report_filters, sector),
+            (sec_name, _sector_key(sector)),
+        )
 
     params_design = _apply_bench_filters(params_design, export_filters)
     params_topo = _apply_bench_filters(params_topo, export_filters)
@@ -430,7 +651,7 @@ async def export_excel(
             tmp,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             filename="Conciliacion_Geotecnica.xlsx",
-            headers=_filters_header(export_filters, include_result_filters=False),
+            headers=_filters_header(export_filters, include_result_filters=True),
         )
     except HTTPException:
         raise
@@ -476,7 +697,7 @@ def _build_word_payload_sync(
 
     all_data = _build_section_geometry(
         session_id, sections_raw, mesh_design, mesh_topo,
-        export_filters, report_filters, filtered_sections,
+        export_filters, report_filters, filtered_sections, filtered,
     )
 
     meta = _report_meta(session_id, project, author, operation, phase, settings)
@@ -845,7 +1066,7 @@ def _build_pdf_payload_sync(
 
     all_data = _build_section_geometry(
         session_id, sections_raw, mesh_design, mesh_topo,
-        export_filters, report_filters, filtered_sections,
+        export_filters, report_filters, filtered_sections, filtered,
     )
 
     meta = _report_meta(session_id, project, author, operation, phase, settings)
@@ -931,6 +1152,60 @@ async def export_pdf(
     except Exception as exc:
         logger.exception("PDF export failed")
         raise HTTPException(500, detail=f"PDF export failed: {exc}") from exc
+
+
+# ---------------------------------------------------------------------------
+# GET /export/levels
+# ---------------------------------------------------------------------------
+
+
+def _build_levels_payload_sync(session_id: str) -> Dict[str, Any]:
+    """Nominal levels of the session's unfiltered results, grouped by sector."""
+    results = db.get_results(session_id)
+    if not results:
+        raise HTTPException(400, "No results available — run the pipeline first")
+
+    rows = [row for row in results if isinstance(row, Mapping)]
+    assignment = assign_nominal_levels(rows)
+
+    levels_by_sector: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        if row.get("type") not in BENCH_TYPES:
+            continue
+        sector = row.get("sector")
+        name = "" if sector is None or not str(sector).strip() else str(sector)
+        levels_by_sector.setdefault(name, [])
+    for level in sorted(assignment.levels, key=lambda item: item.elevation, reverse=True):
+        levels_by_sector.setdefault(level.sector, []).append(
+            {
+                "label": level.label,
+                "elevation": level.elevation,
+                "min_level": level.min_level,
+                "max_level": level.max_level,
+                "n_sections": level.n_sections,
+                "n_rows": level.n_rows,
+            }
+        )
+    return {
+        "sectors": [
+            {"sector": sector, "levels": levels}
+            for sector, levels in levels_by_sector.items()
+        ],
+        "warnings": list(assignment.warnings),
+    }
+
+
+@router.get("/levels")
+async def export_levels(request: Request):
+    """List the nominal levels of every sector, for the export level filter."""
+    try:
+        session_id = db.get_or_create_session(request.state.session_id)
+        return await _run_in_executor(_build_levels_payload_sync, session_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Levels listing failed")
+        raise HTTPException(500, detail="Levels listing failed") from exc
 
 
 # ---------------------------------------------------------------------------

@@ -311,6 +311,7 @@ export interface ComparisonResult {
   bench_num_topo?: number | null;
   type: MatchType;
   level: string;
+  level_nominal?: string | null;
   height_design: number | null;
   height_real: number | null;
   height_dev: number | null;

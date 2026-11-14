@@ -25,7 +25,15 @@ interface Expected {
   profile_counts: { CUMPLE: number; FUERA: number; NO_CUMPLE: number };
   profile_scores: Record<string, number>;
   global_weighted_score: number;
-  parameters: { parameter: string; cumple: number; no_cumple: number; pct_cumple: number; mean_real: number }[];
+  parameters: {
+    parameter: string;
+    cumple: number;
+    no_cumple: number;
+    pct_cumple: number;
+    mean_real: number;
+    n_evaluated: number;
+    n_not_compared: number;
+  }[];
 }
 
 interface FallbackExpected {
@@ -98,6 +106,13 @@ describe('report_parity fixture — web dashboard functions', () => {
     expect(computeGlobalScore(rows)).toBeCloseTo(expected.global_weighted_score, 9);
   });
 
+  it('counts the per-parameter denominator over MATCH rows only (D11)', () => {
+    expect(expected.parameters.map((p) => p.n_evaluated)).toEqual([expected.n_match, expected.n_match, expected.n_match]);
+    expect(expected.parameters.map((p) => p.n_not_compared)).toEqual(
+      Array(3).fill(expected.n_missing + expected.n_extra),
+    );
+  });
+
   it('computeParameterBreakdown matches cumple/noCumple/mean_real', () => {
     const breakdown = computeParameterBreakdown(rows);
     expect(breakdown.map((p) => p.parameter)).toEqual(['height', 'angle', 'berm']);
@@ -105,6 +120,10 @@ describe('report_parity fixture — web dashboard functions', () => {
       const e = expected.parameters.find((x) => x.parameter === p.parameter)!;
       expect(p.cumple, p.parameter).toBe(e.cumple);
       expect(p.noCumple, p.parameter).toBe(e.no_cumple);
+      expect(p.nEvaluated, p.parameter).toBe(e.n_evaluated);
+      expect(p.nNotCompared, p.parameter).toBe(e.n_not_compared);
+      expect(p.cumple + p.noCumple, p.parameter).toBe(e.n_evaluated);
+      expect((100 * p.cumple) / p.nEvaluated, p.parameter).toBeCloseTo(e.pct_cumple, 9);
       const mean = p.realCount === 0 ? null : p.realSum / p.realCount;
       expect(mean, p.parameter).not.toBeNull();
       expect(mean!, p.parameter).toBeCloseTo(e.mean_real, 5);

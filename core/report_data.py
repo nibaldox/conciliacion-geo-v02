@@ -20,6 +20,12 @@ from core.design_achievement import (
     build_design_achievement_summary,
     build_sector_achievement_summary,
 )
+from core.report_levels import NominalLevelAssignment, assign_nominal_levels
+from core.report_volumes import (
+    SectionExcavation,
+    section_excavation,
+    section_influence_widths,
+)
 
 BENCH_TYPES = ("MATCH", "MISSING", "EXTRA")
 
@@ -90,9 +96,27 @@ class ReportFilters:
     sections: tuple[str, ...] = ()
     levels: tuple[str, ...] = ()
     benches: tuple[int, ...] = ()
+    levels_by_sector: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     def is_empty(self) -> bool:
-        return not (self.sectors or self.sections or self.levels or self.benches)
+        return not (
+            self.sectors
+            or self.sections
+            or self.levels
+            or self.benches
+            or any(selection for _sector, selection in self.levels_by_sector)
+        )
+
+    def levels_for(self, sector: str) -> tuple[str, ...]:
+        """Level selection of a sector: its own entry when present, else the global one.
+
+        A sector listed with an empty selection keeps all its levels, even
+        when global ``levels`` are set.
+        """
+        for name, selection in self.levels_by_sector:
+            if name == sector:
+                return tuple(selection)
+        return self.levels
 
 
 def _as_float(value: Any) -> Optional[float]:
@@ -121,30 +145,100 @@ def _section_identity(row: Mapping[str, Any]) -> tuple[str, Optional[str]]:
     return str(row.get("section", "")), _sector_identity(row.get("sector"))
 
 
-def filter_comparisons(
-    rows: Optional[Iterable[Mapping[str, Any]]],
-    filters: ReportFilters,
-) -> list[dict]:
-    """Apply the report filters with the same semantics as ``filterResults``.
+def _level_sector(value: Any) -> str:
+    return _sector_identity(value) or ""
 
-    Dimensions are ANDed, values within a dimension are ORed, and an empty
-    dimension does not filter. ``''`` (level/sector without value) is a
-    selectable value; benches match ``bench_num`` numerically.
-    """
+
+def _nominal_level(
+    row: Mapping[str, Any], assignment: NominalLevelAssignment
+) -> Optional[str]:
+    raw = row.get("bench_num")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        bench_num = int(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    key = (
+        _level_sector(row.get("sector")),
+        str(row.get("section", "")),
+        bench_num,
+        str(row.get("type")),
+        str(row.get("level")),
+    )
+    return assignment.row_level.get(key)
+
+
+def _level_matches(
+    level: Any, nominal: Optional[str], selected: Sequence[str], labels: frozenset[str]
+) -> bool:
+    for value in selected:
+        if value in labels:
+            if nominal == value:
+                return True
+        elif level == value or (level is not None and str(level) == value):
+            return True
+    return False
+
+
+def _filter_with_levels(
+    rows: Sequence[Mapping[str, Any]],
+    filters: ReportFilters,
+    assignment: NominalLevelAssignment,
+) -> list[dict]:
+    labels_by_sector: dict[str, set[str]] = {}
+    for level in assignment.levels:
+        labels_by_sector.setdefault(level.sector, set()).add(level.label)
+    labels = {sector: frozenset(values) for sector, values in labels_by_sector.items()}
+    no_labels: frozenset[str] = frozenset()
+
     out: list[dict] = []
-    for row in rows or ():
-        if not isinstance(row, Mapping):
-            continue
+    for row in rows:
         if filters.sectors and row.get("sector") not in filters.sectors:
             continue
         if filters.sections and row.get("section") not in filters.sections:
             continue
-        if filters.levels and row.get("level") not in filters.levels:
-            continue
         if filters.benches and row.get("bench_num") not in filters.benches:
             continue
-        out.append(dict(row))
+        sector = _level_sector(row.get("sector"))
+        nominal = _nominal_level(row, assignment)
+        selected = filters.levels_for(sector)
+        if selected and not _level_matches(
+            row.get("level"), nominal, selected, labels.get(sector, no_labels)
+        ):
+            continue
+        result = dict(row)
+        result["level_nominal"] = nominal
+        out.append(result)
     return out
+
+
+def filter_comparisons(
+    rows: Optional[Iterable[Mapping[str, Any]]],
+    filters: ReportFilters,
+) -> list[dict]:
+    """Apply the report filters; levels are nominal levels (``core.report_levels``).
+
+    Dimensions are ANDed, values within a dimension are ORed, and an empty
+    dimension does not filter. ``''`` (sector without value) is a selectable
+    sector; benches match ``bench_num`` numerically.
+
+    Nominal levels are assigned over all input rows before any filtering, so
+    the grouping never depends on the other filters. Every returned dict is a
+    copy carrying the additive key ``level_nominal`` (the nominal label, or
+    ``None`` for a row left out of the grouping); input rows are not mutated.
+
+    Level dimension: the selection of a row is ``filters.levels_for(sector)``,
+    with a missing or blank sector read as ``''``. A row passes when that
+    selection is empty or holds its nominal label. Backward compatibility: a
+    selected value that is not a nominal label of the row's sector is matched
+    against the exact ``level`` text instead, which keeps the exact levels the
+    dashboard sends today working, including ``''`` for a row without level.
+    """
+    materialized = [row for row in (rows or ()) if isinstance(row, Mapping)]
+    return _filter_with_levels(
+        materialized, filters, assign_nominal_levels(materialized)
+    )
 
 
 @dataclass(frozen=True)
@@ -173,6 +267,8 @@ class BenchRow:
     effective_berm_status: Optional[str]
     worst_status: str
     status_label: str
+    level_nominal: Optional[str] = None
+    design_below_min: bool = False
 
 
 @dataclass(frozen=True)
@@ -190,7 +286,13 @@ class ProfileSummary:
 
 @dataclass(frozen=True)
 class ParameterSummary:
-    """Per-parameter compliance over every bench carrying a status."""
+    """Per-parameter compliance over the compared (MATCH) benches.
+
+    ``cumple``, ``no_cumple`` and ``pct_cumple`` count only MATCH rows carrying
+    a status for the parameter; ``n_evaluated`` is that denominator and
+    ``n_not_compared`` the MISSING plus EXTRA rows reported apart.
+    ``mean_real`` keeps averaging every row that carries a status.
+    """
 
     parameter: str
     label: str
@@ -199,6 +301,8 @@ class ParameterSummary:
     no_cumple: int
     pct_cumple: Optional[float]
     mean_real: Optional[float]
+    n_evaluated: int = 0
+    n_not_compared: int = 0
 
 
 @dataclass(frozen=True)
@@ -223,6 +327,15 @@ class ReportData:
     conclusions: tuple[str, ...] = ()
     warnings: tuple[str, ...] = ()
     section_plan_states: tuple[tuple[str, Optional[str], bool, str], ...] = ()
+    nominal_levels: tuple = ()
+    level_warnings: tuple[str, ...] = ()
+    headline: dict = field(default_factory=dict)
+    matrix: tuple[dict, ...] = ()
+    deviations: dict[str, tuple[float, ...]] = field(default_factory=dict)
+    trend: tuple[dict, ...] = ()
+    excavation: tuple[SectionExcavation, ...] = ()
+    excavation_totals: dict = field(default_factory=dict)
+    sector_summaries: tuple[dict, ...] = ()
 
     def resolve_section_plan_state(
         self, section: str, sector: Optional[str], infer_missing_sector: bool = True
@@ -288,7 +401,15 @@ def _to_bench_row(row: Mapping[str, Any]) -> BenchRow:
         effective_berm_status=row.get("effective_berm_status"),
         worst_status=worst,
         status_label=_status_label(row_type, worst),
+        level_nominal=row.get("level_nominal"),
+        design_below_min=_design_below_min(row),
     )
+
+
+def _design_below_min(row: Mapping[str, Any]) -> bool:
+    design = _as_float(row.get("berm_design"))
+    minimum = _as_float(row.get("berm_min"))
+    return design is not None and minimum is not None and design < minimum
 
 
 def _web_bench_score(row: Mapping[str, Any]) -> Optional[float]:
@@ -382,6 +503,7 @@ def _profile_statuses(
 
 
 def _parameter_summaries(rows: Sequence[Mapping[str, Any]]) -> tuple[ParameterSummary, ...]:
+    n_not_compared = sum(1 for row in rows if row.get("type") in ("MISSING", "EXTRA"))
     out: list[ParameterSummary] = []
     for parameter, label, unit in _PARAMETERS:
         status_key = f"{parameter}_status"
@@ -394,10 +516,11 @@ def _parameter_summaries(rows: Sequence[Mapping[str, Any]]) -> tuple[ParameterSu
             status = row.get(status_key)
             if not status or status == "-":
                 continue
-            if status == "CUMPLE":
-                cumple += 1
-            else:
-                no_cumple += 1
+            if row.get("type") == "MATCH":
+                if status == "CUMPLE":
+                    cumple += 1
+                else:
+                    no_cumple += 1
             real = _as_float(row.get(real_key))
             if real is not None:
                 real_sum += real
@@ -412,6 +535,8 @@ def _parameter_summaries(rows: Sequence[Mapping[str, Any]]) -> tuple[ParameterSu
                 no_cumple=no_cumple,
                 pct_cumple=(100.0 * cumple / denom) if denom else None,
                 mean_real=(real_sum / real_count) if real_count else None,
+                n_evaluated=denom,
+                n_not_compared=n_not_compared,
             )
         )
     return tuple(out)
@@ -624,6 +749,288 @@ def _warnings(
     return tuple(out)
 
 
+def _profile_counts(statuses: Mapping[Any, str]) -> dict:
+    counts = {"CUMPLE": 0, "FUERA": 0, "NO_CUMPLE": 0}
+    for status in statuses.values():
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+
+def _mean_score(scores: Mapping[str, float]) -> Optional[float]:
+    return sum(scores.values()) / len(scores) if scores else None
+
+
+def _status_tally() -> dict:
+    return {"CUMPLE": 0, "FUERA": 0, "NO_CUMPLE": 0, "UNKNOWN": 0}
+
+
+def _headline(rows: Sequence[Mapping[str, Any]], statuses: Mapping[str, str]) -> dict:
+    """Official statuses split by cause; ``statuses`` are the existing profile statuses."""
+    profiles = _status_tally()
+    for status in statuses.values():
+        profiles[status] += 1
+    match_by_status = _status_tally()
+    failing_by_geometry: set[str] = set()
+    for row in rows:
+        if row.get("type") != "MATCH":
+            continue
+        status = _bench_score_status(row)
+        match_by_status[status] += 1
+        if status != "CUMPLE":
+            failing_by_geometry.add(str(row.get("section", "")))
+    non_compliant = [section for section, status in statuses.items() if status == "NO_CUMPLE"]
+    by_geometry = sum(1 for section in non_compliant if section in failing_by_geometry)
+    return {
+        "profiles": profiles,
+        "nc_by_geometry": by_geometry,
+        "nc_only_missing_extra": len(non_compliant) - by_geometry,
+        "benches": {
+            "match_by_status": match_by_status,
+            "missing": sum(1 for row in rows if row.get("type") == "MISSING"),
+            "extra": sum(1 for row in rows if row.get("type") == "EXTRA"),
+        },
+    }
+
+
+def _plan_sections(plan_inputs: Any) -> list[dict]:
+    """Read-only view of the defined sections as ``name``/``sector``/``origin`` dicts."""
+    if isinstance(plan_inputs, Mapping):
+        raw = plan_inputs.get("sections")
+    elif isinstance(plan_inputs, (list, tuple)):
+        raw = plan_inputs
+    else:
+        raw = None
+    sections: list[dict] = []
+    for item in raw or ():
+        if isinstance(item, Mapping):
+            name, sector, origin = item.get("name"), item.get("sector"), item.get("origin")
+        else:
+            name = getattr(item, "name", None)
+            sector = getattr(item, "sector", None)
+            origin = getattr(item, "origin", None)
+        if name is None:
+            continue
+        sections.append(
+            {"name": str(name), "sector": _level_sector(sector), "origin": origin}
+        )
+    return sections
+
+
+def _row_identity(row: Mapping[str, Any]) -> tuple[str, str]:
+    return str(row.get("section", "")), _level_sector(row.get("sector"))
+
+
+def _ordered_identities(
+    plan_sections: Sequence[Mapping[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
+) -> list[tuple[str, str]]:
+    """(section, sector) identities of the rows in the defined section order.
+
+    The order is the one of the plan sections; identities absent from the
+    plan follow in order of appearance in the rows.
+    """
+    by_pair: dict[tuple[str, str], int] = {}
+    by_name: dict[str, int] = {}
+    for index, section in enumerate(plan_sections):
+        by_pair.setdefault((section["name"], section["sector"]), index)
+        by_name.setdefault(section["name"], index)
+    identities = list(dict.fromkeys(_row_identity(row) for row in rows))
+    unplanned = len(plan_sections)
+
+    def rank(identity: tuple[str, str]) -> int:
+        if identity in by_pair:
+            return by_pair[identity]
+        return by_name.get(identity[0], unplanned)
+
+    return sorted(identities, key=rank)
+
+
+def _matrix(
+    rows: Sequence[Mapping[str, Any]],
+    bench_rows: Sequence[BenchRow],
+    identities: Sequence[tuple[str, str]],
+) -> tuple[dict, ...]:
+    position = {identity: index for index, identity in enumerate(identities)}
+    order = sorted(range(len(rows)), key=lambda index: position[_row_identity(rows[index])])
+    out: list[dict] = []
+    for index in order:
+        section, sector = _row_identity(rows[index])
+        bench = bench_rows[index]
+        out.append(
+            {
+                "section": section,
+                "sector": sector,
+                "level_nominal": bench.level_nominal,
+                "bench_num": bench.bench_num,
+                "type": bench.type,
+                "worst_status": bench.worst_status,
+                "height_status": bench.height_status,
+                "angle_status": bench.angle_status,
+                "berm_status": bench.berm_status,
+                "design_below_min": bench.design_below_min,
+            }
+        )
+    return tuple(out)
+
+
+def _real_minus_design(row: Mapping[str, Any], parameter: str) -> Optional[float]:
+    design = _as_float(row.get(f"{parameter}_design"))
+    real = _as_float(row.get(f"{parameter}_real"))
+    if design is None or real is None:
+        return None
+    return real - design
+
+
+def _deviations(rows: Sequence[Mapping[str, Any]]) -> dict[str, tuple[float, ...]]:
+    out: dict[str, tuple[float, ...]] = {}
+    for parameter, _label, _unit in _PARAMETERS:
+        values = (
+            _real_minus_design(row, parameter)
+            for row in rows
+            if row.get("type") == "MATCH"
+        )
+        out[parameter] = tuple(value for value in values if value is not None)
+    return out
+
+
+def _mean(values: Sequence[float]) -> Optional[float]:
+    return math.fsum(values) / len(values) if values else None
+
+
+def _trend(
+    rows: Sequence[Mapping[str, Any]],
+    identities: Sequence[tuple[str, str]],
+) -> tuple[dict, ...]:
+    """Mean real − design deviation per section; ``n`` counts its MATCH rows."""
+    matched: dict[tuple[str, str], list[Mapping[str, Any]]] = {
+        identity: [] for identity in identities
+    }
+    for row in rows:
+        if row.get("type") == "MATCH":
+            matched[_row_identity(row)].append(row)
+    out: list[dict] = []
+    for section, sector in identities:
+        section_rows = matched[(section, sector)]
+        means = {}
+        for parameter in ("height", "angle"):
+            values = [_real_minus_design(row, parameter) for row in section_rows]
+            means[parameter] = _mean([value for value in values if value is not None])
+        out.append(
+            {
+                "section": section,
+                "sector": sector,
+                "height_dev_mean": means["height"],
+                "angle_dev_mean": means["angle"],
+                "n": len(section_rows),
+            }
+        )
+    return tuple(out)
+
+
+def _excavation(
+    section_geometry: Sequence[Any],
+    plan_sections: Sequence[Mapping[str, Any]],
+    identities: Sequence[tuple[str, str]],
+) -> tuple[SectionExcavation, ...]:
+    """Excavation of every geometry entry whose section is in the filtered rows."""
+    widths = section_influence_widths(plan_sections)
+    plan_sectors: dict[str, list[str]] = {}
+    for section in plan_sections:
+        plan_sectors.setdefault(section["name"], []).append(section["sector"])
+    row_sectors: dict[str, list[str]] = {}
+    for name, sector in identities:
+        row_sectors.setdefault(name, []).append(sector)
+    position = {identity: index for index, identity in enumerate(identities)}
+
+    ranked: list[tuple[int, SectionExcavation]] = []
+    for entry in section_geometry:
+        if not isinstance(entry, Mapping):
+            continue
+        name = str(entry.get("section_name", ""))
+        sectors = row_sectors.get(name)
+        if not sectors:
+            continue
+        raw_sector = entry.get("sector")
+        if raw_sector is None:
+            raw_sector = getattr(entry.get("params_design"), "sector", None)
+        sector = _level_sector(raw_sector)
+        if sector not in sectors:
+            if sector and "" not in sectors:
+                continue
+            if not sector and len(sectors) == 1:
+                sector = sectors[0]
+        width = widths.get((sector, name))
+        if (sector, name) not in widths and len(plan_sectors.get(name, ())) == 1:
+            width = widths.get((plan_sectors[name][0], name))
+        ranked.append(
+            (
+                position.get((name, sector), position[(name, sectors[0])]),
+                section_excavation(
+                    name,
+                    sector,
+                    entry.get("profile_d"),
+                    entry.get("profile_t"),
+                    entry.get("view_window"),
+                    width,
+                ),
+            )
+        )
+    ranked.sort(key=lambda item: item[0])
+    return tuple(excavation for _rank, excavation in ranked)
+
+
+def _excavation_totals(entries: Sequence[SectionExcavation]) -> dict:
+    """Sums over the non-null values only; ``None`` when a magnitude has none."""
+
+    def total(attribute: str) -> Optional[float]:
+        values = [getattr(entry, attribute) for entry in entries]
+        present = [value for value in values if value is not None]
+        return math.fsum(present) if present else None
+
+    return {
+        "area_over_m2": total("area_over_m2"),
+        "area_under_m2": total("area_under_m2"),
+        "volume_over_m3": total("volume_over_m3"),
+        "volume_under_m3": total("volume_under_m3"),
+        "n_sections": len(entries),
+        "n_without_volume": sum(
+            1
+            for entry in entries
+            if entry.volume_over_m3 is None or entry.volume_under_m3 is None
+        ),
+    }
+
+
+def _sector_summaries(
+    rows: Sequence[Mapping[str, Any]],
+    identities: Sequence[tuple[str, str]],
+    filters: ReportFilters,
+    ct_tol: Any,
+    excavation: Sequence[SectionExcavation],
+) -> tuple[dict, ...]:
+    """One summary per sector of the filtered rows, in the defined section order."""
+    out: list[dict] = []
+    for sector in dict.fromkeys(sector for _section, sector in identities):
+        subset = [row for row in rows if _level_sector(row.get("sector")) == sector]
+        statuses = _profile_statuses(subset)
+        out.append(
+            {
+                "sector": sector,
+                "levels": filters.levels_for(sector),
+                "profile_counts": _profile_counts(statuses),
+                "headline": _headline(subset, statuses),
+                "global_weighted_score": _mean_score(_web_profile_scores(subset)),
+                "parameters": _parameter_summaries(subset),
+                "design_achievement": build_design_achievement_summary(subset, ct_tol),
+                "excavation_totals": _excavation_totals(
+                    [entry for entry in excavation if entry.sector == sector]
+                ),
+            }
+        )
+    return tuple(out)
+
+
 def build_report_data(
     comparisons: Optional[Iterable[Mapping[str, Any]]],
     settings: Optional[Mapping[str, Any]],
@@ -638,7 +1045,8 @@ def build_report_data(
     settings = settings or {}
     tolerances = dict(settings.get("tolerances") or {})
     unfiltered = [dict(r) for r in (comparisons or ()) if isinstance(r, Mapping)]
-    filtered = filter_comparisons(unfiltered, filters)
+    level_assignment = assign_nominal_levels(unfiltered)
+    filtered = _filter_with_levels(unfiltered, filters, level_assignment)
     bench_rows = [r for r in filtered if r.get("type") in BENCH_TYPES]
     identities_with_data = {
         _section_identity(row)
@@ -685,14 +1093,8 @@ def build_report_data(
         )
     profiles_t = tuple(profiles)
 
-    profile_counts = {"CUMPLE": 0, "FUERA": 0, "NO_CUMPLE": 0}
-    for status in statuses.values():
-        if status in profile_counts:
-            profile_counts[status] += 1
-
-    global_score: Optional[float] = None
-    if scores:
-        global_score = sum(scores.values()) / len(scores)
+    profile_counts = _profile_counts(statuses)
+    global_score = _mean_score(scores)
 
     counts = {
         "n_rows": len(rows),
@@ -707,6 +1109,12 @@ def build_report_data(
         "global": build_design_achievement_summary(bench_rows, ct_tol),
         "sectors": build_sector_achievement_summary(bench_rows, ct_tol),
     }
+
+    parameters = _parameter_summaries(bench_rows)
+    geometry = tuple(section_geometry or ())
+    plan_sections = _plan_sections(plan_inputs)
+    identities = _ordered_identities(plan_sections, bench_rows)
+    excavation = _excavation(geometry, plan_sections, identities)
 
     blast_data = blast
     if blast_data is None and settings.get("blast_holes"):
@@ -736,18 +1144,29 @@ def build_report_data(
         profiles=profiles_t,
         profile_counts=profile_counts,
         global_weighted_score=global_score,
-        parameters=_parameter_summaries(bench_rows),
+        parameters=parameters,
         design_achievement=design_achievement,
         top_deviations=_top_deviations(bench_rows, tolerances),
         depth=_depth_metrics(bench_rows, depth_extractions),
         counts=counts,
-        section_geometry=tuple(section_geometry or ()),
+        section_geometry=geometry,
         plan_inputs=plan_inputs,
         blast=blast_data,
         conclusions=_conclusions(
-            profiles_t, profile_counts, _parameter_summaries(bench_rows), global_score,
+            profiles_t, profile_counts, parameters, global_score,
             design_achievement, counts,
         ),
         warnings=_warnings(len(unfiltered), filtered, filters),
         section_plan_states=section_plan_states,
+        nominal_levels=level_assignment.levels,
+        level_warnings=level_assignment.warnings,
+        headline=_headline(bench_rows, statuses),
+        matrix=_matrix(bench_rows, rows, identities),
+        deviations=_deviations(bench_rows),
+        trend=_trend(bench_rows, identities),
+        excavation=excavation,
+        excavation_totals=_excavation_totals(excavation),
+        sector_summaries=_sector_summaries(
+            bench_rows, identities, filters, ct_tol, excavation
+        ),
     )

@@ -9,7 +9,7 @@ import type { ComparisonResult } from '../../../api/types';
 
 beforeAll(async () => {
   i18n.addResourceBundle('es', 'translation', {
-    results: { filters: { level: 'Cota', no_sector: '(sin sector)', active_label: 'Filtros activos en este panel:', reset_help: 'Restablece sector, sección y cota; conserva el filtro de banco.' } },
+    results: { filters: { level: 'Cota', level_nominal: 'Cota nominal', no_sector: '(sin sector)', active_label: 'Filtros activos en este panel:', reset_help: 'Restablece sector, sección y cota; conserva el filtro de banco.' } },
     table: { col_level: 'Nivel', col_delta_crest: 'Δ Cresta', col_delta_toe: 'Δ Pata' },
   }, true, true);
   await i18n.changeLanguage('es');
@@ -65,7 +65,23 @@ describe('ResultFilters', () => {
     expect(checkboxValues(dimensionRoot('sector'))).toEqual(['', 'Norte', 'Sur']);
     expect(screen.getByRole('checkbox', { name: '(sin sector)' })).toBeInTheDocument();
     await user.click(dimensionRoot('level').querySelector('summary')!);
-    expect(checkboxValues(dimensionRoot('level'))).toEqual(['2945', '2960']);
+    expect(checkboxValues(dimensionRoot('level'))).toEqual(['2960', '2945']);
+  });
+
+  it('rotula el control como cota nominal y ofrece una opción por cota nominal', async () => {
+    const user = userEvent.setup();
+    const spread = [
+      makeResult({ section: 'S01', bench_num: 3, level: '3095', level_nominal: '3104' }),
+      makeResult({ section: 'S02', bench_num: 3, level: '3104', level_nominal: '3104' }),
+      makeResult({ section: 'S01', bench_num: 2, level: '3111', level_nominal: '3110' }),
+      makeResult({ section: 'S03', bench_num: 1, level: '' }),
+    ];
+    render(<ResultFilters results={spread} filters={EMPTY_RESULT_FILTERS} onChange={() => {}} />);
+    const root = dimensionRoot('level');
+    expect(root.querySelector('p')).toHaveTextContent('Cota nominal');
+    expect(root.querySelector('summary')).toHaveAccessibleName('Cota nominal Todos');
+    await user.click(root.querySelector('summary')!);
+    expect(checkboxValues(root)).toEqual(['3110', '3104', '']);
   });
 
   it('expone una lista nativa de checkboxes con nombres accesibles, sin roles de listbox', async () => {
@@ -97,7 +113,7 @@ describe('ResultFilters', () => {
     const activeSummary = screen.getByText(/Filtros activos en este panel:/).parentElement!;
     expect(activeSummary).toHaveTextContent('Sector: (sin sector)');
     expect(activeSummary).toHaveTextContent('Sección: S02');
-    expect(activeSummary).toHaveTextContent('Cota: 2945');
+    expect(activeSummary).toHaveTextContent('Cota nominal: 2945');
     expect(screen.getByRole('button', { name: 'Restablecer' })).toHaveAccessibleDescription(
       'Restablece sector, sección y cota; conserva el filtro de banco.',
     );

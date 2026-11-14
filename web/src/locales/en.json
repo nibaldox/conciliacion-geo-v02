@@ -277,6 +277,7 @@
   "results": {
     "filters": {
       "level": "Level",
+      "level_nominal": "Nominal level",
       "no_sector": "(no sector)",
       "group_label": "Result filters",
       "active_label": "Active filters in this panel:",
@@ -1523,6 +1524,7 @@
       "pct_cumple": "% COMPLIANT",
       "value_avg": "Avg Real Value",
       "pct_ok": "% compliant",
+      "not_compared": "Not compared",
       "real_avg": "Actual average"
     },
     "histogram": {

@@ -277,6 +277,7 @@
   "results": {
     "filters": {
       "level": "Cota",
+      "level_nominal": "Cota nominal",
       "no_sector": "(sin sector)",
       "group_label": "Filtros de resultados",
       "active_label": "Filtros activos en este panel:",
@@ -1523,6 +1524,7 @@
       "pct_cumple": "% CUMPLE",
       "value_avg": "Valor Real Prom.",
       "pct_ok": "% cumple",
+      "not_compared": "No comparados",
       "real_avg": "Promedio real"
     },
     "histogram": {

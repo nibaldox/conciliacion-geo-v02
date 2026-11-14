@@ -474,3 +474,58 @@ def test_blast_empty_payload_is_explicit_exclusion_and_none_keeps_settings_fallb
 
     fallback = build_report_data(rows, settings, ReportFilters(), {})
     assert fallback.blast == {"holes": holes, "tolerance": None, "data_status": "legacy_reimport_required"}
+
+
+def test_parity_fixture_rows_gain_level_nominal_without_changing_counts(data):
+    fx, report = data
+    out = filter_comparisons(fx["rows"], ReportFilters())
+    assert len(out) == fx["expected"]["filter_counts"]["empty"]
+    assert [row["level_nominal"] for row in out] == ["100", "85", "70", "60", "45", None]
+    assert all("level_nominal" not in row for row in fx["rows"])
+    assert [(level.sector, level.label) for level in report.nominal_levels] == [
+        ("A", "100"), ("A", "85"), ("A", "70"), ("B", "60"), ("B", "45"),
+    ]
+    assert len(report.level_warnings) == 1
+    assert "S-04" in report.level_warnings[0]
+
+
+def test_levels_by_sector_filter_on_parity_fixture(data):
+    fx, _ = data
+    filters = ReportFilters(levels_by_sector=(("A", ("85",)), ("B", ("",))))
+    assert not filters.is_empty()
+    out = filter_comparisons(fx["rows"], filters)
+    assert [(row["section"], row["level"]) for row in out] == [("S-01", "85"), ("S-04", "")]
+
+
+def test_parameter_breakdown_reports_compared_and_not_compared_benches(data):
+    _, rd = data
+    assert [(p.parameter, p.n_evaluated, p.n_not_compared) for p in rd.parameters] == [
+        ("height", 4, 2), ("angle", 4, 2), ("berm", 4, 2),
+    ]
+
+
+def test_parity_fixture_aggregates(data):
+    _, rd = data
+    assert rd.headline == {
+        "profiles": {"CUMPLE": 2, "FUERA": 0, "NO_CUMPLE": 2, "UNKNOWN": 0},
+        "nc_by_geometry": 1,
+        "nc_only_missing_extra": 1,
+        "benches": {
+            "match_by_status": {"CUMPLE": 3, "FUERA": 0, "NO_CUMPLE": 1, "UNKNOWN": 0},
+            "missing": 1,
+            "extra": 1,
+        },
+    }
+    assert [(e["section"], e["type"], e["level_nominal"]) for e in rd.matrix] == [
+        ("S-01", "MATCH", "100"), ("S-01", "MATCH", "85"), ("S-02", "MATCH", "70"),
+        ("S-03", "MATCH", "60"), ("S-03", "MISSING", "45"), ("S-04", "EXTRA", None),
+    ]
+    assert [r.level_nominal for r in rd.rows] == ["100", "85", "70", "60", "45", None]
+    assert [s["sector"] for s in rd.sector_summaries] == ["A", "B"]
+    assert [s["profile_counts"] for s in rd.sector_summaries] == [
+        {"CUMPLE": 2, "FUERA": 0, "NO_CUMPLE": 0},
+        {"CUMPLE": 0, "FUERA": 0, "NO_CUMPLE": 2},
+    ]
+    assert rd.excavation == ()
+    assert rd.excavation_totals["n_sections"] == 0
+    assert rd.excavation_totals["volume_over_m3"] is None

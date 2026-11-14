@@ -126,7 +126,7 @@ export function ResultFilters({ results, filters, onChange, compact = false }: {
   const { t } = useTranslation();
   const sectorLabel = t('dashboard.sector', { defaultValue: 'Sector' });
   const sectionLabel = t('table.col_section', { defaultValue: 'Sección' });
-  const levelLabel = t('results.filters.level', { defaultValue: 'Cota' });
+  const levelLabel = t('results.filters.level_nominal', { defaultValue: 'Cota nominal' });
   const noSectorLabel = t('results.filters.no_sector', { defaultValue: '(sin sector)' });
 
   const sectorOptions = uniqueSectorOptions(results)
