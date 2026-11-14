@@ -123,7 +123,7 @@ def _section_from_payload(payload: dict) -> SectionLine:
         origin=origin[:2],
         azimuth=azimuth % 360.0,
         length=length,
-        sector=str(payload.get("sector", "")),
+        sector=str(payload.get("sector") or ""),
         length_up=length_up,
         length_down=length_down,
     )
@@ -443,7 +443,7 @@ def _build_horizontal_deviation_payload(
     indexed_sections = [
         (index, _section_from_payload(raw))
         for index, raw in enumerate(sections)
-        if str(raw.get("sector", "")) == sector
+        if str(raw.get("sector") or "") == sector
     ]
     if len(indexed_sections) < 2:
         raise ValueError("insufficient_sections: at least two configured sections in the selected sector are required for a 3D patch")
@@ -835,14 +835,14 @@ def _horizontal_deviation_cached_args(
     sections = db.get_sections(session_id)
     if not sections:
         raise HTTPException(422, "insufficient_sections: configure at least two sections in one sector before requesting the 3D comparison")
-    sector_names = list(dict.fromkeys(str(row.get("sector", "")) for row in sections))
+    sector_names = list(dict.fromkeys(str(row.get("sector") or "") for row in sections))
     if sector is None:
         if len(sector_names) == 1:
             sector = sector_names[0]
         else:
             raise HTTPException(422, "sector_required: select a sector to build the 3D comparison")
     sector = str(sector).strip()
-    sector_sections = [row for row in sections if str(row.get("sector", "")) == sector]
+    sector_sections = [row for row in sections if str(row.get("sector") or "") == sector]
     if len(sector_sections) < 2:
         raise HTTPException(422, f"insufficient_sections: sector '{sector}' needs at least two configured sections for the 3D comparison")
 
@@ -915,6 +915,35 @@ def horizontal_deviation_cache_key(
     except HTTPException:
         return None
     return _horizontal_deviation_key_from_args(cached_args)
+
+
+def horizontal_deviation_section_stations(
+    sections: list[dict], sector: str
+) -> tuple[list[str], list[float]]:
+    """Names and stations of a sector's sections in the heatmap's ``station_m`` origin.
+
+    Mirrors ``_build_horizontal_deviation_payload``: the first section of the
+    sector is station 0 and every consecutive pair adds the planar distance
+    between origins, also for pairs the heatmap skips.
+    """
+    sector_sections = [
+        _section_from_payload(raw)
+        for raw in sections
+        if str(raw.get("sector") or "") == sector
+    ]
+    names: list[str] = []
+    stations: list[float] = []
+    station_offset = 0.0
+    for index, section in enumerate(sector_sections):
+        if index:
+            section_gap = float(
+                np.linalg.norm(section.origin - sector_sections[index - 1].origin)
+            )
+            if section_gap > 1.0e-6:
+                station_offset += section_gap
+        names.append(section.name)
+        stations.append(station_offset)
+    return names, stations
 
 
 def _persist_horizontal_deviation(session_id: str, cached_args: tuple, payload: dict) -> None:

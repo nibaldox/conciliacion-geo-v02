@@ -20,7 +20,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from statistics import median
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -38,13 +38,13 @@ from core import (
     build_reconciled_profile,
     export_results,
     generate_word_report,
-    generate_section_images_zip,
 )
-from core.report_data import ReportFilters, build_report_data, filter_comparisons
+from core.report_data import ReportData, ReportFilters, build_report_data, filter_comparisons
 from core.report_levels import BENCH_TYPES, assign_nominal_levels
 from core.section_cutter import azimuth_to_direction
 from core.param_extractor import ExtractionResult
 from core.reconciliation_summary import compute_section_scores
+from core.web_images_report import build_images_zip
 
 # The ReportData-based Word/PDF builders are produced in parallel; the
 # import is guarded so the API still starts (and the legacy writer keeps
@@ -75,6 +75,19 @@ def _import_pdf_report():
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/export", tags=["export"])
+
+
+def _load_excel_builder():
+    """Return ``core.web_excel_report.build_excel_report`` or ``None`` if it cannot be imported."""
+    try:
+        from core.web_excel_report import build_excel_report
+    except ImportError:
+        logger.warning(
+            "core.web_excel_report is unavailable; using the legacy Excel writer",
+            exc_info=True,
+        )
+        return None
+    return build_excel_report
 
 
 def _run_in_executor(func, *args):
@@ -416,6 +429,129 @@ def _blast_payload(
     return {"holes": settings["blast_holes"], "tolerance": filters.blast_tolerance}
 
 
+def _row_sectors(rows: Sequence[Mapping[str, Any]]) -> List[str]:
+    """Sectors of the rows in order of first appearance; no sector is ``''``."""
+    return list(dict.fromkeys(_sector_key(row.get("sector")) for row in rows))
+
+
+def _heatmap_note(sector: str, outdated: bool) -> str:
+    if outdated:
+        return (
+            f"Mapa de calor{' del sector ' + sector if sector else ''} desactualizado "
+            "(cambiaron superficies, secciones o configuración); "
+            "recalcúlelo en la vista 3D para incluirlo."
+        )
+    if sector:
+        return (
+            f"Mapa de calor no calculado para el sector {sector}; "
+            "calcúlelo en la vista 3D para incluirlo."
+        )
+    return "Mapa de calor no calculado; calcúlelo en la vista 3D para incluirlo."
+
+
+def _current_sector_heatmap(
+    session_id: str, sector: str
+) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    from api.routers.meshes import (
+        horizontal_deviation_cache_key,
+        horizontal_deviation_section_stations,
+    )
+
+    stored = db.list_horizontal_deviation_metadata(session_id, sector)
+    if not stored:
+        return None, _heatmap_note(sector, outdated=False)
+    current = []
+    for result in stored:
+        params = result["params"]
+        if params.get("bench_num") is not None:
+            continue
+        key = horizontal_deviation_cache_key(
+            session_id,
+            sector,
+            params["bench_num"],
+            params["longitudinal_step"],
+            params["vertical_step"],
+        )
+        if key is not None and key == result["cache_key"]:
+            current.append(result)
+    if not current:
+        return None, _heatmap_note(sector, outdated=True)
+    chosen = db.get_horizontal_deviation_by_key(session_id, sector, current[0]["cache_key"])
+    if chosen is None:
+        return None, _heatmap_note(sector, outdated=True)
+    names, stations = horizontal_deviation_section_stations(
+        db.get_sections(session_id), sector
+    )
+    payload = dict(chosen["payload"])
+    payload["section_names"] = names
+    payload["section_stations_m"] = stations
+    from datetime import datetime, timezone
+    try:
+        timestamp = datetime.fromisoformat(chosen["created_at"])
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        computed_at_text = timestamp.astimezone().strftime("%d/%m/%Y %H:%M")
+    except (TypeError, ValueError):
+        computed_at_text = None
+    return {
+        "sector": sector,
+        "payload": payload,
+        "computed_at_text": computed_at_text,
+        "params": chosen["params"],
+        "created_at": chosen["created_at"],
+        "cache_key": chosen["cache_key"],
+    }, None
+
+
+def _restrict_heatmap_sections(entry: Dict[str, Any], selected: set[str]):
+    payload = entry["payload"]
+    names = payload.get("section_names", [])
+    stations = payload.get("section_stations_m", [])
+    pairs = sorted(zip(stations, names))
+    intervals = []
+    for index, (station, name) in enumerate(pairs):
+        if name not in selected or len(pairs) < 2:
+            continue
+        left = (pairs[index - 1][0] + station) / 2 if index else station - (pairs[1][0] - station) / 2
+        right = (pairs[index + 1][0] + station) / 2 if index + 1 < len(pairs) else station + (station - pairs[index - 1][0]) / 2
+        if left < right:
+            intervals.append((left, right))
+    cells = [cell for cell in payload.get("cells", []) if cell.get("station_m") is not None
+             and any(left <= cell["station_m"] <= right for left, right in intervals)]
+    if not cells:
+        return None, "Mapa de calor omitido: sin celdas en las secciones del informe."
+    scoped = dict(entry)
+    scoped["payload"] = dict(payload, cells=cells, report_station_ranges=intervals)
+    selected_names = [name for _, name in pairs if name in selected]
+    ranges = ", ".join(f"{left:g}–{right:g} m" for left, right in intervals)
+    note = f"Mapa de calor restringido a las secciones del informe: {', '.join(selected_names)} (estaciones {ranges})."
+    scoped["scope_note"] = " ".join(filter(None, (entry.get("scope_note"), note)))
+    return scoped, None
+
+
+def _current_heatmaps(
+    session_id: str, sectors: Sequence[str]
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Persisted 3D heatmaps still valid for the session state, one per sector.
+
+    Never computes a heatmap: a sector without a stored result whose cache key
+    matches the current meshes, sections and configuration yields a scope note.
+    """
+    heatmaps: List[Dict[str, Any]] = []
+    notes: List[str] = []
+    for sector in sectors:
+        try:
+            heatmap, note = _current_sector_heatmap(session_id, sector)
+        except Exception:
+            logger.exception("Heatmap lookup failed for sector %r", sector)
+            heatmap, note = None, _heatmap_note(sector, outdated=False)
+        if heatmap is not None:
+            heatmaps.append(heatmap)
+        if note is not None:
+            notes.append(note)
+    return heatmaps, notes
+
+
 def _build_section_geometry(
     session_id: str,
     sections_raw: List[Dict[str, Any]],
@@ -508,6 +644,123 @@ def _build_section_geometry(
     return all_data
 
 
+def _build_report_data_sync(
+    session_id: str,
+    project: Optional[str],
+    author: Optional[str],
+    operation: Optional[str],
+    phase: Optional[str],
+    filters: Optional[str],
+    *,
+    require_meshes: bool = True,
+    include_heatmaps: bool = True,
+) -> tuple[ReportData, ExportFilters]:
+    """Build the filtered ``ReportData`` shared by Excel, Word, PDF and images.
+
+    Loads comparisons, settings, sections and meshes, applies every active
+    filter, rebuilds the section geometry and attaches the persisted
+    heatmaps that are still current. Runs off the event loop.
+
+    With ``require_meshes=False`` a session whose meshes cannot be loaded
+    still gets its report, with empty section geometry and no plan surface.
+    """
+    export_filters = _parse_filters(filters)
+
+    results = db.get_results(session_id)
+    if not results:
+        raise HTTPException(400, "No results to export — run the pipeline first")
+
+    settings = db.get_settings(session_id) or {}
+    sections_raw = db.get_sections(session_id)
+    has_meshes = True
+    try:
+        mesh_design = _load_mesh_from_db(session_id, "design")
+        mesh_topo = _load_mesh_from_db(session_id, "topo")
+    except HTTPException as exc:
+        if require_meshes:
+            raise
+        logger.info("Report built without section geometry: %s", exc.detail)
+        mesh_design = mesh_topo = None
+        has_meshes = False
+
+    report_filters = _report_filters(export_filters)
+    filtered = filter_comparisons(results, report_filters)
+    filtered_sections = {row.get("section") for row in filtered}
+
+    all_data = (
+        _build_section_geometry(
+            session_id, sections_raw, mesh_design, mesh_topo,
+            export_filters, report_filters, filtered_sections, filtered,
+        )
+        if has_meshes
+        else []
+    )
+
+    meta = _report_meta(session_id, project, author, operation, phase, settings)
+    plan_inputs = {
+        "comparisons": filtered,
+        "sections": [_section_from_dict(section) for section in sections_raw],
+        "mesh_topo": mesh_topo,
+        "grid_ref": settings.get("grid_ref", 0.0),
+    }
+
+    heatmaps, heatmap_notes = (
+        _current_heatmaps(session_id, _row_sectors(filtered)) if include_heatmaps else ([], [])
+    )
+    if report_filters.sections:
+        restricted = []
+        for entry in heatmaps:
+            scoped, note = _restrict_heatmap_sections(entry, filtered_sections)
+            if scoped is not None:
+                restricted.append(scoped)
+            if note:
+                heatmap_notes.append(note)
+        heatmaps = restricted
+    if export_filters.selected_bench_numbers:
+        for entry in heatmaps:
+            note = "El filtro de bancos no se aplica al mapa de calor de pared completa."
+            entry["scope_note"] = " ".join(filter(None, (entry.get("scope_note"), note)))
+    data = build_report_data(
+        results,
+        settings,
+        report_filters,
+        meta,
+        section_geometry=all_data,
+        plan_inputs=plan_inputs,
+        blast=_blast_payload(settings, export_filters),
+        depth_extractions=_load_report_depth_extractions(session_id, sections_raw),
+        heatmaps=heatmaps,
+        heatmap_notes=heatmap_notes,
+    )
+    return data, export_filters
+
+
+def _legacy_report_inputs(
+    session_id: str, data: ReportData, export_filters: ExportFilters
+) -> Dict[str, Any]:
+    """Arguments of the legacy Word/PDF writers, taken from the shared model."""
+    import pandas as pd
+
+    settings = db.get_settings(session_id) or {}
+    plan_inputs = data.plan_inputs or {}
+    holes = settings.get("blast_holes") if export_filters.show_blast_holes else None
+    return {
+        "comparisons": plan_inputs.get("comparisons") or [],
+        "all_data": list(data.section_geometry),
+        "kwargs": {
+            "df_pozos": pd.DataFrame(holes) if holes else None,
+            "consolidation_report": (
+                (settings.get("blast_upload_meta") or {}).get("consolidation_report")
+                if holes else None
+            ),
+            "crest_toe_tolerance": (settings.get("tolerances") or {}).get("crest_toe_deviation"),
+            "sections": plan_inputs.get("sections") or [],
+            "mesh_topo": plan_inputs.get("mesh_topo"),
+            "grid_ref": plan_inputs.get("grid_ref", 0.0),
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # GET /export/excel
 # ---------------------------------------------------------------------------
@@ -520,8 +773,36 @@ def _build_excel_payload_sync(
     operation: Optional[str],
     phase: Optional[str],
     filters: Optional[str],
-) -> tuple[str, ExportFilters]:
+) -> tuple[io.BytesIO, ExportFilters]:
     """Build the Excel workbook off the event loop.
+
+    Uses the ``ReportData`` builder of ``core.web_excel_report`` over the same
+    filtered model as Word and PDF; the legacy writer only runs while that
+    module cannot be imported. Returns ``(tmp_path, export_filters)``.
+    """
+    builder = _load_excel_builder()
+    if builder is None:
+        return _build_legacy_excel_payload_sync(
+            session_id, project, author, operation, phase, filters
+        )
+    data, export_filters = _build_report_data_sync(
+        session_id, project, author, operation, phase, filters, require_meshes=False,
+        include_heatmaps=False,
+    )
+    workbook = builder(data)
+    workbook.seek(0)
+    return workbook, export_filters
+
+
+def _build_legacy_excel_payload_sync(
+    session_id: str,
+    project: Optional[str],
+    author: Optional[str],
+    operation: Optional[str],
+    phase: Optional[str],
+    filters: Optional[str],
+) -> tuple[io.BytesIO, ExportFilters]:
+    """Build the workbook with the legacy writer.
 
     Returns ``(tmp_path, export_filters)`` so the async handler can wrap the
     result in a ``FileResponse`` once the executor task resolves.
@@ -598,7 +879,6 @@ def _build_excel_payload_sync(
         "date": __import__("datetime").datetime.now().strftime("%d/%m/%Y"),
     }
 
-    tmp = os.path.join(tempfile.gettempdir(), f"conciliacion_{session_id[:8]}.xlsx")
     import inspect
     import pandas as pd
 
@@ -611,9 +891,13 @@ def _build_excel_payload_sync(
     parameters = inspect.signature(export_results).parameters
     if not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
         kwargs = {key: value for key, value in kwargs.items() if key in parameters}
-    export_results(results, params_design, params_topo, tolerances, tmp, project_info, **kwargs)
+    with tempfile.TemporaryDirectory() as directory:
+        tmp = os.path.join(directory, "report.xlsx")
+        export_results(results, params_design, params_topo, tolerances, tmp, project_info, **kwargs)
+        with open(tmp, "rb") as handle:
+            workbook = io.BytesIO(handle.read())
 
-    return tmp, export_filters
+    return workbook, export_filters
 
 
 @router.get("/excel")
@@ -637,7 +921,7 @@ async def export_excel(
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
-        tmp, export_filters = await _run_in_executor(
+        buffer, export_filters = await _run_in_executor(
             _build_excel_payload_sync,
             session_id,
             project,
@@ -647,11 +931,11 @@ async def export_excel(
             filters,
         )
 
-        return FileResponse(
-            tmp,
+        return StreamingResponse(
+            buffer,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            filename="Conciliacion_Geotecnica.xlsx",
-            headers=_filters_header(export_filters, include_result_filters=True),
+            headers={"Content-Disposition": "attachment; filename=Conciliacion_Geotecnica.xlsx",
+                     **_filters_header(export_filters, include_result_filters=True)},
         )
     except HTTPException:
         raise
@@ -680,43 +964,8 @@ def _build_word_payload_sync(
     assembles the shared ``ReportData`` and hands it to the report builder.
     Returns ``(buffer, export_filters)`` for the async handler.
     """
-    export_filters = _parse_filters(filters)
-
-    results = db.get_results(session_id)
-    if not results:
-        raise HTTPException(400, "No results to export — run the pipeline first")
-
-    settings = db.get_settings(session_id) or {}
-    sections_raw = db.get_sections(session_id)
-    mesh_design = _load_mesh_from_db(session_id, "design")
-    mesh_topo = _load_mesh_from_db(session_id, "topo")
-
-    report_filters = _report_filters(export_filters)
-    filtered = filter_comparisons(results, report_filters)
-    filtered_sections = {row.get("section") for row in filtered}
-
-    all_data = _build_section_geometry(
-        session_id, sections_raw, mesh_design, mesh_topo,
-        export_filters, report_filters, filtered_sections, filtered,
-    )
-
-    meta = _report_meta(session_id, project, author, operation, phase, settings)
-    plan_inputs = {
-        "comparisons": filtered,
-        "sections": [_section_from_dict(section) for section in sections_raw],
-        "mesh_topo": mesh_topo,
-        "grid_ref": settings.get("grid_ref", 0.0),
-    }
-
-    data = build_report_data(
-        results,
-        settings,
-        report_filters,
-        meta,
-        section_geometry=all_data,
-        plan_inputs=plan_inputs,
-        blast=_blast_payload(settings, export_filters),
-        depth_extractions=_load_report_depth_extractions(session_id, sections_raw),
+    data, export_filters = _build_report_data_sync(
+        session_id, project, author, operation, phase, filters
     )
 
     if build_word_report is not None:
@@ -730,16 +979,9 @@ def _build_word_payload_sync(
         "phase": phase or "",
     }
     tmp = os.path.join(tempfile.gettempdir(), f"report_{session_id[:8]}.docx")
-    import pandas as pd
-    holes = settings.get("blast_holes") if export_filters.show_blast_holes else None
+    legacy = _legacy_report_inputs(session_id, data, export_filters)
     generate_word_report(
-        filtered, all_data, tmp, project_info,
-        df_pozos=pd.DataFrame(holes) if holes else None,
-        consolidation_report=(settings.get("blast_upload_meta") or {}).get("consolidation_report") if holes else None,
-        crest_toe_tolerance=(settings.get("tolerances") or {}).get("crest_toe_deviation"),
-        sections=[_section_from_dict(section) for section in sections_raw],
-        mesh_topo=mesh_topo,
-        grid_ref=settings.get("grid_ref", 0.0),
+        legacy["comparisons"], legacy["all_data"], tmp, project_info, **legacy["kwargs"]
     )
     with open(tmp, "rb") as handle:
         return io.BytesIO(handle.read()), export_filters
@@ -787,7 +1029,7 @@ async def export_word(
         raise
     except Exception as exc:
         logger.exception("Word export failed")
-        raise HTTPException(500, detail=f"Word export failed: {exc}")
+        raise HTTPException(500, detail="Word export failed") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -936,77 +1178,30 @@ async def export_dxf(request: Request):
 # ---------------------------------------------------------------------------
 
 
-def _build_images_zip_sync(session_id: str):
+def _build_images_zip_sync(
+    session_id: str,
+    filters: Optional[str] = None,
+) -> tuple[io.BytesIO, ExportFilters]:
     """Build the section-images ZIP off the event loop.
 
-    Returns whatever ``generate_section_images_zip`` returns (typically a
-    ``BytesIO`` buffer), ready to wrap in a ``StreamingResponse``.
+    Same filtered ``ReportData`` as Word, PDF and Excel: one cropped profile
+    per filtered section plus the plan view, the status matrix and the scope.
     """
-    sections_raw = db.get_sections(session_id)
-    mesh_design = _load_mesh_from_db(session_id, "design")
-    mesh_topo = _load_mesh_from_db(session_id, "topo")
-
-    from core import cut_both_surfaces
-
-    # Build all_data structure expected by generate_section_images_zip
-    all_data: List[Dict[str, Any]] = []
-    for sec_dict in sections_raw:
-        sec = _section_from_dict(sec_dict)
-        pd_prof, pt_prof = cut_both_surfaces(mesh_design, mesh_topo, sec)
-
-        design_ext = db.get_extraction(session_id, sec.name, "design")
-        topo_ext = db.get_extraction(session_id, sec.name, "topo")
-
-        benches_d = (
-            [_dict_to_bench(b) for b in design_ext.get("benches", [])]
-            if design_ext
-            else []
-        )
-        benches_t = (
-            [_dict_to_bench(b) for b in topo_ext.get("benches", [])] if topo_ext else []
-        )
-
-        p_design = ExtractionResult(
-            section_name=sec.name,
-            sector=sec.sector,
-            benches=benches_d,
-            inter_ramp_angle=design_ext.get("inter_ramp_angle", 0.0)
-            if design_ext
-            else 0.0,
-            overall_angle=design_ext.get("overall_angle", 0.0) if design_ext else 0.0,
-        )
-        p_topo = ExtractionResult(
-            section_name=sec.name,
-            sector=sec.sector,
-            benches=benches_t,
-            inter_ramp_angle=topo_ext.get("inter_ramp_angle", 0.0) if topo_ext else 0.0,
-            overall_angle=topo_ext.get("overall_angle", 0.0) if topo_ext else 0.0,
-        )
-
-        all_data.append(
-            {
-                "section_name": sec.name,
-                "params_design": p_design,
-                "params_topo": p_topo,
-                "profile_d": (
-                    (pd_prof.distances, pd_prof.elevations)
-                    if pd_prof is not None
-                    else (np.array([]), np.array([]))
-                ),
-                "profile_t": (
-                    (pt_prof.distances, pt_prof.elevations)
-                    if pt_prof is not None
-                    else (np.array([]), np.array([]))
-                ),
-            }
-        )
-
-    return generate_section_images_zip(all_data)
+    data, export_filters = _build_report_data_sync(
+        session_id, None, None, None, None, filters, include_heatmaps=False
+    )
+    return build_images_zip(data), export_filters
 
 
 @router.get("/images")
-async def export_images(request: Request):
-    """Export section plot images as a ZIP file.
+async def export_images(
+    request: Request,
+    filters: Optional[str] = Query(
+        None,
+        description="JSON-encoded ExportFilters (camelCase keys).",
+    ),
+):
+    """Export the filtered section images as a ZIP file.
 
     Mesh cutting + matplotlib rendering run on the default executor so a
     multi-section ZIP build doesn't stall the event loop.
@@ -1014,22 +1209,23 @@ async def export_images(request: Request):
     try:
         session_id = db.get_or_create_session(request.state.session_id)
 
-        results = db.get_results(session_id)
-        if not results:
-            raise HTTPException(400, "No results to export — run the pipeline first")
-
-        zip_buffer = await _run_in_executor(_build_images_zip_sync, session_id)
+        zip_buffer, export_filters = await _run_in_executor(
+            _build_images_zip_sync, session_id, filters
+        )
 
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
-            headers={"Content-Disposition": "attachment; filename=Secciones_Imagenes.zip"},
+            headers={
+                "Content-Disposition": "attachment; filename=Secciones_Imagenes.zip",
+                **_filters_header(export_filters),
+            },
         )
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Images export failed")
-        raise HTTPException(500, detail=f"Images export failed: {exc}")
+        raise HTTPException(500, detail="Images export failed") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1050,42 +1246,8 @@ def _build_pdf_payload_sync(
     Mirrors the Word builder: same ``ReportData`` model, same filters, same
     geometry list, so the two reports show identical numbers.
     """
-    export_filters = _parse_filters(filters)
-    results = db.get_results(session_id)
-    if not results:
-        raise HTTPException(400, "No results to export — run the pipeline first")
-
-    settings = db.get_settings(session_id) or {}
-    sections_raw = db.get_sections(session_id)
-    mesh_design = _load_mesh_from_db(session_id, "design")
-    mesh_topo = _load_mesh_from_db(session_id, "topo")
-
-    report_filters = _report_filters(export_filters)
-    filtered = filter_comparisons(results, report_filters)
-    filtered_sections = {row.get("section") for row in filtered}
-
-    all_data = _build_section_geometry(
-        session_id, sections_raw, mesh_design, mesh_topo,
-        export_filters, report_filters, filtered_sections, filtered,
-    )
-
-    meta = _report_meta(session_id, project, author, operation, phase, settings)
-    plan_inputs = {
-        "comparisons": filtered,
-        "sections": [_section_from_dict(section) for section in sections_raw],
-        "mesh_topo": mesh_topo,
-        "grid_ref": settings.get("grid_ref", 0.0),
-    }
-
-    data = build_report_data(
-        results,
-        settings,
-        report_filters,
-        meta,
-        section_geometry=all_data,
-        plan_inputs=plan_inputs,
-        blast=_blast_payload(settings, export_filters),
-        depth_extractions=_load_report_depth_extractions(session_id, sections_raw),
+    data, export_filters = _build_report_data_sync(
+        session_id, project, author, operation, phase, filters
     )
 
     if build_pdf_report is not None:
@@ -1099,16 +1261,10 @@ def _build_pdf_payload_sync(
         "phase": phase or "N/A",
     }
     tmp = os.path.join(tempfile.gettempdir(), f"Conciliacion_PDF_{session_id[:8]}.pdf")
-    import pandas as pd
-    holes = settings.get("blast_holes") if export_filters.show_blast_holes else None
+    legacy = _legacy_report_inputs(session_id, data, export_filters)
     _import_pdf_report()(
-        filtered, all_data, tmp, project_info=project_info,
-        df_pozos=pd.DataFrame(holes) if holes else None,
-        consolidation_report=(settings.get("blast_upload_meta") or {}).get("consolidation_report") if holes else None,
-        crest_toe_tolerance=(settings.get("tolerances") or {}).get("crest_toe_deviation"),
-        sections=[_section_from_dict(section) for section in sections_raw],
-        mesh_topo=mesh_topo,
-        grid_ref=settings.get("grid_ref", 0.0),
+        legacy["comparisons"], legacy["all_data"], tmp, project_info=project_info,
+        **legacy["kwargs"],
     )
     with open(tmp, "rb") as handle:
         return io.BytesIO(handle.read()), export_filters
@@ -1151,7 +1307,7 @@ async def export_pdf(
         raise
     except Exception as exc:
         logger.exception("PDF export failed")
-        raise HTTPException(500, detail=f"PDF export failed: {exc}") from exc
+        raise HTTPException(500, detail="PDF export failed") from exc
 
 
 # ---------------------------------------------------------------------------

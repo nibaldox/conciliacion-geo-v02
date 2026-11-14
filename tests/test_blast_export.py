@@ -82,6 +82,10 @@ def _full_payload(*, n_accepted: int = 2, n_rejected: int = 1) -> dict:
 
 
 def test_excel_route_passes_blast_holes_to_writer(monkeypatch):
+    from io import BytesIO
+
+    import openpyxl
+
     from api.routers import export
     from tests.test_excel_writer import _match_comp
 
@@ -91,10 +95,20 @@ def test_excel_route_passes_blast_holes_to_writer(monkeypatch):
     captured = {}
     def writer(*args, **kwargs):
         captured.update(kwargs)
+        workbook = openpyxl.Workbook()
+        workbook["Sheet"]["A1"] = "legacy"
+        workbook.save(args[4])
     monkeypatch.setattr(export, "export_results", writer)
-    export._build_excel_payload_sync("synthetic", None, None, None, None, None)
+    monkeypatch.setattr(export, "_load_excel_builder", lambda: None)
+    workbook, _ = export._build_excel_payload_sync("synthetic", None, None, None, None, None)
     assert captured["df_pozos"].iloc[0]["X"] == 1.0
     assert captured["consolidation_report"]["exact_copies_removed"] == 2
+    assert isinstance(workbook, BytesIO)
+    assert workbook.seekable()
+    assert workbook.tell() == 0
+    assert openpyxl.load_workbook(workbook)["Sheet"]["A1"].value == "legacy"
+    workbook.seek(0)
+    assert workbook.read(2) == b"PK"
 
 
 def test_excel_keeps_raw_and_effective_berm_as_separate_indicators(tmp_path):

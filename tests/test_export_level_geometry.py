@@ -485,6 +485,10 @@ class TestExcelFilters:
         "levelsBySector": {"Norte": ["3125"]},
     }
 
+    @pytest.fixture(autouse=True)
+    def legacy_excel_writer(self, monkeypatch):
+        monkeypatch.setattr(export_router, "_load_excel_builder", lambda: None)
+
     def test_real_workbook_matches_filtered_rows(self, client, headers, session_id):
         _seed(session_id)
         response = client.get(

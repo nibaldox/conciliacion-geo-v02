@@ -307,7 +307,7 @@ class ExportFilters(BaseModel):
     show_reconciled_topo: bool = Field(default=True, alias="showReconciledTopo")
     show_spill_areas: bool = Field(default=True, alias="showSpillAreas")
     show_blast_holes: bool = Field(default=True, alias="showBlastHoles")
-    blast_tolerance: float = Field(default=2.0, alias="blastTolerance")
+    blast_tolerance: float = Field(default=2.0, alias="blastTolerance", allow_inf_nan=False)
     selected_bench_numbers: List[int] = Field(default_factory=list, alias="selectedBenchNumbers")
     sectors: List[str] = Field(default_factory=list, alias="sector")
     sections: List[str] = Field(default_factory=list, alias="section")

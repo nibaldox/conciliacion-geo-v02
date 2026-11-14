@@ -132,6 +132,10 @@ def _seed_results(client, headers, session_id, benches=(1, 2, 3)):
 
 
 class TestExportExcelFilters:
+    @pytest.fixture(autouse=True)
+    def legacy_excel_writer(self, monkeypatch):
+        monkeypatch.setattr(export_router, "_load_excel_builder", lambda: None)
+
     def test_accepts_filters_query_param_and_returns_header(self, client, headers, monkeypatch):
         """The endpoint parses a camelCase filters payload and echoes the
         applied filters back via the X-Export-Filters-Applied header."""

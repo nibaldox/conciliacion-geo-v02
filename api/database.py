@@ -419,6 +419,51 @@ def get_latest_horizontal_deviation(session_id: str, sector: str) -> Optional[Di
         conn.close()
     if row is None:
         return None
+    return _horizontal_deviation_from_row(row)
+
+
+def list_horizontal_deviations(session_id: str, sector: str) -> List[Dict[str, Any]]:
+    """Return every persisted 3D heatmap of a session sector, newest first."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT cache_key, params, payload, created_at "
+            "FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? ORDER BY id DESC",
+            (session_id, sector),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_horizontal_deviation_from_row(row) for row in rows]
+
+
+def list_horizontal_deviation_metadata(session_id: str, sector: str) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT cache_key, params, created_at FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? ORDER BY id DESC", (session_id, sector)
+        ).fetchall()
+        return [{"cache_key": row["cache_key"], "params": json.loads(row["params"]),
+                 "created_at": row["created_at"]} for row in rows]
+    finally:
+        conn.close()
+
+
+def get_horizontal_deviation_by_key(session_id: str, sector: str, cache_key: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT cache_key, params, payload, created_at FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? AND cache_key = ? ORDER BY id DESC LIMIT 1",
+            (session_id, sector, cache_key),
+        ).fetchone()
+        return _horizontal_deviation_from_row(row) if row else None
+    finally:
+        conn.close()
+
+
+def _horizontal_deviation_from_row(row: sqlite3.Row) -> Dict[str, Any]:
     return {
         "cache_key": row["cache_key"],
         "params": json.loads(row["params"]),
