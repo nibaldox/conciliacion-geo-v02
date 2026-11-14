@@ -1,5 +1,9 @@
 # Continuidad para agentes de codificación
 
+## Rediseño de informes — 14 de noviembre de 2026
+
+Estado en [REPORT_REDESIGN_HANDOFF.md](REPORT_REDESIGN_HANDOFF.md): rama `feat/report-redesign` con diez commits locales sin push sobre `c229d6f`; exportaciones web rediseñadas y verificadas. Pendiente la revisión del usuario en el navegador y la decisión de reprocesar la sesión real. La tabla al pie de la página con seis perfiles es obligatoria.
+
 ## Continuación — 9 de noviembre de 2026: agente de IA conversacional (chat flotante web)
 
 Estado: v1 geotécnica del agente **completa y verificada** en `feat/ai-agent-chat` (16 commits sobre `origin/main`, sin push). Plan aprobado: `docs/AI_CHAT_AGENT_PLAN.md`; inventario: `docs/AI_CHAT_AGENT_INVENTORY.md` (64 endpoints: 16 cubiertos por 14 herramientas / 33 candidatos ola 2 / 7 solo-frontend / 8 excluidos).
