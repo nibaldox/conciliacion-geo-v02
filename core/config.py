@@ -293,6 +293,7 @@ class StabilityDefaults:
     overhang_critical_m: float = 1.5
     berm_design_min_m: float = 6.0
     rockfall_catch_factor: float = 0.6
+    face_angle_consistency_threshold_deg: float = 8.0
 
 
 @dataclass(frozen=True)

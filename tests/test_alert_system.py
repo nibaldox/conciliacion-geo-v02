@@ -96,6 +96,18 @@ class TestBenchAlerts:
         assert a[0].level == 'YELLOW'
         assert a[0].metric_value == pytest.approx(72.0)
 
+    def test_angle_inconsistent_message_refers_to_design_face_comparison(self):
+        b = _bench(face_angle_inconsistent=True, face_angle=72.0)
+        a = [a for a in evaluate_bench_health(b) if a.code == 'ANGLE_INCONSISTENT'][0]
+        threshold = STABILITY.face_angle_consistency_threshold_deg
+        assert a.message == (
+            f'Ángulo de cara 72.0° difiere más de {threshold:.0f}° del diseño del banco.'
+        )
+        assert 'inter-ramp' not in a.message
+        assert a.level == 'YELLOW'
+        assert a.action == 'Verificar patrón de tronadura aplicado.'
+        assert a.metric_value == pytest.approx(72.0)
+
     def test_no_alerts_for_clean_bench(self):
         """Healthy bench with all flags false → empty alert list."""
         b = _bench()
