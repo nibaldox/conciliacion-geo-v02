@@ -6,12 +6,15 @@ import {
   useExportPdf,
   useExportDxf,
   useExportImages,
+  useExportLevels,
   type ExportFilters,
+  type ExportSectorLevels,
   type ExportProjectInfo,
   type ExportResult,
 } from '../../api/hooks';
 import { DEMO_MESH_IDS, useSession } from '../../stores/session';
 import { Button } from '../ui/Button';
+import { ExportLevelSelector } from './ExportLevelSelector';
 
 interface ExportForm {
   project: string;
@@ -53,7 +56,55 @@ function readProfileFilters(): ProfileFilterSnapshot {
   }
 }
 
-function formatAppliedFilters(raw: string | null, translate: (key: string) => string): string | null {
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+function normalizeLevelSectors(raw: unknown): ExportSectorLevels[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (entry): entry is ExportSectorLevels =>
+      !!entry &&
+      typeof entry === 'object' &&
+      typeof (entry as ExportSectorLevels).sector === 'string' &&
+      Array.isArray((entry as ExportSectorLevels).levels) &&
+      (entry as ExportSectorLevels).levels.length > 0,
+  );
+}
+
+function matchDashboardLevels(sectors: ExportSectorLevels[], dashboardLevels: string[]): Record<string, string[]> {
+  const selection: Record<string, string[]> = {};
+  if (dashboardLevels.length === 0) return selection;
+  const names = new Set(dashboardLevels.map((value) => value.trim()));
+  const numbers = dashboardLevels
+    .filter((value) => value.trim() !== '')
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+  for (const entry of sectors) {
+    const labels = entry.levels
+      .filter(
+        (level) =>
+          names.has(level.label) ||
+          numbers.some((value) => value >= level.min_level && value <= level.max_level),
+      )
+      .map((level) => level.label);
+    if (labels.length > 0) selection[entry.sector] = labels;
+  }
+  return selection;
+}
+
+function formatLevelsBySector(value: unknown, translate: Translate): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const parts: string[] = [];
+  for (const [sector, levels] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(levels)) continue;
+    const caption = sector === ''
+      ? translate('export.levels_no_sector')
+      : translate('export.levels_sector', { sector });
+    parts.push(`${caption}: ${levels.length > 0 ? levels.join(', ') : translate('export.levels_all')}`);
+  }
+  return parts.length > 0 ? parts.join('; ') : null;
+}
+
+function formatAppliedFilters(raw: string | null, translate: Translate): string | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
@@ -63,7 +114,9 @@ function formatAppliedFilters(raw: string | null, translate: (key: string) => st
     };
     push(translate('export.applied_sectors'), parsed.sectors);
     push(translate('export.applied_sections'), parsed.sections);
-    push(translate('export.applied_levels'), parsed.levels);
+    const levelsBySector = formatLevelsBySector(parsed.levels_by_sector, translate);
+    if (levelsBySector) parts.push(`${translate('export.applied_levels_by_sector')}: ${levelsBySector}`);
+    else push(translate('export.applied_levels'), parsed.levels);
     push(translate('export.applied_benches'), parsed.selected_bench_numbers);
     return parts.length > 0 ? parts.join(' · ') : null;
   } catch {
@@ -82,6 +135,7 @@ export function ExportPanel() {
   const exportPdf = useExportPdf();
   const exportDxf = useExportDxf();
   const exportImages = useExportImages();
+  const exportLevels = useExportLevels();
 
   const [form, setForm] = useState<ExportForm>({
     project: '',
@@ -89,8 +143,36 @@ export function ExportPanel() {
     operation: '',
     phase: '',
   });
-  const [appliedFiltersRaw, setAppliedFiltersRaw] = useState<string | null>(null);
-  const appliedNote = formatAppliedFilters(appliedFiltersRaw, (key) => t(key));
+  const [appliedFilters, setAppliedFilters] = useState<{ raw: string | null; selection: string } | null>(null);
+  const [levelOverrides, setLevelOverrides] = useState<Record<string, string[]> | null>(null);
+
+  const levelSectors = exportLevels.isError ? [] : normalizeLevelSectors(exportLevels.data?.sectors);
+  const levelWarnings = Array.isArray(exportLevels.data?.warnings)
+    ? exportLevels.data.warnings.filter((warning): warning is string => typeof warning === 'string')
+    : [];
+  const showLevelSelector = !exportsBlocked && levelSectors.length > 0;
+  const levelSelection = levelOverrides ?? matchDashboardLevels(levelSectors, sessionFilters.level);
+  const dashboardLevelActive = sessionFilters.level.length > 0;
+  const levelsBySector: Record<string, string[]> = {};
+  if (showLevelSelector) {
+    for (const entry of levelSectors) {
+      const selected = entry.levels
+        .map((level) => level.label)
+        .filter((label) => (levelSelection[entry.sector] ?? []).includes(label));
+      if (selected.length > 0 || dashboardLevelActive) levelsBySector[entry.sector] = selected;
+    }
+  }
+  const hasLevelSelection = Object.keys(levelsBySector).length > 0;
+  const selectionKey = JSON.stringify([sessionFilters, levelsBySector]);
+  const appliedNote = appliedFilters?.selection === selectionKey
+    ? formatAppliedFilters(appliedFilters.raw, (key, options) => t(key, options)) : null;
+
+  const handleLevelToggle = (sector: string, label: string) => {
+    const current = levelSelection[sector] ?? [];
+    const next = current.includes(label) ? current.filter((item) => item !== label) : [...current, label];
+    setAppliedFilters(null);
+    setLevelOverrides({ ...levelSelection, [sector]: next });
+  };
 
   const handleFieldChange = (field: keyof ExportForm, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -109,14 +191,16 @@ export function ExportPanel() {
     sector: sessionFilters.sector,
     section: sessionFilters.section,
     level: sessionFilters.level,
+    ...(hasLevelSelection ? { levelsBySector } : {}),
   };
 
   const runExport = async (run: () => Promise<ExportResult | void>) => {
     if (exportsBlocked) return;
+    setAppliedFilters(null);
     try {
       const result = await run();
       if (result && typeof result === 'object' && 'appliedFilters' in result) {
-        setAppliedFiltersRaw(result.appliedFilters);
+        setAppliedFilters({ raw: result.appliedFilters, selection: selectionKey });
       }
     } catch {
       return;
@@ -149,7 +233,7 @@ export function ExportPanel() {
     {
       id: 'excel',
       name: t('export.format_excel', { defaultValue: 'Excel' }),
-      description: t('export.format_excel_desc', { defaultValue: 'Resumen, bancos, inter-rampa y dashboard en hojas de cálculo' }),
+      description: t('export.format_excel_desc', { defaultValue: 'Léeme, Resumen, Bancos, Secciones, Sector-Nivel, Tronadura y Pozos' }),
       actionLabel: t('export.excel'),
       pending: exportExcel.isPending,
       failed: exportExcel.isError,
@@ -194,7 +278,7 @@ export function ExportPanel() {
       pending: exportImages.isPending,
       failed: exportImages.isError,
       errorLabel: t('export.error_images'),
-      onClick: () => { if (!exportsBlocked) exportImages.mutate(); },
+      onClick: () => void runExport(() => exportImages.mutateAsync({ filters: exportFilters })),
     },
   ];
 
@@ -238,6 +322,28 @@ export function ExportPanel() {
           </p>
         )}
 
+        {!exportsBlocked && exportLevels.isLoading && (
+          <p data-testid="export-level-loading" role="status" className="text-xs text-text-muted">
+            {t('export.levels_loading')}
+          </p>
+        )}
+
+        {!exportsBlocked && exportLevels.isError && (
+          <div role="alert" className="text-xs text-text-muted">
+            {t('export.levels_error')} <button type="button" onClick={() => void exportLevels.refetch()}>{t('export.levels_retry')}</button>
+          </div>
+        )}
+
+        {showLevelSelector && (
+          <ExportLevelSelector
+            sectors={levelSectors}
+            selection={levelsBySector}
+            warnings={levelWarnings}
+            disabled={isAnyExporting}
+            onToggle={handleLevelToggle}
+          />
+        )}
+
         <ul data-testid="export-actions" className="divide-y divide-border">
           {formats.map((format) => (
             <li key={format.id} data-export-format={format.id} className="flex items-center gap-3 py-2.5">
@@ -254,7 +360,7 @@ export function ExportPanel() {
                 variant="secondary"
                 size="sm"
                 onClick={format.onClick}
-                disabled={isAnyExporting || exportsBlocked}
+                disabled={isAnyExporting || exportsBlocked || (format.id !== 'dxf' && exportLevels.isLoading)}
                 loading={format.pending}
                 aria-label={format.actionLabel}
                 className="shrink-0"

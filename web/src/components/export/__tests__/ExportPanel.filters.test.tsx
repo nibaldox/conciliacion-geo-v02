@@ -38,8 +38,13 @@ function setProfileFilters(snapshot: Record<string, unknown>): void {
   window.localStorage.setItem('profileView.filters', JSON.stringify(snapshot));
 }
 
+function exportCalls(): unknown[][] {
+  return mockGet.mock.calls.filter((call) => call[0] !== '/export/levels');
+}
+
 function lastGetCallArgs(): { url: string; config: { params: Record<string, string> } } {
-  const last = mockGet.mock.calls[mockGet.mock.calls.length - 1];
+  const calls = exportCalls();
+  const last = calls[calls.length - 1];
   if (!last) throw new Error('client.get was never called');
   return { url: last[0] as string, config: last[1] as { params: Record<string, string> } };
 }
@@ -73,7 +78,7 @@ describe('ExportPanel — filter propagation (G09)', () => {
 
     await user.click(screen.getByRole('button', { name: 'export.excel' }));
 
-    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(exportCalls()).toHaveLength(1));
     const { url, config } = lastGetCallArgs();
     expect(url).toBe('/export/excel');
     const filters = JSON.parse(config.params.filters);
@@ -90,7 +95,7 @@ describe('ExportPanel — filter propagation (G09)', () => {
 
     await user.click(screen.getByRole('button', { name: 'export.word' }));
 
-    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(exportCalls()).toHaveLength(1));
     const { config } = lastGetCallArgs();
     const filters = JSON.parse(config.params.filters);
     expect(filters.selectedBenchNumbers).toEqual([2]);
@@ -105,7 +110,7 @@ describe('ExportPanel — filter propagation (G09)', () => {
 
     await user.click(screen.getByRole('button', { name: 'export.excel' }));
 
-    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(exportCalls()).toHaveLength(1));
     const { config } = lastGetCallArgs();
     const filters = JSON.parse(config.params.filters);
     expect(filters.blastTolerance).toBe(15);

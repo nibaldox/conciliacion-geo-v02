@@ -604,3 +604,14 @@ describe('aiChat store — incremental text merging', () => {
     expect(agents[1].text).toBe('post-tool');
   });
 });
+
+
+describe('write tool query dependencies', () => {
+  it('invalidates all section dependents and export levels after reconciliation', async () => {
+    const { WRITE_TOOL_QUERY_KEYS, SECTION_DEPENDENT_QUERY_KEYS } = await import('../aiChat');
+    for (const name of ['generate_sections_auto', 'generate_sections_manual', 'add_section_click']) {
+      expect(WRITE_TOOL_QUERY_KEYS[name]).toEqual([...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']]);
+    }
+    expect(WRITE_TOOL_QUERY_KEYS.run_reconciliation).toContainEqual(['export-levels']);
+  });
+});

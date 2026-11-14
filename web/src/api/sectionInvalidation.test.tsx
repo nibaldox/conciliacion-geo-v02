@@ -21,6 +21,7 @@ const DEPENDENT_KEYS = [
   'blast-correlation',
   'blast-damage-model',
   'horizontal-deviation-mesh',
+  'export-levels',
 ];
 
 function makeClient() {
