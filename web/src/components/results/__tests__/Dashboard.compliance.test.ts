@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { benchScore, computeGlobalScore, computeParameterBreakdown, computeProfileComplianceCounts, computeProfileScores, computeProfileStatuses, computeSectorCompliance, designBenchOptions } from '../Dashboard';
+import { benchScore, computeGlobalScore, computeParameterBreakdown, computeProfileComplianceCounts, computeProfileScores, computeProfileStatuses, computeSectorCompliance, designBenchOptions, sectorComplianceColor } from '../Dashboard';
 import { createPlanProjection, projectPlanPoint } from '../CompliancePlanView';
 import type { ComparisonResult } from '../../../api/types';
 
@@ -73,8 +73,8 @@ describe('Streamlit compliance parity', () => {
   });
   it('counts evaluated parameters by sector rather than requiring a perfect bank', () => {
     const sector = computeSectorCompliance([row({ height_status: 'NO CUMPLE' }), row({ type: 'MISSING', height_status: 'NO CONSTRUIDO', angle_status: '-', berm_status: 'FALTA BANCO' })])[0]!;
-    expect(sector.total).toBe(5);
-    expect(sector.pct).toBe(40);
+    expect(sector.total).toBe(3);
+    expect(sector.pct).toBeCloseTo(200 / 3, 9);
   });
   it('does not count an unavailable parameter as a failed measurement', () => {
     const rows = [row(), row({ type: 'MISSING', angle_status: '-' })];
@@ -114,5 +114,79 @@ describe('plan projection', () => {
     const focused = createPlanProjection({ x: [0, 1000], y: [0, 1000], z: [0, 0] }, [[400, 420], [400, 480]])!;
     expect(Number.isFinite(focused.scale)).toBe(true);
     expect(focused.xMax - focused.xMin).toBeGreaterThan(0);
+  });
+});
+
+describe('D11 — per-parameter compliance over MATCH benches only', () => {
+  const rows = [
+    row({ section: 'S-01', bench_num: 1 }),
+    row({ section: 'S-01', bench_num: 2, height_status: 'FUERA DE TOLERANCIA', height_real: 17 }),
+    row({ section: 'S-02', bench_num: 1, berm_status: 'NO CUMPLE', berm_real: 4 }),
+    row({ section: 'S-02', bench_num: 2, angle_status: '-', angle_real: null }),
+    row({ section: 'S-03', bench_num: 1, type: 'MISSING', height_real: null, angle_real: null, berm_real: null, height_status: 'NO CONSTRUIDO', angle_status: '-', berm_status: 'FALTA BANCO' }),
+    row({ section: 'S-03', bench_num: 999, type: 'EXTRA', height_real: 6, angle_real: 70, berm_real: null, height_status: 'BANCO ADICIONAL', angle_status: 'BANCO ADICIONAL', berm_status: '' }),
+  ];
+  const byParameter = Object.fromEntries(computeParameterBreakdown(rows).map((p) => [p.parameter, p]));
+
+  it('counts CUMPLE / NO CUMPLE only on MATCH rows carrying a status', () => {
+    expect([byParameter.height.cumple, byParameter.height.noCumple]).toEqual([3, 1]);
+    expect([byParameter.angle.cumple, byParameter.angle.noCumple]).toEqual([3, 0]);
+    expect([byParameter.berm.cumple, byParameter.berm.noCumple]).toEqual([3, 1]);
+  });
+
+  it('reports the MATCH denominator and the MISSING + EXTRA benches apart', () => {
+    expect([byParameter.height.nEvaluated, byParameter.angle.nEvaluated, byParameter.berm.nEvaluated]).toEqual([4, 3, 4]);
+    expect([byParameter.height.nNotCompared, byParameter.angle.nNotCompared, byParameter.berm.nNotCompared]).toEqual([2, 2, 2]);
+    expect((100 * byParameter.height.cumple) / byParameter.height.nEvaluated).toBe(75);
+    expect((100 * byParameter.angle.cumple) / byParameter.angle.nEvaluated).toBe(100);
+  });
+
+  it('keeps averaging the real value of every row that carries a status', () => {
+    expect(byParameter.height.realSum / byParameter.height.realCount).toBeCloseTo((15 + 17 + 15 + 15 + 6) / 5, 9);
+    expect(byParameter.angle.realCount).toBe(4);
+  });
+
+  it('leaves the denominator at zero when nothing was compared', () => {
+    const none = computeParameterBreakdown(rows.filter((r) => r.type !== 'MATCH'));
+    expect(none.map((p) => [p.cumple, p.noCumple, p.nEvaluated, p.nNotCompared])).toEqual([[0, 0, 0, 2], [0, 0, 0, 2], [0, 0, 0, 2]]);
+  });
+});
+
+describe('D11 — sector compliance over MATCH benches only', () => {
+  const missing = (overrides: Partial<ComparisonResult> = {}) => row({ type: 'MISSING', height_real: null, angle_real: null, berm_real: null, height_status: 'NO CONSTRUIDO', angle_status: '-', berm_status: 'FALTA BANCO', ...overrides });
+  const extra = (overrides: Partial<ComparisonResult> = {}) => row({ type: 'EXTRA', bench_num: 999, height_status: 'BANCO ADICIONAL', angle_status: 'BANCO ADICIONAL', berm_status: '', ...overrides });
+
+  it('leaves MISSING statuses out of the sector denominator', () => {
+    const sector = computeSectorCompliance([row({ height_status: 'NO CUMPLE' }), missing()])[0]!;
+    expect(sector.total).toBe(3);
+    expect(sector.pct).not.toBeNull();
+    expect(sector.pct!.toFixed(1)).toBe('66.7');
+    expect(sector.nNotCompared).toBe(1);
+  });
+
+  it('leaves EXTRA statuses out of the sector denominator', () => {
+    const sector = computeSectorCompliance([row(), extra({ height_status: 'CUMPLE', angle_status: 'NO CUMPLE' })])[0]!;
+    expect([sector.total, sector.pct, sector.nNotCompared]).toEqual([3, 100, 1]);
+  });
+
+  it('reports no percentage, never 0, for a sector without compared benches', () => {
+    const sectors = computeSectorCompliance([row(), missing({ sector: 'Sur' }), missing({ sector: 'Sur', bench_num: 2 })]);
+    expect(sectors.map((s) => s.sector)).toEqual(['Norte', 'Sur']);
+    expect(sectors[1]).toEqual({ sector: 'Sur', pct: null, total: 0, nNotCompared: 2 });
+  });
+
+  it('reports no percentage for a MATCH bench without any evaluated parameter', () => {
+    const sector = computeSectorCompliance([row({ height_status: '-', angle_status: '-', berm_status: '' })])[0]!;
+    expect([sector.total, sector.pct, sector.nNotCompared]).toEqual([0, null, 0]);
+  });
+
+  it('keeps a real 0 % when every compared parameter fails', () => {
+    const sector = computeSectorCompliance([row({ height_status: 'NO CUMPLE', angle_status: 'NO CUMPLE', berm_status: 'FUERA DE TOLERANCIA' })])[0]!;
+    expect([sector.total, sector.pct]).toEqual([3, 0]);
+  });
+
+  it('gives the no-data tone to a sector without a percentage', () => {
+    expect(sectorComplianceColor(null)).not.toBe(sectorComplianceColor(0));
+    expect(sectorComplianceColor(0)).toBe(sectorComplianceColor(49));
   });
 });

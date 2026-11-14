@@ -28,6 +28,7 @@ from core.compliance_status import (
     STATUS_NO_CUMPLE,
     STATUS_FUERA,
 )
+from core.bench_hazards import _evaluate_angle_consistency
 from core.config import DETECTION, SECTOR_DEVIATION
 from core.profile_extract import (
     ReconciledPoint,
@@ -447,6 +448,17 @@ def compare_design_vs_asbuilt(params_design, params_topo, tolerances):
     matched_design_indices = {r for r, c, _ in valid_matches}
     matched_topo_indices = {c for r, c, _ in valid_matches}
     design_to_topo = {r: c for r, c, _ in valid_matches}
+    topo_to_design = {c: r for r, c, _ in valid_matches}
+
+    _evaluate_angle_consistency(
+        benches_topo,
+        design_face_angles=[
+            benches_design[topo_to_design[j]].face_angle if j in topo_to_design else None
+            for j in range(n_t)
+        ],
+    )
+    for bench in benches_design:
+        bench.face_angle_inconsistent = False
 
     for r in range(n_d):
         if r in matched_design_indices:

@@ -169,15 +169,20 @@ export function computeProfileComplianceCounts(
 // ─── Per-parameter breakdown (binary) ────────────────────────
 
 /**
- * Per-parameter compliance breakdown: how many benches CUMPLE /
- * NO CUMPLE on each parameter (height, angle, berm). FUERA and
- * NO CUMPLE are merged.
+ * Per-parameter compliance breakdown over the compared (MATCH) benches:
+ * how many CUMPLE / NO CUMPLE on each parameter (height, angle, berm).
+ * FUERA and NO CUMPLE are merged. MISSING and EXTRA benches are not part
+ * of the denominator and are reported apart in `nNotCompared`.
  */
 export interface ParameterBreakdown {
   parameter: 'height' | 'angle' | 'berm';
   cumple: number;
   noCumple: number;
-  /** Sum of real values for CUMPLE benches (null-safe). */
+  /** MATCH benches carrying a status for the parameter (cumple + noCumple). */
+  nEvaluated: number;
+  /** MISSING plus EXTRA benches, left out of the compliance percentage. */
+  nNotCompared: number;
+  /** Sum of real values over every bench carrying a status (null-safe). */
   realSum: number;
   /** Count of finite real values contributed (nulls excluded). */
   realCount: number;
@@ -197,6 +202,7 @@ export function computeParameterBreakdown(
 ): ParameterBreakdown[] {
   const out: ParameterBreakdown[] = [];
   const parameters = ['height', 'angle', 'berm'] as const;
+  const nNotCompared = rows.filter((r) => r.type === 'MISSING' || r.type === 'EXTRA').length;
   for (const parameter of parameters) {
     let cumple = 0;
     let noCumple = 0;
@@ -209,16 +215,17 @@ export function computeParameterBreakdown(
           ? r.angle_status
           : r.berm_status;
       if (!status || status === '-') continue;
-      const isCumple = status === 'CUMPLE';
-      if (isCumple) cumple += 1;
-      else noCumple += 1;
+      if (r.type === 'MATCH') {
+        if (status === 'CUMPLE') cumple += 1;
+        else noCumple += 1;
+      }
       const real = realFor(r, parameter);
       if (real != null && Number.isFinite(real)) {
         realSum += real;
         realCount += 1;
       }
     }
-    out.push({ parameter, cumple, noCumple, realSum, realCount });
+    out.push({ parameter, cumple, noCumple, nEvaluated: cumple + noCumple, nNotCompared, realSum, realCount });
   }
   return out;
 }
@@ -227,28 +234,35 @@ export function computeParameterBreakdown(
 
 export interface SectorCompliance {
   sector: string;
-  pct: number;
+  /** % CUMPLE over the MATCH statuses; null when the sector has none. */
+  pct: number | null;
+  /** MATCH parameter statuses evaluated (the percentage denominator). */
   total: number;
+  /** MISSING plus EXTRA benches, left out of the compliance percentage. */
+  nNotCompared: number;
 }
 
 export function computeSectorCompliance(
   rows: readonly ComparisonResult[],
 ): SectorCompliance[] {
-  const map = new Map<string, { cumple: number; total: number }>();
+  const map = new Map<string, { cumple: number; total: number; nNotCompared: number }>();
   for (const r of rows) {
-    const entry = map.get(r.sector) ?? { cumple: 0, total: 0 };
+    const entry = map.get(r.sector) ?? { cumple: 0, total: 0, nNotCompared: 0 };
+    map.set(r.sector, entry);
+    if (r.type === 'MISSING' || r.type === 'EXTRA') entry.nNotCompared += 1;
+    if (r.type !== 'MATCH') continue;
     for (const status of [r.height_status, r.angle_status, r.berm_status]) {
       if (!status || status === '-') continue;
       entry.total += 1;
       if (status === 'CUMPLE') entry.cumple += 1;
     }
-    map.set(r.sector, entry);
   }
   return [...map.entries()]
-    .map(([sector, { cumple, total }]) => ({
+    .map(([sector, { cumple, total, nNotCompared }]) => ({
       sector,
+      pct: total === 0 ? null : (cumple / total) * 100,
       total,
-      pct: total === 0 ? 0 : (cumple / total) * 100,
+      nNotCompared,
     }))
     .sort((a, b) => a.sector.localeCompare(b.sector));
 }
@@ -259,8 +273,8 @@ export function complianceTone(pct: number): StatusTone {
   return 'nok';
 }
 
-export function sectorComplianceColor(pct: number): string {
-  return statusToneColor(complianceTone(pct));
+export function sectorComplianceColor(pct: number | null): string {
+  return statusToneColor(pct == null ? 'muted' : complianceTone(pct));
 }
 
 // ─── Deviation histograms ─────────────────────────────────────
@@ -519,12 +533,13 @@ function ParameterTable({ breakdown, t }: { breakdown: readonly ParameterBreakdo
             <th scope="col" className="py-2 pr-4 text-left font-medium">{t('dashboard.table.pct_ok', { defaultValue: '% cumple' })}</th>
             <th scope="col" className="py-2 pr-4 text-right font-medium">{t('dashboard.kpi.count_ok', { defaultValue: 'Cumple' })}</th>
             <th scope="col" className="py-2 pr-4 text-right font-medium">{t('dashboard.kpi.count_no', { defaultValue: 'No cumple' })}</th>
+            <th scope="col" className="py-2 pr-4 text-right font-medium">{t('dashboard.table.not_compared', { defaultValue: 'No comparados' })}</th>
             <th scope="col" className="py-2 text-right font-medium">{t('dashboard.table.real_avg', { defaultValue: 'Promedio real' })}</th>
           </tr>
         </thead>
         <tbody>
           {breakdown.map((p) => {
-            const total = p.cumple + p.noCumple;
+            const total = p.nEvaluated;
             const pct = percentOf(p.cumple, total);
             const avgReal = p.realCount === 0 ? null : p.realSum / p.realCount;
             return (
@@ -540,6 +555,7 @@ function ParameterTable({ breakdown, t }: { breakdown: readonly ParameterBreakdo
                 </td>
                 <td data-col="cumple" className="py-2 pr-4 text-right tabular-nums text-text-secondary">{p.cumple}</td>
                 <td data-col="no-cumple" className="py-2 pr-4 text-right tabular-nums text-text-secondary">{p.noCumple}</td>
+                <td data-col="no-comparados" className="py-2 pr-4 text-right tabular-nums text-text-secondary">{p.nNotCompared}</td>
                 <td className="py-2 text-right tabular-nums text-text-secondary">{avgReal == null ? '—' : formatReal(p.parameter, avgReal)}</td>
               </tr>
             );
@@ -679,7 +695,7 @@ export function Dashboard() {
         x: sectorCompliance.map((s) => s.sector),
         y: sectorCompliance.map((s) => s.pct),
         marker: { color: sectorCompliance.map((s) => sectorComplianceColor(s.pct)) },
-        text: sectorCompliance.map((s) => `${s.pct.toFixed(1)}%`),
+        text: sectorCompliance.map((s) => (s.pct == null ? '—' : `${s.pct.toFixed(1)}%`)),
         textposition: 'outside',
         cliponaxis: false,
         hovertemplate: `<b>%{x}</b><br>${hoverLabel}: %{y:.1f}%<extra></extra>`,

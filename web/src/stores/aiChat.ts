@@ -63,11 +63,23 @@ export interface PendingConfirmation {
   argsSummary: string;
 }
 
-export const WRITE_TOOL_QUERY_KEYS: Record<string, readonly string[][]> = {
-  generate_sections_auto: [['sections']],
-  generate_sections_manual: [['sections']],
-  add_section_click: [['sections']],
-  run_reconciliation: [['process-status'], ['results'], ['profile']],
+export const SECTION_DEPENDENT_QUERY_KEYS: ReadonlyArray<ReadonlyArray<string>> = [
+  ['sections'],
+  ['results'],
+  ['profile'],
+  ['design-achievement'],
+  ['proposed-compliance'],
+  ['blast-correlation'],
+  ['blast-damage-model'],
+  ['horizontal-deviation-mesh'],
+  ['export-levels'],
+];
+
+export const WRITE_TOOL_QUERY_KEYS: Record<string, ReadonlyArray<ReadonlyArray<string>>> = {
+  generate_sections_auto: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
+  generate_sections_manual: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
+  add_section_click: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
+  run_reconciliation: [['process-status'], ['results'], ['profile'], ['export-levels']],
 };
 
 const INFORMATIONAL_OBSERVATION_CODES: ReadonlySet<string> = new Set([

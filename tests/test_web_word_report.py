@@ -1,24 +1,20 @@
-"""Tests for the web Word report builder (``core.web_word_report``)."""
+"""Tests for the technical Word report builder (``core.web_word_report``)."""
 
 import io
 import time
+from types import SimpleNamespace
 
 import numpy as np
-import pandas as pd
 import pytest
 from docx import Document
+from docx.enum.section import WD_ORIENT
 from docx.oxml.ns import qn
-from docx.shared import Mm
 
+import core.web_word_report as web_word_report
+from core.blast_correlation import PF_DEFINITIONS
 from core.report_data import ReportFilters, build_report_data
-from core.calculo_tronadura import procesar_pozos, proyectar_pozos_en_seccion
-from core.web_word_report import (
-    DETAIL_COLUMN_MM,
-    _plan_sections,
-    _profile_payload,
-    _project_holes,
-    build_word_report,
-)
+from core.report_texts import OFFICIAL_VALUES_LINE, headline_text, kpi_definitions
+from core.web_word_report import build_word_report
 
 STATUS_LABELS = {
     "CUMPLE",
@@ -41,11 +37,22 @@ META = {
     "operation": "Rajo",
     "phase": "Fase 1",
     "author": "Geotecnia",
-    "generated_at": "18/10/2026",
-    "design_file": "design.stl",
-    "topo_file": "topo.stl",
+    "generated_at": "2026-10-18T09:30:00",
+    "design_filename": "design.stl",
+    "topo_filename": "topo.stl",
     "process": {"resolution": 0.1, "face_threshold": 28.0},
 }
+
+SINGLE_SECTOR_CHAPTERS = [
+    "1. Resumen",
+    "2. Criterios y definiciones",
+    "3. Análisis",
+    "4. Perfiles",
+    "Anexo A — Tabla de bancos",
+    "Anexo B — Tronadura",
+    "Anexo C — Excavación por sección",
+    "5. Conclusiones y advertencias",
+]
 
 
 def _rows(n=12, sections=3, sector=""):
@@ -57,10 +64,10 @@ def _rows(n=12, sections=3, sector=""):
             {
                 "section": section,
                 "sector": sector,
-                "level": str(3100 - index),
-                "bench_num": index % 6 + 1,
+                "level": str(3110 - 15 * (index // sections)),
+                "bench_num": index // sections + 1,
                 "type": "MATCH",
-                "bench_score": 100.0 if status == "CUMPLE" else 60.0,
+                "bench_score": 100.0 if status == "CUMPLE" else 40.0,
                 "height_design": 15.0,
                 "height_real": 15.0 + (index % 5) * 0.3,
                 "height_dev": (index % 5) * 0.3,
@@ -69,12 +76,15 @@ def _rows(n=12, sections=3, sector=""):
                 "angle_dev": -(index % 4),
                 "berm_design": 10.0,
                 "berm_real": 9.0 + (index % 3),
-                "berm_dev": -1.0 + (index % 3),
+                "berm_min": 7.0,
+                "berm_dev": None,
                 "height_status": "CUMPLE",
-                "angle_status": status,
-                "berm_status": "CUMPLE",
+                "angle_status": "CUMPLE",
+                "berm_status": status,
                 "spill_width": 0.5,
                 "effective_berm": 9.0,
+                "delta_crest": 0.25,
+                "delta_toe": -1.75,
             }
         )
     return rows
@@ -91,7 +101,8 @@ def _data(rows=None, **kwargs):
     )
 
 
-def _document(blob):
+def _document(data_or_blob):
+    blob = data_or_blob if isinstance(data_or_blob, bytes) else build_word_report(data_or_blob).getvalue()
     return Document(io.BytesIO(blob))
 
 
@@ -99,11 +110,11 @@ def _paragraphs(doc):
     return [p.text for p in doc.paragraphs]
 
 
-def _headings(doc):
+def _headings(doc, level=1):
     return [
         p.text
         for p in doc.paragraphs
-        if p.style is not None and p.style.name == "Heading 1"
+        if p.style is not None and p.style.name == f"Heading {level}"
     ]
 
 
@@ -111,54 +122,148 @@ def _tables(doc):
     return [[cell.text for cell in row.cells] for table in doc.tables for row in table.rows]
 
 
-def _table_with_header(doc, header):
+def _table_with_header(doc, *headers):
     for table in doc.tables:
         first = [cell.text for cell in table.rows[0].cells]
-        if header in first:
+        if all(header in first for header in headers):
             return [[cell.text for cell in row.cells] for row in table.rows]
     return None
 
 
-def test_word_labels_missing_berm_deviation_as_sin_dato():
-    row = _rows(n=1)[0]
-    row["berm_dev"] = None
-    row["effective_berm_status"] = "NO CUMPLE"
-    doc = _document(build_word_report(_data([row])).getvalue())
-    table = _table_with_header(doc, "Desv. berma (m)")
-    assert table is not None
-    header, data_row = table[:2]
-    assert data_row[header.index("Desv. berma (m)")] == "sin dato"
-    assert data_row[header.index("Estado berma efectiva")] == "NO CUMPLE"
-    assert data_row[header.index("Estado berma")] == "CUMPLE"
+def _all_text(doc):
+    return "\n".join(_paragraphs(doc) + [cell for row in _tables(doc) for cell in row])
 
 
-def test_word_blast_annex_exposes_pf_and_consolidation():
-    settings = {"blast_holes": [{"pf_voronoi_bench_g_per_ton": None,
-                                   "pf_voronoi_bench_status": "MISSING_FOOTPRINT"}],
-                "blast_upload_meta": {"consolidation_report": {"holes_out": 1, "exact_copies_removed": 2, "deck_rows_merged": 1}}}
-    data = build_report_data([], settings, ReportFilters(), META)
-    doc = _document(build_word_report(data).getvalue())
-    text = " ".join(_paragraphs(doc) + [" ".join(row) for row in _tables(doc)])
-    assert "1000*Q/(A*H*rho)" in text
-    assert "Q/(B*S*H)" in text
-    assert "MISSING_FOOTPRINT" in text
-    assert "sin dato" in text
-    assert "copias" in text.lower()
+def _bench(number, crest_d, crest_z, toe_d, toe_z):
+    return SimpleNamespace(
+        bench_number=number,
+        crest_distance=crest_d,
+        crest_elevation=crest_z,
+        toe_distance=toe_d,
+        toe_elevation=toe_z,
+        bench_height=crest_z - toe_z,
+        face_angle=70.0,
+        berm_width=10.0,
+    )
 
 
-def test_word_shows_achievement_coverage_for_partial_rows():
-    rows = [{"section": "S", "sector": "A", "bench_num": 1, "type": "MATCH",
-             "delta_crest": 0.0, "berm_status": None}]
-    doc = _document(build_word_report(_data(rows)).getvalue())
-    text = " ".join(_paragraphs(doc) + [" ".join(row) for row in _tables(doc)]).lower()
-    assert "cobertura" in text
-    assert "completos" in text
-    assert "peso medio" in text
-    assert "componentes faltantes" in text
+def _geometry(names=("S-01", "S-02", "S-03"), sector=""):
+    design_d = np.array([-30.0, -15.0, -10.0, 0.0, 5.0, 15.0, 20.0, 30.0])
+    design_z = np.array([3140.0, 3140.0, 3125.0, 3125.0, 3110.0, 3110.0, 3095.0, 3095.0])
+    topo_d = np.linspace(-30.0, 30.0, 61)
+    topo_z = np.interp(topo_d, design_d, design_z) + 1.5 * np.sin(topo_d / 4.0)
+    return [
+        {
+            "section_name": name,
+            "sector": sector,
+            "view_window": (-10.0, 15.0, 3102.5, 3132.5),
+            "warnings": [],
+            "params_design": SimpleNamespace(benches=[_bench(1, 0.0, 3125.0, 5.0, 3110.0)]),
+            "params_topo": SimpleNamespace(benches=[_bench(1, 0.5, 3124.0, 5.5, 3110.5)]),
+            "profile_d": (design_d, design_z),
+            "profile_t": (topo_d, topo_z),
+        }
+        for name in names
+    ]
 
 
-def _xml(doc):
-    return doc.element.body.xml
+def _plan_inputs(names=("S-01", "S-02", "S-03"), sector=""):
+    return {
+        "sections": [
+            {
+                "name": name,
+                "origin": [1000.0 + 20.0 * index, 5000.0 + 2.0 * index],
+                "azimuth": 20.0,
+                "length": 40.0,
+                "sector": sector,
+            }
+            for index, name in enumerate(names)
+        ]
+    }
+
+
+def _heatmap(sector=""):
+    cells = []
+    for station in (1.0, 3.0, 5.0, 7.0, 9.0):
+        for elevation, deviation, category in (
+            (3111.5, 0.4, "within_tolerance"),
+            (3113.5, 1.5, "overbreak_minor"),
+            (3115.5, 2.5, "overbreak_moderate"),
+            (3117.5, -1.2, "underbreak_minor"),
+            (3119.5, None, "unmeasured"),
+        ):
+            cells.append(
+                {
+                    "deviation_m": deviation,
+                    "value": deviation,
+                    "unit": "m",
+                    "category": category,
+                    "status": "measured" if deviation is not None else "topo_missing",
+                    "station_m": station,
+                    "elevation_m": elevation,
+                    "bench_num": 1,
+                }
+            )
+    payload = {
+        "cells": cells,
+        "unit": "m",
+        "thresholds": {"within": 1.0, "moderate": 1.8, "severe": 3.0},
+        "resolution": {"longitudinal_step": 2.0, "vertical_step": 2.0},
+        "section_names": ["S-01", "S-02", "S-03"],
+        "section_stations_m": [0.0, 5.0, 10.0],
+    }
+    return {
+        "sector": sector,
+        "payload": payload,
+        "params": {"bench_num": None, "longitudinal_step": 2.0, "vertical_step": 2.0},
+        "created_at": "2026-10-17 12:00:00",
+        "cache_key": "abc",
+    }
+
+
+def _blast_holes():
+    holes = []
+    for index in range(7):
+        first = index < 4
+        holes.append(
+            {
+                "id_pozo": f"P-{index + 1}",
+                "Nombre_Malla_Original": "F8_3110_01" if first else "F8_3110_02",
+                "Blast": "07-33" if first else "07-34",
+                "fecha_tronadura": "2026-01-02" if first else "2026-01-09",
+                "Nombre_Fase": "8",
+                "Kilos_Cargados_real": 500.0 + index,
+                "Tipo_Explosivo": "Pirex-930" if index % 2 else "Pirex-920",
+                "pf_g_per_ton": 90.0 + index,
+                "pf_g_per_ton_net": 95.0 + index,
+                "pf_voronoi_bench_g_per_ton": None if index == 6 else 100.0 + index,
+                "pf_voronoi_bench_status": "MISSING" if index == 6 else "VALID",
+                "Z_collar": 3125.0,
+                "Z_toe": 3109.0,
+                "bench_height_m": 15.0,
+            }
+        )
+    return holes
+
+
+@pytest.fixture
+def profile_spy(monkeypatch):
+    calls = []
+
+    def spy(doc, data, *, shade=None, sectors=None):
+        calls.append(
+            {
+                "doc": doc,
+                "data": data,
+                "shade": shade,
+                "sectors": sectors,
+                "chapter": (_headings(doc) or [None])[-1],
+                "last_text": doc.paragraphs[-1].text if doc.paragraphs else None,
+            }
+        )
+
+    monkeypatch.setattr(web_word_report, "add_profile_pages_docx", spy)
+    return calls
 
 
 @pytest.fixture(scope="module")
@@ -166,30 +271,58 @@ def base_blob():
     return build_word_report(_data()).getvalue()
 
 
-def test_numbered_section_headings_are_stable(base_blob):
+def test_chapter_order_single_sector(base_blob):
     headings = _headings(_document(base_blob))
-    for expected in (
-        "1. Resumen ejecutivo",
-        "2. Alcance, fuentes y criterios",
-        "3. Resultados por parámetro",
-        "4. Logro de diseño por sector",
-        "5. Mayores desviaciones comparables",
-        "6. Plano de cumplimiento",
-        "7. Detalle por banco",
-        "8. Detalle por sección",
-        "9. Análisis de perforación y tronadura",
-    ):
-        assert expected in headings
+    assert headings == ["Índice"] + SINGLE_SECTOR_CHAPTERS
 
 
-def test_cover_and_toc_field_present(base_blob):
+def test_visible_index_lists_every_chapter_as_text(base_blob):
     doc = _document(base_blob)
-    text = "\n".join(_paragraphs(doc))
+    texts = _paragraphs(doc)
+    start = texts.index("Índice")
+    end = texts.index("1. Resumen", texts.index("1. Resumen", start + 1) + 1)
+    listed = [text for text in texts[start + 1:end] if text.strip()]
+    position = -1
+    for chapter in SINGLE_SECTOR_CHAPTERS:
+        assert chapter in listed, chapter
+        assert listed.index(chapter) > position
+        position = listed.index(chapter)
+    assert any(text.strip().startswith("A.1") for text in listed)
+    assert any(text.strip().startswith("A.2") for text in listed)
+
+
+def test_no_toc_field_and_no_update_request(base_blob):
+    doc = _document(base_blob)
+    instructions = [el.text or "" for el in doc.element.body.iter(qn("w:instrText"))]
+    assert not any("TOC" in text for text in instructions)
+    assert doc.settings.element.find(qn("w:updateFields")) is None
+    assert "se actualiza al abrir" not in "\n".join(_paragraphs(doc))
+
+
+def test_base_pages_are_a4_portrait(base_blob):
+    doc = _document(base_blob)
+    for section in doc.sections:
+        assert section.orientation in (None, WD_ORIENT.PORTRAIT)
+        assert round(section.page_width.mm) == 210
+        assert round(section.page_height.mm) == 297
+
+
+def test_cover_has_control_block_and_scope_lines(base_blob):
+    doc = _document(base_blob)
+    text = _all_text(doc)
     assert "Proyecto: Proyecto X" in text
-    assert "Operación: Rajo" in text
+    assert "Elaborado por: Geotecnia" in text
+    assert "Fecha: 18/10/2026 09:30" in text
     assert "Control de revisión y aprobación" in text
-    assert "Índice" in _headings(doc)
-    assert 'TOC \\o "1-3" \\h \\z \\u' in _xml(doc)
+    assert "Sin filtros: todas las secciones y cotas" in text
+    assert OFFICIAL_VALUES_LINE in text
+    assert "design.stl" in text and "topo.stl" in text
+
+
+def test_cover_scope_reports_filters():
+    data = _data(_rows(sector="A"), filters=ReportFilters(sectors=("A",), levels=("3110",)))
+    text = _all_text(_document(data))
+    assert "Sector A: cota 3110" in text
 
 
 def test_footer_keeps_page_x_of_y_fields(base_blob):
@@ -199,543 +332,554 @@ def test_footer_keeps_page_x_of_y_fields(base_blob):
     assert "Página " in doc.sections[0].footer.paragraphs[0].text
 
 
-def test_executive_summary_contains_counts_score_and_conclusions(base_blob):
+def test_summary_headline_and_kpi_table_with_denominators(base_blob):
+    data = _data()
     doc = _document(base_blob)
-    text = "\n".join(_paragraphs(doc) + [cell for row in _tables(doc) for cell in row])
-    assert "Denominador del desglose" in text
-    assert (
-        "peor estado entre los registros de banco asociados al perfil, "
-        "incluidos los faltantes y los adicionales"
-    ) in text
-    assert "Puntaje ponderado global (0–100)" in text
-    assert "Puntaje disponible en" in text
-    assert "bancos contabilizados; se considera evaluable si tiene al menos una desviación" in text
-    assert "Logro de diseño global" in text
-    assert "Conclusiones" in text
-    assert "El modelo no registró advertencias" in text
+    assert headline_text(data) in _paragraphs(doc)
+    table = _table_with_header(doc, "Indicador", "Valor", "Base")
+    assert table is not None
+    by_name = {row[0]: row for row in table[1:]}
+    assert by_name["Perfiles que cumplen"][1] == "2 de 3 (66,7%)"
+    assert by_name["Perfiles que no cumplen"][1] == "1 de 3 (33,3%)"
+    assert "3 perfiles evaluados" in by_name["Perfiles que cumplen"][2]
+    assert "por geometría" in by_name["Perfiles que no cumplen"][2]
+    assert by_name["Altura de banco: bancos que cumplen"][1] == "12 de 12 (100,0%)"
+    assert "comparados" in by_name["Altura de banco: bancos que cumplen"][2]
+    assert by_name["Puntaje ponderado (0–100)"][1] == "80,0"
+    assert "12 de 12" in by_name["Logro de diseño (0–100)"][2]
 
 
-def test_criteria_section_shows_signed_tolerances_and_no_filters(base_blob):
-    rows = _tables(_document(base_blob))
-    flat = [" | ".join(row) for row in rows]
-    assert any("Altura de banco" in row and "−2.0 / +2.0" in row for row in flat)
-    assert any("Ancho de berma" in row and "Mínimo 7.00" in row for row in flat)
-    text = "\n".join(_paragraphs(_document(base_blob)))
-    assert "Sin filtros." in text
-    assert any("design.stl" in cell for row in _tables(_document(base_blob)) for cell in row)
+def test_sector_comparison_table_only_with_two_sectors(base_blob, profile_spy):
+    assert _table_with_header(_document(base_blob), "Sector", "Puntaje") is None
+    rows = _rows(sector="Norte") + _rows(n=6, sector="Sur")
+    doc = _document(_data(rows))
+    table = _table_with_header(doc, "Sector", "Puntaje")
+    assert table is not None
+    assert [row[0] for row in table[1:]] == ["Norte", "Sur"]
+    assert len(table[0]) <= 12
 
 
-def test_criteria_reports_applied_filters():
-    data = _data(filters=ReportFilters(sectors=("A",), benches=(1, 2)))
-    text = "\n".join(_paragraphs(_document(build_word_report(data).getvalue())))
-    assert "Filtros aplicados" in text
-    assert "sectores: A" in text
-    assert "bancos de diseño: D1, D2" in text
+def test_sector_chapters_only_with_two_sectors(base_blob, profile_spy):
+    single = _headings(_document(base_blob))
+    assert "4. Perfiles" in single
+    assert not any("sector" in heading.lower() for heading in single)
+
+    rows = _rows(sector="Norte") + _rows(n=6, sector="Sur")
+    headings = _headings(_document(_data(rows)))
+    assert headings == [
+        "Índice",
+        "1. Resumen",
+        "2. Criterios y definiciones",
+        "3. Análisis",
+        "4. Perfiles — sector Norte",
+        "5. Perfiles — sector Sur",
+        "Anexo A — Tabla de bancos",
+        "Anexo B — Tronadura",
+        "Anexo C — Excavación por sección",
+        "6. Conclusiones y advertencias",
+    ]
 
 
-def test_parameter_table_and_donut_image(base_blob):
+def test_profile_pages_called_once_with_data_and_shade(monkeypatch, profile_spy):
+    sentinel = (np.zeros((2, 2)), (0.0, 1.0, 0.0, 1.0))
+    monkeypatch.setattr(web_word_report, "_plan_backdrop", lambda data: ("surface", sentinel))
+    monkeypatch.setattr(web_word_report, "dashboard_plan_png", lambda *args, **kwargs: None)
+    data = _data(section_geometry=_geometry(), plan_inputs=_plan_inputs())
+    build_word_report(data)
+    assert len(profile_spy) == 1
+    assert profile_spy[0]["data"] is data
+    assert profile_spy[0]["shade"] is sentinel
+    assert profile_spy[0]["sectors"] is None
+    assert profile_spy[0]["chapter"] == "4. Perfiles"
+
+
+def test_profile_pages_called_per_sector_right_after_each_chapter_heading(monkeypatch, profile_spy):
+    sentinel = (np.zeros((2, 2)), (0.0, 1.0, 0.0, 1.0))
+    monkeypatch.setattr(web_word_report, "_plan_backdrop", lambda data: ("surface", sentinel))
+    monkeypatch.setattr(web_word_report, "dashboard_plan_png", lambda *args, **kwargs: None)
+    rows = _rows(sector="Norte") + _rows(n=6, sector="Sur")
+    data = _data(rows)
+    build_word_report(data)
+    assert [call["sectors"] for call in profile_spy] == [["Norte"], ["Sur"]]
+    assert [call["chapter"] for call in profile_spy] == [
+        "4. Perfiles — sector Norte",
+        "5. Perfiles — sector Sur",
+    ]
+    assert all(call["data"] is data and call["shade"] is sentinel for call in profile_spy)
+    assert profile_spy[1]["last_text"].startswith("Sector Sur")
+
+
+def test_real_profile_pages_follow_their_own_sector_chapter():
+    names_north, names_south = ("S-01", "S-02", "S-03"), ("S-11", "S-12", "S-13")
+    rows = _rows(sector="Norte") + [
+        dict(row, section=f"S-1{row['section'][-1]}") for row in _rows(n=6, sector="Sur")
+    ]
+    geometry = _geometry(names_north, sector="Norte") + _geometry(names_south, sector="Sur")
+    doc = _document(_data(rows, section_geometry=geometry))
+    texts = _paragraphs(doc)
+
+    def chapter(title):
+        return next(
+            index
+            for index, paragraph in enumerate(doc.paragraphs)
+            if paragraph.text == title and paragraph.style.name == "Heading 1"
+        )
+
+    north, south = chapter("4. Perfiles — sector Norte"), chapter("5. Perfiles — sector Sur")
+    annex = chapter("Anexo A — Tabla de bancos")
+    pages = [index for index, text in enumerate(texts) if "página 1 de 1" in text.lower()]
+    assert len(pages) == 2
+    assert north < pages[0] < south < pages[1] < annex
+    assert "Norte" in texts[pages[0]] and "Sur" in texts[pages[1]]
+    assert round(doc.sections[-1].page_width.mm) == 210
+
+
+def test_dashboard_plan_receives_backdrop_and_statuses(monkeypatch, profile_spy):
+    seen = {}
+    sentinel = (np.zeros((2, 2)), (0.0, 1.0, 0.0, 1.0))
+
+    def fake_plan(sections, statuses, *, shade=None, surface=None, **kwargs):
+        seen.update(sections=sections, statuses=dict(statuses), shade=shade, surface=surface)
+        return None
+
+    monkeypatch.setattr(web_word_report, "_plan_backdrop", lambda data: ("surface", sentinel))
+    monkeypatch.setattr(web_word_report, "dashboard_plan_png", fake_plan)
+    plan_inputs = _plan_inputs()
+    build_word_report(_data(plan_inputs=plan_inputs))
+    assert seen["sections"] is plan_inputs["sections"]
+    assert seen["statuses"] == {"S-01": "NO_CUMPLE", "S-02": "CUMPLE", "S-03": "CUMPLE"}
+    assert seen["shade"] is sentinel and seen["surface"] == "surface"
+
+
+def test_plan_statuses_skip_names_repeated_across_sectors(monkeypatch, profile_spy):
+    seen = {}
+    monkeypatch.setattr(
+        web_word_report,
+        "dashboard_plan_png",
+        lambda sections, statuses, **kwargs: seen.update(statuses=dict(statuses)),
+    )
+    rows = _rows(n=2, sections=2, sector="A") + _rows(n=1, sections=1, sector="B")
+    build_word_report(_data(rows, plan_inputs=_plan_inputs(("S-01", "S-02"))))
+    assert "S-01" not in seen["statuses"]
+    assert "S-02" in seen["statuses"]
+
+
+def test_real_profile_pages_are_landscape_and_document_returns_to_portrait():
+    data = _data(section_geometry=_geometry(), plan_inputs=_plan_inputs())
+    doc = _document(data)
+    widths = [round(section.page_width.mm) for section in doc.sections]
+    assert 297 in widths
+    assert widths[0] == 210 and widths[-1] == 210
+    headings = _headings(doc)
+    assert headings.index("4. Perfiles") < headings.index("Anexo A — Tabla de bancos")
+    body = doc.element.body
+    children = list(body)
+    annex = next(
+        p._p
+        for p in doc.paragraphs
+        if p.text == "Anexo A — Tabla de bancos" and p.style.name == "Heading 1"
+    )
+    landscape_breaks = [
+        index
+        for index, child in enumerate(children)
+        if child.find(".//" + qn("w:sectPr")) is not None
+        and child.find(".//" + qn("w:pgSz")).get(qn("w:orient")) == "landscape"
+    ]
+    assert landscape_breaks and max(landscape_breaks) < children.index(annex)
+
+
+def test_heatmap_chapter_and_landscape_page_only_with_heatmaps(base_blob, profile_spy):
+    base = _document(base_blob)
+    assert not any("Mapa de calor" in heading for heading in _headings(base))
+    assert all(round(section.page_width.mm) == 210 for section in base.sections)
+
+    data = _data(section_geometry=_geometry(), heatmaps=[_heatmap()])
+    doc = _document(data)
+    headings = _headings(doc)
+    assert headings.index("4. Mapa de calor de desviación horizontal") == headings.index("3. Análisis") + 1
+    assert "5. Perfiles" in headings
+    widths = [round(section.page_width.mm) for section in doc.sections]
+    assert widths.count(297) == 1
+    assert widths[-1] == 210
+    table = _table_with_header(doc, "Celdas", "Medidas")
+    assert table is not None and len(table) == 2
+    assert table[1][table[0].index("Celdas")] == "25"
+    assert table[1][table[0].index("Medidas")] == "20"
+    text = "\n".join(_paragraphs(doc))
+    assert "la pared quedó en promedio" in text
+
+
+def test_heatmap_absent_leaves_only_the_scope_note(profile_spy):
+    note = "Mapa de calor no calculado; calcúlelo en la vista 3D para incluirlo."
+    doc = _document(_data(heatmap_notes=[note]))
+    assert not any("Mapa de calor" in heading for heading in _headings(doc))
+    assert note in _all_text(doc)
+
+
+def test_criteria_tolerances_definitions_levels_and_official_values(profile_spy):
+    data = _data()
+    object.__setattr__(data, "level_warnings", ("Sector X sin altura de banco de diseño válida.",))
+    doc = _document(data)
+    flat = [" | ".join(row) for row in _tables(doc)]
+    assert any("Altura de banco" in row and "−2,0 / +2,0" in row for row in flat)
+    assert any("Ancho de berma" in row and "mínimo 7,0" in row for row in flat)
+    definitions = _table_with_header(doc, "Indicador", "Definición")
+    assert definitions is not None
+    assert [row[0] for row in definitions[1:]] == [name for name, _text in kpi_definitions(data)]
+    levels = _table_with_header(doc, "Cota nominal", "Rango de cotas (m)")
+    assert levels is not None and len(levels) == 5
+    text = _all_text(doc)
+    assert "Sector X sin altura de banco de diseño válida." in text
+    assert "área × ancho de influencia" in text
+    assert text.count(OFFICIAL_VALUES_LINE) >= 2
+
+
+def _chapter_tables(doc, title):
+    """Header rows of the tables between the level-1 heading ``title`` and the next one."""
+    headers, inside = [], False
+    for child in doc.element.body:
+        if child.tag == qn("w:p"):
+            style = child.find(qn("w:pPr") + "/" + qn("w:pStyle"))
+            if style is not None and style.get(qn("w:val")) == "Heading1":
+                inside = "".join(node.text or "" for node in child.iter(qn("w:t"))) == title
+        elif child.tag == qn("w:tbl") and inside:
+            first = child.find(qn("w:tr"))
+            headers.append(
+                ["".join(node.text or "" for node in cell.iter(qn("w:t"))) for cell in first.iter(qn("w:tc"))]
+            )
+    return headers
+
+
+def test_analysis_keeps_excavation_bars_and_totals_without_the_section_table(profile_spy):
+    data = _data(section_geometry=_geometry(), plan_inputs=_plan_inputs())
+    doc = _document(data)
+    assert len(doc.inline_shapes) == 5
+    analysis = _chapter_tables(doc, "3. Análisis")
+    assert analysis
+    assert not any("Sección" in header and "Ancho de influencia (m)" in header for header in analysis)
+    assert not any("Ancho de influencia (m)" in header for header in analysis)
+    totals = _table_with_header(doc, "Secciones con volumen", "Volumen sobreexc. (m³)")
+    assert totals is not None and len(totals) == 2
+    assert totals[0] in analysis
+    expected = data.excavation_totals
+    with_volume = expected["n_sections"] - expected["n_without_volume"]
+    assert totals[1][0] == f"{with_volume} de {expected['n_sections']}"
+    assert any(
+        text.startswith("Totales de las secciones del informe.") and "Anexo C" in text
+        for text in _paragraphs(doc)
+    )
+    achievement = _table_with_header(doc, "Ámbito", "Logro")
+    assert achievement is not None and achievement[1][0] == "Global"
+    text = _all_text(doc)
+    assert "Cobertura" in text
+    assert "componentes faltantes" in text.lower()
+
+
+def test_annex_c_holds_the_excavation_table_by_section(profile_spy):
+    data = _data(section_geometry=_geometry(), plan_inputs=_plan_inputs())
+    doc = _document(data)
+    headings = _headings(doc)
+    assert headings.index("Anexo B — Tronadura") < headings.index("Anexo C — Excavación por sección")
+    annex = _chapter_tables(doc, "Anexo C — Excavación por sección")
+    assert len(annex) == 1
+    assert annex[0][0] == "Sección" and "Ancho de influencia (m)" in annex[0]
+    table = _table_with_header(doc, "Sección", "Ancho de influencia (m)")
+    assert [row[0] for row in table[1:]] == ["S-01", "S-02", "S-03", "Total"]
+    assert len(table[0]) <= 12
+    index = [p.text for p in doc.paragraphs]
+    assert index.count("Anexo C — Excavación por sección") == 2
+
+
+def test_annex_c_without_excavation_renders_a_note(base_blob):
     doc = _document(base_blob)
-    assert any("Altura de banco (m)" in row for row in [" | ".join(r) for r in _tables(doc)])
-    assert len(doc.inline_shapes) == 1
+    assert _chapter_tables(doc, "Anexo C — Excavación por sección") == []
+    assert "Sin geometría de secciones para estimar áreas y volúmenes." in _paragraphs(doc)
 
 
-def test_parameter_mean_denominator_counts_only_finite_values_with_status():
+def test_annex_score_column_reads_bench_score_from_bench_row(profile_spy):
+    from dataclasses import replace
+
+    data = _data(_rows(n=3, sections=3))
+    rows = list(data.rows)
+    assert rows[0].bench_score == 40.0 and rows[1].bench_score == 100.0
+    rows[0] = replace(rows[0], bench_score=85.4)
+    rows[1] = replace(rows[1], bench_score=None)
+    object.__setattr__(data, "rows", tuple(rows))
+    table = _table_with_header(_document(data), "Estado del banco", "Puntaje")
+    column = table[0].index("Puntaje")
+    by_section = {row[0]: row[column] for row in table[1:]}
+    assert by_section == {"S-01": "85", "S-02": "—", "S-03": "100"}
+
+
+def test_conclusions_are_printed_as_the_model_wrote_them(profile_spy):
+    data = _data()
+    literal = ("Texto del modelo 1.5 sin reescritura.", "Sector con menor logro de diseño: Norte (64/100).")
+    object.__setattr__(data, "conclusions", literal)
+    texts = _paragraphs(_document(data))
+    assert all(text in texts for text in literal)
+    assert not hasattr(web_word_report, "_conclusion_lines")
+
+
+def test_achievement_coverage_is_aggregated_not_one_line_per_bench(profile_spy):
     rows = _rows()
-    rows[0]["height_status"] = None
-    rows[2]["height_real"] = float("nan")
-    rows[1]["angle_status"] = "-"
-    doc = _document(build_word_report(_data(rows)).getvalue())
-    table = _table_with_header(doc, "Media real (n con estado)")
-    headers = table[0]
-    mean_index = headers.index("Media real (n con estado)")
-    height_row = next(row for row in table[1:] if row[0] == "Altura de banco (m)")
-    angle_row = next(row for row in table[1:] if row[0] == "Ángulo de cara (°)")
-    assert height_row[mean_index].endswith("(n=10)")
-    assert angle_row[mean_index].endswith("(n=11)")
+    for row in rows[:5]:
+        row["delta_toe"] = None
+    doc = _document(_data(rows))
+    lines = [text for text in _paragraphs(doc) if "omponentes faltantes" in text]
+    assert len(lines) == 1
+    assert "pata en 5 bancos" in lines[0]
 
 
-def test_design_achievement_section_has_global_row(base_blob):
-    flat = [" | ".join(row) for row in _tables(_document(base_blob))]
-    assert any(row.startswith("Global") for row in flat)
-
-
-def test_empty_design_achievement_renders_note(monkeypatch):
+def test_empty_design_achievement_renders_note(profile_spy):
     data = _data()
     object.__setattr__(data, "design_achievement", None)
-    text = "\n".join(_paragraphs(_document(build_word_report(data).getvalue())))
-    assert "Sin datos suficientes de logro de diseño" in text
+    assert "Sin datos suficientes de logro de diseño" in _all_text(_document(data))
 
 
-def test_plan_section_notes_when_no_geometry(base_blob):
-    text = "\n".join(_paragraphs(_document(base_blob)))
-    assert "Sin geometría de secciones disponible" in text
-
-
-def test_plan_image_rendered_from_plan_inputs():
-    plan_inputs = {
-        "sections": [
-            {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0, "sector": ""},
-            {"name": "S-02", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0, "sector": ""},
-        ]
-    }
-    data = _data(plan_inputs=plan_inputs)
-    doc = _document(build_word_report(data).getvalue())
-    assert len(doc.inline_shapes) == 2
-    assert "Sin geometría de secciones disponible" not in "\n".join(_paragraphs(doc))
-
-
-def test_plan_sections_mark_filter_exclusions_without_reclassifying_unknown():
-    plan_inputs = {"sections": [
-        {"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
-        {"name": "S-02", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
-        {"name": "S-99", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
-    ]}
-    data = _data(
-        filters=ReportFilters(sections=("S-01",)),
-        plan_inputs=plan_inputs,
-    )
-
-    sections = _plan_sections(data)
-
-    assert [(section["name"], section["included"]) for section in sections] == [
-        ("S-01", True), ("S-02", False), ("S-99", False),
+def test_annex_tables_have_at_most_twelve_columns_and_nominal_level(profile_spy):
+    rows = _rows(sector="Norte") + _rows(n=6, sector="Sur")
+    doc = _document(_data(rows, blast={"holes": _blast_holes()}))
+    for table in doc.tables:
+        assert len(table.columns) <= 12, [cell.text for cell in table.rows[0].cells]
+    annex = [
+        [cell.text for cell in table.rows[0].cells]
+        for table in doc.tables
+        if "Banco" in [cell.text for cell in table.rows[0].cells]
+        and len(table.rows) == 19
     ]
-    assert sections[1]["worst_status"] == "UNKNOWN"
-
-
-def test_plan_sections_resolve_duplicate_names_by_sector_and_keep_ambiguous_unknown():
-    rows = _rows(n=1, sections=1, sector="A") + _rows(n=1, sections=1, sector="B")
-    plan_inputs = {"sections": [
-        {"name": "S-01", "sector": "A", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
-        {"name": "S-01", "sector": "B", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
-        {"name": "S-01", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
-    ]}
-    data = _data(rows, filters=ReportFilters(sectors=("A",)), plan_inputs=plan_inputs)
-
-    sections = _plan_sections(data)
-
-    assert [(section["sector"], section["included"], section["worst_status"]) for section in sections] == [
-        ("A", True, "NO_CUMPLE"),
-        ("B", False, "UNKNOWN"),
-        ("", True, "UNKNOWN"),
+    assert len(annex) == 3
+    for header in annex:
+        assert "Cota nominal" in header
+        assert header[:2] == ["Sector", "Sección"]
+    assert [h for h in _headings(doc, 2) if h.startswith("A.")] == [
+        "A.1 Geometría: altura y ángulo de cara",
+        "A.1 Geometría: berma, cresta y pata (continuación)",
+        "A.2 Estados",
     ]
 
 
-def test_plan_section_without_sector_stays_unknown_when_same_name_geometry_is_unmatched():
-    rows = _rows(n=1, sections=1, sector="A")
-    plan_inputs = {"sections": [
-        {"name": "S-01", "sector": "A", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0},
-        {"name": "S-01", "sector": "B", "origin": [30.0, 0.0], "azimuth": 0.0, "length": 40.0},
-        {"name": "S-01", "origin": [60.0, 0.0], "azimuth": 0.0, "length": 40.0},
-    ]}
-    data = _data(rows, filters=ReportFilters(sectors=("A",)), plan_inputs=plan_inputs)
-
-    sections = _plan_sections(data)
-
-    assert [(section["included"], section["worst_status"]) for section in sections] == [
-        (True, "NO_CUMPLE"), (False, "UNKNOWN"), (True, "UNKNOWN"),
-    ]
+def test_annex_reads_crest_toe_and_berm_min_from_bench_row(profile_spy):
+    data = _data(_rows(n=2, sections=2))
+    object.__setattr__(data, "plan_inputs", {"comparisons": [{"delta_crest": 99.0}]})
+    table = _table_with_header(_document(data), "Δ cresta (m)", "Δ pata (m)")
+    assert table is not None
+    header, first = table[0], table[1]
+    assert first[header.index("Δ cresta (m)")] == "+0,25"
+    assert first[header.index("Δ pata (m)")] == "−1,75"
+    assert first[header.index("Berma mínima (m)")] == "7,00"
+    assert first[header.index("Berma efectiva (m)")] == "9,00"
 
 
-def test_profile_table_columns_dropped_when_empty():
+def test_annex_none_values_render_dash_never_zero(profile_spy):
+    rows = _rows(n=2, sections=2)
+    rows[0].update(type="MISSING", height_real=None, angle_real=None, berm_real=None,
+                   height_dev=None, angle_dev=None,
+                   height_status=None, angle_status=None, berm_status=None,
+                   delta_crest=None, delta_toe=float("nan"), bench_score=None)
+    doc = _document(_data(rows))
+    geometry = _table_with_header(doc, "Altura real (m)")
+    row = next(r for r in geometry[1:] if r[geometry[0].index("Tipo")] == "No construido")
+    assert row[geometry[0].index("Altura real (m)")] == "—"
+    assert row[geometry[0].index("Δ altura (m)")] == "—"
+    position = _table_with_header(doc, "Δ cresta (m)")
+    row = position[1]
+    assert row[position[0].index("Δ cresta (m)")] == "—"
+    assert row[position[0].index("Δ pata (m)")] == "—"
+    states = _table_with_header(doc, "Estado del banco", "Puntaje")
+    row = next(r for r in states[1:] if r[states[0].index("Estado del banco")] == "NO CONSTRUIDO")
+    assert row[states[0].index("Puntaje")] == "—"
+    assert row[states[0].index("Altura")] == "—"
+    assert states[2][states[0].index("Altura")] == "Cumple"
+    for table in (geometry, position, states):
+        for values in table[1:]:
+            assert "None" not in values and "nan" not in [v.lower() for v in values]
+
+
+def test_annex_columns_without_data_are_omitted_with_a_note(profile_spy):
     rows = _rows()
     for row in rows:
         row["spill_width"] = None
         row["effective_berm"] = None
-    blob = build_word_report(_data(rows)).getvalue()
-    doc = _document(blob)
-    header_rows = _table_with_header(doc, "Estado banco")
-    assert header_rows, "profile table not found"
-    headers = header_rows[0]
-    assert "Derrame (m)" not in headers
-    assert "Berma efectiva (m)" not in headers
-    assert "Sector" not in headers
-    assert "Altura diseño (m)" in headers
-    text = "\n".join(_paragraphs(doc))
-    assert "Columnas sin datos en esta sesión y omitidas" in text
+    doc = _document(_data(rows))
+    table = _table_with_header(doc, "Berma mínima (m)")
+    assert "Derrame (m)" not in table[0]
+    assert "Berma efectiva (m)" not in table[0]
+    assert "Sector" not in table[0]
+    note = next(p for p in _paragraphs(doc) if p.startswith("Columnas sin datos omitidas en esta tabla:"))
+    assert "Derrame (m), Berma efectiva (m)" in note
+    assert "Δ cresta (m)" not in note
 
 
-def test_profile_table_keeps_columns_with_data():
-    header_rows = _table_with_header(_document(build_word_report(_data()).getvalue()), "Estado banco")
-    headers = header_rows[0]
-    assert "Derrame (m)" in headers
-    assert "Berma efectiva (m)" in headers
-    assert "Estado banco" in headers
+def test_annex_marks_berm_design_below_minimum(profile_spy):
+    rows = _rows(n=2, sections=2)
+    rows[0]["berm_design"] = 6.0
+    doc = _document(_data(rows))
+    table = _table_with_header(doc, "Berma mínima (m)", "Diseño < mín.")
+    column = table[0].index("Diseño < mín.")
+    assert table[1][column] == "⚠"
+    assert table[2][column] == "—"
+    assert any("la berma de diseño es menor que el mínimo" in text for text in _paragraphs(doc))
 
 
-def test_status_column_is_labeled_never_numeric(base_blob):
+def test_bench_status_column_uses_labels_and_light_fills(base_blob):
     doc = _document(base_blob)
-    header_rows = _table_with_header(doc, "Estado banco")
-    headers = header_rows[0]
-    index = headers.index("Estado banco")
-    values = [row[index] for row in header_rows[1:]]
-    assert values
-    for value in values:
-        assert value in STATUS_LABELS
-        assert "✗" not in value and "✓" not in value
-
-
-def test_status_cells_use_light_fill_with_dark_text(base_blob):
-    doc = _document(base_blob)
-    table_rows = _table_with_header(doc, "Estado banco")
-    status_column = table_rows[0].index("Estado banco")
+    table = next(
+        t for t in doc.tables if "Estado del banco" in [c.text for c in t.rows[0].cells]
+    )
+    header = [cell.text for cell in table.rows[0].cells]
+    column = header.index("Estado del banco")
     fills = set()
-    for values, row in zip(table_rows[1:], next(t for t in doc.tables if t.rows[0].cells[0].text == "Sección").rows[1:]):
-        if values[status_column] not in STATUS_LABELS:
-            continue
-        tcPr = row.cells[status_column]._tc.tcPr
-        shd = tcPr.findall("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd")
-        fills.update(element.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fill") for element in shd)
-    assert fills
-    assert fills <= {"C9E7CB", "FBE3BF", "F6C6C6", "E2E8F0"}
+    for row in table.rows[1:]:
+        cell = row.cells[column]
+        assert cell.text in STATUS_LABELS
+        fills.update(shd.get(qn("w:fill")) for shd in cell._tc.tcPr.findall(qn("w:shd")))
+    assert fills and fills <= {"C9E7CB", "FBE3BF", "F6C6C6", "E2E8F0"}
+    scores = {row.cells[header.index("Puntaje")].text for row in table.rows[1:]}
+    assert scores == {"100", "40"}
 
 
-def test_missing_bench_status_label_is_not_numeric():
+def test_missing_bench_status_label_is_not_numeric(profile_spy):
     rows = _rows()
-    rows[0]["type"] = "MISSING"
-    rows[0]["height_status"] = None
-    rows[0]["angle_status"] = None
-    rows[0]["berm_status"] = None
-    doc = _document(build_word_report(_data(rows)).getvalue())
-    header_rows = _table_with_header(doc, "Estado banco")
-    index = header_rows[0].index("Estado banco")
-    assert "NO CONSTRUIDO" in {row[index] for row in header_rows[1:]}
-
-
-def test_image_count_bounded_with_geometry():
-    geometry = [
-        {
-            "section_name": f"S-{index + 1:02d}",
-            "params_design": None,
-            "profile_d": ([0.0, 10.0], [3110.0, 3125.0]),
-            "profile_t": ([0.0, 10.0], [3109.5, 3124.0]),
-        }
-        for index in range(3)
-    ]
-    blob = build_word_report(_data(section_geometry=geometry)).getvalue()
-    doc = _document(blob)
-    assert 1 <= len(doc.inline_shapes) <= 8
+    rows[0].update(type="MISSING", height_status=None, angle_status=None, berm_status=None)
+    table = _table_with_header(_document(_data(rows)), "Estado del banco")
+    index = table[0].index("Estado del banco")
+    assert "NO CONSTRUIDO" in {row[index] for row in table[1:]}
 
 
 def test_blast_none_renders_note(base_blob):
-    text = "\n".join(_paragraphs(_document(base_blob)))
-    assert "Sin datos de pozos de tronadura en esta sesión." in text
+    assert "Sin datos de pozos de tronadura en esta sesión." in _all_text(_document(base_blob))
 
 
-def test_synthetic_blast_renders_summary_table():
-    blast = {
-        "holes": [
-            {"dist": 5.0, "collar_z": 3125.0, "toe_z": 3112.0, "bench_height_m": 15.0},
-            {"dist": 9.0, "collar_z": 3124.0, "toe_z": 3110.0, "bench_height_m": 15.0},
-        ],
-        "tolerance": {"neg": 1.0, "pos": 1.0},
+def test_blast_annex_is_aggregated_by_event_not_by_hole(profile_spy):
+    doc = _document(_data(blast={"holes": _blast_holes()}))
+    table = _table_with_header(doc, "Malla", "Pozos")
+    assert table is not None
+    header = table[0]
+    assert len(table) == 3
+    assert len(header) <= 12
+    assert [row[header.index("Malla")] for row in table[1:]] == ["F8_3110_01", "F8_3110_02"]
+    assert [row[header.index("Pozos")] for row in table[1:]] == ["4", "3"]
+    assert table[1][header.index("Carga (kg)")] == "2\u202f006"
+    assert "Pozos con FC" not in header
+    assert "Todos los pozos de cada evento tienen FC." in _all_text(doc)
+    assert table[1][header.index("FC (g/t)")] == "91,5"
+    assert table[2][header.index("FC principal (g/t)")] == "104,5"
+    assert "Pirex-920 (2); Pirex-930 (2)" == table[1][header.index("Explosivo")]
+    text = _all_text(doc)
+    assert "7 pozos en 2 mallas o eventos" in text
+    hole_ids = [f"P-{index}" for index in range(1, 7)]
+    assert not any(row and row[0] in hole_ids for row in _tables(doc))
+    assert len([p for p in _paragraphs(doc) if p.startswith("Pozo P-")]) == 0
+
+
+def test_blast_audit_block_keeps_definitions_coverage_and_ids(profile_spy):
+    settings = {
+        "tolerances": dict(TOLERANCES),
+        "blast_holes": _blast_holes(),
+        "blast_upload_meta": {
+            "consolidation_report": {"holes_out": 7, "exact_copies_removed": 2, "deck_rows_merged": 1}
+        },
     }
-    doc = _document(build_word_report(_data(blast=blast)).getvalue())
-    flat = [" | ".join(row) for row in _tables(doc)]
-    assert any("Total de pozos registrados | 2" in row for row in flat)
-    assert any("Pasadura promedio" in row for row in flat)
-    assert any("Tolerancia cresta-pie aplicada" in row for row in flat)
-    assert "Sin datos de pozos de tronadura en esta sesión." not in "\n".join(_paragraphs(doc))
+    data = build_report_data(_rows(), settings, ReportFilters(), dict(META))
+    doc = _document(data)
+    text = _all_text(doc)
+    assert "1000*Q/(A*H*rho)" in text
+    for definition in PF_DEFINITIONS.values():
+        assert definition["formula"] in text
+    assert "copias eliminadas 2" in text
+    assert "Datos de pozos importados con una versión anterior: reimportar" in text
+    assert "MISSING 1" in text and "VALID 6" in text
+    line = next(p for p in _paragraphs(doc) if "sin dato de FC principal" in p)
+    assert "1 de 7" in line and "P-7" in line and "P-1," not in line
 
 
-def test_design_surface_collar_elevation_is_labeled_as_estimated():
+def test_blast_audit_lists_capped_literal_hole_ids(profile_spy):
+    holes = [{"id_pozo": f"H-{index:03d}", "X": 1.0, "Y": 2.0} for index in range(40)]
+    doc = _document(_data(blast={"holes": holes}))
+    line = next(p for p in _paragraphs(doc) if "sin dato de FC principal" in p)
+    assert "40 de 40" in line
+    assert "H-000" in line and "H-011" in line and "H-012" not in line
+    assert "28 más" in line
+    assert len(_table_with_header(doc, "Malla", "Pozos")) == 2
+
+
+def test_blast_summary_metrics_table(profile_spy):
+    blast = {"holes": _blast_holes(), "tolerance": {"neg": 1.0, "pos": 1.0}}
+    flat = [" | ".join(row) for row in _tables(_document(_data(blast=blast)))]
+    assert any(row.startswith("Total de pozos registrados | 7") for row in flat)
+    assert any("Pasadura promedio" in row and "1,00 m" in row for row in flat)
+    assert any("Tolerancia cresta-pata aplicada" in row and "−1,00 / +1,00 m" in row for row in flat)
+
+
+def test_design_surface_collar_elevation_is_labeled_as_estimated(profile_spy):
     blast = {
-        "holes": [{"dist": 5.0, "collar_z": 3125.0, "toe_z": 3112.0, "Z_collar_semantic": "design_surface_estimate"}],
-        "tolerance": {"neg": 1.0, "pos": 1.0},
+        "holes": [{"dist": 5.0, "collar_z": 3125.0, "toe_z": 3112.0,
+                   "Z_collar_semantic": "design_surface_estimate"}],
     }
-    text = "\n".join(_paragraphs(_document(build_word_report(_data(blast=blast)).getvalue())))
+    text = "\n".join(_paragraphs(_document(_data(blast=blast))))
     assert "fue estimada desde la superficie de diseño" in text
     assert "no debe interpretarse como cota real levantada" in text
 
 
-def test_blast_without_bench_height_never_prints_nan():
-    blast = {
-        "holes": [{"dist": 5.0, "collar_z": 3125.0, "toe_z": 3112.0}],
-        "tolerance": {"neg": 1.0, "pos": 1.0},
-    }
-    doc = _document(build_word_report(_data(blast=blast)).getvalue())
-    flat = [" | ".join(row) for row in _tables(doc)]
+def test_blast_without_bench_height_never_prints_nan(profile_spy):
+    blast = {"holes": [{"dist": 5.0, "collar_z": 3125.0, "toe_z": 3112.0}]}
+    flat = [" | ".join(row) for row in _tables(_document(_data(blast=blast)))]
     assert any("No disponible sin altura de banco" in row for row in flat)
     assert not any("nan" in row.lower() for row in flat)
 
 
-def test_section_details_split_non_compliant_and_annex():
-    rows = _rows(n=6, sections=3)
-    text = "\n".join(_paragraphs(_document(build_word_report(_data(rows)).getvalue())))
-    assert "Perfiles no conformes" in text
-    assert "Anexo: perfiles conformes" in text
+def test_conclusions_and_deduplicated_warnings_with_counts(profile_spy):
+    geometry = _geometry()
+    geometry[0]["warnings"] = ["Perfil recortado sin datos de topografía."]
+    geometry[1]["warnings"] = ["Perfil recortado sin datos de topografía."]
+    data = _data(section_geometry=geometry)
+    object.__setattr__(data, "warnings", ("Aviso único.", "Aviso único."))
+    doc = _document(data)
+    texts = _paragraphs(doc)
+    start = texts.index("5. Conclusiones y advertencias")
+    tail = texts[start:]
+    assert "Puntaje ponderado global (0-100): 80,0." in tail
+    assert not any(text.startswith("Sector con menor logro de diseño") for text in tail)
+    repeated = [text for text in tail if text.startswith("Perfil recortado sin datos de topografía.")]
+    assert len(repeated) == 1
+    assert "2 secciones" in repeated[0] and "S-01" in repeated[0] and "S-02" in repeated[0]
+    unique = [text for text in tail if text.startswith("Aviso único.")]
+    assert len(unique) == 1 and "×2" in unique[0]
 
 
-def test_unknown_profile_is_separate_from_compliant_and_non_compliant():
-    from dataclasses import replace
-
-    data = _data(_rows(n=2, sections=2))
-    profiles = list(data.profiles)
-    profiles[0] = replace(profiles[0], worst_status="UNKNOWN")
-    object.__setattr__(data, "profiles", tuple(profiles))
-    text = "\n".join(_paragraphs(_document(build_word_report(data).getvalue())))
-    assert "Perfiles con estado UNKNOWN u otro estado no clasificado (1)" in text
-    assert "se muestran por separado, sin contarlos como conformes ni no conformes" in text
-    assert "SIN EVALUAR (UNKNOWN): 1 perfil en el detalle" in text
-    assert "Denominador del desglose: 2 perfiles" in text
-    assert "no hay perfiles clasificados como CUMPLE, FUERA o NO CUMPLE" not in text
+def test_no_warnings_renders_note(base_blob):
+    assert "Sin advertencias para este informe." in _paragraphs(_document(base_blob))
 
 
-def test_ambiguous_profile_does_not_display_arbitrary_sector():
-    rows = _rows(n=1, sections=1, sector="A") + _rows(n=1, sections=1, sector="B")
-    geometry = [{
-        "section_name": "S-01",
-        "params_design": None,
-        "profile_d": ([0.0, 10.0], [3110.0, 3125.0]),
-        "profile_t": ([0.0, 10.0], [3109.5, 3124.0]),
-    }]
-    data = _data(rows, section_geometry=geometry)
-    payload = _profile_payload(data, data.profiles[0])
-    assert "sector" not in payload
-    assert any("no se pueden atribuir a un sector" in warning for warning in data.warnings)
-    text = "\n".join(_paragraphs(_document(build_word_report(data).getvalue())))
-    assert "no se pueden atribuir a un sector" in text
-    assert "Sector con menor logro de diseño:  (" not in text
-
-
-def test_all_non_compliant_uses_two_per_page():
-    rows = _rows(n=6, sections=3)
-    for row in rows:
-        row["angle_status"] = "NO CUMPLE"
-        row["bench_score"] = 60.0
-    text = "\n".join(_paragraphs(_document(build_word_report(_data(rows)).getvalue())))
-    assert "Todos los perfiles presentan estado no conforme" in text
-    assert "Anexo: perfiles conformes" not in text
-
-
-def test_plan_accepts_api_section_objects_and_mesh_topo():
-    class SectionLine:
-        def __init__(self, name, origin, azimuth, length, sector):
-            self.name = name
-            self.origin = origin
-            self.azimuth = azimuth
-            self.length = length
-            self.sector = sector
-
-    class Mesh:
-        def __init__(self):
-            self.vertices = [
-                [0.0, 0.0, 3110.0],
-                [40.0, 0.0, 3115.0],
-                [0.0, 40.0, 3120.0],
-                [40.0, 40.0, 3125.0],
-            ]
-
-    plan_inputs = {
-        "comparisons": [],
-        "sections": [
-            SectionLine("S-01", [0.0, 0.0], 0.0, 40.0, ""),
-            SectionLine("S-02", [30.0, 0.0], 0.0, 40.0, ""),
-        ],
-        "mesh_topo": Mesh(),
-        "grid_ref": 0.0,
-    }
-    doc = _document(build_word_report(_data(plan_inputs=plan_inputs)).getvalue())
-    assert len(doc.inline_shapes) == 2
-    assert "Sin geometría de secciones disponible" not in "\n".join(_paragraphs(doc))
-
-
-def test_blast_with_float_tolerance_and_geo_holes_projects_on_profiles():
-    geometry = [
-        {
-            "section_name": "S-01",
-            "params_design": None,
-            "profile_d": ([0.0, 10.0], [3110.0, 3125.0]),
-            "profile_t": ([0.0, 10.0], [3109.5, 3124.0]),
-        }
-    ]
-    blast = {
-        "holes": [
-            {"X": 4.0, "Y": 0.0, "Z_collar": 3126.0, "Z_toe": 3110.0, "Len": 16.0},
-            {"X": 6.0, "Y": 0.0, "Z_collar": 3126.0, "Z_toe": 3110.0, "Len": 16.0},
-        ],
-        "tolerance": 10.0,
-    }
-    plan_inputs = {"sections": [{"name": "S-01", "origin": [0.0, 0.0], "azimuth": 0.0, "length": 40.0}]}
-    rows = _rows(n=2, sections=1)
-    data = _data(rows, section_geometry=geometry, plan_inputs=plan_inputs, blast=blast)
-    doc = _document(build_word_report(data).getvalue())
-    flat = [" | ".join(row) for row in _tables(doc)]
-    assert any("Tolerancia de proyección de pozos" in row and "±10.00 m" in row for row in flat)
-    assert any("Total de pozos registrados | 2" in row for row in flat)
-
-
-@pytest.mark.parametrize(
-    ("inclination", "expected_toe_station"),
-    [(30.0, 10.0), (0.0, 0.0)],
-    ids=("inclined-hole", "vertical-hole"),
-)
-def test_blast_hole_report_toe_uses_projected_toe_station(inclination, expected_toe_station):
-    source = pd.DataFrame([{
-        "Latitud_Geo": 0.0,
-        "Longitud_Geo": 0.0,
-        "Nombre_Banco": 4000.0,
-        "Inclinacion_real": inclination,
-        "Azimuth_real": 0.0,
-        "longitud_real": 20.0,
-        "Incl_convention": "from_vertical",
-        "bench_height_m": 15.0,
-    }])
-    accepted_rows = procesar_pozos(
-        source,
-        geometry_user_confirmed=True,
-        incl_convention="from_vertical",
-    )[0]
-    reference = proyectar_pozos_en_seccion(
-        accepted_rows,
-        origin=np.array([0.0, 0.0]),
-        azimuth=0.0,
-        length=100.0,
-        tolerance=1.0,
-    ).iloc[0]
-    plan_inputs = {
-        "sections": [{
-            "name": "S-01",
-            "origin": [0.0, 0.0],
-            "azimuth": 0.0,
-            "length": 100.0,
-        }],
-    }
-    data = _data(
-        _rows(n=1, sections=1),
-        plan_inputs=plan_inputs,
-        blast={"holes": accepted_rows.to_dict(orient="records"), "tolerance": 1.0},
-    )
-
-    report_holes = _project_holes(data, "S-01")
-
-    assert reference["dist_along_toe"] - reference["dist_along"] == pytest.approx(expected_toe_station)
-    assert report_holes is not None
-    assert report_holes[0]["dist"] == pytest.approx(reference["dist_along"])
-    assert report_holes[0]["toe_dist"] == pytest.approx(reference["dist_along_toe"])
-
-
-def test_empty_dataset_degrades_to_notes():
+def test_empty_dataset_degrades_to_notes(profile_spy):
     data = build_report_data([], {"tolerances": dict(TOLERANCES)}, ReportFilters(), dict(META))
-    doc = _document(build_word_report(data).getvalue())
-    text = "\n".join(_paragraphs(doc))
-    assert "No hay comparaciones en la sesión." in text
+    doc = _document(data)
+    text = _all_text(doc)
+    assert "Sin perfiles evaluados." in text
     assert "No hay bancos para tabular." in text
-    assert "No hay perfiles para detallar." in text
+    assert "No hay comparaciones en la sesión." in text
     assert len(doc.inline_shapes) == 0
+    assert _headings(doc) == ["Índice"] + SINGLE_SECTOR_CHAPTERS
 
 
-def test_size_and_time_budget_for_100_rows():
-    rows = _rows(n=100, sections=12)
+def test_profile_pages_failure_degrades_to_a_note(monkeypatch):
+    def broken(doc, data, *, shade=None, sectors=None):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(web_word_report, "add_profile_pages_docx", broken)
+    doc = _document(_data(section_geometry=_geometry()))
+    assert "No fue posible generar las páginas de perfiles." in _all_text(doc)
+    assert round(doc.sections[-1].page_width.mm) == 210
+
+
+def test_size_and_time_budget_for_100_rows(profile_spy):
+    rows = _rows(n=100, sections=20)
     data = _data(rows)
     started = time.perf_counter()
     blob = build_word_report(data).getvalue()
     elapsed = time.perf_counter() - started
     assert len(blob) < 1_500_000, f"{len(blob)} bytes exceeds the 1.5 MB budget"
     assert elapsed < 6.0, f"{elapsed:.2f}s exceeds the 6 s budget"
-
-
-def _detail_geometry(sections=4):
-    return [
-        {
-            "section_name": f"S-{index + 1:02d}",
-            "params_design": None,
-            "profile_d": ([0.0, 100.0], [3050.0, 3110.0]),
-            "profile_t": ([0.0, 100.0], [3049.5, 3109.0]),
-        }
-        for index in range(sections)
-    ]
-
-
-def _grid_rows(doc):
-    """Return, per table, the drawings found in each cell of each row."""
-    grids = []
-    for table in doc.tables:
-        rows = [
-            [cell._tc.findall(".//" + qn("w:drawing")) for cell in row.cells]
-            for row in table.rows
-        ]
-        if rows and any(any(cell for cell in row) for row in rows):
-            grids.append(rows)
-    return grids
-
-
-def _extents(cells):
-    out = []
-    for cell in cells:
-        for drawing in cell:
-            inline = drawing.find(qn("wp:inline"))
-            extent = inline.find(qn("wp:extent")) if inline is not None else None
-            if extent is not None:
-                out.append((int(extent.get("cx")), int(extent.get("cy"))))
-    return out
-
-
-def test_detail_plots_are_side_by_side_two_per_page():
-    rows = _rows(n=8, sections=4)
-    for row in rows:
-        row["angle_status"] = "NO CUMPLE"
-        row["bench_score"] = 60.0
-    doc = _document(build_word_report(_data(rows, section_geometry=_detail_geometry())).getvalue())
-
-    grids = [grid for grid in _grid_rows(doc) if len(grid[0]) == 2]
-    assert grids, "no two-column detail grid found"
-    for grid in grids:
-        for row in grid:
-            assert all(cell for cell in row), "a detail row holds fewer than two plots"
-    placed = [extent for grid in grids for row in grid for extent in _extents(row)]
-    assert len(placed) == 4
-    for cx, cy in placed:
-        assert abs(cx - Mm(DETAIL_COLUMN_MM)) <= Mm(DETAIL_COLUMN_MM) * 0.02
-        assert cy < cx, "landscape detail plot should be wider than tall"
-
-
-def test_detail_grid_is_borderless():
-    doc = _document(build_word_report(_data(section_geometry=_detail_geometry())).getvalue())
-    grid_tables = [
-        table
-        for table in doc.tables
-        if any(cell._tc.findall(".//" + qn("w:drawing")) for row in table.rows for cell in row.cells)
-    ]
-    assert grid_tables
-    for table in grid_tables:
-        borders = table._tbl.tblPr.find(qn("w:tblBorders"))
-        assert borders is not None
-        for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
-            element = borders.find(qn(f"w:{edge}"))
-            assert element is not None and element.get(qn("w:val")) == "none"
-
-
-def test_annex_keeps_two_compliant_profiles_side_by_side():
-    doc = _document(build_word_report(_data(_rows(n=8, sections=4), section_geometry=_detail_geometry())).getvalue())
-    text = "\n".join(_paragraphs(doc))
-    assert "Anexo: perfiles conformes" in text
-    assert "se presentan dos por página en formato compacto" in text
-    grids = [grid for grid in _grid_rows(doc) if len(grid[0]) == 2]
-    assert grids
-    for grid in grids:
-        assert len(grid) == 1, "each page carries a single row of two plots"
-        assert all(any(cell for cell in row) for row in grid)
-        assert sum(len(cell) for row in grid for cell in row) <= 2
-    placed = [extent for grid in grids for row in grid for extent in _extents(row)]
-    assert len(placed) == 4
-
-
-def test_all_non_compliant_note_matches_parallel_layout():
-    rows = _rows(n=8, sections=4)
-    for row in rows:
-        row["angle_status"] = "NO CUMPLE"
-        row["bench_score"] = 60.0
-    text = "\n".join(_paragraphs(_document(build_word_report(_data(rows)).getvalue())))
-    assert "Todos los perfiles presentan estado no conforme" in text
-    assert "a ancho completo" not in text
-    assert "en paralelo" in text
-
-
-def test_section_seven_starts_on_a_new_page(base_blob):
-    doc = _document(base_blob)
-    heading = next(p for p in doc.paragraphs if p.text == "8. Detalle por sección")
-    assert heading.paragraph_format.page_break_before is True
 
 
 def test_major_headings_keep_with_next(base_blob):
@@ -745,21 +889,114 @@ def test_major_headings_keep_with_next(base_blob):
         for p in doc.paragraphs
         if p.style is not None and p.style.name in ("Heading 1", "Heading 2")
     ]
-    assert len(headings) > 5
+    assert len(headings) > 8
     for heading in headings:
         keep_next = heading._p.pPr.find(qn("w:keepNext"))
         assert keep_next is not None
         assert keep_next.get(qn("w:val")) in (None, "true", "1")
 
 
-def test_settings_request_field_update_on_open(base_blob):
-    settings = _document(base_blob).settings.element
-    element = settings.find(qn("w:updateFields"))
-    assert element is not None
-    assert element.get(qn("w:val")) == "true"
+def test_numbers_use_spanish_decimal_comma_in_tables(base_blob):
+    cells = [cell for row in _tables(_document(base_blob)) for cell in row]
+    assert "15,00" in cells
+    assert not any(cell.replace(".", "", 1).isdigit() and "." in cell for cell in cells)
 
 
-def test_toc_keeps_spanish_placeholder_instruction(base_blob):
-    text = "\n".join(_paragraphs(_document(base_blob)))
-    assert "El índice se actualiza al abrir el documento en Word" in text
-    assert "Ctrl+E, F9" in text
+def test_fitted_columns_never_break_a_header_word():
+    headers = ("Sección", "Estado del banco", "Puntaje", "Explosivo cargado (kg)")
+    widths = web_word_report._fit_weights(headers, (3.0, 3.0, 0.1, 0.1), 80.0, 7.5)
+    assert sum(widths) == pytest.approx(80.0)
+    for header, width in zip(headers, widths):
+        longest = max(len(word) for word in header.split())
+        assert width >= longest * 7.5 * 0.66 * 25.4 / 72.0 + 3.6 - 1e-6
+
+
+def test_fitted_columns_keep_weights_when_everything_fits():
+    widths = web_word_report._fit_weights(("A", "B"), (1.0, 3.0), 100.0, 9.0)
+    assert widths == pytest.approx([25.0, 75.0])
+
+
+def test_blast_event_table_omits_primary_pf_column_without_data(profile_spy):
+    holes = _blast_holes()
+    for hole in holes:
+        hole["pf_voronoi_bench_g_per_ton"] = None
+    doc = _document(_data(blast={"holes": holes}))
+    table = _table_with_header(doc, "Malla", "Pozos")
+    assert "FC principal (g/t)" not in table[0]
+    assert "Columna sin datos omitida: FC principal (g/t)." in "\n".join(_paragraphs(doc))
+
+
+def test_fitted_columns_fit_body_tokens_and_whole_nowrap_cells():
+    headers = ("A", "B", "C")
+    rows = [("2026-01-02", "F15_3120_GB_(06ENE) 01-02", "uno dos tres cuatro cinco seis")]
+    widths = web_word_report._fit_weights(headers, (0.2, 0.2, 5.0), 120.0, 7.5, rows, nowrap=(0,))
+    char = 7.5 * 0.56 * 25.4 / 72.0
+    assert widths[0] >= 10 * char + 3.6 - 1e-6
+    assert widths[1] >= 19 * char + 3.6 - 1e-6
+    assert sum(widths) == pytest.approx(120.0)
+
+
+def test_annex_parameter_statuses_are_short_with_legend(profile_spy):
+    rows = _rows(n=2, sections=2)
+    rows[0]["height_status"] = "FUERA DE TOLERANCIA"
+    doc = _document(_data(rows))
+    states = _table_with_header(doc, "Estado del banco", "Puntaje")
+    assert states[1][states[0].index("Altura")] == "Fuera de tol."
+    assert "Fuera de tol. = fuera de tolerancia." in "\n".join(_paragraphs(doc))
+
+
+def test_sector_ranking_conclusion_only_with_several_sectors(profile_spy):
+    rows = _rows(sector="Norte") + _rows(n=6, sector="Sur")
+    texts = _paragraphs(_document(_data(rows)))
+    assert any(text.startswith("Sector con menor logro de diseño: ") for text in texts)
+
+
+def test_blast_event_table_keeps_holes_with_pf_when_some_lack_it(profile_spy):
+    holes = _blast_holes()
+    holes[0]["pf_g_per_ton"] = None
+    holes[0]["pf_voronoi_bench_g_per_ton"] = None
+    table = _table_with_header(_document(_data(blast={"holes": holes})), "Malla", "Pozos")
+    header = table[0]
+    assert table[1][header.index("Pozos")] == "4"
+    assert table[1][header.index("Pozos con FC")] == "3"
+
+
+def test_w43_word_heatmap_scope_and_date(profile_spy):
+    entry = _heatmap()
+    entry.update(scope_note="Alcance especial del mapa.", computed_at_text="14/11/2026 10:00", created_at="RAW_TIMESTAMP")
+    doc = _document(_data(heatmaps=[entry]))
+    text = "\n".join(_paragraphs(doc))
+    assert text.count("Alcance especial del mapa.") >= 2
+    assert "14/11/2026 10:00" in text
+    assert "RAW_TIMESTAMP" not in text
+    assert "18/10/2026 09:30" in text
+    assert "Berma: Δ = real − mínima" in text
+
+
+def test_disjoint_windows_in_word_table_and_figure_title(monkeypatch, profile_spy):
+    from core.report_figures_heatmap import LevelWindow
+    window = LevelWindow([(3111, 3114), (3117, 3120)])
+    monkeypatch.setattr(web_word_report, "level_window_from_geometry", lambda _: window)
+    captured = {}
+    original = web_word_report.heatmap_page_png
+    def capture(payload, **kwargs):
+        captured.update(kwargs)
+        return original(payload, **kwargs)
+    monkeypatch.setattr(web_word_report, "heatmap_page_png", capture)
+    data = _data(section_geometry=_geometry(), heatmaps=[_heatmap()], filters=ReportFilters(levels=("3125", "3104")))
+    doc = _document(data)
+    text = " ".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells).replace("\u00a0", " ")
+    title = captured["title"].replace("\u00a0", " ")
+    for interval in ("3 111–3 114", "3 117–3 120"):
+        assert interval in text
+        assert interval in title
+    assert "ventanas" in title
+
+
+def test_heatmap_figure_leaves_room_for_scope_and_notes(profile_spy):
+    entry = _heatmap()
+    entry["scope_note"] = "Mapa restringido a las secciones. El filtro de bancos no se aplica al mapa."
+    doc = _document(_data(section_geometry=_geometry(), heatmaps=[entry]))
+    landscape = [shape for shape in doc.inline_shapes if shape.height.mm > 70]
+    assert landscape
+    assert any(shape.height.mm <= 100.1 for shape in landscape)

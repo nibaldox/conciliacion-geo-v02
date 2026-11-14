@@ -11,14 +11,19 @@ indicators:
   (Phase 10).
 * :func:`_detect_toppling_potential` — Goodman & Bray toppling proxy
   (Phase 10).
-* :func:`_evaluate_angle_consistency` — flags benches whose face
-  angle departs from the inter-ramp angle by more than 8°
-  (Phase 10).
+* :func:`_evaluate_angle_consistency` — flags as-built benches whose
+  face angle departs from the design face angle of the matched design
+  bench by more than ``STABILITY.face_angle_consistency_threshold_deg``
+  (Phase 10; reference changed from the inter-ramp angle).
 
 The ``_angle_between_segments`` helper supports :func:`_detect_wedge_shape_in_face`.
 """
 
+from typing import Sequence
+
 import numpy as np
+
+from core.config import STABILITY
 
 
 NOT_EVALUABLE_STATUS = "-"
@@ -231,27 +236,63 @@ def _detect_toppling_potential(
 
 def _evaluate_angle_consistency(
     benches,
-    inter_ramp_angle: float,
-    overall_angle: float,
+    inter_ramp_angle: float | None = None,
+    overall_angle: float | None = None,
+    *,
+    design_face_angles: Sequence[float | None] | None = None,
+    threshold_deg: float = STABILITY.face_angle_consistency_threshold_deg,
 ):
-    """Flag benches whose face_angle is inconsistent with the inter-ramp angle.
+    """Flag benches whose face angle departs from a reference angle.
 
-    Criteria:
+    Current rule (``design_face_angles`` supplied): each bench is compared
+    against the design face angle of the design bench it was matched to.
+    ``design_face_angles`` holds one entry per bench, in the same order;
+    ``None`` means the bench has no matched design bench.
 
-    - If ``|face_angle - inter_ramp_angle| > 8°`` → flag
-      ``face_angle_inconsistent = True``. This indicates the bench is
-      either anomalously steep or shallow relative to the overall slope
-      geometry.
+    - ``|face_angle - design_face_angle| > threshold_deg`` →
+      ``face_angle_inconsistent = True``.
+    - Otherwise, including benches without a reference or with a
+      non-finite angle on either side → ``False``. A missing angle is
+      never read as zero.
 
-    ``overall_angle`` is accepted for forward compatibility (the audit
-    also discussed |face_angle - overall_angle| comparisons), but the
-    current rule uses ``inter_ramp_angle`` as the reference, which is
-    the more conservative (steeper) reference value.
+    The flag is assigned for every bench, so a stale value is replaced.
+    :func:`core.profile_compliance.compare_design_vs_asbuilt` calls this
+    form once the design/as-built matching is known; extraction alone no
+    longer sets the flag.
+
+    Legacy call form (``design_face_angles`` omitted):
+    ``_evaluate_angle_consistency(benches, inter_ramp_angle, overall_angle)``
+    keeps the previous behaviour, flagging ``True`` when
+    ``|face_angle - inter_ramp_angle| > threshold_deg`` and leaving the
+    other benches untouched. ``overall_angle`` is accepted and ignored.
+    The pipeline does not use this form any more.
+
+    ``threshold_deg`` defaults to
+    ``STABILITY.face_angle_consistency_threshold_deg``.
 
     Updates in place: ``bench.face_angle_inconsistent``. Returns the
     same list for convenience.
     """
+    if design_face_angles is not None:
+        if len(design_face_angles) != len(benches):
+            raise ValueError(
+                "design_face_angles must have one entry per bench "
+                f"({len(design_face_angles)} != {len(benches)})"
+            )
+        for b, reference in zip(benches, design_face_angles):
+            face = _finite_or_none(b.face_angle)
+            design_face = _finite_or_none(reference)
+            b.face_angle_inconsistent = bool(
+                face is not None
+                and design_face is not None
+                and abs(face - design_face) > threshold_deg
+            )
+        return benches
+    if inter_ramp_angle is None:
+        raise TypeError(
+            "_evaluate_angle_consistency requires design_face_angles or inter_ramp_angle"
+        )
     for b in benches:
-        if abs(float(b.face_angle) - float(inter_ramp_angle)) > 8.0:
+        if abs(float(b.face_angle) - float(inter_ramp_angle)) > threshold_deg:
             b.face_angle_inconsistent = True
     return benches

@@ -35,7 +35,6 @@ from core.bench_hazards import (
     _detect_overhangs_and_bridges,
     _detect_toppling_potential,
     _detect_wedge_shape_in_face,
-    _evaluate_angle_consistency,
     _evaluate_catch_bench_adequacy,
 )
 from core.config import DETECTION, TOLERANCES
@@ -932,9 +931,6 @@ def extract_parameters(distances, elevations, section_name, sector,
     _finalize_ramp_angles(result, benches)
 
     if benches:
-        _evaluate_angle_consistency(
-            benches, result.inter_ramp_angle, result.overall_angle,
-        )
         from core.stability_analysis import compute_anisotropy_dispersion
         dispersion = compute_anisotropy_dispersion(benches)
         for b in benches:

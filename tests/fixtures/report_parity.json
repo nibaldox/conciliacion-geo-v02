@@ -85,9 +85,9 @@
     "profile_scores": {"S-01": 100.0, "S-02": 70.0, "S-03": 40.0},
     "global_weighted_score": 70.0,
     "parameters": [
-      {"parameter": "height", "cumple": 3, "no_cumple": 3, "pct_cumple": 50.0, "mean_real": 9.9},
-      {"parameter": "angle", "cumple": 4, "no_cumple": 1, "pct_cumple": 80.0, "mean_real": 74.0},
-      {"parameter": "berm", "cumple": 3, "no_cumple": 2, "pct_cumple": 60.0, "mean_real": 6.7}
+      {"parameter": "height", "cumple": 3, "no_cumple": 1, "pct_cumple": 75.0, "mean_real": 9.9, "n_evaluated": 4, "n_not_compared": 2},
+      {"parameter": "angle", "cumple": 4, "no_cumple": 0, "pct_cumple": 100.0, "mean_real": 74.0, "n_evaluated": 4, "n_not_compared": 2},
+      {"parameter": "berm", "cumple": 3, "no_cumple": 1, "pct_cumple": 75.0, "mean_real": 6.7, "n_evaluated": 4, "n_not_compared": 2}
     ],
     "bench_labels": ["CUMPLE", "CUMPLE", "CUMPLE", "NO CUMPLE", "NO CONSTRUIDO", "BANCO ADICIONAL"],
     "top_deviations_top3": [
@@ -96,9 +96,9 @@
       {"section": "S-03", "parameter": "berm", "deviation": -2.0, "ratio": 0.3333}
     ],
     "conclusions_contains": [
-      "Puntaje ponderado global (0-100): 70.0",
+      "Puntaje ponderado global (0-100): 70,0",
       "no conformes (peor banco NO CUMPLE): 2 de 4",
-      "Altura de banco (50.0%)",
+      "Altura de banco (75,0%)",
       "Bancos de diseño no construidos: 1",
       "Bancos adicionales (no presentes en el diseño): 1"
     ]

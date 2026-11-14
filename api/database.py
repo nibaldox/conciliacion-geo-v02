@@ -1,6 +1,7 @@
 import sqlite3
 import json
 import uuid
+import zlib
 import functools
 import tempfile
 import os
@@ -257,8 +258,27 @@ def init_db():
     if "import_report" not in mesh_columns:
         conn.execute("ALTER TABLE meshes ADD COLUMN import_report TEXT")
     _ensure_settings_version_column(conn)
+    _ensure_horizontal_deviation_results_table(conn)
     conn.commit()
     conn.close()
+
+
+def _ensure_horizontal_deviation_results_table(conn: sqlite3.Connection) -> None:
+    """Create the persisted 3D heatmap table on new and pre-existing databases."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS horizontal_deviation_results (
+            id INTEGER PRIMARY KEY,
+            session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+            sector TEXT NOT NULL,
+            cache_key TEXT NOT NULL,
+            params TEXT NOT NULL,
+            payload BLOB NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(session_id, sector, cache_key)
+        )
+        """
+    )
 
 
 def _ensure_settings_version_column(conn: sqlite3.Connection) -> None:
@@ -336,6 +356,120 @@ def cleanup_old_sessions(max_age_hours: int = 24):
     conn.execute("DELETE FROM sessions WHERE created_at < ?", (cutoff_str,))
     conn.commit()
     conn.close()
+
+
+# --- Horizontal deviation (3D heatmap) results ---
+
+HORIZONTAL_DEVIATION_RESULTS_PER_SECTOR = 4
+
+
+def save_horizontal_deviation(
+    session_id: str,
+    sector: str,
+    cache_key: str,
+    params: Dict[str, Any],
+    payload: Dict[str, Any],
+) -> None:
+    """Upsert a computed 3D heatmap and keep the newest results per session and sector."""
+    params_json = json.dumps(params, sort_keys=True, separators=(",", ":"))
+    payload_blob = zlib.compress(
+        json.dumps(payload, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    )
+    conn = get_connection()
+    try:
+        conn.execute(
+            "DELETE FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? AND cache_key = ?",
+            (session_id, sector, cache_key),
+        )
+        conn.execute(
+            "INSERT INTO horizontal_deviation_results "
+            "(session_id, sector, cache_key, params, payload) VALUES (?, ?, ?, ?, ?)",
+            (session_id, sector, cache_key, params_json, payload_blob),
+        )
+        conn.execute(
+            "DELETE FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? AND id NOT IN ("
+            "SELECT id FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? ORDER BY id DESC LIMIT ?)",
+            (
+                session_id,
+                sector,
+                session_id,
+                sector,
+                HORIZONTAL_DEVIATION_RESULTS_PER_SECTOR,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_latest_horizontal_deviation(session_id: str, sector: str) -> Optional[Dict[str, Any]]:
+    """Return the newest persisted 3D heatmap of a session sector, or ``None``."""
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT cache_key, params, payload, created_at "
+            "FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? ORDER BY id DESC LIMIT 1",
+            (session_id, sector),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    return _horizontal_deviation_from_row(row)
+
+
+def list_horizontal_deviations(session_id: str, sector: str) -> List[Dict[str, Any]]:
+    """Return every persisted 3D heatmap of a session sector, newest first."""
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT cache_key, params, payload, created_at "
+            "FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? ORDER BY id DESC",
+            (session_id, sector),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_horizontal_deviation_from_row(row) for row in rows]
+
+
+def list_horizontal_deviation_metadata(session_id: str, sector: str) -> List[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT cache_key, params, created_at FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? ORDER BY id DESC", (session_id, sector)
+        ).fetchall()
+        return [{"cache_key": row["cache_key"], "params": json.loads(row["params"]),
+                 "created_at": row["created_at"]} for row in rows]
+    finally:
+        conn.close()
+
+
+def get_horizontal_deviation_by_key(session_id: str, sector: str, cache_key: str) -> Optional[Dict[str, Any]]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT cache_key, params, payload, created_at FROM horizontal_deviation_results "
+            "WHERE session_id = ? AND sector = ? AND cache_key = ? ORDER BY id DESC LIMIT 1",
+            (session_id, sector, cache_key),
+        ).fetchone()
+        return _horizontal_deviation_from_row(row) if row else None
+    finally:
+        conn.close()
+
+
+def _horizontal_deviation_from_row(row: sqlite3.Row) -> Dict[str, Any]:
+    return {
+        "cache_key": row["cache_key"],
+        "params": json.loads(row["params"]),
+        "payload": json.loads(zlib.decompress(row["payload"]).decode("utf-8")),
+        "created_at": row["created_at"],
+    }
 
 
 # --- Mesh operations ---

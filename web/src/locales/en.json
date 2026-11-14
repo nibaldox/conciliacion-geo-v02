@@ -277,6 +277,7 @@
   "results": {
     "filters": {
       "level": "Level",
+      "level_nominal": "Nominal level",
       "no_sector": "(no sector)",
       "group_label": "Result filters",
       "active_label": "Active filters in this panel:",
@@ -983,6 +984,17 @@
     "applied_sectors": "Sectors",
     "applied_sections": "Sections",
     "applied_levels": "Levels",
+    "applied_levels_by_sector": "Levels by sector",
+    "levels_title": "Nominal level",
+    "levels_hint": "With no selection, every level of the sector is exported.",
+    "levels_sector": "Sector {{sector}}",
+    "levels_no_sector": "No sector",
+    "levels_all": "all levels",
+    "levels_chip": "{{label}} ({{count}} sect.)",
+    "levels_chip_range": "{{label}} ({{min}}–{{max}} · {{count}} sect.)",
+    "levels_loading": "Loading nominal levels…",
+    "levels_error": "Could not load levels; you can export without levels by sector.",
+    "levels_retry": "Retry",
     "applied_benches": "Benches",
     "blast_tolerance_label": "blast tolerance",
     "all_benches": "all benches",
@@ -990,7 +1002,7 @@
     "download": "Export",
     "project_info_hint": "Optional. Included in exported reports.",
     "format_excel": "Excel",
-    "format_excel_desc": "Summary, benches, inter-ramp and dashboard sheets",
+    "format_excel_desc": "Read me, Summary, Benches, Sections, Sector-Level, Blasting and Holes",
     "format_word": "Word",
     "format_word_desc": "Editable technical report with tables and charts",
     "format_pdf": "Executive PDF",
@@ -1523,6 +1535,7 @@
       "pct_cumple": "% COMPLIANT",
       "value_avg": "Avg Real Value",
       "pct_ok": "% compliant",
+      "not_compared": "Not compared",
       "real_avg": "Actual average"
     },
     "histogram": {

@@ -176,11 +176,13 @@ describe('FloatingChatButton', () => {
       ['process-status'],
       ['results'],
       ['profile'],
+      ['export-levels'],
     ]);
     vi.unstubAllEnvs();
   });
 
-  it('invalidates exactly [sections] after a section generator', async () => {
+  it.each(['generate_sections_auto', 'generate_sections_manual', 'add_section_click'])(
+    'invalidates exactly the section-dependent keys after %s', async (name) => {
     vi.stubEnv('VITE_AI_CHAT', 'true');
     const captured: { client?: QueryClient } = {};
     renderWithProviders(
@@ -193,7 +195,7 @@ describe('FloatingChatButton', () => {
     useAIChat.getState().applyAgentEvent({
       type: 'tool_result',
       invocation_id: 'inv_s',
-      name: 'generate_sections_manual',
+      name,
       ok: true,
       summary: '2 secciones',
       duration_ms: 12,
@@ -202,7 +204,18 @@ describe('FloatingChatButton', () => {
     const invalidatedKeys = invalidateSpy.mock.calls.map(
       (call) => (call[0] as { queryKey: unknown }).queryKey,
     );
-    expect(invalidatedKeys).toEqual([['sections']]);
+    expect(invalidatedKeys).toEqual([
+      ['sections'],
+      ['results'],
+      ['profile'],
+      ['design-achievement'],
+      ['proposed-compliance'],
+      ['blast-correlation'],
+      ['blast-damage-model'],
+      ['horizontal-deviation-mesh'],
+      ['export-levels'],
+      ['process-status'],
+    ]);
     vi.unstubAllEnvs();
   });
 

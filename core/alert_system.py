@@ -75,7 +75,8 @@ def evaluate_bench_health(bench: BenchParams) -> List[Alert]:
     if bench.face_angle_inconsistent:
         alerts.append(Alert(
             'YELLOW', 'ANGLE_INCONSISTENT', bench.bench_number,
-            f'Ángulo de cara {bench.face_angle:.1f}° inconsistente con inter-ramp.',
+            f'Ángulo de cara {bench.face_angle:.1f}° difiere más de '
+            f'{STABILITY.face_angle_consistency_threshold_deg:.0f}° del diseño del banco.',
             'Verificar patrón de tronadura aplicado.',
             float(bench.face_angle),
         ))

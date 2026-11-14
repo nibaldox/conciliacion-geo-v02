@@ -55,6 +55,7 @@ from core.design_achievement import (
     build_design_achievement_summary,
     build_sector_achievement_summary,
 )
+from core.report_data import ReportFilters, filter_comparisons as _filter_report_comparisons
 
 logger = logging.getLogger(__name__)
 
@@ -639,9 +640,17 @@ async def get_status(request: Request):
 # ---------------------------------------------------------------------------
 
 
+def _with_nominal_levels(rows: List[dict]) -> List[dict]:
+    return _filter_report_comparisons(rows, ReportFilters())
+
+
 @router.get("/results")
 async def get_results(request: Request, section: Optional[str] = None):
     """Return all comparison results, optionally filtered by section.
+
+    Every row carries the additive key ``level_nominal`` (nominal level label
+    or ``None``), assigned over all rows of the session before the section
+    filter so it never depends on the requested subset.
 
     The SQLite read runs on the default executor so the event loop isn't
     blocked while the (potentially large) results table is fetched.
@@ -652,7 +661,14 @@ async def get_results(request: Request, section: Optional[str] = None):
         )
 
         def _fetch():
-            return db.get_results(session_id, section=section)
+            rows = _with_nominal_levels(db.get_results(session_id))
+            if not section:
+                return rows
+            return [
+                row
+                for row in rows
+                if row.get("section") is not None and str(row["section"]) == section
+            ]
 
         return await _run_in_executor(_fetch)
     except HTTPException:
@@ -1770,6 +1786,23 @@ _ACHIEVEMENT_ASSUMPTIONS = (
 )
 
 
+_ROW_INDEX_KEY = "__row_index__"
+
+
+def _rows_matching_levels(rows: List[dict], levels: List[str]) -> set:
+    tagged = []
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        tagged_row = dict(row)
+        if tagged_row.get("level") is None:
+            tagged_row["level"] = ""
+        tagged_row[_ROW_INDEX_KEY] = index
+        tagged.append(tagged_row)
+    kept = _filter_report_comparisons(tagged, ReportFilters(levels=tuple(levels)))
+    return {row[_ROW_INDEX_KEY] for row in kept}
+
+
 def _filter_comparisons(
     rows: List[dict],
     sectors: Optional[List[str]],
@@ -1783,16 +1816,25 @@ def _filter_comparisons(
     inside one dimension are ORed. An absent or empty dimension does not
     filter. ``''`` is a selectable value (rows without that field). Bench
     matches ``bench_num`` by its string form.
+
+    The level dimension follows ``core.report_data.filter_comparisons``: a
+    row matches when its nominal level label is selected; a selected value
+    that is not a nominal label of the row's sector is compared with the
+    exact ``level`` text. Nominal levels are assigned over ``rows`` as
+    passed in, so callers must pass the unfiltered session rows. The input
+    rows are returned as they are, without ``level_nominal``.
     """
     dimensions = (
         ("sector", sectors),
         ("section", sections),
-        ("level", levels),
         ("bench_num", benches),
     )
+    level_matches = _rows_matching_levels(rows, levels) if levels else None
     out: List[dict] = []
-    for row in rows:
+    for index, row in enumerate(rows):
         if not isinstance(row, dict):
+            continue
+        if level_matches is not None and index not in level_matches:
             continue
         keep = True
         for field, values in dimensions:

@@ -15,6 +15,7 @@ vi.mock('../../../api/hooks', () => ({
   useExportPdf: () => ({ isPending: false, isError: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
   useExportDxf: () => ({ isPending: false, isError: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
   useExportImages: () => ({ isPending: false, isError: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
+  useExportLevels: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
 
 vi.mock('react-i18next', () => ({

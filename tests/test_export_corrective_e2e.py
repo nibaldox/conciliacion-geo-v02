@@ -10,6 +10,9 @@ from core.blast_correlation import PF_DEFINITIONS
 from tests.test_excel_writer import _match_comp, _tolerances
 
 
+_WEB_BENCH_HEADERS = {'Cumpl. B': 'Estado berma', 'Estado berma efectiva': 'Estado berma efectiva'}
+
+
 def _text(data, kind):
     stream = io.BytesIO(data)
     if kind == "excel":
@@ -22,7 +25,7 @@ def _text(data, kind):
     return "\n".join(page.extract_text() for page in reader(stream).pages)
 
 
-@pytest.mark.parametrize("kind,legacy", [("excel", False), ("word", False), ("word", True), ("pdf", False), ("pdf", True)])
+@pytest.mark.parametrize("kind,legacy", [("excel", False), ("excel", True), ("word", False), ("word", True), ("pdf", False), ("pdf", True)])
 def test_corrective_exports_real_writers(api_test_client, monkeypatch, kind, legacy):
     import api.database as db
     from api.routers import export
@@ -37,7 +40,9 @@ def test_corrective_exports_real_writers(api_test_client, monkeypatch, kind, leg
     db.save_settings(sid, {"tolerances": _tolerances(), "blast_holes": [hole], "blast_upload_meta": {"consolidation_report": {"holes_out": 1, "exact_copies_removed": 2, "deck_rows_merged": 0}}})
     mesh = create_pit_surface(nx=12, ny=12)
     monkeypatch.setattr(export, "_load_mesh_from_db", lambda *args: mesh)
-    if legacy:
+    if legacy and kind == "excel":
+        monkeypatch.setattr(export, "_load_excel_builder", lambda: None)
+    elif legacy:
         monkeypatch.setattr(export, "build_word_report" if kind == "word" else "build_pdf_report", None)
     response = api_test_client.get(f"/api/v1/export/{kind}", headers={"X-Session-ID": sid}, params={"filters": '{"showBlastHoles":true}'})
     assert response.status_code == 200, response.text
@@ -53,8 +58,9 @@ def test_corrective_exports_real_writers(api_test_client, monkeypatch, kind, leg
         sheet = openpyxl.load_workbook(io.BytesIO(response.content))['Bancos']
         header = [cell.value for cell in sheet[1]]
         values = [cell.value for cell in sheet[2]]
-        assert values[header.index('Cumpl. B')] == 'CUMPLE'
-        assert values[header.index('Estado berma efectiva')] == 'NO CUMPLE'
+        names = _WEB_BENCH_HEADERS if not legacy else {}
+        assert values[header.index(names.get('Cumpl. B', 'Cumpl. B'))] == 'CUMPLE'
+        assert values[header.index(names.get('Estado berma efectiva', 'Estado berma efectiva'))] == 'NO CUMPLE'
     artifact_dir = os.environ.get("CORRECTIVE_REPORT_ARTIFACTS")
     if artifact_dir:
         suffix = {"excel": "xlsx", "word": "docx", "pdf": "pdf"}[kind]

@@ -13,30 +13,37 @@ Three operations live here:
   when the width falls in the ramp-detection range.
 """
 
+import math
+
 import numpy as np
 
 from core.blast_correlation import classify_berm_as_ramp
 from core.config import DETECTION
 
 
-def _extended_toe_distance(b):
-    """Calcula la distancia horizontal del toe extendido de un banco.
+def _extended_toe_point(b) -> tuple[float, float]:
+    """Return ``(distance, elevation)`` of the extended toe of a bench.
 
-    Si el banco tiene un ``floor_elevation`` más bajo que su ``toe_elevation``,
-    la cara se prolonga con su ``face_angle`` hasta llegar al piso. Esta
-    función retorna la posición horizontal donde esa prolongación termina.
-    Se usa para calcular el ancho de berm real entre bancos.
+    When the bench has a ``floor_elevation`` below its ``toe_elevation``, the
+    face is prolonged at ``face_angle`` down to that floor and the returned
+    point is where the prolongation ends. Otherwise the point is the toe
+    itself. Distance and elevation always belong to the same point.
     """
-    import math
-    floor_elev = getattr(b, 'floor_elevation', 0.0)
-    if floor_elev > 0 and floor_elev < b.toe_elevation:
+    toe_distance = float(b.toe_distance)
+    toe_elevation = float(b.toe_elevation)
+    floor_elev = float(getattr(b, 'floor_elevation', 0.0))
+    if 0 < floor_elev < toe_elevation:
         angle_rad = math.radians(float(b.face_angle))
         if angle_rad > 0.01:
-            delta_z = float(b.toe_elevation) - float(floor_elev)
             face_dir = 1.0 if b.toe_distance >= b.crest_distance else -1.0
-            delta_d = (delta_z / math.tan(angle_rad)) * face_dir
-            return float(b.toe_distance) + delta_d
-    return float(b.toe_distance)
+            delta_d = ((toe_elevation - floor_elev) / math.tan(angle_rad)) * face_dir
+            return toe_distance + delta_d, floor_elev
+    return toe_distance, toe_elevation
+
+
+def _extended_toe_distance(b) -> float:
+    """Return the horizontal distance of the extended toe of a bench."""
+    return _extended_toe_point(b)[0]
 
 
 def _is_ramp(d_start: float, d_end: float, e_start: float, e_end: float,
@@ -50,24 +57,44 @@ def _is_ramp(d_start: float, d_end: float, e_start: float, e_end: float,
 
 
 def _segment_is_ramp(d_start: float, d_end: float,
-                     e_start: float, e_end: float, width: float) -> bool:
+                     e_upper: float, e_lower: float, width: float) -> bool:
     """Classify the berm/ramp segment between two consecutive benches.
+
+    ``e_upper`` is the elevation where the segment leaves the upper bench
+    (its extended toe point) and ``e_lower`` the elevation where it reaches
+    the crest of the lower bench.
 
     A segment is a ramp when it falls in the classic ramp width band
     (:func:`classify_berm_as_ramp`) OR when it is a genuinely descending
-    gentle segment wide enough to be a ramp. The descent guard keeps flat
-    catch berms (toe of the upper bench ≈ crest of the lower bench) from
-    being mislabelled as ramps.
+    gentle segment wide enough to be a ramp. The descent is signed
+    (``e_upper - e_lower``): a ramp always goes down toward the lower
+    bench, so a segment that rises toward it never passes this rule, and
+    flat catch berms (toe of the upper bench ≈ crest of the lower bench)
+    are not mislabelled as ramps.
     """
     if classify_berm_as_ramp(width):
         return True
-    descent = abs(e_end - e_start)
+    descent = e_upper - e_lower
     if descent > DETECTION.ramp_min_descent_m and _is_ramp(
-            d_start, d_end, e_start, e_end,
+            d_start, d_end, e_upper, e_lower,
             min_width=DETECTION.ramp_narrow_min_width,
             max_slope_deg=DETECTION.ramp_max_slope_deg):
         return True
     return False
+
+
+def _ramp_segment_elevations(b_first, b_second) -> tuple[float, float]:
+    """Return ``(e_upper, e_lower)`` of the segment between two benches.
+
+    The upper bench is chosen by crest elevation, not by list order: the
+    extractor emits benches in profile-distance order, which is top-down
+    only when the profile descends with distance.
+    """
+    if float(b_second.crest_elevation) > float(b_first.crest_elevation):
+        upper, lower = b_second, b_first
+    else:
+        upper, lower = b_first, b_second
+    return _extended_toe_point(upper)[1], float(lower.crest_elevation)
 
 
 def _compute_berm_widths_from_profile(
@@ -113,10 +140,9 @@ def _compute_berm_widths_from_profile(
         b_next.berm_width = width
         b_next.effective_berm_width = float(max(width - b_curr.spill_width, 0.0))
 
+        e_upper, e_lower = _ramp_segment_elevations(b_curr, b_next)
         is_ramp_seg = _segment_is_ramp(
-            curr_right, next_left,
-            float(b_curr.toe_elevation), float(b_next.crest_elevation),
-            width,
+            curr_right, next_left, e_upper, e_lower, width,
         )
         b_next.is_ramp = is_ramp_seg
         b_next.ramp_segment = is_ramp_seg

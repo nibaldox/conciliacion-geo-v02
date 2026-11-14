@@ -49,6 +49,8 @@ def test_pdf_embeds_plan_as_an_image_instead_of_an_error_placeholder(monkeypatch
 
 
 def test_selected_benches_recalculate_report_plan_scores_without_mutating_session():
+    import copy
+
     from api.schemas import ExportFilters
     from core.reconciliation_summary import compute_section_scores
 
@@ -56,8 +58,18 @@ def test_selected_benches_recalculate_report_plan_scores_without_mutating_sessio
         {"section": "S-01", "type": "MATCH", "bench_num": 1, "bench_score": 100, "section_score": 50},
         {"section": "S-01", "type": "MATCH", "bench_num": 2, "bench_score": 0, "section_score": 50},
     ]
-    selected = export_router._filter_comparisons(rows, ExportFilters(selected_bench_numbers=[1]))
+    stored = copy.deepcopy(rows)
+
+    def export_rows(filters):
+        return export_router._export_rows(rows, export_router._report_filters(filters))
+
+    selected = export_rows(ExportFilters(selected_bench_numbers=[1]))
+    assert [row["bench_num"] for row in selected] == [1]
     assert compute_section_scores(selected, prefer_canonical=True) == {"S-01": 100}
     assert selected[0]["section_score"] == 100
-    assert rows[0]["section_score"] == 50
-    assert export_router._filter_comparisons(rows, ExportFilters()) == rows
+    assert rows == stored
+
+    unfiltered = export_rows(ExportFilters())
+    assert [(row["bench_num"], row["section_score"]) for row in unfiltered] == [(1, 50), (2, 50)]
+    assert all(out is not row for out, row in zip(unfiltered, rows))
+    assert rows == stored

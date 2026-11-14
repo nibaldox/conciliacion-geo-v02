@@ -39,8 +39,13 @@ function renderWith(ui: ReactElement, qc: QueryClient) {
   );
 }
 
+function exportCalls(): unknown[][] {
+  return mockGet.mock.calls.filter((call) => call[0] !== '/export/levels');
+}
+
 function lastGetCallArgs(): { url: string; config: { params: Record<string, string> } } {
-  const last = mockGet.mock.calls[mockGet.mock.calls.length - 1];
+  const calls = exportCalls();
+  const last = calls[calls.length - 1];
   if (!last) throw new Error('client.get was never called');
   return { url: last[0] as string, config: last[1] as { params: Record<string, string> } };
 }
@@ -78,7 +83,7 @@ describe('ExportPanel — session filters, filename and applied-filters note', (
 
     await user.click(screen.getByRole('button', { name: 'Exportar Word' }));
 
-    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(exportCalls()).toHaveLength(1));
     const { config } = lastGetCallArgs();
     const filters = JSON.parse(config.params.filters);
     expect(filters.sector).toEqual(['A']);
@@ -174,7 +179,7 @@ describe('ExportPanel — session filters, filename and applied-filters note', (
 
     await user.click(screen.getByRole('button', { name: 'Exportar Word' }));
 
-    await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(exportCalls()).toHaveLength(1));
     expect(screen.queryByTestId('export-applied-filters')).not.toBeInTheDocument();
   });
 
@@ -196,14 +201,14 @@ describe('ExportPanel — session filters, filename and applied-filters note', (
     expect(mockGet).not.toHaveBeenCalled();
   });
 
-  it('keeps exports available when demoMode remains true but the session has real mesh IDs', () => {
+  it('keeps exports available when demoMode remains true but the session has real mesh IDs', async () => {
     useSession.setState({ demoMode: true, designMeshId: 'real-design-id', topoMeshId: 'real-topo-id' });
 
     renderWith(<ExportPanel />, qc);
 
     expect(screen.queryByTestId('export-demo-notice')).not.toBeInTheDocument();
-    for (const button of screen.getByTestId('export-actions').querySelectorAll('button')) {
-      expect(button).toBeEnabled();
-    }
+    await waitFor(() => {
+      for (const button of screen.getByTestId('export-actions').querySelectorAll('button')) expect(button).toBeEnabled();
+    });
   });
 });

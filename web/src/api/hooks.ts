@@ -1,3 +1,4 @@
+import { SECTION_DEPENDENT_QUERY_KEYS } from '../stores/aiChat';
 import { useQuery, useQueries, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import client, { getSessionId } from './client';
@@ -63,17 +64,6 @@ function uploadTimeoutMs(fileSizeBytes: number): number {
 function isDemoMeshId(meshId: string | null | undefined): boolean {
   return meshId === DEMO_MESH_IDS.design || meshId === DEMO_MESH_IDS.topo;
 }
-
-const SECTION_DEPENDENT_QUERY_KEYS: ReadonlyArray<ReadonlyArray<string>> = [
-  ['sections'],
-  ['results'],
-  ['profile'],
-  ['design-achievement'],
-  ['proposed-compliance'],
-  ['blast-correlation'],
-  ['blast-damage-model'],
-  ['horizontal-deviation-mesh'],
-];
 
 export function invalidateSectionDependents(qc: QueryClient): void {
   const { demoMode, demoData, designMeshId } = useSession.getState();
@@ -410,6 +400,7 @@ export function useProcess() {
       qc.invalidateQueries({ queryKey: ['process-status'] });
       qc.invalidateQueries({ queryKey: ['results'] });
       qc.invalidateQueries({ queryKey: ['profile'] });
+      qc.invalidateQueries({ queryKey: ['export-levels'] });
     },
   });
 }
@@ -519,6 +510,7 @@ export function useUpdateReconciled() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['profile', vars.sectionId] });
       qc.invalidateQueries({ queryKey: ['results'] });
+      qc.invalidateQueries({ queryKey: ['export-levels'] });
     },
   });
 }
@@ -856,6 +848,26 @@ export interface ExportFilters {
   sector: string[];
   section: string[];
   level: string[];
+  levelsBySector?: Record<string, string[]>;
+}
+
+export interface ExportLevel {
+  label: string;
+  elevation: number;
+  min_level: number;
+  max_level: number;
+  n_sections: number;
+  n_rows: number;
+}
+
+export interface ExportSectorLevels {
+  sector: string;
+  levels: ExportLevel[];
+}
+
+export interface ExportLevelsResponse {
+  sectors: ExportSectorLevels[];
+  warnings: string[];
 }
 
 export interface ExportProjectInfo {
@@ -938,7 +950,18 @@ export function useExportDxf() {
   return useExportMutation('/export/dxf', 'Perfiles_3D.dxf', false);
 }
 export function useExportImages() {
-  return useExportMutation('/export/images', 'Secciones_Imagenes.zip', false);
+  return useExportMutation('/export/images', 'Secciones_Imagenes.zip');
+}
+
+export function useExportLevels() {
+  const { demoMode, designMeshId, topoMeshId } = useSession();
+  const hasDemoMesh = isDemoMeshId(designMeshId) || isDemoMeshId(topoMeshId);
+  return useQuery<ExportLevelsResponse>({
+    queryKey: ['export-levels', demoMode, designMeshId, topoMeshId],
+    queryFn: () => client.get<ExportLevelsResponse>('/export/levels').then((r) => r.data),
+    enabled: !hasDemoMesh,
+    retry: false,
+  });
 }
 
 // ─── Settings ──────────────────────────────────────────────
