@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAIChat, WRITE_TOOL_QUERY_KEYS } from '../../stores/aiChat';
 import { ChatPanel } from './ChatPanel';
 import { ChatPet } from './ChatPet';
+import { usePetState } from './petState';
 
 /**
  * Build-time feature flag for the whole chat UI. When VITE_AI_CHAT is
@@ -50,6 +51,7 @@ export function FloatingChatButton() {
   const [open, setOpen] = useState(false);
   const [choreo, setChoreo] = useState<'opening' | 'closing' | null>(null);
   const [unread, setUnread] = useState(false);
+  const petState = usePetState({ unread });
   const streaming = useAIChat((s) => s.streaming);
   const messages = useAIChat((s) => s.messages);
   const agentMessageCount = messages.reduce(
@@ -112,7 +114,7 @@ export function FloatingChatButton() {
                 : ''
           }`}
         >
-          <ChatPet streaming={streaming} />
+          <ChatPet state={petState} trackPointer={!open} />
           {unread && (
             <span
               data-testid="ai-chat-pet-unread"

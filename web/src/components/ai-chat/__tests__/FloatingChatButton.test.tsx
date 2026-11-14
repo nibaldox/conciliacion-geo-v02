@@ -242,3 +242,14 @@ describe('FloatingChatButton', () => {
     vi.unstubAllEnvs();
   });
 });
+
+
+it('reflects the active turn and confirmation in the launcher', () => {
+  vi.stubEnv('VITE_AI_CHAT', 'true');
+  renderWithProviders(<FloatingChatButton />);
+  act(() => useAIChat.setState({ streaming: true }));
+  expect(screen.getByTestId('ai-chat-pet').closest('.ai-pet')).toHaveAttribute('data-state', 'thinking');
+  act(() => useAIChat.setState({ pendingConfirmation: { invocationId: '1', name: 'tool', argsSummary: '' } }));
+  expect(screen.getByTestId('ai-chat-pet').closest('.ai-pet')).toHaveAttribute('data-state', 'confirm');
+  vi.unstubAllEnvs();
+});

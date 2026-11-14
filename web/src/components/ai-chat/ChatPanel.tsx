@@ -12,6 +12,8 @@ import {
   type ChatModelSelection,
 } from '../../utils/chatModelSelection';
 import { Spinner } from '../ui/Spinner';
+import { ChatPet } from './ChatPet';
+import { usePetState } from './petState';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TopoUploadZone } from './TopoUploadZone';
 import { ConfirmationCard, ToolCallCard } from './ToolCallCard';
@@ -207,6 +209,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
   const { t } = useTranslation();
   const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
+  const petState = usePetState({ unread: false });
   const streaming = useAIChat((s) => s.streaming);
   const sendInFlight = useAIChat((s) => s.sendInFlight);
   const clearing = useAIChat((s) => s.clearing);
@@ -343,9 +346,10 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
     >
       <header className="shrink-0 border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">
-            {t('aiChat.title')}
-          </h2>
+          <div className="flex shrink-0 items-center gap-2">
+            <ChatPet size="inline" state={petState} trackPointer={false} />
+            <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">{t('aiChat.title')}</h2>
+          </div>
           <button
             type="button"
             data-testid="ai-chat-close"
@@ -576,7 +580,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
             data-testid="ai-chat-streaming-indicator"
             className="flex items-center gap-2 text-xs text-text-muted"
           >
-            <Spinner size="sm" />
+            <ChatPet size="inline" state={petState} trackPointer={false} />
             {t('aiChat.messages.streaming')}
           </div>
         )}

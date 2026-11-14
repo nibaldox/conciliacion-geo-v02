@@ -228,7 +228,10 @@ describe('ChatPanel — busy controls while the agent streams', () => {
 
     await userEvent.type(input, 'hola');
     await userEvent.click(screen.getByTestId('ai-chat-send'));
-    await screen.findByTestId('ai-chat-streaming-indicator');
+    const indicator = await screen.findByTestId('ai-chat-streaming-indicator');
+    expect(indicator.querySelector('.ai-pet--inline')).not.toBeNull();
+    expect(indicator.querySelector('.ai-pet')).toHaveAttribute('data-state', 'thinking');
+    expect(screen.getByRole('heading', { name: /asistente/i }).parentElement?.querySelector('.ai-pet--inline')).not.toBeNull();
 
     expect(screen.getByTestId('ai-chat-clear')).toBeDisabled();
     expect(screen.getByTestId('ai-chat-model-select')).toBeDisabled();
