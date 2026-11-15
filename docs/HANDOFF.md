@@ -1,5 +1,71 @@
 # Continuidad para agentes de codificación
 
+## Agente de IA, ola 2 — 15 de noviembre de 2026
+
+Estado: ola 2 del agente conversacional **verificada localmente**, en la rama `feat/ai-agent-wave2` con **7 commits locales sin push** (6 de código y 1 de documentación). La rama está rebasada sobre `origin/main` `e8b4c2d` (PR #48), sin archivos en común con esa integración. Pendiente la validación con el modelo en vivo, la revisión del usuario en la instancia, el push y la PR.
+
+| Commit | Contenido |
+|---|---|
+| `7faa214` | Reprocesar respeta la configuración guardada |
+| `e6e92fb` | Tolerancias y exportación con filtros |
+| `a2b4f9a` | Memoria y contexto de pantalla |
+| `bc35611` | Tronadura de solo lectura |
+| `a4a147a` | Editar, borrar y generar secciones por curva |
+| `e79b570` | Correcciones de la revisión adversarial |
+
+**Alcance**
+
+- El agente pasa de 14 a **21 herramientas**. Nuevas: `get_settings`, `get_blast_summary`, `get_blast_correlation`, `get_blast_damage_model`, `update_section`, `delete_section` y `generate_sections_curve`.
+- `export_report` admite `sector`, `section`, `levels_by_sector`, `project` y `author`.
+- `query_results` agrega `nominal_levels` y `levels_truncated`.
+- `POST /ai/chat` acepta `ui_context.selected_section_id`.
+- Compactación del historial a 48.000 caracteres.
+
+**Contrato**
+
+- El evento `tool_result` tiene el campo opcional `download`.
+- Bermas: cumplimiento solo con mínimo. CUMPLE si el ancho real es ≥ `min`; NO CUMPLE si es menor; no hay banda FUERA DE TOLERANCIA.
+- Estado de densidad en tronadura: `SAVED` o `DEFAULT`.
+- `add_section_click` pide confirmación cuando ya hay resultados.
+- La confirmación muestra los parámetros.
+
+**Verificación** (última ejecución del coordinador)
+
+- Backend: 4.960 aprobadas y 2 omitidas, con `CONCILIACION_DATA_DIR` vacío y `MemoryMax=6G`.
+- `test_pipeline.py`: OK.
+- Vitest: 1.754/1.754 en 152 archivos.
+- `tsc -b`, lint (0 errores; 1 advertencia preexistente) y build: OK (medido sobre la rama rebasada en `e8b4c2d`).
+- Revisión adversarial G3 con dos lentes: REQUEST_CHANGES (1 ALTA y 8 MEDIA en total). Todos los hallazgos se adoptaron y se cerraron en `e79b570`.
+
+**Datos reales**
+
+Sesión con `f12b_v2.2.stl` y `TOPO_NOVIEMBRE_021126_relimit.stl`:
+
+- `query_results`: 3.989 B; 28 cotas nominales, iguales a `GET /export/levels`.
+- Score ponderado: 37,44, igual al dashboard.
+- Exportación Excel, sector Norte, cotas 3065 y 3050: 11 bancos.
+
+Tronadura con `enaex_pozos_tronadura_2026.xlsx` (14.204 pozos tras consolidación):
+
+- Resumen: 848 B.
+- Correlación: filas idénticas al REST en 10 secciones (S-03: 35 pozos, 135,3 g/t).
+- Modelo de daño: 0 puntos.
+
+**Pendiente**
+
+- Validación en vivo con el modelo (G2): el host de LM Studio `192.168.100.169` no respondió el 15 de noviembre.
+- Revisión del usuario en la instancia.
+- Push y PR.
+
+**Registrado, sin corregir**
+
+- URL de exportación larga detrás de un proxy de 8 KB.
+- Inyección de fórmulas en Excel por REST (preexistente).
+- 14 errores `fixture 'client' not found`, solo si se ejecutan juntos `tests/api/test_settings.py` y `tests/api/test_ai_agent_chat.py` en una invocación parcial; la suite completa pasa.
+- Hallazgos R5 de núcleo de tronadura: agregado de densidad por defecto, etiqueta de `bench_height_source` y nombre `energy_coverage_kg_fraction`.
+- La selección de plano del dashboard (estado local en `Dashboard.tsx`) no llega a `ui_context` del chat.
+- `length_up` y `length_down` no pueden volver a automático desde el agente.
+
 ## Rediseño de informes — 14 de noviembre de 2026
 
 Estado en [REPORT_REDESIGN_HANDOFF.md](REPORT_REDESIGN_HANDOFF.md): rama `feat/report-redesign` con diez commits locales sin push sobre `c229d6f`; exportaciones web rediseñadas y verificadas. Pendiente la revisión del usuario en el navegador y la decisión de reprocesar la sesión real. La tabla al pie de la página con seis perfiles es obligatoria.

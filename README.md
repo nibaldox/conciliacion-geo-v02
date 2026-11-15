@@ -308,6 +308,16 @@ El 3 de noviembre se añadieron pruebas de selección y filtros de perfil; la su
 
 Tras el rediseño inicial de informes, se ejecutaron **167 pruebas** de datos, gráficos, Word, PDF y exportación, usando pypdf del runtime incluido para verificar extracción del PDF. La revisión visual cubrió un PDF sintético; la paginación de Word y la validación con datos reales siguen pendientes.
 
+### Verificación local — 15 de noviembre de 2026
+
+Ola 2 del agente de IA en la rama `feat/ai-agent-wave2`; no es validación con el modelo en vivo.
+
+| Validación | Resultado ejecutado | Alcance |
+|---|---|---|
+| Backend | 4.960 aprobadas, 2 omitidas | Python 3.14; `MemoryMax=6G` sin swap; `pytest tests/ -q --ignore=tests/test_openblast.py`; `test_pipeline.py` OK |
+| Frontend | 1.754 aprobadas en 152 archivos | vitest |
+| TypeScript / ESLint / build | Aprobados | `npx tsc -b`; ESLint con la advertencia preexistente en `e2e/blast-colors.spec.ts`; `npm run build` OK |
+
 ### Verificación local — 8 de noviembre de 2026
 
 Cierre técnico de la rama `feat/tronadura-auditable` (olas correctivas de Tronadura auditables, medición guiada por diseño y propuesta de cumplimiento en validación). Los números de la propuesta provienen de una copia reprocesada de la sesión real `c83435ee`, no de la base del usuario. **No es validación operacional.**
