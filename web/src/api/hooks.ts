@@ -924,8 +924,8 @@ function useExportMutation(endpoint: string, defaultFilename: string, withParams
   return useMutation<ExportResult, Error, ExportProjectInfo | void>({
     mutationFn: (params?: ExportProjectInfo | void) => {
       const config = withParams
-        ? { params: buildExportQuery(params as ExportProjectInfo | undefined), responseType: 'blob' as const }
-        : { responseType: 'blob' as const };
+        ? { params: buildExportQuery(params as ExportProjectInfo | undefined), responseType: 'blob' as const, timeout: 600000 }
+        : { responseType: 'blob' as const, timeout: 600000 };
       return client.get(endpoint, config).then(r => {
         const disposition = readHeader(r.headers, 'content-disposition');
         const filename = filenameFromDisposition(disposition, defaultFilename);

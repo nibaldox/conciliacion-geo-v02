@@ -1,4 +1,18 @@
 {
+  "recentSessions": {
+    "button": "Sessions",
+    "title": "Recent sessions",
+    "current": "Current",
+    "open": "Open",
+    "sections_one": "{{count}} section",
+    "sections_other": "{{count}} sections",
+    "results_one": "{{count}} result",
+    "results_other": "{{count}} results",
+    "expires": "Deleted on {{date}} if unused",
+    "retention": "Sessions are kept {{days}} days after their last use.",
+    "empty": "No saved sessions with loaded surfaces.",
+    "error": "Could not load the session list."
+  },
   "app": {
     "title": "Geotechnical Reconciliation",
     "tagline": "Design vs As-Built",
@@ -1463,8 +1477,8 @@
       "status_no_cumple": "Fail",
       "status_unknown": "No data",
       "parameters": "Compliance by parameter",
-      "denominator": "Percentage of all benches, including other statuses and missing data.",
-      "bar_counts": "Pass: {{ok}}; outside: {{warn}}; fail: {{nok}}; other or no data: {{unknown}}",
+      "denominator": "Percentage over compared benches ({{n}}); unbuilt and extra benches are not counted.",
+      "bar_counts": "Pass: {{ok}}; outside: {{warn}}; fail: {{nok}}; no evaluable data: {{unknown}}",
       "selected": "Selected section",
       "score": "Score",
       "status": "Status",

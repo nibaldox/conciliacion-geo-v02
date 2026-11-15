@@ -15,6 +15,10 @@ describe('dashboard selectors', () => {
     expect(summary?.status).toBe('CUMPLE');
     expect(sectionSummary(rows, 'absent', new Map())).toBeNull();
   });
+  it('excludes unmatched rows from parameter counts', () => {
+    const bars = parameterBars([row({ height_status: 'CUMPLE' }), row({ type: 'MISSING', height_status: 'NO CUMPLE' }), row({ type: 'EXTRA', height_status: 'CUMPLE' })]);
+    expect(bars[0]).toEqual({ parameter: 'height', ok: 1, warn: 0, nok: 0, unknown: 0 });
+  });
   it('counts parameter status tiers including unknown and special values', () => {
     const bars = parameterBars([row({ height_status: 'CUMPLE' }), row({ height_status: ' FUERA DE TOLERANCIA ' }), row({ height_status: 'NO CUMPLE' }), row({ height_status: '-' }), row({ height_status: 'NO CONSTRUIDO' })]);
     expect(bars[0]).toEqual({ parameter: 'height', ok: 1, warn: 1, nok: 1, unknown: 2 });

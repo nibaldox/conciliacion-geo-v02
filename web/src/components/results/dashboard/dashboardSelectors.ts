@@ -14,7 +14,7 @@ export function parameterTone(raw: string | null | undefined): ParameterTone {
 export function parameterBars(rows: readonly ComparisonResult[]) {
   return (['height', 'angle', 'berm'] as const).map((parameter) => {
     const counts = { parameter, ok: 0, warn: 0, nok: 0, unknown: 0 };
-    for (const row of rows) counts[parameterTone(row[`${parameter}_status`])]++;
+    for (const row of rows.filter((row) => row.type === 'MATCH')) counts[parameterTone(row[`${parameter}_status`])]++;
     return counts;
   });
 }
