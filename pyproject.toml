@@ -8,6 +8,7 @@ version = "0.2.0"
 description = "Herramienta para conciliación geotécnica de taludes en minería a cielo abierto"
 requires-python = ">=3.10"
 dependencies = [
+    "tzdata>=2024.1",
     "trimesh",
     "fast_simplification",
     "numpy",

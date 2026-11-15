@@ -1,6 +1,8 @@
 """Centralized configuration defaults for the geotechnical pipeline."""
 
 import math
+import logging
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Optional
@@ -53,6 +55,27 @@ def _env_max_upload_mb(name: str, default: int = 500, ceiling: int = 10240) -> i
     if value < 1 or value > ceiling:
         return default
     return value
+
+
+_DEFAULT_REPORT_TIMEZONE = "America/Santiago"
+
+
+def _report_timezone_name() -> str:
+    name = os.environ.get("CONCILIACION_TIMEZONE", _DEFAULT_REPORT_TIMEZONE)
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        logging.getLogger(__name__).warning("Invalid report timezone %r; using %s", name, _DEFAULT_REPORT_TIMEZONE)
+        return _DEFAULT_REPORT_TIMEZONE
+    return name
+
+
+def report_tz() -> ZoneInfo:
+    try:
+        return ZoneInfo(DEPLOY.report_timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        logging.getLogger(__name__).warning("Invalid report timezone %r; using %s", DEPLOY.report_timezone, _DEFAULT_REPORT_TIMEZONE)
+        return ZoneInfo(_DEFAULT_REPORT_TIMEZONE)
 
 
 @dataclass(frozen=True)
@@ -135,6 +158,10 @@ class DeployDefaults:
     (Supabase, R2, auth) default to False so enabling them requires
     an explicit decision.
     """
+    report_timezone: str = field(default_factory=_report_timezone_name)
+    session_ttl_days: int = field(default_factory=lambda: _env_int("CONCILIACION_SESSION_TTL_DAYS", 30) if _env_int("CONCILIACION_SESSION_TTL_DAYS", 30) > 0 else 30)
+    session_list_enabled: bool = field(default_factory=lambda: _env_bool("CONCILIACION_SESSION_LIST_ENABLED", False))
+
     # Logging
     log_level: str = field(default_factory=lambda: os.environ.get("CONCILIACION_LOG_LEVEL", "INFO"))
     log_format: str = field(default_factory=lambda: os.environ.get("CONCILIACION_LOG_FORMAT", "plain"))

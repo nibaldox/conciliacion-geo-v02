@@ -39,6 +39,7 @@ from core import (
     export_results,
     generate_word_report,
 )
+from core.config import report_tz
 from core.report_data import ReportData, ReportFilters, build_report_data, filter_comparisons
 from core.report_levels import BENCH_TYPES, assign_nominal_levels
 from core.section_cutter import azimuth_to_direction
@@ -410,7 +411,7 @@ def _report_meta(
         "author": author or "",
         "operation": operation or "",
         "phase": phase or "",
-        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "generated_at": datetime.now(report_tz()).isoformat(timespec="seconds"),
         "design_filename": design_mesh.get("filename", ""),
         "topo_filename": topo_mesh.get("filename", ""),
         "process": settings.get("process") or {},
@@ -490,7 +491,7 @@ def _current_sector_heatmap(
         timestamp = datetime.fromisoformat(chosen["created_at"])
         if timestamp.tzinfo is None:
             timestamp = timestamp.replace(tzinfo=timezone.utc)
-        computed_at_text = timestamp.astimezone().strftime("%d/%m/%Y %H:%M")
+        computed_at_text = timestamp.astimezone(report_tz()).strftime("%d/%m/%Y %H:%M")
     except (TypeError, ValueError):
         computed_at_text = None
     return {
@@ -876,7 +877,7 @@ def _build_legacy_excel_payload_sync(
         "author": author or "",
         "operation": operation or "",
         "phase": phase or "",
-        "date": __import__("datetime").datetime.now().strftime("%d/%m/%Y"),
+        "date": datetime.now(report_tz()).strftime("%d/%m/%Y"),
     }
 
     import inspect

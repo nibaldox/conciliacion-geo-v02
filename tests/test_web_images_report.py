@@ -254,7 +254,7 @@ class TestPlanAndMatrix:
         archive = _zip(build_images_zip(data))
 
         assert archive.read("plano.png") == PNG_SIGNATURE + b"plan"
-        assert captured["sections"] is data.plan_inputs["sections"]
+        assert [s["name"] for s in captured["sections"]] == [s.name for s in data.plan_inputs["sections"]]
         assert captured["statuses"] == {"S-01": "CUMPLE", "S-02": "NO_CUMPLE", "S-03": "CUMPLE"}
         assert captured["surface"] is not None
         shade, extent = captured["shade"]
@@ -335,7 +335,7 @@ class TestReadme:
     def test_scope_lines_without_filters(self):
         readme = _readme(_zip(build_images_zip(_data())))
         assert "Proyecto Demo" in readme
-        assert "2026-11-14T10:20:30" in readme
+        assert "14/11/2026 10:20" in readme
         assert "Solo valores oficiales" in readme
         assert "Sin filtros" in readme
         assert "Cota nominal" in readme

@@ -554,10 +554,8 @@ def _new_section(doc, landscape: bool):
 
 
 def _plan_sections(data: ReportData) -> Sequence[Any]:
-    plan_inputs = data.plan_inputs
-    if not isinstance(plan_inputs, Mapping):
-        return ()
-    return plan_inputs.get("sections") or ()
+    from core.web_pdf_report import _plan_sections as resolve_plan_sections
+    return resolve_plan_sections(data)
 
 
 def _plan_backdrop(data: ReportData):
