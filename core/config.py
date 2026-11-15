@@ -186,6 +186,7 @@ class DeployDefaults:
     process_threads: int = field(default_factory=lambda: _env_int("CONCILIACION_PROCESS_THREADS", 4) if _env_int("CONCILIACION_PROCESS_THREADS", 4) > 0 else 4)
     process_concurrency: int = field(default_factory=lambda: _env_int("CONCILIACION_PROCESS_CONCURRENCY", 2) if _env_int("CONCILIACION_PROCESS_CONCURRENCY", 2) > 0 else 2)
     data_dir: str = field(default_factory=lambda: os.environ.get("CONCILIACION_DATA_DIR", ""))
+    sqlite_busy_timeout_s: float = 30.0
 
 
 def _env_free_ratio(name: str, default: float) -> float:

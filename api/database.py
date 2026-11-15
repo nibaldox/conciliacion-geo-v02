@@ -29,7 +29,7 @@ DB_PATH = _DATA_DIR / "conciliacion.db"
 def get_connection() -> sqlite3.Connection:
     """Get a connection to the SQLite database."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=DEPLOY.sqlite_busy_timeout_s)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")

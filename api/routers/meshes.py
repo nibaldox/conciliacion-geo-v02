@@ -1019,6 +1019,7 @@ async def upload_mesh(
         }
         n_vertices = len(mesh.vertices)
         n_faces = len(mesh.faces)
+        mesh._cache.clear()
 
         session_id = await run_db(db.get_or_create_session, get_session_id(request))
         mesh_id = await run_db(
@@ -1110,6 +1111,7 @@ async def confirm_dxf(request: Request, body: DxfImportConfirmation):
         )
         raw_bounds = get_mesh_bounds(mesh)
         clean_bounds = {key: raw_bounds[key] for key in ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")}
+        mesh._cache.clear()
         other_type = "topo" if pending["type"] == "design" else "design"
         other_mesh = await run_db(db.get_mesh, session_id, other_type)
         if other_mesh is not None:
