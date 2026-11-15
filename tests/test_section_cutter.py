@@ -582,3 +582,56 @@ class TestGenerateSectionsAlongCrestEdgeCases:
         )
         assert len(sections) == 1
         np.testing.assert_allclose(sections[0].origin, [250.0, 250.0], atol=1e-6)
+
+
+def _assert_indexed_matches_full(monkeypatch, mesh, sections):
+    import dataclasses
+    import core.section_cutter as cutter
+    from core.config import SECTION_INDEX
+    for section in sections:
+        monkeypatch.setattr(cutter, "SECTION_INDEX", dataclasses.replace(SECTION_INDEX, min_faces=10**9))
+        full = cutter.cut_mesh_with_section_diagnostics(mesh, section)
+        monkeypatch.setattr(cutter, "SECTION_INDEX", dataclasses.replace(SECTION_INDEX, min_faces=0))
+        indexed = cutter.cut_mesh_with_section_diagnostics(mesh, section)
+        assert indexed.warnings == full.warnings
+        assert (indexed.profile is None) == (full.profile is None)
+        if full.profile is not None:
+            assert np.array_equal(indexed.profile.distances, full.profile.distances)
+            assert np.array_equal(indexed.profile.elevations, full.profile.elevations)
+
+
+def test_indexed_matches_pit_fixtures(monkeypatch, pit_mesh_design, pit_mesh_asbuilt, sample_sections):
+    import core.section_cutter as cutter
+    sections = list(sample_sections) + [
+        cutter.SectionLine(str(a), np.array([245., 253., 0.]), a, 200, length_up=130, length_down=70)
+        for a in (0, 45, 90, 137, 270)
+    ] + [cutter.SectionLine("outside", np.array([2000., 2000., 0.]), 45, 20)]
+    for mesh in (pit_mesh_design, pit_mesh_asbuilt):
+        _assert_indexed_matches_full(monkeypatch, mesh, sections)
+
+
+def test_default_indexed_large_mesh(monkeypatch, pit_mesh_design):
+    import core.section_cutter as cutter
+    from core.config import SECTION_INDEX
+    mesh = pit_mesh_design.subdivide()
+    assert len(mesh.faces) > 50000
+    section = cutter.SectionLine("large", np.array([249., 251., 0.]), 137, 220)
+    import dataclasses
+    monkeypatch.setattr(cutter, "SECTION_INDEX", dataclasses.replace(SECTION_INDEX, min_faces=10**9))
+    full = cutter.cut_mesh_with_section_diagnostics(mesh, section)
+    monkeypatch.setattr(cutter, "SECTION_INDEX", SECTION_INDEX)
+    indexed = cutter.cut_mesh_with_section_diagnostics(mesh, section)
+    assert indexed.warnings == full.warnings
+    assert (indexed.profile is None) == (full.profile is None)
+    if full.profile is not None:
+        assert np.array_equal(indexed.profile.distances, full.profile.distances)
+        assert np.array_equal(indexed.profile.elevations, full.profile.elevations)
+    assert mesh._cache["conciliacion_face_grid"] is not None
+
+
+def test_index_failure_falls_back(monkeypatch, pit_mesh_design):
+    import core.section_cutter as cutter
+    def fail(mesh):
+        raise RuntimeError("index failed")
+    monkeypatch.setattr(cutter, "get_face_grid_index", fail)
+    _assert_indexed_matches_full(monkeypatch, pit_mesh_design, [cutter.SectionLine("fallback", np.array([245., 253., 0.]), 45, 200)])

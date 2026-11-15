@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from typing import List, Optional
 import trimesh
 
+from core.config import SECTION_INDEX
+from core.section_index import candidate_faces, get_face_grid_index
+
 
 @dataclass
 class SectionLine:
@@ -59,9 +62,30 @@ def cut_mesh_with_section_diagnostics(
     plane_normal = np.array([direction[1], -direction[0], 0.0])
     plane_origin = np.array([section.origin[0], section.origin[1], 0.0])
 
+    cut_mesh = mesh
+    if len(mesh.faces) >= SECTION_INDEX.min_faces:
+        try:
+            if getattr(section, 'length_up', None) is not None and getattr(section, 'length_down', None) is not None:
+                lower = -float(section.length_down)
+                upper = float(section.length_up)
+            else:
+                lower = -float(section.length) / 2.0
+                upper = float(section.length) / 2.0
+            a = section.origin[:2] + lower * direction[:2]
+            b = section.origin[:2] + upper * direction[:2]
+            idx = candidate_faces(get_face_grid_index(mesh), a, b, SECTION_INDEX.pad_m)
+            if len(idx) == 0:
+                return ProfileCutDiagnostics(None, ("no_section_intersection",))
+            faces = np.asarray(mesh.faces)
+            vertices = np.asarray(mesh.vertices)
+            uv, inv = np.unique(faces[idx], return_inverse=True)
+            cut_mesh = trimesh.Trimesh(vertices=vertices[uv], faces=inv.reshape(-1, 3), process=False)
+        except Exception:
+            cut_mesh = mesh
+
     try:
         lines = trimesh.intersections.mesh_plane(
-            mesh, plane_normal, plane_origin
+            cut_mesh, plane_normal, plane_origin
         )
     except (ValueError, np.linalg.LinAlgError, AttributeError):
         return ProfileCutDiagnostics(None, ("section_cut_error",))

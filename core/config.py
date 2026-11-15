@@ -511,3 +511,13 @@ DRILL_HARDNESS = DrillHardnessDefaults()
 HORIZONTAL_DEVIATION = HorizontalDeviationDefaults()
 BACKBREAK = BackbreakDefaults()
 SIMULATION = SimulationDefaults()
+
+
+@dataclass(frozen=True)
+class SectionIndexDefaults:
+    cell_size_m: float = 5.0
+    min_faces: int = 50_000
+    pad_m: float = 1.0
+
+
+SECTION_INDEX = SectionIndexDefaults()
