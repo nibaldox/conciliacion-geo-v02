@@ -8,6 +8,7 @@ import api.database as db
 import api.routers.export as export
 import api.routers.meshes as meshes
 from api.schemas import ExportFilters
+from core.config import report_tz
 
 
 @pytest.mark.parametrize('endpoint,builder', [('word', '_build_word_payload_sync'), ('pdf', '_build_pdf_payload_sync'), ('images', '_build_images_zip_sync')])
@@ -37,7 +38,7 @@ def test_computation_timestamp_is_local_text(monkeypatch, tmp_path):
     monkeypatch.setattr(meshes, 'horizontal_deviation_section_stations', lambda *args: ([], []))
     result = export._current_heatmaps(sid, [''])[0][0]
     from datetime import datetime, timezone
-    expected = datetime.fromisoformat(result['created_at']).replace(tzinfo=timezone.utc).astimezone().strftime('%d/%m/%Y %H:%M')
+    expected = datetime.fromisoformat(result['created_at']).replace(tzinfo=timezone.utc).astimezone(report_tz()).strftime('%d/%m/%Y %H:%M')
     assert result['computed_at_text'] == expected
 
 
