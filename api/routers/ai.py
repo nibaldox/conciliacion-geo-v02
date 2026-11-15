@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import unicodedata
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -728,6 +729,7 @@ def _ndjson_response(
 
 
 _UI_CONTEXT_FORBIDDEN_CHARS = frozenset("\r\n[]«»")
+_UI_CONTEXT_FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Co", "Cs"})
 _UI_CONTEXT_MAX_CHARS = 4200
 _UI_CONTEXT_SECTION_HEAD = "sección seleccionada «"
 
@@ -753,6 +755,22 @@ def _screen_context_message(
     return f"{head}{section_name}{tail}{message}"
 
 
+def _is_usable_ui_context_name(name: Any) -> bool:
+    """True when a section name can sit inside the screen-context line.
+
+    The name must be a non-empty string with no bracket, guillemet, line break
+    or Unicode control, format, line/paragraph separator, private-use or
+    surrogate character, so it cannot break the line structure the model reads.
+    """
+    if not isinstance(name, str) or not name:
+        return False
+    return not any(
+        char in _UI_CONTEXT_FORBIDDEN_CHARS
+        or unicodedata.category(char) in _UI_CONTEXT_FORBIDDEN_CATEGORIES
+        for char in name
+    )
+
+
 def _screen_context_content(
     message: str, selected_id: str | None, sections: list[dict[str, Any]]
 ) -> str:
@@ -761,7 +779,7 @@ def _screen_context_content(
     ``selected_id`` is the section's index in the stored list, the same id
     GET /sections returns. The name is read from that stored section; the
     message goes through untouched when the id is out of range or the name
-    is empty or holds one of ``_UI_CONTEXT_FORBIDDEN_CHARS``.
+    is not usable (see :func:`_is_usable_ui_context_name`).
     """
     if selected_id is None:
         return message
@@ -769,11 +787,7 @@ def _screen_context_content(
     if not 0 <= index < len(sections):
         return message
     name = sections[index].get("name")
-    if (
-        not isinstance(name, str)
-        or not name
-        or any(char in _UI_CONTEXT_FORBIDDEN_CHARS for char in name)
-    ):
+    if not isinstance(name, str) or not _is_usable_ui_context_name(name):
         return message
     return _screen_context_message(message, name, index)
 
@@ -795,11 +809,12 @@ def _strip_older_screen_context(
 
 
 def _without_screen_context(content: str) -> str:
-    """Return a user message as the browser may see it, without the context line."""
-    if not content.startswith(agent_conversations.UI_CONTEXT_PREFIX):
-        return content
-    _, newline, rest = content.partition("\n")
-    return rest if newline else content
+    """Return a user message as the browser may see it, without the context line.
+
+    Only the exact server-written line is removed (see
+    :func:`agent_conversations.strip_screen_context`).
+    """
+    return agent_conversations.strip_screen_context(content)
 
 
 @router.post("/chat")

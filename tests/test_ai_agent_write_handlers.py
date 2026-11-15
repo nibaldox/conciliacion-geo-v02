@@ -32,6 +32,7 @@ from api.routers.export import _parse_filters
 from core.ai_v2.agent.catalog import TOOL_CATALOG
 from core.ai_v2.agent.models import (
     ExportReportArgs,
+    ResultQueryArgs,
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
@@ -41,7 +42,9 @@ from core.ai_v2.agent.models import (
     SectionManualArgs,
     SectionUpdateArgs,
     ToolRisk,
+    ToolState,
 )
+from core.ai_v2.agent.policy import decide
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -319,6 +322,20 @@ async def test_add_section_click_invalidates_analysis(temp_db):
     )
     assert result["ok"] is True
     _assert_analysis_invalidated(SESSION_A)
+
+
+@pytest.mark.parametrize(
+    "n_results, requires_confirmation",
+    [(0, False), (3, True)],
+)
+def test_add_section_click_confirms_only_when_it_would_replace_results(
+    n_results, requires_confirmation
+):
+    decision = decide(
+        TOOL_CATALOG["add_section_click"],
+        ToolState(n_sections=1, n_results=n_results),
+    )
+    assert decision.requires_confirmation is requires_confirmation
 
 
 @pytest.mark.asyncio
@@ -1276,7 +1293,7 @@ async def test_section_list_shrinking_mid_edit_returns_out_of_range(
 ):
     _seed_two_sections_with_analysis(SESSION_A)
 
-    def _lost_index(*_args):
+    def _lost_index(*_args, **_kwargs):
         raise HTTPException(404, "Section index 1 out of range (0-0)")
 
     monkeypatch.setattr(write_handlers, helper_name, _lost_index)
@@ -1399,3 +1416,189 @@ async def test_busy_session_rejects_curve_with_process_running(temp_db, busy_sta
     assert result["ok"] is False
     assert result["error"] == "process_running"
     assert _edit_snapshot(SESSION_A) == before
+
+
+# ---------------------------------------------------------------------------
+# C2 args hardening: finite floats, bounded spacing, bounded query items
+# ---------------------------------------------------------------------------
+
+_NON_FINITE = (float("inf"), float("-inf"), float("nan"))
+_FORMULA_MESSAGE = "El proyecto y el autor no pueden empezar con =, +, - o @."
+_TOO_MANY_CURVE_MESSAGE = (
+    "La curva generaría más de 200 secciones; aumenta el espaciamiento."
+)
+
+
+def test_every_agent_args_model_rejects_non_finite_floats():
+    for name, spec in TOOL_CATALOG.items():
+        assert spec.args_model.model_config.get("allow_inf_nan") is False, name
+
+
+@pytest.mark.parametrize("value", _NON_FINITE)
+def test_section_args_reject_non_finite_coordinates(value):
+    with pytest.raises(ValidationError):
+        SectionClickArgs(origin=[value, 0.0])
+    with pytest.raises(ValidationError):
+        SectionManualArgs.model_validate(
+            {"sections": [{"origin": [0.0, value], "azimuth": 0.0}]}
+        )
+    with pytest.raises(ValidationError):
+        SectionUpdateArgs(section_id=0, origin=[value, 0.0])
+    with pytest.raises(ValidationError):
+        SectionAutoArgs(start=[value, 0.0], end=[10.0, 0.0])
+    with pytest.raises(ValidationError):
+        SectionAutoArgs(start=[0.0, 0.0], end=[10.0, value])
+
+
+def test_json_overflow_origin_is_rejected_at_validation():
+    with pytest.raises(ValidationError):
+        SectionClickArgs.model_validate_json('{"origin": [1e400, 0]}')
+
+
+@pytest.mark.parametrize("spacing", [1e-308, 5e-324, 0.09])
+def test_curve_spacing_below_a_tenth_of_a_metre_is_rejected(spacing):
+    with pytest.raises(ValidationError):
+        _curve_args(spacing=spacing)
+
+
+def test_curve_spacing_bounds_are_inclusive_at_0_1_and_1000():
+    assert _curve_args(spacing=0.1).spacing == 0.1
+    assert _curve_args(spacing=1000.0).spacing == 1000.0
+    with pytest.raises(ValidationError):
+        _curve_args(spacing=1000.5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "points, spacing",
+    [
+        ([[0.0, 0.0], [1e200, 1e200]], 10.0),
+        ([[0.0, 0.0], [1e308, 1e308]], 1000.0),
+        ([[0.0, 0.0], [1e300, 0.0]], 0.1),
+    ],
+)
+async def test_unbounded_curve_is_too_many_sections_and_writes_nothing(
+    temp_db, points, spacing
+):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    _seed_analysis(SESSION_A)
+    before = _edit_snapshot(SESSION_A)
+    result = await write_handlers.generate_sections_curve(
+        SESSION_A, _curve_args(points=points, spacing=spacing)
+    )
+    assert result == {
+        "ok": False,
+        "error": "too_many_sections",
+        "message": _TOO_MANY_CURVE_MESSAGE,
+    }
+    assert _edit_snapshot(SESSION_A) == before
+
+
+@pytest.mark.asyncio
+async def test_update_section_rejects_a_name_used_by_another_section(temp_db):
+    _seed_two_sections_with_analysis(SESSION_A)
+    before = _edit_snapshot(SESSION_A)
+    result = await write_handlers.update_section(
+        SESSION_A, SectionUpdateArgs(section_id=1, name="S-01")
+    )
+    assert result == {
+        "ok": False,
+        "error": "duplicate_section_name",
+        "message": "Ya existe otra sección llamada «S-01».",
+    }
+    assert _edit_snapshot(SESSION_A) == before
+
+
+@pytest.mark.asyncio
+async def test_update_section_keeps_its_own_name_without_duplicate_error(temp_db):
+    _seed_two_sections_with_analysis(SESSION_A)
+    result = await write_handlers.update_section(
+        SESSION_A, SectionUpdateArgs(section_id=0, name="S-01", azimuth=3.0)
+    )
+    assert result["ok"] is True
+    assert db.get_sections(SESSION_A)[0]["azimuth"] == 3.0
+
+
+@pytest.mark.asyncio
+async def test_update_section_does_not_block_other_edits_on_legacy_duplicates(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01"), _section_dict("S-01", 10.0)])
+    result = await write_handlers.update_section(
+        SESSION_A, SectionUpdateArgs(section_id=1, azimuth=4.0)
+    )
+    assert result["ok"] is True
+    assert db.get_sections(SESSION_A)[1]["azimuth"] == 4.0
+
+
+@pytest.mark.asyncio
+async def test_update_section_merges_onto_the_stored_section_at_write_time(
+    temp_db, monkeypatch
+):
+    _seed_two_sections_with_analysis(SESSION_A)
+    original = write_handlers._section_index_error
+
+    async def _concurrent_edit_after_read(session_id, section_id):
+        result = await original(session_id, section_id)
+        stored = db.get_sections(session_id)
+        stored[1]["sector"] = "Concurrente"
+        db.save_sections(session_id, stored)
+        return result
+
+    monkeypatch.setattr(
+        write_handlers, "_section_index_error", _concurrent_edit_after_read
+    )
+    result = await write_handlers.update_section(
+        SESSION_A, SectionUpdateArgs(section_id=1, azimuth=7.0)
+    )
+    assert result["ok"] is True
+    stored = db.get_sections(SESSION_A)[1]
+    assert stored["azimuth"] == 7.0
+    assert stored["sector"] == "Concurrente"
+
+
+@pytest.mark.parametrize("field", ["sector", "section", "level"])
+def test_result_query_list_items_are_capped_at_120_chars(field):
+    assert getattr(ResultQueryArgs.model_validate({field: ["Z" * 120]}), field) == ["Z" * 120]
+    with pytest.raises(ValidationError):
+        ResultQueryArgs.model_validate({field: ["Z" * 121]})
+    with pytest.raises(ValidationError):
+        ResultQueryArgs.model_validate({field: ["Z" * 1_000_000]})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["project", "author"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        '=HYPERLINK("http://x")',
+        "+SUM(1)",
+        "-2+3",
+        "@cmd",
+        "  =1+1",
+        "\t=1+1",
+        "\tPlain",
+        "\rPlain",
+    ],
+)
+async def test_export_report_rejects_formula_like_project_and_author(
+    temp_db, field, value
+):
+    _seed_filter_results(SESSION_A)
+    result = await export_report(
+        SESSION_A, ExportReportArgs.model_validate({"format": "excel", field: value})
+    )
+    assert result == {
+        "ok": False,
+        "error": "invalid_filters",
+        "message": _FORMULA_MESSAGE,
+    }
+
+
+@pytest.mark.asyncio
+async def test_export_report_keeps_symbols_inside_project_and_author(temp_db):
+    _seed_filter_results(SESSION_A)
+    result = await export_report(
+        SESSION_A,
+        ExportReportArgs(format="excel", project="Mina-Norte = 2", author="A+B"),
+    )
+    assert result["ok"] is True
+    assert result["query"] == {"project": "Mina-Norte = 2", "author": "A+B"}

@@ -134,6 +134,17 @@ class TestRestSectionEditGolden:
         assert response.json()["name"] == "S-01"
         assert response.json()["sector"] == ""
 
+    def test_put_duplicate_name_is_still_accepted_by_rest(self, api_test_client):
+        _seed(SESSION_REST, ("S-01", "S-02"))
+        response = api_test_client.put(
+            PUT_URL.format(section_id=1),
+            json={"name": "S-01", "origin": [10.0, 0.0], "azimuth": 0.0, "sector": "Principal"},
+            headers=_headers(SESSION_REST),
+        )
+        assert response.status_code == 200
+        assert response.json()["name"] == "S-01"
+        assert [section["name"] for section in db.get_sections(SESSION_REST)] == ["S-01", "S-01"]
+
     def test_put_out_of_range_is_404_and_writes_nothing(self, api_test_client):
         _seed(SESSION_REST, ("S-01", "S-02"))
         before = _state(SESSION_REST)
@@ -387,3 +398,27 @@ async def test_agent_curve_matches_rest_post_on_identical_session(api_test_clien
     assert result["n_sections"] == len(rest_sections) == 10
     assert result["sections"] == [_summary_entry(section) for section in rest_sections]
     assert _state(SESSION_AGENT) == _state(SESSION_REST)
+
+
+@pytest.mark.asyncio
+async def test_agent_rejects_a_duplicate_name_that_rest_accepts(api_test_client):
+    _seed(SESSION_REST, ("S-01", "S-02"))
+    _seed(SESSION_AGENT, ("S-01", "S-02"))
+    rest = api_test_client.put(
+        PUT_URL.format(section_id=1),
+        json={"name": "S-01", "origin": [10.0, 0.0], "azimuth": 0.0, "sector": "Principal"},
+        headers=_headers(SESSION_REST),
+    )
+    assert rest.status_code == 200, rest.text
+
+    result = await write_handlers.update_section(
+        SESSION_AGENT, SectionUpdateArgs(section_id=1, name="S-01")
+    )
+
+    assert result == {
+        "ok": False,
+        "error": "duplicate_section_name",
+        "message": "Ya existe otra sección llamada «S-01».",
+    }
+    assert [s["name"] for s in db.get_sections(SESSION_AGENT)] == ["S-01", "S-02"]
+

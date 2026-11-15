@@ -688,7 +688,7 @@ async def test_delete_section_confirmation_names_section_and_invalidated_results
     assert len(confirmations) == 1
     expected = (
         "Elimina la sección con section_id 4 e invalida 160 resultados; "
-        "los section_id posteriores bajan en 1."
+        "los section_id posteriores bajan en 1. Parámetros: section_id=4"
     )
     assert confirmations[0].args_summary == expected
     assert store.created[0].args_summary == expected
@@ -1404,3 +1404,285 @@ class TestExportDownloadMeta:
             ExportDownloadMeta(format="csv")
         with pytest.raises(ValidationError):
             ExportDownloadMeta(format="excel", url="/x")
+
+
+# ---------------------------------------------------------------------------
+# C1 corrective (G3 review): add_section_click policy, payload-derived ok,
+# confirmation args line, levels_truncated preservation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_add_section_click_without_results_runs_autonomously():
+    handler = RecordingHandler({"ok": True, "n_added": 1})
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("add_section_click", '{"origin": [10, 20]}', call_id="c-add")
+                ]
+            ),
+            ChatTurn(text="Listo."),
+        ]
+    )
+    events, _, store, _ = await run_simple(
+        provider, {"add_section_click": handler}, state=ToolState(n_sections=4)
+    )
+    assert len(handler.calls) == 1
+    assert store.created == []
+    assert events[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_add_section_click_with_results_pauses_for_confirmation():
+    handler = RecordingHandler({"ok": True, "n_added": 1})
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("add_section_click", '{"origin": [10, 20]}', call_id="c-add")
+                ]
+            ),
+        ]
+    )
+    events, _, store, _ = await run_simple(
+        provider,
+        {"add_section_click": handler},
+        state=ToolState(n_sections=4, n_results=12),
+    )
+    assert handler.calls == []
+    assert len(store.created) == 1
+    assert store.created[0].tool_name == "add_section_click"
+    assert events[-1].finish_reason == "confirmation_required"
+    confirm = next(e for e in events if isinstance(e, ConfirmationRequiredEvent))
+    assert confirm.args_summary == (
+        "Añade una sección e invalida 12 resultados del análisis actual. "
+        "Parámetros: origin=[10.0, 20.0]; length=200.0; az_mode=auto"
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_reconciliation_confirmation_shows_the_override():
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("run_reconciliation", '{"face_threshold": 60}', call_id="c-rec")
+                ]
+            ),
+        ]
+    )
+    events, _, store, _ = await run_simple(
+        provider,
+        {"run_reconciliation": RecordingHandler()},
+        state=ToolState(n_results=5),
+    )
+    confirm = next(e for e in events if isinstance(e, ConfirmationRequiredEvent))
+    assert confirm.args_summary == (
+        "Sobrescribe 5 resultados existentes (~42 s) Parámetros: face_threshold=60.0"
+    )
+    assert store.created[0].args_summary == confirm.args_summary
+
+
+@pytest.mark.asyncio
+async def test_run_reconciliation_without_overrides_has_no_args_line():
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[tool_call("run_reconciliation", "{}", call_id="c-rec")]
+            ),
+        ]
+    )
+    events, _, store, _ = await run_simple(
+        provider,
+        {"run_reconciliation": RecordingHandler()},
+        state=ToolState(n_results=5),
+    )
+    confirm = next(e for e in events if isinstance(e, ConfirmationRequiredEvent))
+    assert confirm.args_summary == "Sobrescribe 5 resultados existentes (~42 s)"
+    assert "Parámetros:" not in store.created[0].args_summary
+
+
+class TestConfirmationArgsFragment:
+    def test_skips_none_empty_string_and_empty_list(self):
+        from core.ai_v2.agent.loop import _args_fragment
+
+        assert _args_fragment({"a": None, "b": [], "c": "", "d": 3}) == " Parámetros: d=3"
+
+    def test_no_remaining_args_yield_empty_fragment(self):
+        from core.ai_v2.agent.loop import _args_fragment
+
+        assert _args_fragment({"a": None, "b": []}) == ""
+
+    def test_strings_are_unquoted_and_non_scalars_are_json_without_ascii_escapes(self):
+        from core.ai_v2.agent.loop import _args_fragment
+
+        assert _args_fragment({"section_id": "4", "sector": ["Ñandú"]}) == (
+            ' Parámetros: section_id=4; sector=["Ñandú"]'
+        )
+
+    def test_each_value_is_cut_to_sixty_chars(self):
+        from core.ai_v2.agent.loop import _args_fragment
+
+        fragment = _args_fragment({"sections": ["x" * 200]})
+        value = fragment.removeprefix(" Parámetros: sections=")
+        assert len(value) == 60
+        assert value.endswith("…")
+
+    def test_whole_line_is_cut_to_three_hundred_chars(self):
+        from core.ai_v2.agent.loop import _args_fragment
+
+        fragment = _args_fragment({f"k{i:02d}": "y" * 55 for i in range(20)})
+        assert len(fragment) == 300
+        assert fragment.endswith("…")
+
+    def test_short_line_is_kept_whole(self):
+        from core.ai_v2.agent.loop import _args_fragment
+
+        assert _args_fragment({"face_threshold": 60.0}) == (
+            " Parámetros: face_threshold=60.0"
+        )
+
+
+@pytest.mark.asyncio
+async def test_handler_payload_ok_false_is_reported_as_failed_result():
+    payload = {"ok": False, "error": "section_id_out_of_range"}
+    handler = RecordingHandler(payload)
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("get_profile", '{"section_id": "9"}', call_id="c-prof")
+                ]
+            ),
+            ChatTurn(text="No existe esa sección."),
+        ]
+    )
+    events, provider, _, _ = await run_simple(provider, {"get_profile": handler})
+    result = _single_result(events)
+    assert handler.calls != []
+    assert result.ok is False
+    assert result.error == "section_id_out_of_range"
+    assert result.download is None
+    tool_messages = [m for m in provider.requests[1] if m["role"] == "tool"]
+    assert json.loads(tool_messages[0]["content"]) == payload
+    assert events[-1].finish_reason == "stop"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error", ["invalid_filters", "process_running", "no_rows_for_filters"]
+)
+async def test_rejected_export_is_not_reported_ok(error):
+    events, _ = await _run_export(_export_payload(ok=False, error=error))
+    result = _single_result(events)
+    assert result.ok is False
+    assert result.error == error
+    assert result.download is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        pytest.param({"ok": False}, "tool_error", id="missing-error"),
+        pytest.param({"ok": False, "error": "x" * 65}, "tool_error", id="error-65-chars"),
+        pytest.param({"ok": False, "error": {"code": "nested"}}, "tool_error", id="non-str"),
+        pytest.param({"ok": False, "error": "y" * 64}, "y" * 64, id="error-64-chars"),
+    ],
+)
+async def test_rejected_payload_error_code_is_bounded(payload, expected_error):
+    handler = RecordingHandler(payload)
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("get_profile", '{"section_id": "9"}', call_id="c-prof")
+                ]
+            ),
+            ChatTurn(text="Hubo un problema."),
+        ]
+    )
+    events, provider, _, _ = await run_simple(provider, {"get_profile": handler})
+    result = _single_result(events)
+    assert result.ok is False
+    assert result.error == expected_error
+    tool_messages = [m for m in provider.requests[1] if m["role"] == "tool"]
+    assert json.loads(tool_messages[0]["content"]) == payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"ok": True, "section_id": "0"}, id="explicit-ok"),
+        pytest.param({"section_id": "0"}, id="no-ok-key"),
+    ],
+)
+async def test_ok_payload_is_reported_ok_without_error(payload):
+    handler = RecordingHandler(payload)
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("get_profile", '{"section_id": "0"}', call_id="c-prof")
+                ]
+            ),
+            ChatTurn(text="Listo."),
+        ]
+    )
+    events, _, _, _ = await run_simple(provider, {"get_profile": handler})
+    result = _single_result(events)
+    assert result.ok is True
+    assert result.error is None
+
+
+class TestLevelsTruncatedPreservation:
+    def test_levels_truncated_survives_structural_truncation(self):
+        from core.ai_v2.agent.loop import _observation_content
+
+        observation: dict[str, Any] = {f"f{i:03d}": i for i in range(200)}
+        observation["levels_truncated"] = True
+        observation["nominal_levels"] = {
+            "Norte": [str(2900 + index) for index in range(900)]
+        }
+        result = _observation_content(observation)
+        assert len(result) <= 4000
+        assert json.loads(result)["levels_truncated"] is True
+
+    def test_levels_truncated_survives_conversation_compaction(self):
+        from api.ai_agent_conversations import compact_messages
+
+        observation = {
+            "ok": True,
+            "levels_truncated": True,
+            "n_total_rows": 3,
+            "filler": "z" * 50,
+        }
+        messages = [
+            {"role": "system", "content": "Eres el agente."},
+            {"role": "user", "content": "consulta"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "query_results", "arguments": "{}"},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "c1",
+                "content": json.dumps(observation, ensure_ascii=False),
+            },
+            {"role": "user", "content": "otra"},
+            {"role": "assistant", "content": "ok"},
+            {"role": "user", "content": "última"},
+        ]
+        compacted = compact_messages(messages)
+        parsed = json.loads(compacted[3]["content"])
+        assert parsed == {"ok": True, "levels_truncated": True, "n_total_rows": 3}
+

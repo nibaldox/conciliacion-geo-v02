@@ -20,10 +20,10 @@ Guarantees and limits:
   startup, by a background task every 6 hours, and opportunistically
   on access (same SQLite timestamp format as ``cleanup_old_sessions``).
 - Compaction: before the cap, :func:`compact_messages` shrinks the
-  ``role:tool`` observations of older turns to their critical keys and
-  strips old screen-context lines (:data:`UI_CONTEXT_PREFIX`). The last
-  two user turns are kept as they are, and every ``tool_call`` /
-  ``tool`` pair stays intact.
+  ``role:tool`` observations of turns before the last two user messages to
+  their critical keys, and strips the exact screen-context line
+  (:data:`UI_CONTEXT_PREFIX`) from every user message except the last one.
+  Every ``tool_call`` / ``tool`` pair stays intact.
 - Cap: at most :data:`MAX_CONVERSATION_MESSAGES` messages and
   :data:`MAX_CONVERSATION_CHARS` JSON-encoded characters are kept per
   conversation. Trimming is GROUP-AWARE: an assistant
@@ -38,6 +38,7 @@ worker (``render.yaml`` / ``Dockerfile-api``).
 from __future__ import annotations
 
 import json
+import re
 import secrets
 from typing import Any, Optional
 
@@ -64,8 +65,13 @@ UI_CONTEXT_PREFIX = "[Contexto de pantalla: "
 """Start of the screen-context line the server prepends to a user message.
 
 Only the line of the last user message is kept; older lines are stripped
-by :func:`compact_messages`.
+by :func:`compact_messages` through :func:`strip_screen_context`.
 """
+
+_UI_CONTEXT_LINE = re.compile(
+    r"\[Contexto de pantalla: sección seleccionada «[^\n]*» \(section_id [0-9]{1,5}\)\]\n"
+)
+"""Exact format of one server-written screen-context line, newline included."""
 
 _COMPACT_MAX_CHARS = 600
 _COMPACT_SUFFIX = "...[compacted]"
@@ -239,23 +245,30 @@ def _compact_tool_content(content: str) -> str:
     return text[:_COMPACT_MAX_CHARS] + _COMPACT_SUFFIX
 
 
-def _strip_ui_context(content: str) -> str:
-    """Drop leading screen-context lines, each up to its first newline."""
-    while content.startswith(UI_CONTEXT_PREFIX):
-        newline = content.find("\n")
-        if newline == -1:
-            break
-        content = content[newline + 1 :]
+def strip_screen_context(content: str) -> str:
+    """Remove the screen-context lines the server wrote, and only those.
+
+    A leading line is removed only when it matches the exact format of the
+    line :func:`api.routers.ai._screen_context_message` writes. The match
+    repeats while it holds, so the result is the same however many times this
+    runs. Text the user typed is returned unchanged, even when it starts like
+    that line but does not match it exactly.
+    """
+    match = _UI_CONTEXT_LINE.match(content)
+    while match is not None:
+        content = content[match.end() :]
+        match = _UI_CONTEXT_LINE.match(content)
     return content
 
 
 def compact_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return a compacted copy of a conversation; the input is not mutated.
 
-    The system message and the last two user turns (a user message and
-    everything up to the next user message) are kept as they are. In the
-    older turns, each ``role:tool`` content is compacted and every user
-    message except the last one loses its leading screen-context line.
+    The system message is kept as it is. Tool observations before the last
+    two user turns are compacted, and every ``role:tool`` content of those
+    turns keeps its critical keys. Every user message except the last one
+    loses its exact leading screen-context line (see
+    :func:`strip_screen_context`); the last user message keeps it.
     ``tool_call_id`` and ``name`` are kept, and assistant ``tool_calls``
     messages are copied unchanged, so every answer keeps its parent call.
     Pure and idempotent: compacting a compacted list changes nothing.
@@ -276,7 +289,7 @@ def compact_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if role == "tool" and index < protected_from:
                 item["content"] = _compact_tool_content(content)
             elif role == "user" and index != last_user:
-                item["content"] = _strip_ui_context(content)
+                item["content"] = strip_screen_context(content)
         compacted.append(item)
     return compacted
 

@@ -324,6 +324,40 @@ def test_ui_context_line_is_stripped_from_older_user_messages_only() -> None:
     assert kept[1]["content"] == line + "última con contexto"
 
 
+def test_only_exact_server_context_lines_are_stripped_from_older_users() -> None:
+    prefix = agent_conversations.UI_CONTEXT_PREFIX
+    lookalike = "[Contexto de pantalla: a]\n[Contexto de pantalla: b]\nreal"
+    partial = prefix + "sección seleccionada «S-03» (section_id 2)]"
+    wide_id = prefix + "sección seleccionada «S-03» (section_id 123456)]\nreal"
+    messages = [
+        SYSTEM,
+        _user(lookalike),
+        _text("a"),
+        _user(partial),
+        _text("b"),
+        _user(wide_id),
+        _text("c"),
+        _user("última"),
+    ]
+    compacted = agent_conversations.compact_messages(messages)
+    assert [m["content"] for m in compacted if m["role"] == "user"] == [
+        lookalike,
+        partial,
+        wide_id,
+        "última",
+    ]
+
+
+def test_repeated_server_context_lines_are_stripped_until_none_match() -> None:
+    prefix = agent_conversations.UI_CONTEXT_PREFIX
+    first = prefix + "sección seleccionada «S-01» (section_id 0)]\n"
+    second = prefix + "sección seleccionada «S-02» (section_id 1)]\n"
+    messages = [SYSTEM, _user(first + second + "real"), _text("a"), _user("última"), _text("b")]
+    once = agent_conversations.compact_messages(messages)
+    assert once[1]["content"] == "real"
+    assert agent_conversations.compact_messages(once) == once
+
+
 def test_input_list_and_dicts_are_not_mutated() -> None:
     messages = [SYSTEM]
     for index in range(4):

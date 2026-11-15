@@ -147,6 +147,7 @@ _OBSERVATION_PRESERVE_KEYS = frozenset(
         "status_by_parameter",
         "n_total_rows",
         "n_matched_rows",
+        "levels_truncated",
         "warnings",
         "tolerances",
         "rock_density",
@@ -163,6 +164,13 @@ _OBSERVATION_PRESERVE_KEYS = frozenset(
 )
 
 _OBSERVATION_NESTED_KEEP_STEPS = (64, 32, 16, 8, 4)
+
+_ARGS_LABEL = " Parámetros: "
+_ARG_VALUE_MAX_CHARS = 60
+_ARGS_FRAGMENT_MAX_CHARS = 300
+_ERROR_CODE_MAX_CHARS = 64
+_GENERIC_TOOL_ERROR = "tool_error"
+_ELLIPSIS = "…"
 
 MSG_TOOL_UNAVAILABLE = (
     "Herramienta no disponible: no está en el catálogo del agente."
@@ -244,6 +252,48 @@ def _compact_summary(observation: dict[str, Any]) -> str:
 
 def _is_json_scalar(value: Any) -> bool:
     return value is None or isinstance(value, (bool, int, float, str))
+
+
+def _cut(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - len(_ELLIPSIS)] + _ELLIPSIS
+
+
+def _render_arg(value: Any) -> str:
+    if _is_json_scalar(value):
+        text = f"{value}"
+    else:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    return _cut(text, _ARG_VALUE_MAX_CHARS)
+
+
+def _is_empty_arg(value: Any) -> bool:
+    return value is None or (isinstance(value, (str, list)) and len(value) == 0)
+
+
+def _args_fragment(args: Mapping[str, Any]) -> str:
+    """Compact ``Parámetros: k=v; ...`` suffix for a confirmation summary.
+
+    Lists the validated arguments that carry a value (None, empty strings
+    and empty lists are skipped). Empty string when nothing remains.
+    """
+    parts = [
+        f"{key}={_render_arg(value)}"
+        for key, value in args.items()
+        if not _is_empty_arg(value)
+    ]
+    if not parts:
+        return ""
+    return _cut(_ARGS_LABEL + "; ".join(parts), _ARGS_FRAGMENT_MAX_CHARS)
+
+
+def _payload_error_code(observation: dict[str, Any]) -> str:
+    """Short handler error code, or the generic code when it is unusable."""
+    error = observation.get("error")
+    if isinstance(error, str) and 0 < len(error) <= _ERROR_CODE_MAX_CHARS:
+        return error
+    return _GENERIC_TOOL_ERROR
 
 
 def _bounded_nested(value: Any, keep: int) -> Any:
@@ -734,6 +784,7 @@ async def _handle_tool_call(
             )
             conversation.append(_tool_message(call.call_id, observation))
             return events, None
+        summary = decision.human_summary_es + _args_fragment(args_for_event)
         recorded = _record_pending(
             pending_store=pending_store,
             invocation_id=invocation_id,
@@ -747,7 +798,7 @@ async def _handle_tool_call(
             state=state,
             turn_confirmations=turn_confirmations + 1,
             conversation_id=conversation_id,
-            args_summary=decision.human_summary_es[:500],
+            args_summary=summary[:500],
         )
         if recorded is None:
             return [ErrorEvent(content=MSG_PENDING_ERROR)], "error"
@@ -761,7 +812,7 @@ async def _handle_tool_call(
             ConfirmationRequiredEvent(
                 invocation_id=invocation_id,
                 name=call.name,
-                args_summary=decision.human_summary_es,
+                args_summary=summary,
             ),
         ]
         return events, "confirmation_required"
@@ -824,8 +875,8 @@ async def _execute_tool(
             handler(session_id, validated), timeout=spec.timeout_s
         )
         observation = result if isinstance(result, dict) else {"result": result}
-        ok = True
-        reason = None
+        ok = not (isinstance(observation, dict) and observation.get("ok") is False)
+        reason = None if ok else _payload_error_code(observation)
         summary = _compact_summary(observation)
     except asyncio.TimeoutError:
         observation = {
@@ -1277,6 +1328,7 @@ async def resume_pending_turn(
             )
             if confirmed_block is None:
                 re_invocation = new_invocation_id()
+                summary = decision.human_summary_es + _args_fragment(validated_args)
                 recorded = _record_pending(
                     pending_store=pending_store,
                     invocation_id=re_invocation,
@@ -1290,7 +1342,7 @@ async def resume_pending_turn(
                     state=state_now,
                     turn_confirmations=pending.turn_confirmations + 1,
                     conversation_id=pending.conversation_id,
-                    args_summary=decision.human_summary_es[:500],
+                    args_summary=summary[:500],
                 )
                 if recorded is None:
                     yield ErrorEvent(content=MSG_PENDING_ERROR)
@@ -1305,7 +1357,7 @@ async def resume_pending_turn(
                 yield ConfirmationRequiredEvent(
                     invocation_id=re_invocation,
                     name=spec.name,
-                    args_summary=decision.human_summary_es,
+                    args_summary=summary,
                 )
                 yield DoneEvent(finish_reason="confirmation_required")
                 return

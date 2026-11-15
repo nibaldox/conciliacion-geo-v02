@@ -659,6 +659,12 @@ describe('write tool query dependencies', () => {
     expect(WRITE_TOOL_QUERY_KEYS.run_reconciliation).toContainEqual(['export-levels']);
   });
 
+  it('invalidates the blast correlation and damage model queries after run_reconciliation', async () => {
+    const { WRITE_TOOL_QUERY_KEYS } = await import('../aiChat');
+    expect(WRITE_TOOL_QUERY_KEYS.run_reconciliation).toContainEqual(['blast-correlation']);
+    expect(WRITE_TOOL_QUERY_KEYS.run_reconciliation).toContainEqual(['blast-damage-model']);
+  });
+
   it('maps update_section and delete_section to the section dependents and process status', async () => {
     const { WRITE_TOOL_QUERY_KEYS, SECTION_DEPENDENT_QUERY_KEYS } = await import('../aiChat');
     for (const name of ['update_section', 'delete_section']) {

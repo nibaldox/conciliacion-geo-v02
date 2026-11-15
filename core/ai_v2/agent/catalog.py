@@ -77,11 +77,15 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         name="add_section_click",
         description=(
             "Append ONE cross-section at an origin point on the plan view. "
-            "Additive: existing sections are kept."
+            "Additive: existing sections are kept. Adding a section invalidates "
+            "the previous analysis; it asks for confirmation only when results exist."
         ),
         args_model=SectionClickArgs,
-        risk=ToolRisk.ADDITIVE,
-        impact_summary="Añade una sección sin eliminar las existentes",
+        risk=ToolRisk.REPLACE,
+        state_keys=("n_results",),
+        impact_summary=(
+            "Añade una sección e invalida {count} resultados del análisis actual."
+        ),
     ),
     ToolSpec(
         name="generate_sections_auto",

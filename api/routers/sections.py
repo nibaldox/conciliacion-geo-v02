@@ -9,7 +9,7 @@ import io
 import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import numpy as np
 import pandas as pd
@@ -246,18 +246,81 @@ def _section_dict_from_body(body: "SectionCreate", fallback_name: str) -> dict:
     }
 
 
+_SECTION_EDIT_FIELDS: tuple[str, ...] = (
+    "name",
+    "origin",
+    "azimuth",
+    "length",
+    "length_up",
+    "length_down",
+    "sector",
+)
+
+
+class SectionNameTakenError(ValueError):
+    """An agent edit asked for a name that another section already has."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.name = name
+
+
+def _merge_section_overrides(current: dict, overrides: Mapping[str, Any]) -> "SectionCreate":
+    """Return the stored section with every non-None override applied."""
+    values: Dict[str, Any] = {
+        "name": current["name"],
+        "origin": current["origin"],
+        "azimuth": current["azimuth"],
+        "length": current["length"],
+        "length_up": current.get("length_up"),
+        "length_down": current.get("length_down"),
+        "sector": current.get("sector", ""),
+    }
+    values.update(
+        {
+            field: overrides[field]
+            for field in _SECTION_EDIT_FIELDS
+            if overrides.get(field) is not None
+        }
+    )
+    return SectionCreate(**values)
+
+
 def _update_section_sync(
-    session_id: str, section_id: str, body: "SectionCreate"
+    session_id: str,
+    section_id: str,
+    body: Optional["SectionCreate"] = None,
+    overrides: Optional[Mapping[str, Any]] = None,
+    *,
+    reject_duplicate_name: bool = False,
 ) -> tuple[dict, bool]:
     """Apply one section edit off the event loop.
 
-    Returns the REST response body and whether the stored section changed.
-    The analysis is invalidated only on a real change.
+    REST passes the full ``body``. The agent passes ``overrides`` (only the
+    fields to change) and the merge with the stored section happens here, in
+    the same call that writes, so a concurrent edit is never overwritten with
+    stale values. With ``reject_duplicate_name`` (agent only) a new name equal
+    to another section's name raises :class:`SectionNameTakenError`; REST keeps
+    accepting duplicates. Returns the response body and whether the stored
+    section changed; the analysis is invalidated only on a real change.
     """
     sections = db.get_sections(session_id)
     idx = _section_index(section_id, len(sections))
-    updated = _section_dict_from_body(body, sections[idx]["name"])
-    changed = updated != sections[idx]
+    current = sections[idx]
+    if body is None:
+        body = _merge_section_overrides(current, overrides or {})
+    updated = _section_dict_from_body(body, current["name"])
+    if (
+        reject_duplicate_name
+        and updated["name"] != current["name"]
+        and any(
+            other["name"] == updated["name"]
+            for position, other in enumerate(sections)
+            if position != idx
+        )
+    ):
+        raise SectionNameTakenError(updated["name"])
+    changed = updated != current
     if changed:
         sections[idx] = updated
         db.save_sections(session_id, sections)

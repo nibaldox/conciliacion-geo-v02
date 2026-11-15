@@ -177,11 +177,20 @@ describe('FloatingChatButton', () => {
       ['results'],
       ['profile'],
       ['export-levels'],
+      ['blast-correlation'],
+      ['blast-damage-model'],
     ]);
     vi.unstubAllEnvs();
   });
 
-  it.each(['generate_sections_auto', 'generate_sections_manual', 'add_section_click'])(
+  it.each([
+    'generate_sections_auto',
+    'generate_sections_manual',
+    'add_section_click',
+    'generate_sections_curve',
+    'update_section',
+    'delete_section',
+  ])(
     'invalidates exactly the section-dependent keys after %s', async (name) => {
     vi.stubEnv('VITE_AI_CHAT', 'true');
     const captured: { client?: QueryClient } = {};

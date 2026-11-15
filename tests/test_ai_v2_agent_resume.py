@@ -960,7 +960,9 @@ async def test_pending_created_by_loop_carries_args_summary():
     created = store.created_runs[-1]
     assert created.args_summary
     assert created.args_summary == (
-        "Añade secciones e invalida el análisis actual (3 secciones existentes)"
+        "Añade secciones e invalida el análisis actual (3 secciones existentes) "
+        "Parámetros: start=[0.0, 0.0]; end=[100.0, 0.0]; n_sections=5; "
+        "length=200.0; az_method=perpendicular; fixed_az=0.0"
     )
 
 
@@ -998,4 +1000,56 @@ async def test_approved_resume_sibling_export_carries_download_meta():
     assert results[1].download is not None
     assert results[1].download.format == "excel"
     assert results[1].download.query == {"filters": '{"sector":["Norte"]}'}
+
+
+@pytest.mark.asyncio
+async def test_approved_resume_reports_handler_rejection_as_failed_result():
+    handler = RecordingHandler({"ok": False, "error": "process_running"})
+    executor = {"generate_sections_auto": handler}
+    _, store, invocation_id = await pause_for_confirmation(
+        executor, ToolState(n_sections=3)
+    )
+    continuation = ScriptedChatProvider([ChatTurn(text="No se pudo.")])
+    events = await resume(
+        store,
+        invocation_id,
+        executor,
+        ToolState(n_sections=3),
+        approved=True,
+        provider=continuation,
+    )
+    assert len(handler.calls) == 1
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(results) == 1
+    assert results[0].ok is False
+    assert results[0].error == "process_running"
+
+
+@pytest.mark.asyncio
+async def test_rearmed_confirmation_rebuilds_the_args_line():
+    handler = RecordingHandler({"ok": True})
+    executor = {"run_reconciliation": handler}
+    calls = [
+        tool_call("run_reconciliation", '{"face_threshold": 60}', call_id="c-rec")
+    ]
+    _, store, invocation_id = await pause_for_confirmation(
+        executor, ToolState(n_results=5), tool_calls=calls
+    )
+    continuation = ScriptedChatProvider([ChatTurn(text="Listo.")])
+    events = await resume(
+        store,
+        invocation_id,
+        executor,
+        ToolState(n_results=9),
+        approved=True,
+        provider=continuation,
+    )
+    assert handler.calls == []
+    rearm = next(e for e in events if isinstance(e, ConfirmationRequiredEvent))
+    assert rearm.args_summary == (
+        "Sobrescribe 9 resultados existentes (~42 s) Parámetros: face_threshold=60.0"
+    )
+    stored = store.peek(rearm.invocation_id, SESSION)
+    assert stored.args_summary == rearm.args_summary
+
 

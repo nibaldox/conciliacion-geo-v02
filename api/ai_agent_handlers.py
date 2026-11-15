@@ -34,6 +34,7 @@ from datetime import date
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import api.database as db
+import numpy as np
 from fastapi import HTTPException
 from core.ai_v2.agent.catalog import TOOL_CATALOG
 from core.ai_v2.agent.models import (
@@ -1042,6 +1043,28 @@ def _correlation_digest(response: Any, settings: Dict[str, Any], requested_toler
     return base
 
 
+def _damage_fit_status(fit: Any, points: List[Any]) -> Tuple[str, Optional[float]]:
+    """Fit status and rounded p-value of the PF↔damage model.
+
+    ``FIT`` when the REST helper returned a fit. Without one, fewer than
+    ``_BLAST_FIT_MIN_SAMPLES`` points is ``INSUFFICIENT_SAMPLES``; enough points
+    with no significant fit is ``NOT_SIGNIFICANT``, and its p-value comes from
+    the core fit over the same samples.
+    """
+    from core.blast_model import fit_powder_factor_damage_model
+
+    if fit is not None:
+        return "FIT", _round_or_none(fit.p_value, 4)
+    if len(points) < _BLAST_FIT_MIN_SAMPLES:
+        return "INSUFFICIENT_SAMPLES", None
+    model = fit_powder_factor_damage_model(
+        np.asarray([point.pf_g_per_ton for point in points], dtype=float),
+        np.asarray([point.over_break for point in points], dtype=float),
+        min_samples=_BLAST_FIT_MIN_SAMPLES,
+    )
+    return "NOT_SIGNIFICANT", _round_or_none(model["p_value"], 4)
+
+
 def _damage_digest(response: Any, settings: Dict[str, Any], requested_tolerance: Optional[float]) -> Dict[str, Any]:
     density, density_warnings, sector_sectors = _density_context(settings)
     points = list(response.points)
@@ -1061,10 +1084,13 @@ def _damage_digest(response: Any, settings: Dict[str, Any], requested_tolerance:
             "ci_beta1_low_m_per_gt": fit.ci_beta1_low,
             "ci_beta1_high_m_per_gt": fit.ci_beta1_high,
         }
+    fit_status, p_value = _damage_fit_status(fit, points)
     base: Dict[str, Any] = {
         "ok": True,
         "data_status": response.data_status,
-        "fit_status": "FIT" if fit is not None else "INSUFFICIENT_SAMPLES",
+        "fit_status": fit_status,
+        "n": len(points),
+        "p_value": p_value,
         "n_points": len(points),
         "min_samples": _BLAST_FIT_MIN_SAMPLES,
         "tolerance": _blast_tolerance(requested_tolerance),

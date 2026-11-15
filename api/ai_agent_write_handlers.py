@@ -22,7 +22,9 @@ Section semantics mirror the REST router (``api.routers.sections``):
   /sections/{section_id}`` through the router's sync helpers
   (``_update_section_sync``, ``_delete_section_sync``). They use index ids,
   return ``section_id_out_of_range`` / ``no_sections`` for bad ids, and
-  invalidate the analysis (update only on a real change).
+  invalidate the analysis (update only on a real change). The agent rejects
+  a name that another section already has (``duplicate_section_name``); REST
+  keeps accepting it.
 - Every effective section mutation invalidates the previous analysis
   (``db.invalidate_analysis``). Mutations are rejected with
   ``process_running`` while the session is ``running`` or ``processing``.
@@ -163,6 +165,12 @@ _MSG_INVALID_CURVE = (
     "La curva no tiene longitud: los puntos consecutivos se repiten. "
     "Indica al menos dos puntos distintos."
 )
+_MSG_DUPLICATE_SECTION_NAME = "Ya existe otra sección llamada «{name}»."
+_MSG_FORMULA_FILTERS = (
+    "El proyecto y el autor no pueden empezar con =, +, - o @."
+)
+_FORMULA_LEADING = frozenset("=+-@")
+_CSV_LEADING = frozenset("\t\r")
 
 
 # ---------------------------------------------------------------------------
@@ -220,19 +228,22 @@ async def _design_mesh_or_error(session_id: str) -> tuple[Any, Dict[str, Any] | 
 
 def _polyline_length(points: Sequence[Sequence[float]]) -> float:
     vertices = np.asarray(points, dtype=float)
-    return float(np.sqrt((np.diff(vertices, axis=0) ** 2).sum(axis=1)).sum())
+    with np.errstate(over="ignore"):
+        return float(np.sqrt((np.diff(vertices, axis=0) ** 2).sum(axis=1)).sum())
 
 
-def _curve_section_count(length: float, spacing: float) -> int:
+def _curve_section_count(length: float, spacing: float) -> float:
     """Sections that ``generate_perpendicular_sections`` places on a polyline.
 
     One section sits at the midpoint when the polyline is shorter than the
     spacing; otherwise one every ``spacing`` metres from ``spacing / 2``, which
-    is ``ceil((length - spacing / 2) / spacing)`` sections.
+    is ``ceil((length - spacing / 2) / spacing)`` sections. Returns ``math.inf``
+    when that quotient is not finite, so the caller never raises.
     """
     if length < spacing:
         return 1
-    return math.ceil((length - spacing / 2) / spacing)
+    quotient = (length - spacing / 2) / spacing
+    return math.ceil(quotient) if math.isfinite(quotient) else math.inf
 
 
 # ---------------------------------------------------------------------------
@@ -372,7 +383,9 @@ async def generate_sections_curve(
     length = _polyline_length(args.points)
     if length < _MIN_CURVE_LENGTH_M:
         return _error("invalid_curve", _MSG_INVALID_CURVE)
-    if _curve_section_count(length, args.spacing) > _MAX_CURVE_SECTIONS:
+    if not math.isfinite(length) or (
+        _curve_section_count(length, args.spacing) > _MAX_CURVE_SECTIONS
+    ):
         return _error("too_many_sections", _MSG_TOO_MANY_SECTIONS)
     sections = await asyncio.to_thread(
         _curve_sections,
@@ -409,33 +422,31 @@ async def update_section(session_id: str, args: SectionUpdateArgs) -> Dict[str, 
     """Edit one section by index, mirroring PUT /sections/{section_id}.
 
     Only the fields given in ``args`` change; the rest of the stored section
-    is kept. The router's sync helper applies the same normalization as the
-    REST endpoint, and the analysis is invalidated only on a real change.
-    Rejected with ``process_running`` while the session is busy.
+    is kept. The merge runs inside the router's sync helper, in the same call
+    that writes, so a concurrent edit is never overwritten. The agent rejects a
+    name equal to another section's name (``duplicate_section_name``); REST does
+    not. The analysis is invalidated only on a real change. Rejected with
+    ``process_running`` while the session is busy.
     """
     busy = await _sections_busy_error(session_id)
     if busy is not None:
         return busy
-    stored, error = await _section_index_error(session_id, args.section_id)
+    _, error = await _section_index_error(session_id, args.section_id)
     if error is not None:
         return error
-    current = stored[args.section_id]
-    body = SectionCreate(
-        name=current["name"] if args.name is None else args.name,
-        origin=current["origin"] if args.origin is None else args.origin,
-        azimuth=current["azimuth"] if args.azimuth is None else args.azimuth,
-        length=current["length"] if args.length is None else args.length,
-        length_up=(
-            current.get("length_up") if args.length_up is None else args.length_up
-        ),
-        length_down=(
-            current.get("length_down") if args.length_down is None else args.length_down
-        ),
-        sector=current["sector"] if args.sector is None else args.sector,
-    )
     try:
         section, changed = await run_db(
-            _update_section_sync, session_id, str(args.section_id), body
+            _update_section_sync,
+            session_id,
+            str(args.section_id),
+            None,
+            args.model_dump(exclude={"section_id"}),
+            reject_duplicate_name=True,
+        )
+    except SectionNameTakenError as exc:
+        return _error(
+            "duplicate_section_name",
+            _MSG_DUPLICATE_SECTION_NAME.format(name=exc.name),
         )
     except HTTPException:
         return _error(
@@ -537,6 +548,16 @@ def _error(code: str, message: str) -> Dict[str, Any]:
     return {"ok": False, "error": code, "message": message}
 
 
+def _formula_like(value: str) -> bool:
+    """True when a text cell could be read as a formula or split by a spreadsheet.
+
+    Checks the first character after leading spaces (tab and carriage return
+    included) and the first character of the stripped text, which is what the
+    handler sends on.
+    """
+    return value.lstrip(" ")[:1] in _CSV_LEADING or value.strip()[:1] in _FORMULA_LEADING
+
+
 def _listing(items: Sequence[str], limit: int) -> str:
     shown = ", ".join(items[:limit])
     hidden = len(items) - limit
@@ -606,6 +627,8 @@ async def export_report(session_id: str, args: ExportReportArgs) -> Dict[str, An
 
     if args.format == "dxf" and (has_filters or project or author):
         return _error("invalid_filters", _MSG_DXF_FILTERS)
+    if _formula_like(args.project or "") or _formula_like(args.author or ""):
+        return _error("invalid_filters", _MSG_FORMULA_FILTERS)
 
     omitted: list[str] = []
     if args.format == "images":
@@ -758,7 +781,7 @@ __all__ = [
 
 from api.routers.process import _run_pipeline_sync
 from api.routers.sections import (
-    SectionCreate,
+    SectionNameTakenError,
     _append_sections,
     _curve_sections,
     _delete_section_sync,

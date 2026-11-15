@@ -94,7 +94,14 @@ export const WRITE_TOOL_QUERY_KEYS: Record<string, ReadonlyArray<ReadonlyArray<s
   generate_sections_curve: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
   update_section: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
   delete_section: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
-  run_reconciliation: [['process-status'], ['results'], ['profile'], ['export-levels']],
+  run_reconciliation: [
+    ['process-status'],
+    ['results'],
+    ['profile'],
+    ['export-levels'],
+    ['blast-correlation'],
+    ['blast-damage-model'],
+  ],
 };
 
 const INFORMATIONAL_OBSERVATION_CODES: ReadonlySet<string> = new Set([

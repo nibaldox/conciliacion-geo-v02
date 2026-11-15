@@ -345,3 +345,27 @@ class TestGenerateSectionsCurvePolicy:
         assert decision.reason_code == REASON_REPLACE_EXISTING
         assert "78" in decision.human_summary_es
         assert "secciones" in decision.human_summary_es
+
+
+class TestAddSectionClickPolicy:
+    def test_add_section_click_is_autonomous_without_results(self) -> None:
+        from core.ai_v2.agent.catalog import TOOL_CATALOG
+
+        decision = decide(
+            TOOL_CATALOG["add_section_click"], ToolState(n_sections=4, n_results=0)
+        )
+        assert decision.requires_confirmation is False
+        assert decision.reason_code == REASON_AUTONOMOUS
+
+    def test_add_section_click_confirms_when_results_exist(self) -> None:
+        from core.ai_v2.agent.catalog import TOOL_CATALOG
+
+        decision = decide(
+            TOOL_CATALOG["add_section_click"], ToolState(n_sections=4, n_results=78)
+        )
+        assert decision.requires_confirmation is True
+        assert decision.reason_code == REASON_REPLACE_EXISTING
+        assert decision.human_summary_es == (
+            "Añade una sección e invalida 78 resultados del análisis actual."
+        )
+

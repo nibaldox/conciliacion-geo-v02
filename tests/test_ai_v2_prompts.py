@@ -87,7 +87,7 @@ _RULE_5_LINE = (
     "Cualquier cambio de secciones invalida el análisis previo, y `run_reconciliation` reemplaza TODOS los resultados "
     "usando la configuración de detección guardada en la sesión. "
     "Si ya hay secciones o resultados, `generate_sections_auto`, `generate_sections_curve`, `generate_sections_manual` "
-    "y `run_reconciliation` pedirán confirmación; `add_section_click` se ejecuta sin confirmación. "
+    "y `run_reconciliation` pedirán confirmación; `add_section_click` pide confirmación solo si ya hay resultados. "
     "Explica qué se añade, qué se reemplaza y qué se invalida, y espera la decisión."
 )
 
@@ -96,7 +96,8 @@ def test_agent_system_prompt_production_loader_rule_5(monkeypatch):
     monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
     text = conversations.agent_system_prompt()
     assert "AÑADEN secciones" in text
-    assert "`add_section_click` se ejecuta sin confirmación" in text
+    assert "`add_section_click` pide confirmación solo si ya hay resultados" in text
+    assert "`add_section_click` se ejecuta sin confirmación" not in text
     assert "generar secciones reemplaza TODAS" not in text
     assert "procées" not in text
     assert _rule_line(text, 5) == _RULE_5_LINE

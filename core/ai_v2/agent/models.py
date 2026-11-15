@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 _FilterSectorName = Annotated[str, Field(min_length=1, max_length=120)]
 _FilterSectionName = Annotated[str, Field(min_length=1, max_length=60)]
 _FilterLevelLabel = Annotated[str, Field(min_length=1, max_length=20)]
+_QueryText = Annotated[str, Field(max_length=120)]
 
 
 class ToolRisk(str, Enum):
@@ -122,9 +123,9 @@ class PolicyDecision(BaseModel):
 
 
 class _StrictArgs(BaseModel):
-    """Base for all tool argument models: unknown keys are rejected."""
+    """Base for all tool argument models: unknown keys and non-finite floats are rejected."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class SectionDefinitionArgs(_StrictArgs):
@@ -174,7 +175,7 @@ class SectionCurveArgs(_StrictArgs):
     """
 
     points: list[_CurvePoint] = Field(min_length=2, max_length=200)
-    spacing: float = Field(default=10.0, gt=0.0, le=1000.0, allow_inf_nan=False)
+    spacing: float = Field(default=10.0, ge=0.1, le=1000.0, allow_inf_nan=False)
     length: float = Field(default=200.0, gt=0.0, le=10000.0, allow_inf_nan=False)
     length_up: Optional[float] = Field(default=None, gt=0.0, le=10000.0, allow_inf_nan=False)
     length_down: Optional[float] = Field(default=None, gt=0.0, le=10000.0, allow_inf_nan=False)
@@ -306,12 +307,13 @@ class ResultQueryArgs(_StrictArgs):
     ``level`` values are the design bench floor elevations exactly as the
     web table shows them (text, e.g. ``['3065', '3066']``); ``bench``
     values are design bench numbers matched by their string form, like
-    the web table filter.
+    the web table filter. Each sector, section and level item is capped at
+    120 characters.
     """
 
-    sector: Optional[list[str]] = Field(default=None, max_length=20)
-    section: Optional[list[str]] = Field(default=None, max_length=20)
-    level: Optional[list[str]] = Field(default=None, max_length=60)
+    sector: Optional[list[_QueryText]] = Field(default=None, max_length=20)
+    section: Optional[list[_QueryText]] = Field(default=None, max_length=20)
+    level: Optional[list[_QueryText]] = Field(default=None, max_length=60)
     bench: Optional[list[int]] = Field(default=None, max_length=50)
     parameter: Optional[Literal["height", "angle", "berm"]] = None
     status: Optional[str] = Field(default=None, max_length=40)

@@ -1211,8 +1211,9 @@ def test_get_conversation_history_sanitized_with_pending(
         "role": "user",
         "content": "reemplaza las secciones",
     }
-    assert "origin" not in resp.text
-    assert "10.0" not in resp.text
+    serialized_messages = json.dumps(messages)
+    assert "origin" not in serialized_messages
+    assert "10.0" not in serialized_messages
     assert messages[1]["tools"] == ["generate_sections_manual"]
     assert "arguments" not in messages[1]
     assert body["pending"] == {
@@ -1220,8 +1221,11 @@ def test_get_conversation_history_sanitized_with_pending(
         "tool_name": "generate_sections_manual",
         "args_summary": body["pending"]["args_summary"],
     }
-    assert body["pending"]["args_summary"]
-    assert "10.0" not in body["pending"]["args_summary"]
+    args_summary = body["pending"]["args_summary"]
+    assert args_summary
+    assert " Parámetros: " in args_summary
+    assert "sections=" in args_summary
+    assert len(args_summary) <= 500
     peeked = ai_router.AGENT_PENDING_STORE.peek(invocation_id, SESSION_A)
     assert peeked is not None
     assert peeked.args_summary == body["pending"]["args_summary"]
@@ -1837,3 +1841,68 @@ def test_strip_older_screen_context_touches_only_user_messages() -> None:
     assert result[2] == messages[2]
     assert result[3] == {"role": "user", "content": _LINE_S02 + "dos"}
     assert messages[1]["content"] == _LINE_S03 + "uno"
+
+
+@pytest.mark.parametrize(
+    "section_name",
+    [
+        "Norte\u2028Sur",
+        "Norte\u2029Sur",
+        "Norte\u0085Sur",
+        "Norte\u202eSur",
+        "Norte\u200bSur",
+        "Norte\tSur",
+        "Norte\ue000Sur",
+    ],
+)
+def test_ui_context_name_with_control_or_format_char_never_prefixes(
+    client: TestClient,
+    chat_on: None,
+    monkeypatch: pytest.MonkeyPatch,
+    section_name: str,
+) -> None:
+    _seed_named_sections(SESSION_A, [section_name])
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "0"})
+    assert resp.status_code == 200
+    assert _user_contents(fake) == ["hola"]
+
+
+def test_ui_context_accented_name_keeps_its_prefix(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "Sección Ñandú norte"
+    _seed_named_sections(SESSION_A, [name])
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "0"})
+    assert resp.status_code == 200
+    expected = f"[Contexto de pantalla: sección seleccionada «{name}» (section_id 0)]\n"
+    assert _user_contents(fake) == [expected + "hola"]
+
+
+def test_without_screen_context_strips_only_exact_server_lines() -> None:
+    lookalike = "[Contexto de pantalla: a]\n[Contexto de pantalla: b]\nreal"
+    assert ai_router._without_screen_context(_LINE_S03 + "hola") == "hola"
+    assert ai_router._without_screen_context(_LINE_S03 + _LINE_S02 + "hola") == "hola"
+    assert ai_router._without_screen_context(lookalike) == lookalike
+
+
+def test_history_keeps_user_text_that_only_looks_like_a_screen_context_line(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    text = "[Contexto de pantalla: a]\n[Contexto de pantalla: b]\nreal"
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, text)
+    assert resp.status_code == 200
+    assert _user_contents(fake) == [text]
+    conv_id = resp.headers["X-Conversation-Id"]
+    history = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert history.status_code == 200
+    assert history.json()["messages"][0] == {"role": "user", "content": text}
+

@@ -12,6 +12,7 @@ import inspect
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Dict, List, cast
 
 import numpy as np
@@ -19,8 +20,9 @@ import pytest
 import trimesh
 
 import api.database as db
-from api.ai_agent_handlers import READ_HANDLERS
+from api.ai_agent_handlers import READ_HANDLERS, _damage_digest
 from core.ai_v2.agent.catalog import TOOL_CATALOG
+from core.blast_model import fit_powder_factor_damage_model
 from core.ai_v2.agent.models import (
     AchievementFilterArgs,
     BlastCorrelationArgs,
@@ -2070,3 +2072,68 @@ class TestGetBlastDamageModel:
         session_id = _seed_projection(api_test_client, holes, sections, results)
         payload = await READ_HANDLERS["get_blast_damage_model"](session_id, BlastDamageArgs())
         assert _CORRELATION_KEYS.isdisjoint(set(_walk_keys(payload)))
+
+
+_DAMAGE_PF = [100.0 + 5.0 * index for index in range(24)]
+
+
+def _damage_response(pf_values, over_breaks, fit=None):
+    points = [
+        SimpleNamespace(section_name=f"S-{index:02d}", pf_g_per_ton=pf, over_break=over)
+        for index, (pf, over) in enumerate(zip(pf_values, over_breaks))
+    ]
+    return SimpleNamespace(points=points, fit=fit, data_status="OK", temporal_filter={})
+
+
+def _router_fit(pf_values, over_breaks):
+    """Mirror of ``_build_damage_model_sync``: a fit only when confidence is not INSUFFICIENT."""
+    model = fit_powder_factor_damage_model(
+        np.asarray(pf_values, dtype=float), np.asarray(over_breaks, dtype=float)
+    )
+    if model["confidence"] == "INSUFFICIENT":
+        return None
+    return SimpleNamespace(
+        beta0=model["beta0"],
+        beta1=model["beta1"],
+        r_squared=model["r_squared"],
+        p_value=model["p_value"],
+        n=model["n"],
+        confidence=model["confidence"],
+        ci_beta1_low=model["ci_beta1_low"],
+        ci_beta1_high=model["ci_beta1_high"],
+    )
+
+
+def _digest_bytes(digest):
+    return len(json.dumps(digest, ensure_ascii=False).encode("utf-8"))
+
+
+def test_damage_digest_three_points_is_insufficient_samples():
+    response = _damage_response([120.0, 130.0, 140.0], [0.2, 0.3, 0.4])
+    digest = _damage_digest(response, {}, None)
+    assert digest["fit_status"] == "INSUFFICIENT_SAMPLES"
+    assert digest["n"] == 3
+    assert digest["p_value"] is None
+    assert digest["fit"] is None
+
+
+def test_damage_digest_noisy_points_are_not_significant_with_rounded_p():
+    over = [0.3 * (-1) ** index for index in range(24)]
+    digest = _damage_digest(_damage_response(_DAMAGE_PF, over), {}, None)
+    assert digest["fit_status"] == "NOT_SIGNIFICANT"
+    assert digest["n"] == 24
+    assert digest["p_value"] == pytest.approx(0.7373, abs=1e-4)
+    assert digest["fit"] is None
+    assert _digest_bytes(digest) <= 4096
+
+
+def test_damage_digest_strong_linear_points_report_the_fit():
+    over = [0.02 * pf + 0.01 * (-1) ** index for index, pf in enumerate(_DAMAGE_PF)]
+    fit = _router_fit(_DAMAGE_PF, over)
+    digest = _damage_digest(_damage_response(_DAMAGE_PF, over, fit), {}, None)
+    assert digest["fit_status"] == "FIT"
+    assert digest["n"] == 24
+    assert digest["p_value"] == 0.0
+    assert digest["fit"]["confidence"] == "HIGH"
+    assert _digest_bytes(digest) <= 4096
+

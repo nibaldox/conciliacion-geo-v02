@@ -176,6 +176,21 @@ class TestCatalog:
         )
         assert spec.impact_summary == TOOL_CATALOG["generate_sections_auto"].impact_summary
 
+    def test_add_section_click_is_replace_with_frozen_text(self) -> None:
+        spec = TOOL_CATALOG["add_section_click"]
+        assert spec.args_model is SectionClickArgs
+        assert spec.risk is ToolRisk.REPLACE
+        assert spec.state_keys == ("n_results",)
+        assert spec.description == (
+            "Append ONE cross-section at an origin point on the plan view. "
+            "Additive: existing sections are kept. "
+            "Adding a section invalidates the previous analysis; it asks for "
+            "confirmation only when results exist."
+        )
+        assert spec.impact_summary == (
+            "Añade una sección e invalida {count} resultados del análisis actual."
+        )
+
     def test_names_are_unique(self) -> None:
         names = [spec.name for spec in AGENT_TOOLS]
         assert len(names) == len(set(names))
@@ -196,7 +211,7 @@ class TestCatalog:
             ("list_meshes", ToolRisk.READ, (), 30.0, False),
             ("get_mesh_info", ToolRisk.READ, (), 30.0, False),
             ("list_sections", ToolRisk.READ, (), 30.0, False),
-            ("add_section_click", ToolRisk.ADDITIVE, (), 30.0, False),
+            ("add_section_click", ToolRisk.REPLACE, ("n_results",), 30.0, False),
             ("generate_sections_auto", ToolRisk.REPLACE, ("n_sections",), 30.0, False),
             ("generate_sections_manual", ToolRisk.REPLACE, ("n_sections",), 30.0, False),
             ("run_reconciliation", ToolRisk.EXPENSIVE_REPLACE, ("n_results",), 300.0, False),
