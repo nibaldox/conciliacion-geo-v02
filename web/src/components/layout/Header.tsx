@@ -1,4 +1,9 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { setSessionId } from '../../api/client';
+import { newSessionId } from '../../sessionRecovery';
+import { useRecentSessions } from '../../api/sessions';
+import { RecentSessionsDialog } from '../session/RecentSessionsDialog';
 import { useSession } from '../../stores/session';
 import { useQueryClient } from '@tanstack/react-query';
 import { LanguageToggle } from './LanguageToggle';
@@ -34,8 +39,11 @@ export function Header() {
   const { projectStatus } = useWorkflowStatus();
   const queryClient = useQueryClient();
   const { t } = useTranslation();
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  const sessions = useRecentSessions();
 
   const handleNewSession = () => {
+    setSessionId(newSessionId());
     queryClient.clear();
     reset();
     window.location.href = window.location.pathname;
@@ -57,9 +65,11 @@ export function Header() {
       <div className="flex shrink-0 items-center gap-2">
         <div className="hidden items-center gap-1 md:flex"><KeyboardShortcutsHelp /><LanguageToggle /></div>
         <ThemeToggle />
+        {sessions.isSuccess && <Button variant="secondary" size="sm" aria-label={t('recentSessions.button')} title={t('recentSessions.button')} onClick={() => { setSessionsOpen(true); void sessions.refetch(); }}><span className="hidden sm:inline">{t('recentSessions.button')}</span><svg className="h-4 w-4 sm:hidden" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg></Button>}
         <Button variant="secondary" size="sm" onClick={handleNewSession} aria-label={t('header.new_session')} title={t('header.new_session')}><span className="hidden sm:inline">{t('header.new_session')}</span><span className="sm:hidden" aria-hidden="true">+</span></Button>
         <span className="hidden sm:inline-flex"><Button variant="secondary" size="sm" leftIcon={<IconExport className="h-4 w-4" />} onClick={() => setView('export-ai')}>{t('workspace.export')}</Button></span>
       </div>
+      {sessionsOpen && <RecentSessionsDialog data={sessions.data} error={sessions.isError} onClose={() => setSessionsOpen(false)} />}
     </header>
   );
 }

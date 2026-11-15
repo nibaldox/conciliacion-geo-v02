@@ -10,6 +10,12 @@ export function getSessionId(): string | null {
 
 export function setSessionId(sessionId: string | null): void {
   currentSessionId = sessionId;
+  try {
+    if (sessionId === null) localStorage.removeItem('conciliacion.sessionId');
+    else localStorage.setItem('conciliacion.sessionId', sessionId);
+  } catch {
+    return;
+  }
 }
 
 /**
@@ -139,8 +145,8 @@ client.interceptors.request.use((config) => {
 client.interceptors.response.use(
   async (response) => {
     const sid = response.headers['x-session-id'];
-    if (typeof sid === 'string') {
-      currentSessionId = sid;
+    if (!currentSessionId && typeof sid === 'string') {
+      setSessionId(sid);
     }
     if (!(response.data instanceof Blob)) {
       response.data = await normalizeJsonResponse(response.data);
@@ -150,8 +156,8 @@ client.interceptors.response.use(
   (error) => {
     // Preserve session ID even on errors
     const sid = error.response?.headers?.['x-session-id'];
-    if (typeof sid === 'string') {
-      currentSessionId = sid;
+    if (!currentSessionId && typeof sid === 'string') {
+      setSessionId(sid);
     }
     return Promise.reject(error);
   }

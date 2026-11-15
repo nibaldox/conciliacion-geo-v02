@@ -9,6 +9,8 @@ import io
 import math
 from dataclasses import dataclass
 from datetime import datetime
+
+from core.config import report_tz
 from typing import Any, Mapping, Optional, Sequence
 
 from openpyxl import Workbook
@@ -411,7 +413,7 @@ def _write_readme(
             line(label, str(value))
     generated = meta.get("generated_at")
     if _is_empty(generated):
-        generated = datetime.now().isoformat(timespec="seconds")
+        generated = datetime.now(report_tz()).isoformat(timespec="seconds")
     try:
         generated = datetime.fromisoformat(str(generated)).strftime("%d/%m/%Y %H:%M")
     except ValueError:

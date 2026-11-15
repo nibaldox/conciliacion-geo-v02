@@ -446,7 +446,7 @@ def test_dashboard_plan_receives_backdrop_and_statuses(monkeypatch, profile_spy)
     monkeypatch.setattr(web_word_report, "dashboard_plan_png", fake_plan)
     plan_inputs = _plan_inputs()
     build_word_report(_data(plan_inputs=plan_inputs))
-    assert seen["sections"] is plan_inputs["sections"]
+    assert [s["name"] for s in seen["sections"]] == [s["name"] for s in plan_inputs["sections"]]
     assert seen["statuses"] == {"S-01": "NO_CUMPLE", "S-02": "CUMPLE", "S-03": "CUMPLE"}
     assert seen["shade"] is sentinel and seen["surface"] == "surface"
 

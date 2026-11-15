@@ -129,9 +129,18 @@ async def _run_startup_vacuum() -> None:
         logger.info("Startup VACUUM: %s", result)
 
 
+async def _run_startup_session_cleanup() -> None:
+    try:
+        count = await run_db(cleanup_old_sessions)
+        logger.info("Startup session cleanup deleted %d sessions", count)
+    except Exception:
+        logger.exception("Startup session cleanup failed; continuing startup")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    await _run_startup_session_cleanup()
     await _run_startup_vacuum()
     stop_cleanup = asyncio.Event()
     cleanup_task = None
@@ -153,7 +162,8 @@ async def lifespan(app: FastAPI):
             if ai_conversations_task is not None:
                 await ai_conversations_task
             await run_db(dxf_uploads.cleanup_all)
-            await run_db(cleanup_old_sessions)
+            deleted = await run_db(cleanup_old_sessions)
+            logger.info("Shutdown session cleanup deleted %d sessions", deleted)
         finally:
             close_sentinel()
 

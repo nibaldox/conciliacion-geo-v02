@@ -13,8 +13,10 @@ import { createRoot } from 'react-dom/client'
 import './styles/globals.css'
 import App from './App'
 import { restoreSessionFromHash } from './sessionRecovery'
+import { purgeLegacyApiCache } from './pwaCleanup'
 
 async function mountApp() {
+  if (await purgeLegacyApiCache()) return;
   const sessionRestoreFailed = await restoreSessionFromHash();
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

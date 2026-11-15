@@ -1,4 +1,18 @@
 {
+  "recentSessions": {
+    "button": "Sesiones",
+    "title": "Sesiones recientes",
+    "current": "Actual",
+    "open": "Abrir",
+    "sections_one": "{{count}} sección",
+    "sections_other": "{{count}} secciones",
+    "results_one": "{{count}} resultado",
+    "results_other": "{{count}} resultados",
+    "expires": "Se borra el {{date}} si no se usa",
+    "retention": "Las sesiones se conservan {{days}} días desde su último uso.",
+    "empty": "No hay sesiones guardadas con superficies cargadas.",
+    "error": "No se pudo cargar la lista de sesiones."
+  },
   "app": {
     "title": "Conciliación Geotécnica",
     "tagline": "Diseño vs As-Built",
@@ -1463,8 +1477,8 @@
       "status_no_cumple": "No cumple",
       "status_unknown": "Sin dato",
       "parameters": "Cumplimiento por parámetro",
-      "denominator": "Porcentaje sobre todos los bancos, incluidos otros estados y sin dato.",
-      "bar_counts": "Cumple: {{ok}}; fuera: {{warn}}; no cumple: {{nok}}; otros o sin dato: {{unknown}}",
+      "denominator": "Porcentaje sobre los bancos comparados ({{n}}); los no construidos y adicionales no cuentan.",
+      "bar_counts": "Cumple: {{ok}}; fuera: {{warn}}; no cumple: {{nok}}; sin dato evaluable: {{unknown}}",
       "selected": "Sección seleccionada",
       "score": "Puntaje",
       "status": "Estado",

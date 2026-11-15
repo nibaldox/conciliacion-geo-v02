@@ -97,11 +97,12 @@ def _plan_png(data: ReportData) -> Optional[bytes]:
     plan_inputs = data.plan_inputs
     if not isinstance(plan_inputs, Mapping):
         return None
-    sections = plan_inputs.get("sections")
+    from core.web_pdf_report import _plan_sections, _plan_statuses
+    sections = _plan_sections(data)
     if not sections:
         return None
     surface, shade = _plan_backdrop(plan_inputs, sections)
-    statuses = {profile.section: profile.worst_status for profile in data.profiles}
+    statuses = _plan_statuses(sections)
     try:
         return dashboard_plan_png(sections, statuses, shade=shade, surface=surface)
     except Exception:
@@ -165,6 +166,11 @@ def _readme_text(
     ):
         value = str(meta.get(key) or "").strip()
         if value:
+            if key == "generated_at":
+                try:
+                    value = datetime.fromisoformat(value).strftime("%d/%m/%Y %H:%M")
+                except ValueError:
+                    pass
             lines.append(f"{label}: {value}")
 
     lines += ["", "Alcance"]

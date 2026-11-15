@@ -47,7 +47,7 @@ export default defineConfig({
         globIgnores: ['**/vendor-plotly*.*', '**/Cesium/**'],
         additionalManifestEntries: [],
         cleanupOutdatedCaches: true,
-        navigateFallbackDenylist: [/assets\/.*-plotly/],
+        navigateFallbackDenylist: [/assets\/.*-plotly/, /\/api\//],
         runtimeCaching: [
           {
             // Demo data + small static assets: cache-first
@@ -65,15 +65,6 @@ export default defineConfig({
             options: {
               cacheName: 'plotly-js',
               expiration: { maxEntries: 5, maxAgeSeconds: 60 * 60 * 24 * 30 },
-            },
-          },
-          {
-            // API responses (stale-while-revalidate for 1 day).
-            urlPattern: /\/api\/v1\/.*/,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 },
             },
           },
           {

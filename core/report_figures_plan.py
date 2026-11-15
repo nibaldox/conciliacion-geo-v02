@@ -236,6 +236,7 @@ def _build_plan_figure(
     sections,
     statuses: Optional[Mapping[str, str]],
     *,
+    excluded=(),
     shade: Optional[Shade] = None,
     surface: Optional[PlanSurface] = None,
     width_in: float = 7.0,
@@ -243,11 +244,16 @@ def _build_plan_figure(
 ):
     """Build the dashboard plan figure, returning ``(fig, ax)`` or ``None``."""
     valid = []
+    excluded_flags = []
+    resolved_statuses = []
+    excluded = set(excluded)
     for section in sections or ():
         points = _section_points(section)
         if points:
             name = (_section_mapping(section) or {}).get("name")
             valid.append(("" if name is None else str(name), points))
+            excluded_flags.append(str(name) in excluded or (_section_mapping(section) or {}).get("included") is False)
+            resolved_statuses.append((_section_mapping(section) or {}).get("worst_status"))
     if not valid:
         return None
     statuses = statuses or {}
@@ -281,15 +287,16 @@ def _build_plan_figure(
     ax.set_xlim(*x_lim)
     ax.set_ylim(*y_lim)
 
-    keys = [_status_key(statuses.get(name)) for name, _points in valid]
-    counts = {status: keys.count(status) for status in STATUS_COLORS}
+    keys = [_status_key(resolved if resolved is not None else statuses.get(name))
+            for (name, _points), resolved in zip(valid, resolved_statuses)]
+    counts = {status: sum(key == status and not excluded for key, excluded in zip(keys, excluded_flags)) for status in STATUS_COLORS}
     halo = [patheffects.withStroke(linewidth=3.0, foreground="#FFFFFF", alpha=0.9)]
-    for (name, points), key in zip(valid, keys):
+    for (name, points), key, is_excluded in zip(valid, keys, excluded_flags):
         line, = ax.plot(
             [point[0] for point in points], [point[1] for point in points],
-            color=STATUS_COLORS[key], linewidth=1.7, solid_capstyle="butt", zorder=4, path_effects=halo,
+            color="#CBD5E1" if is_excluded else STATUS_COLORS[key], linewidth=0.8 if is_excluded else 1.7, solid_capstyle="butt", zorder=4, path_effects=halo,
         )
-        line.set_gid("plan-section")
+        line.set_gid("plan-section-excluded" if is_excluded else "plan-section")
 
     ax.set_xlabel("Este (m)", fontsize=7.5, labelpad=2)
     ax.set_ylabel("Norte (m)", fontsize=7.5, labelpad=2)
@@ -311,6 +318,8 @@ def _build_plan_figure(
             [], [], color=STATUS_COLORS[STATUS_UNKNOWN], linewidth=1.7,
             label=f"{STATUS_LABELS_ES[STATUS_UNKNOWN]} ({counts[STATUS_UNKNOWN]})",
         ))
+    if any(excluded_flags):
+        handles.append(Line2D([], [], color="#CBD5E1", linewidth=0.8, label=f"Fuera del filtro ({sum(excluded_flags)})"))
     if has_contours:
         handles.append(Line2D(
             [], [], color=_MAJOR_CONTOUR_COLOR, linewidth=0.75,
@@ -518,6 +527,7 @@ def dashboard_plan_png(
     sections,
     statuses: Mapping[str, str],
     *,
+    excluded=(),
     shade: Optional[Shade] = None,
     surface: Optional[PlanSurface] = None,
     width_in: float = 7.0,
@@ -540,7 +550,7 @@ def dashboard_plan_png(
     when no section has usable endpoints.
     """
     built = _build_plan_figure(
-        sections, statuses, shade=shade, surface=surface, width_in=width_in, height_in=height_in,
+        sections, statuses, excluded=excluded, shade=shade, surface=surface, width_in=width_in, height_in=height_in,
     )
     if built is None:
         return None

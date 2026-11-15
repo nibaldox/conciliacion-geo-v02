@@ -9,16 +9,17 @@ import { parameterBars, parameterTone, sectionSummary } from './dashboardSelecto
 export function ParameterBars({ rows }: { rows: readonly ComparisonResult[] }) {
   const { t } = useTranslation();
   const bars = parameterBars(rows);
-  const tones = ['ok', 'warn', 'nok', 'unknown'] as const;
+  const comparedCount = Math.max(0, ...bars.map((bar) => bar.ok + bar.warn + bar.nok));
+  const tones = ['ok', 'warn', 'nok'] as const;
   return <section className="space-y-3 border-t border-border py-5" data-slot="parameter-bars">
     <h2 className="ui-section-title">{t('dashboard.rail.parameters')}</h2>
-    {bars.map((bar) => <div key={bar.parameter}>
-      <div className="flex justify-between text-xs"><span>{t(`dashboard.parameter.${bar.parameter}`)}</span><span className="tabular-nums">{rows.length ? `${(100 * bar.ok / rows.length).toFixed(1)}%` : '—'}</span></div>
+    {bars.map((bar) => { const count = bar.ok + bar.warn + bar.nok; return <div key={bar.parameter}>
+      <div className="flex justify-between text-xs"><span>{t(`dashboard.parameter.${bar.parameter}`)}</span><span className="tabular-nums">{count ? `${(100 * bar.ok / count).toFixed(1)}%` : '—'}</span></div>
       <div className="mt-1 flex h-1.5 w-full" aria-label={t('dashboard.rail.bar_counts', { ok: bar.ok, warn: bar.warn, nok: bar.nok, unknown: bar.unknown })}>
-        {tones.map((tone) => <span key={tone} style={{ width: `${rows.length ? 100 * bar[tone] / rows.length : 0}%`, backgroundColor: tone === 'unknown' ? 'var(--color-text-muted)' : statusToneColor(tone) }} />)}
+        {tones.map((tone) => <span key={tone} style={{ width: `${count ? 100 * bar[tone] / count : 0}%`, backgroundColor: statusToneColor(tone) }} />)}
       </div>
-    </div>)}
-    <p className="text-xs text-text-muted">{t('dashboard.rail.denominator')}</p>
+    </div>})}
+    <p className="text-xs text-text-muted">{t('dashboard.rail.denominator', { n: comparedCount })}</p>
   </section>;
 }
 

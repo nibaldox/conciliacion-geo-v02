@@ -263,6 +263,7 @@ dependencies = [
     { name = "slowapi" },
     { name = "streamlit" },
     { name = "trimesh" },
+    { name = "tzdata" },
     { name = "uvicorn" },
 ]
 
@@ -306,6 +307,7 @@ requires-dist = [
     { name = "slowapi", specifier = "==0.1.10" },
     { name = "streamlit" },
     { name = "trimesh" },
+    { name = "tzdata", specifier = ">=2024.1" },
     { name = "uvicorn" },
 ]
 provides-extras = ["test"]
