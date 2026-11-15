@@ -160,10 +160,13 @@ def chat_post(
     model: str = "llama3.1:8b",
     conversation_id: str | None = None,
     headers: dict[str, str] = CHAT_HEADERS_A,
+    ui_context: dict[str, Any] | None = None,
 ) -> Any:
     payload: dict[str, Any] = {"message": message, "provider": provider, "model": model}
     if conversation_id is not None:
         payload["conversation_id"] = conversation_id
+    if ui_context is not None:
+        payload["ui_context"] = ui_context
     return client.post(
         "/api/v1/ai/chat", json=payload, headers={**CHAT_HEADERS_A, **headers}
     )
@@ -1530,3 +1533,307 @@ def test_get_and_delete_unknown_conversation_on_fresh_session_generic(
     assert got_other.status_code == 404
     assert got_other.json() == {"exists": False}
     assert db.get_ai_conversation("conv_unknown_fresh", FRESH_SESSION) is None
+
+
+# ---------------------------------------------------------------------------
+# T3.2c. ui_context.selected_section_id: screen context for the model (plan 1.4,
+# arbitraje #26). The browser sends the section id; the server resolves the name.
+# ---------------------------------------------------------------------------
+
+_LINE_S03 = "[Contexto de pantalla: sección seleccionada «S-03» (section_id 2)]\n"
+_LINE_S02 = "[Contexto de pantalla: sección seleccionada «S-02» (section_id 1)]\n"
+
+
+def _seed_named_sections(session_id: str, names: list[str]) -> None:
+    db.get_or_create_session(session_id)
+    db.save_sections(
+        session_id,
+        [
+            {"name": name, "origin": [0.0, 0.0], "azimuth": 0.0, "length": 200.0}
+            for name in names
+        ],
+    )
+
+
+def _user_contents(provider: ScriptedChatProvider) -> list[str]:
+    return [m["content"] for m in provider.requests[0] if m["role"] == "user"]
+
+
+def _error_details(resp: Any) -> list[tuple[tuple[Any, ...], str]]:
+    return [(tuple(error["loc"]), error["type"]) for error in resp.json()["detail"]]
+
+
+def test_ui_context_valid_id_prefixes_model_message_with_real_name(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    fake = ScriptedChatProvider([text_turn("Listo.")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(
+        client, "¿qué ves aquí?", ui_context={"selected_section_id": "2"}
+    )
+    assert resp.status_code == 200
+    assert _user_contents(fake) == [_LINE_S03 + "¿qué ves aquí?"]
+
+
+def test_ui_context_name_is_resolved_server_side_from_stored_index(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed_named_sections(SESSION_A, ["Norte", "Centro", "Sur"])
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "2"})
+    assert resp.status_code == 200
+    assert _user_contents(fake) == [
+        "[Contexto de pantalla: sección seleccionada «Sur» (section_id 2)]\nhola"
+    ]
+
+
+@pytest.mark.parametrize("section_id", ["3", "99", "12345"])
+def test_ui_context_out_of_range_id_adds_no_prefix(
+    client: TestClient,
+    chat_on: None,
+    monkeypatch: pytest.MonkeyPatch,
+    section_id: str,
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": section_id})
+    assert resp.status_code == 200
+    assert _user_contents(fake) == ["hola"]
+
+
+def test_ui_context_id_without_stored_sections_adds_no_prefix(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db.get_or_create_session(SESSION_A)
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "0"})
+    assert resp.status_code == 200
+    assert _user_contents(fake) == ["hola"]
+
+
+@pytest.mark.parametrize(
+    "section_name", ["", "S-03]", "S\n04", "S\r05", "[S-06", "«S-07»", "S»08"]
+)
+def test_ui_context_unusable_name_at_valid_index_never_prefixes(
+    client: TestClient,
+    chat_on: None,
+    monkeypatch: pytest.MonkeyPatch,
+    section_name: str,
+) -> None:
+    _seed_named_sections(SESSION_A, [section_name])
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "0"})
+    assert resp.status_code == 200
+    assert _user_contents(fake) == ["hola"]
+
+
+@pytest.mark.parametrize("section_id", ["S-03", "123456", "-1", "2 ", "2\n", ""])
+def test_ui_context_malformed_id_rejected_422(
+    client: TestClient,
+    chat_on: None,
+    monkeypatch: pytest.MonkeyPatch,
+    section_id: str,
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    fake = ScriptedChatProvider([text_turn("x")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": section_id})
+    assert resp.status_code == 422
+    assert (
+        ("body", "ui_context", "selected_section_id"),
+        "string_pattern_mismatch",
+    ) in _error_details(resp)
+    assert fake.requests == []
+
+
+def test_ui_context_non_ascii_digit_id_rejected_422(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    fake = ScriptedChatProvider([text_turn("x")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "\u0662"})
+    assert resp.status_code == 422
+    assert (
+        ("body", "ui_context", "selected_section_id"),
+        "string_pattern_mismatch",
+    ) in _error_details(resp)
+    assert fake.requests == []
+
+
+def test_ui_context_extra_key_rejected_422(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    fake = ScriptedChatProvider([text_turn("x")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(
+        client,
+        "hola",
+        ui_context={"selected_section_id": "2", "section_id": "2"},
+    )
+    assert resp.status_code == 422
+    assert (("body", "ui_context", "section_id"), "extra_forbidden") in _error_details(
+        resp
+    )
+    assert fake.requests == []
+
+
+def test_ui_context_old_selected_section_field_rejected_422(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    fake = ScriptedChatProvider([text_turn("x")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section": "S-03"})
+    assert resp.status_code == 422
+    assert (
+        ("body", "ui_context", "selected_section"),
+        "extra_forbidden",
+    ) in _error_details(resp)
+    assert fake.requests == []
+
+
+def test_ui_context_hundred_char_section_name_is_prefixed_in_full(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    name = "N" * 100
+    _seed_named_sections(SESSION_A, [name])
+    fake = ScriptedChatProvider([text_turn("ok")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "0"})
+    assert resp.status_code == 200
+    expected = f"[Contexto de pantalla: sección seleccionada «{name}» (section_id 0)]\n"
+    assert _user_contents(fake) == [expected + "hola"]
+
+
+def test_ui_context_prefix_stored_for_current_turn_and_stripped_on_next(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    first_fake = ScriptedChatProvider([text_turn("primera")])
+    install_fake_providers(monkeypatch, [first_fake])
+    first = chat_post(
+        client, "primer mensaje", ui_context={"selected_section_id": "2"}
+    )
+    assert first.status_code == 200
+    conv_id = first.headers["X-Conversation-Id"]
+    stored = db.get_ai_conversation(conv_id, SESSION_A)
+    assert stored is not None
+    assert stored[1] == {"role": "user", "content": _LINE_S03 + "primer mensaje"}
+    second_fake = ScriptedChatProvider([text_turn("segunda")])
+    install_fake_providers(monkeypatch, [second_fake])
+    second = chat_post(client, "segundo mensaje", conversation_id=conv_id)
+    assert second.status_code == 200
+    seen = second_fake.requests[0]
+    assert [m["role"] for m in seen] == ["system", "user", "assistant", "user"]
+    assert seen[1] == {"role": "user", "content": "primer mensaje"}
+    assert seen[-1] == {"role": "user", "content": "segundo mensaje"}
+    stored_after = db.get_ai_conversation(conv_id, SESSION_A)
+    assert stored_after is not None
+    assert stored_after[1] == {"role": "user", "content": "primer mensaje"}
+
+
+def test_ui_context_new_section_on_next_turn_replaces_visible_context(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    install_fake_providers(
+        monkeypatch, [ScriptedChatProvider([text_turn("uno")])]
+    )
+    first = chat_post(client, "uno", ui_context={"selected_section_id": "1"})
+    conv_id = first.headers["X-Conversation-Id"]
+    second_fake = ScriptedChatProvider([text_turn("dos")])
+    install_fake_providers(monkeypatch, [second_fake])
+    second = chat_post(
+        client,
+        "dos",
+        conversation_id=conv_id,
+        ui_context={"selected_section_id": "2"},
+    )
+    assert second.status_code == 200
+    assert _user_contents(second_fake) == [
+        "uno",
+        _LINE_S03 + "dos",
+    ]
+
+
+def test_ui_context_prefix_never_echoed_to_browser(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    fake = ScriptedChatProvider([text_turn("respuesta")])
+    install_fake_providers(monkeypatch, [fake])
+    resp = chat_post(client, "hola", ui_context={"selected_section_id": "2"})
+    assert resp.status_code == 200
+    assert "Contexto de pantalla" not in resp.text
+    conv_id = resp.headers["X-Conversation-Id"]
+    history = client.get(
+        f"/api/v1/ai/chat/conversation/{conv_id}", headers=CHAT_HEADERS_A
+    )
+    assert history.status_code == 200
+    assert history.json()["messages"][0] == {"role": "user", "content": "hola"}
+    assert "Contexto de pantalla" not in history.text
+
+
+def test_ui_context_absent_or_null_keeps_message_verbatim(
+    client: TestClient, chat_on: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed_sections(SESSION_A, n=3)
+    plain_fake = ScriptedChatProvider([text_turn("a")])
+    install_fake_providers(monkeypatch, [plain_fake])
+    plain = chat_post(client, "hola")
+    assert plain.status_code == 200
+    assert _user_contents(plain_fake) == ["hola"]
+    conv_id = plain.headers["X-Conversation-Id"]
+    stored = db.get_ai_conversation(conv_id, SESSION_A)
+    assert stored is not None
+    assert stored[1] == {"role": "user", "content": "hola"}
+    for ui_context in (None, {}, {"selected_section_id": None}):
+        null_fake = ScriptedChatProvider([text_turn("b")])
+        install_fake_providers(monkeypatch, [null_fake])
+        resp = client.post(
+            "/api/v1/ai/chat",
+            json={
+                "message": "hola",
+                "provider": "ollama",
+                "model": "llama3.1:8b",
+                "ui_context": ui_context,
+            },
+            headers=CHAT_HEADERS_A,
+        )
+        assert resp.status_code == 200
+        assert _user_contents(null_fake) == ["hola"]
+
+
+def test_screen_context_message_shortens_name_only_over_budget() -> None:
+    message = "m" * 4100
+    result = ai_router._screen_context_message(message, "S" * 100, 2)
+    shortened = f"[Contexto de pantalla: sección seleccionada «{'S' * 36}…» (section_id 2)]\n"
+    assert result == shortened + message
+    assert len(result) == 4200
+
+
+def test_screen_context_message_skips_prefix_when_impossible() -> None:
+    message = "m" * 4190
+    assert ai_router._screen_context_message(message, "S" * 100, 2) == message
+
+
+def test_strip_older_screen_context_touches_only_user_messages() -> None:
+    long_tool = "t" * 3000
+    messages = [
+        {"role": "system", "content": "sistema"},
+        {"role": "user", "content": _LINE_S03 + "uno"},
+        {"role": "tool", "tool_call_id": "c1", "content": long_tool},
+        {"role": "user", "content": _LINE_S02 + "dos"},
+    ]
+    result = ai_router._strip_older_screen_context(messages)
+    assert result[1] == {"role": "user", "content": "uno"}
+    assert result[2] == messages[2]
+    assert result[3] == {"role": "user", "content": _LINE_S02 + "dos"}
+    assert messages[1]["content"] == _LINE_S03 + "uno"

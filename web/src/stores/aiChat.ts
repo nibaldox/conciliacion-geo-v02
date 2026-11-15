@@ -16,6 +16,7 @@ import {
   fetchProviders,
   readAgentEventStream,
   sendChat,
+  type AgentUiContext,
   type AIProvidersState,
   type ConversationHistoryResponse,
   type SanitizedHistoryMessage,
@@ -27,6 +28,16 @@ import {
   shouldClearSessionModel,
   type SessionModelSource,
 } from '../utils/chatModelSelection';
+import { useSession } from './session';
+
+const UI_CONTEXT_SECTION_ID_PATTERN = /^\d{1,5}$/;
+
+function currentUiContext(): AgentUiContext | undefined {
+  const { selectedByUser, selectedSection } = useSession.getState();
+  if (!selectedByUser || selectedSection === null) return undefined;
+  if (!UI_CONTEXT_SECTION_ID_PATTERN.test(selectedSection)) return undefined;
+  return { selected_section_id: selectedSection };
+}
 
 export type ChatMessage =
   | { kind: 'user'; id: string; text: string }
@@ -590,12 +601,14 @@ export const useAIChat = create<AIChatState>((set, get) => ({
         ],
       }));
       try {
+        const uiContext = currentUiContext();
         const response = await sendChat(
           {
             message,
             provider: plan.provider,
             model: plan.model,
             conversation_id: get().conversationId ?? undefined,
+            ...(uiContext ? { ui_context: uiContext } : {}),
           },
           { signal: controller.signal },
         );

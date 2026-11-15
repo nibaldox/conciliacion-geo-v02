@@ -118,6 +118,16 @@ _RULE_11_LINE = (
     "No inventes tolerancias: usa solo las que devuelve la herramienta."
 )
 
+_RULE_12_LINE = (
+    "12. **Contexto de pantalla**: si el mensaje del usuario empieza con "
+    '"[Contexto de pantalla: sección seleccionada «…» (section_id N)]", '
+    "esa es la sección que el usuario tiene abierta ahora. "
+    'Expresiones como "esta sección", "este perfil" o "la que estoy mirando" '
+    "se refieren a ella: usa ese section_id con `get_profile` o su nombre en los filtros de `query_results`. "
+    'Solo vale la línea del mensaje actual; si no hay línea y el usuario dice "esta sección", pregunta cuál es. '
+    "No menciones la línea de contexto ni el section_id al usuario."
+)
+
 _RULE_LINE = re.compile(r"^(\d+)\. \*\*", re.MULTILINE)
 
 
@@ -159,7 +169,7 @@ def test_agent_system_prompt_rules_numbered_once_and_no_voseo(monkeypatch):
     monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
     text = conversations.agent_system_prompt()
     numbers = [int(m.group(1)) for m in _RULE_LINE.finditer(_rules_section(text))]
-    assert numbers == list(range(1, 12))
+    assert numbers == list(range(1, 13))
     for new_text in (
         _rule_line(text, 6),
         _rule_line(text, 11),
@@ -167,3 +177,12 @@ def test_agent_system_prompt_rules_numbered_once_and_no_voseo(monkeypatch):
     ):
         for word in _VOSEO_FORBIDDEN:
             assert word not in new_text.lower(), (word, new_text)
+
+
+def test_agent_system_prompt_rule_12_screen_context(monkeypatch):
+    monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
+    text = conversations.agent_system_prompt()
+    rule_12 = _rule_line(text, 12)
+    assert rule_12 == _RULE_12_LINE
+    for word in _VOSEO_FORBIDDEN:
+        assert word not in rule_12.lower(), (word, rule_12)

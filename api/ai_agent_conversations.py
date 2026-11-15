@@ -19,6 +19,11 @@ Guarantees and limits:
   :data:`CONVERSATION_TTL_HOURS` are deleted by ``api.main`` at
   startup, by a background task every 6 hours, and opportunistically
   on access (same SQLite timestamp format as ``cleanup_old_sessions``).
+- Compaction: before the cap, :func:`compact_messages` shrinks the
+  ``role:tool`` observations of older turns to their critical keys and
+  strips old screen-context lines (:data:`UI_CONTEXT_PREFIX`). The last
+  two user turns are kept as they are, and every ``tool_call`` /
+  ``tool`` pair stays intact.
 - Cap: at most :data:`MAX_CONVERSATION_MESSAGES` messages and
   :data:`MAX_CONVERSATION_CHARS` JSON-encoded characters are kept per
   conversation. Trimming is GROUP-AWARE: an assistant
@@ -37,6 +42,7 @@ import secrets
 from typing import Any, Optional
 
 import api.database as db
+from core.ai_v2.agent.loop import _OBSERVATION_PRESERVE_KEYS
 from core.ai_v2.prompts import load_prompt_template
 
 CONVERSATION_TTL_HOURS = 24
@@ -45,12 +51,25 @@ CONVERSATION_TTL_HOURS = 24
 MAX_CONVERSATION_MESSAGES = 200
 """Hard cap on stored messages per conversation (system message kept)."""
 
-MAX_CONVERSATION_CHARS = 24000
+MAX_CONVERSATION_CHARS = 48000
 """Hard cap on the JSON-encoded size of the stored conversation.
 
 Measured as the sum of ``json.dumps(message, ensure_ascii=False)``
-lengths over the whole stored list (system message included).
+lengths over the whole stored list (system message included). Applied
+after :func:`compact_messages`, so old observations no longer count at
+their full size.
 """
+
+UI_CONTEXT_PREFIX = "[Contexto de pantalla: "
+"""Start of the screen-context line the server prepends to a user message.
+
+Only the line of the last user message is kept; older lines are stripped
+by :func:`compact_messages`.
+"""
+
+_COMPACT_MAX_CHARS = 600
+_COMPACT_SUFFIX = "...[compacted]"
+_TOOL_KEEP_KEYS = frozenset({"ok", "error"}) | _OBSERVATION_PRESERVE_KEYS
 
 _CONVERSATION_ID_PREFIX = "conv_"
 
@@ -181,6 +200,87 @@ def _cap_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return trimmed
 
 
+def _dumps_compact(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _compact_tool_content(content: str) -> str:
+    """Reduce one observation to its critical keys; idempotent.
+
+    A JSON object keeps only ``ok``, ``error`` and the observation keys
+    of :data:`_OBSERVATION_PRESERVE_KEYS`; any other content is kept as
+    is. The result is cut to :data:`_COMPACT_MAX_CHARS` plus
+    :data:`_COMPACT_SUFFIX` when longer. Content already compacted stays
+    identical.
+    """
+    if content.endswith(_COMPACT_SUFFIX):
+        return content
+    try:
+        parsed = json.loads(content)
+    except (ValueError, RecursionError):
+        parsed = None
+    if isinstance(parsed, dict):
+        if (
+            set(parsed) <= _TOOL_KEEP_KEYS
+            and len(content) <= _COMPACT_MAX_CHARS
+        ):
+            return content
+        text = _dumps_compact(
+            {
+                key: value
+                for key, value in parsed.items()
+                if key in _TOOL_KEEP_KEYS
+            }
+        )
+    else:
+        text = content
+    if len(text) <= _COMPACT_MAX_CHARS:
+        return text
+    return text[:_COMPACT_MAX_CHARS] + _COMPACT_SUFFIX
+
+
+def _strip_ui_context(content: str) -> str:
+    """Drop leading screen-context lines, each up to its first newline."""
+    while content.startswith(UI_CONTEXT_PREFIX):
+        newline = content.find("\n")
+        if newline == -1:
+            break
+        content = content[newline + 1 :]
+    return content
+
+
+def compact_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a compacted copy of a conversation; the input is not mutated.
+
+    The system message and the last two user turns (a user message and
+    everything up to the next user message) are kept as they are. In the
+    older turns, each ``role:tool`` content is compacted and every user
+    message except the last one loses its leading screen-context line.
+    ``tool_call_id`` and ``name`` are kept, and assistant ``tool_calls``
+    messages are copied unchanged, so every answer keeps its parent call.
+    Pure and idempotent: compacting a compacted list changes nothing.
+    """
+    user_positions = [
+        index
+        for index, message in enumerate(messages)
+        if message.get("role") == "user"
+    ]
+    protected_from = user_positions[-2] if len(user_positions) >= 2 else 0
+    last_user = user_positions[-1] if user_positions else -1
+    compacted: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        item = dict(message)
+        content = item.get("content")
+        if isinstance(content, str):
+            role = item.get("role")
+            if role == "tool" and index < protected_from:
+                item["content"] = _compact_tool_content(content)
+            elif role == "user" and index != last_user:
+                item["content"] = _strip_ui_context(content)
+        compacted.append(item)
+    return compacted
+
+
 def load_conversation(
     session_id: str, conversation_id: Optional[str]
 ) -> Optional[tuple[str, list[dict[str, Any]]]]:
@@ -216,9 +316,11 @@ def save_conversation(
     conversation_id: str,
     messages: list[dict[str, Any]],
 ) -> None:
-    """Persist the final conversation (bounded), scoped to the session."""
+    """Persist the final conversation, compacted then bounded, per session."""
     db.save_ai_conversation(
-        conversation_id, session_id, _cap_messages(_copy_messages(messages))
+        conversation_id,
+        session_id,
+        _cap_messages(compact_messages(messages)),
     )
 
 
@@ -226,8 +328,10 @@ __all__ = [
     "CONVERSATION_TTL_HOURS",
     "MAX_CONVERSATION_CHARS",
     "MAX_CONVERSATION_MESSAGES",
+    "UI_CONTEXT_PREFIX",
     "agent_system_prompt",
     "append_message",
+    "compact_messages",
     "load_conversation",
     "new_conversation_id",
     "save_conversation",

@@ -49,11 +49,16 @@ export interface AIProvidersState {
   chat_models?: AIChatModelsState;
 }
 
+export interface AgentUiContext {
+  selected_section_id: string;
+}
+
 export interface AgentChatRequestBody {
   message: string;
   provider: string;
   model: string;
   conversation_id?: string;
+  ui_context?: AgentUiContext;
 }
 
 export interface StreamCallOptions {

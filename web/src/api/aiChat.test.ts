@@ -185,6 +185,41 @@ describe('sendChat / confirmChat', () => {
   });
 });
 
+describe('sendChat ui_context', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ndjsonResponse([])),
+    );
+  });
+
+  it('serializes ui_context.selected_section_id when the caller provides it', async () => {
+    await sendChat(
+      {
+        message: 'hola',
+        provider: 'lmstudio',
+        model: 'm',
+        ui_context: { selected_section_id: '2' },
+      },
+      {},
+    );
+    const [, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      message: 'hola',
+      provider: 'lmstudio',
+      model: 'm',
+      ui_context: { selected_section_id: '2' },
+    });
+    expect(String(init.body)).not.toContain('selected_section"');
+  });
+
+  it('keeps the ui_context key out of the JSON when the caller omits it', async () => {
+    await sendChat({ message: 'hola', provider: 'lmstudio', model: 'm' }, {});
+    const [, init] = vi.mocked(fetch).mock.calls[0] as unknown as [string, RequestInit];
+    expect(String(init.body)).not.toContain('ui_context');
+  });
+});
+
 describe('non-streaming helpers', () => {
   it('fetchProviders returns the parsed providers body', async () => {
     const body = {

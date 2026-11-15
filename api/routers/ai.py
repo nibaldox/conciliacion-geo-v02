@@ -385,6 +385,19 @@ _MSG_CHAT_STREAM_FAILED = (
 )
 
 
+class AgentUiContext(BaseModel):
+    """Screen context sent with one chat turn: the selected section's id.
+
+    ``selected_section_id`` is the id GET /sections returns (the section's
+    index in the stored list). The server resolves the real name itself and
+    ignores the id when it does not map to a usable section.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_section_id: str | None = Field(default=None, pattern=r"^[0-9]{1,5}$")
+
+
 class AgentChatRequest(BaseModel):
     """Strict body of ``POST /ai/chat``: plain user text only.
 
@@ -399,6 +412,7 @@ class AgentChatRequest(BaseModel):
     provider: str = Field(min_length=1, max_length=64)
     model: str = Field(min_length=1, max_length=200)
     conversation_id: str | None = Field(default=None, max_length=64)
+    ui_context: AgentUiContext | None = None
 
 
 class AgentChatConfirmRequest(BaseModel):
@@ -713,6 +727,81 @@ def _ndjson_response(
     )
 
 
+_UI_CONTEXT_FORBIDDEN_CHARS = frozenset("\r\n[]«»")
+_UI_CONTEXT_MAX_CHARS = 4200
+_UI_CONTEXT_SECTION_HEAD = "sección seleccionada «"
+
+
+def _screen_context_message(
+    message: str, section_name: str, section_index: int
+) -> str:
+    """Prepend the screen-context line to ``message``.
+
+    The line is ``[Contexto de pantalla: sección seleccionada «NAME»
+    (section_id N)]`` followed by a newline. When the result would exceed
+    ``_UI_CONTEXT_MAX_CHARS``, only the section name is cut (ending in
+    ``…``); when not even a shortened name fits, ``message`` is returned
+    unchanged.
+    """
+    head = f"{agent_conversations.UI_CONTEXT_PREFIX}{_UI_CONTEXT_SECTION_HEAD}"
+    tail = f"» (section_id {section_index})]\n"
+    budget = _UI_CONTEXT_MAX_CHARS - len(head) - len(tail) - len(message)
+    if len(section_name) > budget:
+        if budget < 2:
+            return message
+        section_name = section_name[: budget - 1] + "…"
+    return f"{head}{section_name}{tail}{message}"
+
+
+def _screen_context_content(
+    message: str, selected_id: str | None, sections: list[dict[str, Any]]
+) -> str:
+    """Return the user text to store and send, with a valid screen context.
+
+    ``selected_id`` is the section's index in the stored list, the same id
+    GET /sections returns. The name is read from that stored section; the
+    message goes through untouched when the id is out of range or the name
+    is empty or holds one of ``_UI_CONTEXT_FORBIDDEN_CHARS``.
+    """
+    if selected_id is None:
+        return message
+    index = int(selected_id)
+    if not 0 <= index < len(sections):
+        return message
+    name = sections[index].get("name")
+    if (
+        not isinstance(name, str)
+        or not name
+        or any(char in _UI_CONTEXT_FORBIDDEN_CHARS for char in name)
+    ):
+        return message
+    return _screen_context_message(message, name, index)
+
+
+def _strip_older_screen_context(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Remove the screen-context line from every user message but the last.
+
+    Reuses :func:`agent_conversations.compact_messages`, which applies the
+    same rule on save; only ``role:user`` entries take its content, so
+    tool observations reach the model exactly as they were stored.
+    """
+    compacted = agent_conversations.compact_messages(messages)
+    return [
+        fresh if message.get("role") == "user" else message
+        for message, fresh in zip(messages, compacted)
+    ]
+
+
+def _without_screen_context(content: str) -> str:
+    """Return a user message as the browser may see it, without the context line."""
+    if not content.startswith(agent_conversations.UI_CONTEXT_PREFIX):
+        return content
+    _, newline, rest = content.partition("\n")
+    return rest if newline else content
+
+
 @router.post("/chat")
 async def chat(req: AgentChatRequest, request: Request) -> StreamingResponse:
     """Run ONE conversational agent turn as an NDJSON event stream.
@@ -751,7 +840,15 @@ async def chat(req: AgentChatRequest, request: Request) -> StreamingResponse:
             detail=_sanitize_error(_MSG_CHAT_CONVERSATION_NOT_FOUND),
         )
     conversation_id, messages = loaded
-    messages = agent_conversations.append_message(messages, "user", req.message)
+    selected_id = None
+    if req.ui_context is not None:
+        selected_id = req.ui_context.selected_section_id
+    user_text = req.message
+    if selected_id is not None:
+        sections = await run_db(db.get_sections, session_id)
+        user_text = _screen_context_content(req.message, selected_id, sections)
+    messages = agent_conversations.append_message(messages, "user", user_text)
+    messages = _strip_older_screen_context(messages)
     model = _effective_lmstudio_model_override() or req.model
     if req.provider == _LOCAL_ONLY_PROVIDER:
         model = await _resolve_placeholder_chat_model(model)
@@ -977,6 +1074,8 @@ def _sanitize_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             sanitized.append(_history_tool_entry(message))
             continue
         content = message.get("content")
+        if role == "user" and isinstance(content, str):
+            content = _without_screen_context(content)
         entry: dict[str, Any] = {
             "role": "assistant" if role == "assistant" else "user",
             "content": content if isinstance(content, str) else "",

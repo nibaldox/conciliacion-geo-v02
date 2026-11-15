@@ -88,6 +88,7 @@ interface SessionState {
 
   // Selections
   selectedSection: string | null;
+  selectedByUser: boolean;
   selectedBlastHoleRowId: string | null;
   designMeshId: string | null;
   topoMeshId: string | null;
@@ -142,6 +143,7 @@ const initialState = {
   curveSelection: createCurveSelectionState(null),
   guideCurve: null as GuideCurve | null,
   selectedSection: null,
+  selectedByUser: false,
   selectedBlastHoleRowId: null,
   designMeshId: null,
   topoMeshId: null,
@@ -177,7 +179,7 @@ export const useSession = create<SessionState>((set, get) => ({
       return next === s.curveSelection ? s : { curveSelection: next };
     }),
   setGuideCurve: (curve) => set({ guideCurve: curve ? { id: curve.id, points: curve.points.map((point) => [...point] as [number, number, number]) } : null }),
-  setSelectedSection: (id) => set({ selectedSection: id }),
+  setSelectedSection: (id) => set({ selectedSection: id, selectedByUser: id !== null }),
   setSelectedBlastHoleRowId: (rowId) => set({ selectedBlastHoleRowId: rowId }),
   setDesignMeshId: (id) =>
     set((s) =>
@@ -202,6 +204,7 @@ export const useSession = create<SessionState>((set, get) => ({
         curveSelection: createCurveSelectionState(null),
         guideCurve: null,
         selectedSection: existing.sections[0]?.section_name ?? null,
+        selectedByUser: false,
         selectedBlastHoleRowId: null,
         demoLoading: false,
         demoError: null,
@@ -228,6 +231,7 @@ export const useSession = create<SessionState>((set, get) => ({
         curveSelection: createCurveSelectionState(null),
         guideCurve: null,
         selectedSection: data.sections[0]?.section_name ?? null,
+        selectedByUser: false,
         selectedBlastHoleRowId: null,
       });
     } catch (err) {
@@ -248,6 +252,7 @@ export const useSession = create<SessionState>((set, get) => ({
       designMeshId: null,
       topoMeshId: null,
       selectedSection: null,
+      selectedByUser: false,
       selectedBlastHoleRowId: null,
       currentStep: 1,
       activeWorkspaceView: '3d',

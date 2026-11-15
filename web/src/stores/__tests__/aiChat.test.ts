@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, AgentToolResultDownload } from '../../api/agentChat';
 
 const { mockGet, mockDelete, mockGetSessionId, mockFetch } = vi.hoisted(() => ({
@@ -18,6 +18,7 @@ vi.mock('../../api/client', () => ({
 }));
 
 import { useAIChat, historyToChatMessages, type ChatMessage } from '../aiChat';
+import { useSession, type DemoData } from '../session';
 import type { AIProvidersState } from '../../api/aiChat';
 
 function providersBody(overrides: Partial<AIProvidersState> = {}): AIProvidersState {
@@ -656,5 +657,113 @@ describe('write tool query dependencies', () => {
       expect(WRITE_TOOL_QUERY_KEYS[name]).toEqual([...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']]);
     }
     expect(WRITE_TOOL_QUERY_KEYS.run_reconciliation).toContainEqual(['export-levels']);
+  });
+});
+
+describe('aiChat store — ui_context from the user section selection', () => {
+  function requestBody(index = 0): Record<string, unknown> {
+    const call = mockFetch.mock.calls[index] as unknown as [string, RequestInit];
+    return JSON.parse(String(call[1].body)) as Record<string, unknown>;
+  }
+
+  async function sendOnce(message: string): Promise<void> {
+    mockFetch.mockResolvedValueOnce(ndjsonResponse(TEXT_DONE));
+    await useAIChat.getState().send(message);
+  }
+
+  beforeEach(() => {
+    mockGet.mockResolvedValue({ data: providersBody() });
+    useSession.getState().reset();
+    return useAIChat.getState().loadProviderState();
+  });
+
+  afterEach(() => {
+    useSession.getState().reset();
+  });
+
+  it('sends ui_context.selected_section_id after the user picks a numeric section', async () => {
+    useSession.getState().setSelectedSection('2');
+    await sendOnce('¿cuánto tengo en esta sección?');
+    expect(requestBody().ui_context).toEqual({ selected_section_id: '2' });
+  });
+
+  it('never sends the legacy selected_section key', async () => {
+    useSession.getState().setSelectedSection('2');
+    await sendOnce('hola');
+    expect(requestBody().ui_context).not.toHaveProperty('selected_section');
+  });
+
+  it('sends ids of one to five digits, including zero and leading zeros', async () => {
+    useSession.getState().setSelectedSection('0');
+    await sendOnce('uno');
+    useSession.getState().setSelectedSection('12345');
+    await sendOnce('dos');
+    useSession.getState().setSelectedSection('00042');
+    await sendOnce('tres');
+    expect(requestBody(0).ui_context).toEqual({ selected_section_id: '0' });
+    expect(requestBody(1).ui_context).toEqual({ selected_section_id: '12345' });
+    expect(requestBody(2).ui_context).toEqual({ selected_section_id: '00042' });
+  });
+
+  it('omits ui_context for a six-digit id', async () => {
+    useSession.getState().setSelectedSection('123456');
+    await sendOnce('hola');
+    expect(requestBody()).not.toHaveProperty('ui_context');
+  });
+
+  it('omits ui_context for a non-numeric section name', async () => {
+    useSession.getState().setSelectedSection('S-03');
+    await sendOnce('hola');
+    expect(requestBody()).not.toHaveProperty('ui_context');
+  });
+
+  it('omits ui_context for values that only look numeric', async () => {
+    const values = [' 2', '2 ', '2\n', '+2', '-1', '2.0', '1e3', '٣'];
+    for (const [index, value] of values.entries()) {
+      useSession.getState().setSelectedSection(value);
+      await sendOnce('hola');
+      expect(requestBody(index)).not.toHaveProperty('ui_context');
+    }
+  });
+
+  it('omits ui_context when the store auto-selects a numeric first section on load', async () => {
+    useSession.setState({ demoData: { sections: [{ section_name: '1' }] } as unknown as DemoData });
+    await useSession.getState().loadDemo();
+    expect(useSession.getState().selectedSection).toBe('1');
+    expect(useSession.getState().selectedByUser).toBe(false);
+    await sendOnce('hola');
+    expect(requestBody()).not.toHaveProperty('ui_context');
+  });
+
+  it('omits ui_context when a numeric section is set without user intent', async () => {
+    useSession.setState({ selectedSection: '2', selectedByUser: false });
+    await sendOnce('hola');
+    expect(requestBody()).not.toHaveProperty('ui_context');
+  });
+
+  it('drops ui_context again after the session is reset', async () => {
+    useSession.getState().setSelectedSection('2');
+    await sendOnce('uno');
+    expect(requestBody(0).ui_context).toEqual({ selected_section_id: '2' });
+    useSession.getState().reset();
+    await sendOnce('dos');
+    expect(requestBody(1)).not.toHaveProperty('ui_context');
+  });
+
+  it('drops ui_context again when a demo load replaces the user selection', async () => {
+    useSession.getState().setSelectedSection('2');
+    useSession.setState({ demoData: { sections: [{ section_name: '1' }] } as unknown as DemoData });
+    await useSession.getState().loadDemo();
+    await sendOnce('dos');
+    expect(requestBody()).not.toHaveProperty('ui_context');
+  });
+
+  it('omits ui_context for an empty or cleared selection', async () => {
+    useSession.getState().setSelectedSection('');
+    await sendOnce('uno');
+    expect(requestBody(0)).not.toHaveProperty('ui_context');
+    useSession.getState().setSelectedSection(null);
+    await sendOnce('dos');
+    expect(requestBody(1)).not.toHaveProperty('ui_context');
   });
 });
