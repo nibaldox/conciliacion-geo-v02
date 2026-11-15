@@ -6,6 +6,8 @@ import re
 import pytest
 
 import api.ai_agent_conversations as conversations
+from core.ai_v2.agent.catalog import AGENT_TOOLS
+from core.ai_v2.agent.models import ToolRisk
 from core.ai_v2.prompts import (
     get_all_template_names,
     load_prompt_template,
@@ -73,6 +75,23 @@ def test_render_prompt_with_dict_kwargs():
     assert out == "PF=0.42"
 
 
+_RULE_4_FRAGMENT = (
+    "`generate_sections_auto` / `generate_sections_curve` / "
+    "`generate_sections_manual` / `add_section_click`"
+)
+
+_RULE_5_LINE = (
+    "5. **Secciones y resultados existentes**: "
+    "`generate_sections_auto`, `generate_sections_curve` y `add_section_click` AÑADEN secciones a las existentes; "
+    "`generate_sections_manual` REEMPLAZA todas. "
+    "Cualquier cambio de secciones invalida el análisis previo, y `run_reconciliation` reemplaza TODOS los resultados "
+    "usando la configuración de detección guardada en la sesión. "
+    "Si ya hay secciones o resultados, `generate_sections_auto`, `generate_sections_curve`, `generate_sections_manual` "
+    "y `run_reconciliation` pedirán confirmación; `add_section_click` se ejecuta sin confirmación. "
+    "Explica qué se añade, qué se reemplaza y qué se invalida, y espera la decisión."
+)
+
+
 def test_agent_system_prompt_production_loader_rule_5(monkeypatch):
     monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
     text = conversations.agent_system_prompt()
@@ -80,6 +99,13 @@ def test_agent_system_prompt_production_loader_rule_5(monkeypatch):
     assert "`add_section_click` se ejecuta sin confirmación" in text
     assert "generar secciones reemplaza TODAS" not in text
     assert "procées" not in text
+    assert _rule_line(text, 5) == _RULE_5_LINE
+
+
+def test_agent_system_prompt_rule_4_flow_lists_curve(monkeypatch):
+    monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
+    text = conversations.agent_system_prompt()
+    assert _RULE_4_FRAGMENT in _rule_line(text, 4)
 
 
 _VOSEO_FORBIDDEN = (
@@ -142,6 +168,17 @@ _RULE_13_LINE = (
     "La tolerancia de proyección de pozos está en metros (15 m por defecto)."
 )
 
+_RULE_14_LINE = (
+    "14. **Editar y borrar secciones**: para corregir una sección usa `update_section` con su section_id "
+    "y solo los campos que cambian; si ya hay resultados pedirá confirmación. "
+    "Para eliminarla usa `delete_section`, que siempre pide confirmación y borra una sola sección por llamada. "
+    "Antes de editar o borrar, confirma el nombre y el section_id con `list_sections` y nombra la sección al usuario; "
+    "avisa que el análisis quedará invalidado. "
+    "Después de borrar, los section_id posteriores bajan en 1: vuelve a consultar `list_sections` antes de otra edición. "
+    "Para generar secciones a lo largo de una cresta o curva usa `generate_sections_curve` "
+    "con los puntos de la polilínea y el espaciamiento en metros (como máximo 200 secciones por curva)."
+)
+
 _RULE_LINE = re.compile(r"^(\d+)\. \*\*", re.MULTILINE)
 
 
@@ -183,8 +220,9 @@ def test_agent_system_prompt_rules_numbered_once_and_no_voseo(monkeypatch):
     monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
     text = conversations.agent_system_prompt()
     numbers = [int(m.group(1)) for m in _RULE_LINE.finditer(_rules_section(text))]
-    assert numbers == list(range(1, 14))
+    assert numbers == list(range(1, 15))
     for new_text in (
+        _rule_line(text, 5),
         _rule_line(text, 6),
         _rule_line(text, 11),
         _RULE_9_SENTENCE,
@@ -212,3 +250,27 @@ def test_agent_system_prompt_rule_13_blast_tools(monkeypatch):
         assert f"`{tool}`" in rule_13, tool
     for word in _VOSEO_FORBIDDEN:
         assert word not in rule_13.lower(), (word, rule_13)
+
+
+def test_agent_system_prompt_rule_14_edit_delete_and_curve(monkeypatch):
+    monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
+    text = conversations.agent_system_prompt()
+    rule_14 = _rule_line(text, 14)
+    assert rule_14 == _RULE_14_LINE
+    for tool in ("update_section", "delete_section", "list_sections", "generate_sections_curve"):
+        assert f"`{tool}`" in rule_14, tool
+    for word in _VOSEO_FORBIDDEN:
+        assert word not in rule_14.lower(), (word, rule_14)
+
+
+def test_agent_system_prompt_mentions_every_write_tool(monkeypatch):
+    monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
+    text = conversations.agent_system_prompt()
+    write_tools = sorted(
+        spec.name
+        for spec in AGENT_TOOLS
+        if spec.risk not in (ToolRisk.READ, ToolRisk.EXPORT)
+    )
+    assert write_tools
+    for name in write_tools:
+        assert f"`{name}`" in text, name

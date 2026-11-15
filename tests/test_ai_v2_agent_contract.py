@@ -65,9 +65,12 @@ from core.ai_v2.agent.models import (
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
+    SectionCurveArgs,
     SectionDefinitionArgs,
+    SectionDeleteArgs,
     SectionIdArgs,
     SectionManualArgs,
+    SectionUpdateArgs,
     ToolRisk,
     ToolSpec,
     ToolState,
@@ -92,6 +95,9 @@ EXPECTED_TOOL_NAMES = {
     "get_blast_summary",
     "get_blast_correlation",
     "get_blast_damage_model",
+    "update_section",
+    "delete_section",
+    "generate_sections_curve",
 }
 
 ALL_ARGS_MODELS = sorted(
@@ -113,12 +119,15 @@ EXTRA_FIELD_PAYLOADS = {
     AchievementFilterArgs: {"bench": [3], "force": True},
     BlastCorrelationArgs: {"tolerance": 10.0, "survey_date": "2026-06-01", "session_id": "other"},
     BlastDamageArgs: {"tolerance": 10.0, "survey_date": "2026-06-01", "section": ["S-01"]},
+    SectionUpdateArgs: {"section_id": 0, "azimuth": 90.0, "hacker": True},
+    SectionDeleteArgs: {"section_id": 0, "force": True},
+    SectionCurveArgs: {"points": [[0.0, 0.0], [1.0, 1.0]], "spacing": 5.0, "hacker": True},
 }
 
 
 class TestCatalog:
-    def test_catalog_has_exactly_18_tools(self) -> None:
-        assert len(AGENT_TOOLS) == 18
+    def test_catalog_has_exactly_21_tools(self) -> None:
+        assert len(AGENT_TOOLS) == 21
         assert {spec.name for spec in AGENT_TOOLS} == EXPECTED_TOOL_NAMES
 
     def test_get_blast_correlation_is_read_with_frozen_text(self) -> None:
@@ -154,6 +163,19 @@ class TestCatalog:
         )
         assert spec.impact_summary == "Solo lectura: sin efecto sobre los datos de la sesión"
 
+    def test_generate_sections_curve_is_replace_with_frozen_text(self) -> None:
+        spec = TOOL_CATALOG["generate_sections_curve"]
+        assert spec.args_model is SectionCurveArgs
+        assert spec.risk is ToolRisk.REPLACE
+        assert spec.state_keys == ("n_sections",)
+        assert spec.state_keys == TOOL_CATALOG["generate_sections_auto"].state_keys
+        assert spec.description == (
+            "Generate cross-sections perpendicular to a polyline (for example a crest "
+            "or contour segment) every `spacing` metres. Sections are appended to the "
+            "existing ones and invalidate the previous analysis."
+        )
+        assert spec.impact_summary == TOOL_CATALOG["generate_sections_auto"].impact_summary
+
     def test_names_are_unique(self) -> None:
         names = [spec.name for spec in AGENT_TOOLS]
         assert len(names) == len(set(names))
@@ -188,6 +210,9 @@ class TestCatalog:
             ("get_blast_summary", ToolRisk.READ, (), 30.0, False),
             ("get_blast_correlation", ToolRisk.READ, (), 30.0, False),
             ("get_blast_damage_model", ToolRisk.READ, (), 30.0, False),
+            ("update_section", ToolRisk.REPLACE, ("n_results",), 30.0, False),
+            ("delete_section", ToolRisk.DESTRUCTIVE, ("n_results",), 30.0, False),
+            ("generate_sections_curve", ToolRisk.REPLACE, ("n_sections",), 30.0, False),
         ],
     )
     def test_spec_metadata(
@@ -289,6 +314,133 @@ class TestStrictArgs:
         }
         assert ExportReportArgs.__doc__ is not None
         assert "literal" in ExportReportArgs.__doc__.lower()
+
+
+class TestSectionEditArgs:
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"name": "Norte"},
+            {"origin": [1.0, 2.0]},
+            {"azimuth": 0.0},
+            {"length": 10.0},
+            {"length_up": 5.0},
+            {"length_down": 5.0},
+            {"sector": ""},
+        ],
+    )
+    def test_update_accepts_any_single_override(self, override: dict) -> None:
+        args = SectionUpdateArgs.model_validate({"section_id": 3, **override})
+        assert args.section_id == 3
+        assert {k: getattr(args, k) for k in override} == override
+
+    def test_update_requires_at_least_one_override(self) -> None:
+        with pytest.raises(ValidationError, match="at least one field"):
+            SectionUpdateArgs.model_validate({"section_id": 0})
+
+    def test_update_explicit_nulls_count_as_no_override(self) -> None:
+        with pytest.raises(ValidationError, match="at least one field"):
+            SectionUpdateArgs.model_validate({"section_id": 0, "name": None, "azimuth": None})
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"azimuth": 360.5},
+            {"azimuth": -0.1},
+            {"length": 0.0},
+            {"length": 10000.5},
+            {"length_up": 0.0},
+            {"length_down": 10001.0},
+            {"origin": [1.0]},
+            {"origin": [1.0, 2.0, 3.0]},
+            {"name": "n" * 101},
+            {"sector": "s" * 101},
+        ],
+    )
+    def test_update_overrides_mirror_section_definition_bounds(self, override: dict) -> None:
+        with pytest.raises(ValidationError):
+            SectionUpdateArgs.model_validate({"section_id": 0, **override})
+
+    @pytest.mark.parametrize("model", [SectionUpdateArgs, SectionDeleteArgs], ids=lambda m: m.__name__)
+    @pytest.mark.parametrize("section_id", [-1, 100000])
+    def test_section_id_outside_0_to_99999_is_rejected(self, model, section_id: int) -> None:
+        payload = {"section_id": section_id, "azimuth": 1.0} if model is SectionUpdateArgs else {"section_id": section_id}
+        with pytest.raises(ValidationError):
+            model.model_validate(payload)
+
+    @pytest.mark.parametrize("model", [SectionUpdateArgs, SectionDeleteArgs], ids=lambda m: m.__name__)
+    def test_section_id_bounds_are_inclusive(self, model) -> None:
+        for section_id in (0, 99999):
+            payload = {"section_id": section_id, "azimuth": 1.0} if model is SectionUpdateArgs else {"section_id": section_id}
+            assert model.model_validate(payload).section_id == section_id
+
+    def test_delete_requires_section_id(self) -> None:
+        with pytest.raises(ValidationError):
+            SectionDeleteArgs.model_validate({})
+
+    def test_section_edit_tools_never_expose_session_or_path(self) -> None:
+        for model in (SectionUpdateArgs, SectionDeleteArgs):
+            assert "session_id" not in model.model_fields
+            assert "path" not in model.model_fields
+
+
+class TestSectionCurveArgs:
+    def test_defaults_mirror_the_rest_model(self) -> None:
+        args = SectionCurveArgs.model_validate({"points": [[0.0, 0.0], [10.0, 0.0]]})
+        assert args.spacing == 10.0
+        assert args.length == 200.0
+        assert args.length_up is None
+        assert args.length_down is None
+        assert args.sector == ""
+
+    def test_docstring_marks_the_bounds_as_agent_restrictions(self) -> None:
+        assert SectionCurveArgs.__doc__ is not None
+        assert "agent restriction" in SectionCurveArgs.__doc__.lower()
+
+    def test_one_point_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            SectionCurveArgs.model_validate({"points": [[0.0, 0.0]]})
+
+    def test_more_than_200_points_is_rejected(self) -> None:
+        points = [[float(index), 0.0] for index in range(201)]
+        with pytest.raises(ValidationError):
+            SectionCurveArgs.model_validate({"points": points})
+
+    def test_200_points_are_accepted(self) -> None:
+        points = [[float(index), 0.0] for index in range(200)]
+        assert len(SectionCurveArgs.model_validate({"points": points}).points) == 200
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_coordinate_is_rejected(self, value: float) -> None:
+        with pytest.raises(ValidationError):
+            SectionCurveArgs.model_validate({"points": [[value, 0.0], [1.0, 1.0]]})
+
+    @pytest.mark.parametrize("point", [[0.0], [0.0, 1.0, 2.0]])
+    def test_each_point_must_be_exactly_two_numbers(self, point: list) -> None:
+        with pytest.raises(ValidationError):
+            SectionCurveArgs.model_validate({"points": [point, [1.0, 1.0]]})
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            {"spacing": 0.0},
+            {"spacing": -1.0},
+            {"spacing": 1000.5},
+            {"spacing": float("nan")},
+            {"length": 0.0},
+            {"length": 10000.5},
+            {"length_up": 0.0},
+            {"length_down": 10001.0},
+            {"sector": "s" * 101},
+        ],
+    )
+    def test_bounds_are_enforced(self, override: dict) -> None:
+        with pytest.raises(ValidationError):
+            SectionCurveArgs.model_validate({"points": [[0.0, 0.0], [1.0, 1.0]], **override})
+
+    def test_spacing_upper_bound_is_inclusive(self) -> None:
+        args = SectionCurveArgs.model_validate({"points": [[0.0, 0.0], [1.0, 1.0]], "spacing": 1000.0})
+        assert args.spacing == 1000.0
 
 
 class TestBlastArgs:
@@ -564,6 +716,13 @@ class TestAntiDriftAgainstRealRouters:
         from api.routers.sections import SectionClickParams as RealClickParams
 
         assert self._field_names(SectionClickArgs) == self._field_names(RealClickParams)
+
+    def test_section_update_args_match_rest_section_body(self) -> None:
+        from api.routers.sections import SectionCreate as RealSectionBody
+
+        assert self._field_names(SectionUpdateArgs) - {"section_id"} == self._field_names(
+            RealSectionBody
+        )
 
     def test_run_reconciliation_args_match_process_settings(self) -> None:
         from api.schemas import ProcessSettings as RealProcessSettings

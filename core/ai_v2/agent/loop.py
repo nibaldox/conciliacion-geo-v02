@@ -713,8 +713,8 @@ async def _handle_tool_call(
         return events, None
 
     state = await state_provider(session_id)
-    decision = decide(spec, state)
     args_for_event = validated.model_dump()
+    decision = decide(spec, state, args=args_for_event)
     if decision.requires_confirmation:
         block = _pending_block_reason(
             conversation=conversation,
@@ -1265,7 +1265,7 @@ async def resume_pending_turn(
         return
 
     state_now = await state_provider(session_id)
-    decision = decide(spec, state_now)
+    decision = decide(spec, state_now, args=validated_args)
     confirmed_block: tuple[str, str] | None = None
     if state_now.fingerprint() != pending.state_fingerprint:
         if decision.requires_confirmation:

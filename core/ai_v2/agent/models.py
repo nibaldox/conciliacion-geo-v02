@@ -14,7 +14,7 @@ from datetime import date
 from enum import Enum
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 _FilterSectorName = Annotated[str, Field(min_length=1, max_length=120)]
 _FilterSectionName = Annotated[str, Field(min_length=1, max_length=60)]
@@ -157,6 +157,69 @@ class SectionAutoArgs(_StrictArgs):
     sector: str = Field(default="", max_length=100)
     az_method: Literal["perpendicular", "fixed", "local_slope"] = "perpendicular"
     fixed_az: float = Field(default=0.0, ge=0.0, le=360.0)
+
+
+_CurvePoint = Annotated[
+    list[Annotated[float, Field(allow_inf_nan=False)]],
+    Field(min_length=2, max_length=2),
+]
+
+
+class SectionCurveArgs(_StrictArgs):
+    """Arguments for ``generate_sections_curve`` (POST /sections/curve).
+
+    Field names mirror ``api.routers.sections.SectionCurveParams``. The 2-200
+    point limit and the spacing bounds are agent restrictions: the REST
+    endpoint accepts any polyline, so these limits do not describe it.
+    """
+
+    points: list[_CurvePoint] = Field(min_length=2, max_length=200)
+    spacing: float = Field(default=10.0, gt=0.0, le=1000.0, allow_inf_nan=False)
+    length: float = Field(default=200.0, gt=0.0, le=10000.0, allow_inf_nan=False)
+    length_up: Optional[float] = Field(default=None, gt=0.0, le=10000.0, allow_inf_nan=False)
+    length_down: Optional[float] = Field(default=None, gt=0.0, le=10000.0, allow_inf_nan=False)
+    sector: str = Field(default="", max_length=100)
+
+
+_SECTION_OVERRIDE_FIELDS: tuple[str, ...] = (
+    "name",
+    "origin",
+    "azimuth",
+    "length",
+    "length_up",
+    "length_down",
+    "sector",
+)
+
+
+class SectionUpdateArgs(_StrictArgs):
+    """Arguments for ``update_section``: one section by index plus overrides.
+
+    ``section_id`` is the index returned by ``list_sections``. Each override
+    mirrors :class:`SectionDefinitionArgs`; ``None`` keeps the stored value,
+    so at least one override must be given.
+    """
+
+    section_id: int = Field(ge=0, le=99999)
+    name: Optional[str] = Field(default=None, max_length=100)
+    origin: Optional[list[float]] = Field(default=None, min_length=2, max_length=2)
+    azimuth: Optional[float] = Field(default=None, ge=0.0, le=360.0)
+    length: Optional[float] = Field(default=None, gt=0.0, le=10000.0)
+    length_up: Optional[float] = Field(default=None, gt=0.0, le=10000.0)
+    length_down: Optional[float] = Field(default=None, gt=0.0, le=10000.0)
+    sector: Optional[str] = Field(default=None, max_length=100)
+
+    @model_validator(mode="after")
+    def _requires_one_override(self) -> "SectionUpdateArgs":
+        if all(getattr(self, field) is None for field in _SECTION_OVERRIDE_FIELDS):
+            raise ValueError("update_section needs at least one field to change")
+        return self
+
+
+class SectionDeleteArgs(_StrictArgs):
+    """Arguments for ``delete_section``: one section by its index id."""
+
+    section_id: int = Field(ge=0, le=99999)
 
 
 class SectionManualArgs(_StrictArgs):
@@ -309,9 +372,12 @@ __all__ = [
     "RunReconciliationArgs",
     "SectionAutoArgs",
     "SectionClickArgs",
+    "SectionCurveArgs",
     "SectionDefinitionArgs",
+    "SectionDeleteArgs",
     "SectionManualArgs",
     "SectionIdArgs",
+    "SectionUpdateArgs",
     "ToolRisk",
     "ToolSpec",
     "ToolState",

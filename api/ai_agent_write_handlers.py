@@ -14,6 +14,15 @@ Section semantics mirror the REST router (``api.routers.sections``):
   ``POST /sections/manual``; analysis is invalidated only on a real change.
 - ``add_section_click`` APPENDS one section, mirroring
   ``POST /sections/click``; colliding names get a ``_{n}`` suffix.
+- ``generate_sections_curve`` APPENDS sections along a polyline, mirroring
+  ``POST /sections/curve``. The section count is checked before anything is
+  generated: more than 200 sections returns ``too_many_sections`` and writes
+  nothing; a zero-length polyline returns ``invalid_curve``.
+- ``update_section`` and ``delete_section`` mirror ``PUT``/``DELETE
+  /sections/{section_id}`` through the router's sync helpers
+  (``_update_section_sync``, ``_delete_section_sync``). They use index ids,
+  return ``section_id_out_of_range`` / ``no_sections`` for bad ids, and
+  invalidate the analysis (update only on a real change).
 - Every effective section mutation invalidates the previous analysis
   (``db.invalidate_analysis``). Mutations are rejected with
   ``process_running`` while the session is ``running`` or ``processing``.
@@ -32,12 +41,13 @@ collection cycle (``api.routers`` imports ``ai`` at package init, and
 ``ai.py`` imports ``ALL_HANDLERS`` from this module back).
 
 Aggregated with the strictly read-only ``READ_HANDLERS`` into
-``ALL_HANDLERS``, which covers exactly the 14 catalog tools.
+``ALL_HANDLERS``, which covers exactly the catalog tools.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import math
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Sequence
 
 import api.database as db
@@ -53,7 +63,10 @@ from core.ai_v2.agent.models import (
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
+    SectionCurveArgs,
+    SectionDeleteArgs,
     SectionManualArgs,
+    SectionUpdateArgs,
 )
 from core.report_levels import assign_nominal_levels
 from core.section_cutter import (
@@ -97,6 +110,15 @@ _MSG_NO_RESULTS = (
     "No hay resultados de conciliación: ejecuta el procesamiento "
     "antes de exportar."
 )
+_MSG_NO_SECTIONS_SESSION = "No hay secciones definidas en esta sesión."
+_MSG_SECTION_OUT_OF_RANGE = (
+    "El section_id {section_id} no existe: la sesión tiene {count} secciones "
+    "(válidos: 0 a {last})."
+)
+_MSG_SECTION_CHANGED = (
+    "La lista de secciones cambió mientras se procesaba el section_id "
+    "{section_id}; consulta list_sections antes de reintentar."
+)
 _EXPORT_NOTE = (
     "El archivo se genera para su descarga en la interfaz; el "
     "contenido binario nunca viaja al modelo."
@@ -132,6 +154,15 @@ _EXPORT_QUERY_KEYS: Dict[str, tuple[str, ...]] = {
     "images": ("filters",),
     "dxf": (),
 }
+_MAX_CURVE_SECTIONS = 200
+_MIN_CURVE_LENGTH_M = 1e-6
+_MSG_TOO_MANY_SECTIONS = (
+    "La curva generaría más de 200 secciones; aumenta el espaciamiento."
+)
+_MSG_INVALID_CURVE = (
+    "La curva no tiene longitud: los puntos consecutivos se repiten. "
+    "Indica al menos dos puntos distintos."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +216,23 @@ async def _design_mesh_or_error(session_id: str) -> tuple[Any, Dict[str, Any] | 
             "error": "design_mesh_missing",
             "message": str(exc.detail)[:200],
         }
+
+
+def _polyline_length(points: Sequence[Sequence[float]]) -> float:
+    vertices = np.asarray(points, dtype=float)
+    return float(np.sqrt((np.diff(vertices, axis=0) ** 2).sum(axis=1)).sum())
+
+
+def _curve_section_count(length: float, spacing: float) -> int:
+    """Sections that ``generate_perpendicular_sections`` places on a polyline.
+
+    One section sits at the midpoint when the polyline is shorter than the
+    spacing; otherwise one every ``spacing`` metres from ``spacing / 2``, which
+    is ``ceil((length - spacing / 2) / spacing)`` sections.
+    """
+    if length < spacing:
+        return 1
+    return math.ceil((length - spacing / 2) / spacing)
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +352,128 @@ async def generate_sections_manual(
     ]
     await _replace_sections(session_id, sections)
     return await _stored_sections_summary(session_id)
+
+
+async def generate_sections_curve(
+    session_id: str, args: SectionCurveArgs
+) -> Dict[str, Any]:
+    """Generate sections across a polyline, APPENDING to the stored ones.
+
+    Mirrors POST /sections/curve through the router's ``_curve_sections``
+    helper. The section count is checked before anything is generated: a
+    curve that would place more than 200 sections returns ``too_many_sections``
+    and writes nothing, and a zero-length polyline returns ``invalid_curve``.
+    Colliding names get a ``_{n}`` suffix and the previous analysis is
+    invalidated. Rejected with ``process_running`` while the session is busy.
+    """
+    busy = await _sections_busy_error(session_id)
+    if busy is not None:
+        return busy
+    length = _polyline_length(args.points)
+    if length < _MIN_CURVE_LENGTH_M:
+        return _error("invalid_curve", _MSG_INVALID_CURVE)
+    if _curve_section_count(length, args.spacing) > _MAX_CURVE_SECTIONS:
+        return _error("too_many_sections", _MSG_TOO_MANY_SECTIONS)
+    sections = await asyncio.to_thread(
+        _curve_sections,
+        args.points,
+        args.spacing,
+        args.length,
+        args.sector,
+        args.length_up,
+        args.length_down,
+    )
+    await _append_sections(session_id, sections)
+    summary = await _stored_sections_summary(session_id)
+    return {"ok": True, "n_added": len(sections), **summary}
+
+
+async def _section_index_error(
+    session_id: str, section_id: int
+) -> tuple[list[dict], Dict[str, Any] | None]:
+    """Return the stored sections, or a bounded error for a missing/bad index."""
+    stored = await _load_sections(session_id)
+    if not stored:
+        return stored, _error("no_sections", _MSG_NO_SECTIONS_SESSION)
+    if not 0 <= section_id < len(stored):
+        return stored, _error(
+            "section_id_out_of_range",
+            _MSG_SECTION_OUT_OF_RANGE.format(
+                section_id=section_id, count=len(stored), last=len(stored) - 1
+            ),
+        )
+    return stored, None
+
+
+async def update_section(session_id: str, args: SectionUpdateArgs) -> Dict[str, Any]:
+    """Edit one section by index, mirroring PUT /sections/{section_id}.
+
+    Only the fields given in ``args`` change; the rest of the stored section
+    is kept. The router's sync helper applies the same normalization as the
+    REST endpoint, and the analysis is invalidated only on a real change.
+    Rejected with ``process_running`` while the session is busy.
+    """
+    busy = await _sections_busy_error(session_id)
+    if busy is not None:
+        return busy
+    stored, error = await _section_index_error(session_id, args.section_id)
+    if error is not None:
+        return error
+    current = stored[args.section_id]
+    body = SectionCreate(
+        name=current["name"] if args.name is None else args.name,
+        origin=current["origin"] if args.origin is None else args.origin,
+        azimuth=current["azimuth"] if args.azimuth is None else args.azimuth,
+        length=current["length"] if args.length is None else args.length,
+        length_up=(
+            current.get("length_up") if args.length_up is None else args.length_up
+        ),
+        length_down=(
+            current.get("length_down") if args.length_down is None else args.length_down
+        ),
+        sector=current["sector"] if args.sector is None else args.sector,
+    )
+    try:
+        section, changed = await run_db(
+            _update_section_sync, session_id, str(args.section_id), body
+        )
+    except HTTPException:
+        return _error(
+            "section_id_out_of_range",
+            _MSG_SECTION_CHANGED.format(section_id=args.section_id),
+        )
+    return {"ok": True, "section": section, "invalidated": changed}
+
+
+async def delete_section(session_id: str, args: SectionDeleteArgs) -> Dict[str, Any]:
+    """Delete one section by index, mirroring DELETE /sections/{section_id}.
+
+    Always reached only after the policy confirmed the call. The analysis is
+    always invalidated and the later section ids shift down by one. Rejected
+    with ``process_running`` while the session is busy.
+    """
+    busy = await _sections_busy_error(session_id)
+    if busy is not None:
+        return busy
+    _, error = await _section_index_error(session_id, args.section_id)
+    if error is not None:
+        return error
+    try:
+        name, total = await run_db(
+            _delete_section_sync, session_id, str(args.section_id)
+        )
+    except HTTPException:
+        return _error(
+            "section_id_out_of_range",
+            _MSG_SECTION_CHANGED.format(section_id=args.section_id),
+        )
+    return {
+        "ok": True,
+        "deleted": {"section_id": args.section_id, "name": name},
+        "total": total,
+        "invalidated": True,
+        "note": "Los section_id posteriores bajan en 1.",
+    }
 
 
 async def run_reconciliation(
@@ -563,6 +733,9 @@ _WRITE_HANDLERS: Dict[str, Handler] = {
     "add_section_click": add_section_click,
     "generate_sections_auto": generate_sections_auto,
     "generate_sections_manual": generate_sections_manual,
+    "update_section": update_section,
+    "delete_section": delete_section,
+    "generate_sections_curve": generate_sections_curve,
     "run_reconciliation": run_reconciliation,
     "export_report": export_report,
 }
@@ -573,19 +746,27 @@ ALL_HANDLERS: Dict[str, Handler] = {**READ_HANDLERS, **_WRITE_HANDLERS}
 __all__ = [
     "ALL_HANDLERS",
     "add_section_click",
+    "delete_section",
     "export_report",
     "generate_sections_auto",
+    "generate_sections_curve",
     "generate_sections_manual",
     "run_reconciliation",
+    "update_section",
 ]
 
 
 from api.routers.process import _run_pipeline_sync
 from api.routers.sections import (
+    SectionCreate,
     _append_sections,
+    _curve_sections,
+    _delete_section_sync,
     _ensure_sections_mutable,
     _get_design_mesh,
     _load_sections,
     _replace_sections,
     _section_to_response,
+    _update_section_sync,
 )
+

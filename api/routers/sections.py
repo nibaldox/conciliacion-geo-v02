@@ -220,6 +220,86 @@ async def _replace_sections(session_id: str, sections: List[SectionLine]) -> Lis
     return replacement
 
 
+def _section_index(section_id: str, count: int) -> int:
+    """Parse an index-based section id and check it against ``count`` sections."""
+    try:
+        idx = int(section_id)
+    except ValueError:
+        raise HTTPException(400, "section_id must be an integer index")
+    if idx < 0 or idx >= count:
+        raise HTTPException(
+            404, f"Section index {idx} out of range (0-{count - 1})"
+        )
+    return idx
+
+
+def _section_dict_from_body(body: "SectionCreate", fallback_name: str) -> dict:
+    """Normalize an edit body the way PUT /sections/{id} stores it."""
+    return {
+        "name": body.name or fallback_name,
+        "origin": list(body.origin),
+        "azimuth": round(float(body.azimuth), 2),
+        "length": float(body.length),
+        "length_up": float(body.length_up) if body.length_up is not None else None,
+        "length_down": float(body.length_down) if body.length_down is not None else None,
+        "sector": body.sector,
+    }
+
+
+def _update_section_sync(
+    session_id: str, section_id: str, body: "SectionCreate"
+) -> tuple[dict, bool]:
+    """Apply one section edit off the event loop.
+
+    Returns the REST response body and whether the stored section changed.
+    The analysis is invalidated only on a real change.
+    """
+    sections = db.get_sections(session_id)
+    idx = _section_index(section_id, len(sections))
+    updated = _section_dict_from_body(body, sections[idx]["name"])
+    changed = updated != sections[idx]
+    if changed:
+        sections[idx] = updated
+        db.save_sections(session_id, sections)
+        db.invalidate_analysis(session_id)
+    return _section_to_response(idx, updated), changed
+
+
+def _delete_section_sync(session_id: str, section_id: str) -> tuple[str, int]:
+    """Remove one section off the event loop; returns (removed name, total left)."""
+    sections = db.get_sections(session_id)
+    idx = _section_index(section_id, len(sections))
+    removed = sections.pop(idx)
+    db.save_sections(session_id, sections)
+    db.invalidate_analysis(session_id)
+    return removed["name"], len(sections)
+
+
+def _curve_sections(
+    points: List[List[float]],
+    spacing: float,
+    length: float,
+    sector: str,
+    length_up: Optional[float],
+    length_down: Optional[float],
+) -> List[SectionLine]:
+    """Build the perpendicular sections of a polyline without touching the DB.
+
+    Shared by POST /sections/curve and the generate_sections_curve agent tool.
+    """
+    points_array = np.array(points, dtype=float)
+    if len(points_array) < 2:
+        raise HTTPException(400, "Curve must have at least 2 points")
+    return generate_perpendicular_sections(
+        points=points_array,
+        spacing=spacing,
+        section_length=length,
+        sector_name=sector,
+        length_up=length_up,
+        length_down=length_down,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models for request bodies
 # ---------------------------------------------------------------------------
@@ -473,33 +553,8 @@ async def update_section(request: Request, section_id: str, body: SectionCreate)
     """
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
     await _ensure_sections_mutable(session_id)
-    sections = await _load_sections(session_id)
-
-    try:
-        idx = int(section_id)
-    except ValueError:
-        raise HTTPException(400, "section_id must be an integer index")
-
-    if idx < 0 or idx >= len(sections):
-        raise HTTPException(
-            404, f"Section index {idx} out of range (0-{len(sections) - 1})"
-        )
-
-    updated = {
-        "name": body.name or sections[idx]["name"],
-        "origin": list(body.origin),
-        "azimuth": round(float(body.azimuth), 2),
-        "length": float(body.length),
-        "length_up": float(body.length_up) if body.length_up is not None else None,
-        "length_down": float(body.length_down) if body.length_down is not None else None,
-        "sector": body.sector,
-    }
-    if updated != sections[idx]:
-        sections[idx] = updated
-        await run_db(db.save_sections, session_id, sections)
-        await run_db(db.invalidate_analysis, session_id)
-
-    return _section_to_response(idx, updated)
+    response, _changed = await run_db(_update_section_sync, session_id, section_id, body)
+    return response
 
 
 @router.delete("/{section_id}")
@@ -507,25 +562,10 @@ async def delete_section(request: Request, section_id: str):
     """Delete a single section by its index-based ID."""
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
     await _ensure_sections_mutable(session_id)
-    sections = await _load_sections(session_id)
-
-    try:
-        idx = int(section_id)
-    except ValueError:
-        raise HTTPException(400, "section_id must be an integer index")
-
-    if idx < 0 or idx >= len(sections):
-        raise HTTPException(
-            404, f"Section index {idx} out of range (0-{len(sections) - 1})"
-        )
-
-    removed = sections.pop(idx)
-    await run_db(db.save_sections, session_id, sections)
-    await run_db(db.invalidate_analysis, session_id)
-
+    name, total = await run_db(_delete_section_sync, session_id, section_id)
     return {
-        "message": f"Section '{removed['name']}' deleted",
-        "total": len(sections),
+        "message": f"Section '{name}' deleted",
+        "total": total,
     }
 
 
@@ -549,17 +589,13 @@ async def sections_curve(request: Request, params: SectionCurveParams):
     session_id = await run_db(db.get_or_create_session, get_session_id(request))
     await _ensure_sections_mutable(session_id)
 
-    points_array = np.array(params.points, dtype=float)
-    if len(points_array) < 2:
-        raise HTTPException(400, "Curve must have at least 2 points")
-
-    sections = generate_perpendicular_sections(
-        points=points_array,
-        spacing=params.spacing,
-        section_length=params.length,
-        sector_name=params.sector,
-        length_up=params.length_up,
-        length_down=params.length_down
+    sections = _curve_sections(
+        params.points,
+        params.spacing,
+        params.length,
+        params.sector,
+        params.length_up,
+        params.length_down,
     )
 
     stored = await _append_sections(session_id, sections)

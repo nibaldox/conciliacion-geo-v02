@@ -668,6 +668,33 @@ async def test_replace_tool_in_clean_state_runs_autonomously():
 
 
 @pytest.mark.asyncio
+async def test_delete_section_confirmation_names_section_and_invalidated_results():
+    handler = RecordingHandler()
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("delete_section", '{"section_id": 4}', call_id="c-del")
+                ]
+            ),
+        ]
+    )
+    state = ToolState(n_sections=10, n_results=160)
+    events, _, store, _ = await run_simple(
+        provider, {"delete_section": handler}, state=state
+    )
+    assert handler.calls == []
+    confirmations = [e for e in events if isinstance(e, ConfirmationRequiredEvent)]
+    assert len(confirmations) == 1
+    expected = (
+        "Elimina la sección con section_id 4 e invalida 160 resultados; "
+        "los section_id posteriores bajan en 1."
+    )
+    assert confirmations[0].args_summary == expected
+    assert store.created[0].args_summary == expected
+
+
+@pytest.mark.asyncio
 async def test_pending_store_failure_ends_in_error_not_confirmation():
     args_json = '{"start": [0, 0], "end": [100, 0]}'
     provider = ScriptedChatProvider(

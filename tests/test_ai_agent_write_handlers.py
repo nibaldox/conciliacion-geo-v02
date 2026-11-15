@@ -35,8 +35,11 @@ from core.ai_v2.agent.models import (
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
+    SectionCurveArgs,
     SectionDefinitionArgs,
+    SectionDeleteArgs,
     SectionManualArgs,
+    SectionUpdateArgs,
     ToolRisk,
 )
 from fastapi import HTTPException
@@ -52,6 +55,9 @@ _EXPECTED_WRITE_TOOLS = {
     "generate_sections_manual",
     "run_reconciliation",
     "export_report",
+    "update_section",
+    "delete_section",
+    "generate_sections_curve",
 }
 
 _EXPORT_FILENAMES = {
@@ -113,7 +119,7 @@ def _save_box_mesh(session_id: str, mesh_type: str) -> str:
 
 def test_all_handlers_cover_exactly_the_catalog():
     assert set(ALL_HANDLERS.keys()) == set(TOOL_CATALOG.keys())
-    assert len(ALL_HANDLERS) == len(TOOL_CATALOG) == 18
+    assert len(ALL_HANDLERS) == len(TOOL_CATALOG) == 21
 
 
 def test_read_handlers_stay_strictly_read_only():
@@ -144,6 +150,9 @@ def test_write_arg_models_never_carry_session_id():
         "generate_sections_manual": SectionManualArgs,
         "run_reconciliation": RunReconciliationArgs,
         "export_report": ExportReportArgs,
+        "update_section": SectionUpdateArgs,
+        "delete_section": SectionDeleteArgs,
+        "generate_sections_curve": SectionCurveArgs,
     }
     for name, model in write_args.items():
         assert TOOL_CATALOG[name].args_model is model, name
@@ -1094,3 +1103,299 @@ async def test_export_report_row_count_matches_real_excel_bancos(cross_sector_re
     assert result["n_rows"] == sheet.max_row - 1
     workbook.close()
 
+
+
+# ---------------------------------------------------------------------------
+# update_section / delete_section: index edits, invalidation, error codes
+# ---------------------------------------------------------------------------
+
+
+def _seed_two_sections_with_analysis(session_id: str) -> None:
+    db.save_sections(session_id, [_section_dict("S-01"), _section_dict("S-02", 10.0)])
+    _seed_analysis(session_id)
+
+
+def _edit_snapshot(session_id: str) -> tuple:
+    return (
+        db.get_sections(session_id),
+        db.get_results(session_id),
+        db.get_extraction(session_id, "S-01", "design"),
+        db.get_process_status(session_id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_section_changes_only_the_given_fields(temp_db):
+    _seed_two_sections_with_analysis(SESSION_A)
+    result = await write_handlers.update_section(
+        SESSION_A, SectionUpdateArgs(section_id=1, name="Norte-2", length_up=40.0)
+    )
+    assert result["ok"] is True
+    assert result["invalidated"] is True
+    assert result["section"] == {
+        "id": "1",
+        "name": "Norte-2",
+        "origin": [10.0, 0.0],
+        "azimuth": 0.0,
+        "length": 60.0,
+        "length_up": 40.0,
+        "length_down": None,
+        "sector": "Principal",
+    }
+    assert db.get_sections(SESSION_A)[1] == {
+        "name": "Norte-2",
+        "origin": [10.0, 0.0],
+        "azimuth": 0.0,
+        "length": 60.0,
+        "length_up": 40.0,
+        "length_down": None,
+        "sector": "Principal",
+    }
+    _assert_analysis_invalidated(SESSION_A)
+    assert db.get_sections(SESSION_B) == []
+
+
+@pytest.mark.asyncio
+async def test_update_section_rounds_azimuth_like_the_rest_endpoint(temp_db):
+    _seed_two_sections_with_analysis(SESSION_A)
+    result = await write_handlers.update_section(
+        SESSION_A, SectionUpdateArgs(section_id=0, azimuth=12.3456)
+    )
+    assert result["section"]["azimuth"] == 12.35
+    assert db.get_sections(SESSION_A)[0]["azimuth"] == 12.35
+
+
+@pytest.mark.asyncio
+async def test_update_section_identical_values_keep_the_analysis(temp_db):
+    _seed_two_sections_with_analysis(SESSION_A)
+    result = await write_handlers.update_section(
+        SESSION_A, SectionUpdateArgs(section_id=1, azimuth=0.0, sector="Principal")
+    )
+    assert result["ok"] is True
+    assert result["invalidated"] is False
+    _assert_analysis_intact(SESSION_A)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler_name, args",
+    [
+        pytest.param("update_section", SectionUpdateArgs(section_id=2, azimuth=1.0), id="update"),
+        pytest.param("delete_section", SectionDeleteArgs(section_id=2), id="delete"),
+    ],
+)
+async def test_out_of_range_section_id_is_rejected_without_writing(
+    temp_db, handler_name, args
+):
+    _seed_two_sections_with_analysis(SESSION_A)
+    before = _edit_snapshot(SESSION_A)
+    result = await getattr(write_handlers, handler_name)(SESSION_A, args)
+    assert result["ok"] is False
+    assert result["error"] == "section_id_out_of_range"
+    assert "0 a 1" in result["message"]
+    assert "2 secciones" in result["message"]
+    assert _edit_snapshot(SESSION_A) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler_name, args",
+    [
+        pytest.param("update_section", SectionUpdateArgs(section_id=0, azimuth=1.0), id="update"),
+        pytest.param("delete_section", SectionDeleteArgs(section_id=0), id="delete"),
+    ],
+)
+async def test_section_edit_without_sections_returns_no_sections(temp_db, handler_name, args):
+    result = await getattr(write_handlers, handler_name)(SESSION_A, args)
+    assert result["ok"] is False
+    assert result["error"] == "no_sections"
+    assert db.get_sections(SESSION_A) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busy_status", ["running", "processing"])
+async def test_busy_session_rejects_section_edits_with_process_running(temp_db, busy_status):
+    _seed_two_sections_with_analysis(SESSION_A)
+    db.update_process_status(SESSION_A, busy_status, 0, 2)
+    before = _edit_snapshot(SESSION_A)
+    for result in (
+        await write_handlers.update_section(
+            SESSION_A, SectionUpdateArgs(section_id=0, name="X")
+        ),
+        await write_handlers.delete_section(SESSION_A, SectionDeleteArgs(section_id=0)),
+    ):
+        assert result["ok"] is False
+        assert result["error"] == "process_running"
+    assert _edit_snapshot(SESSION_A) == before
+
+
+@pytest.mark.asyncio
+async def test_delete_section_removes_one_and_invalidates_the_analysis(temp_db):
+    _seed_two_sections_with_analysis(SESSION_A)
+    result = await write_handlers.delete_section(SESSION_A, SectionDeleteArgs(section_id=0))
+    assert result == {
+        "ok": True,
+        "deleted": {"section_id": 0, "name": "S-01"},
+        "total": 1,
+        "invalidated": True,
+        "note": "Los section_id posteriores bajan en 1.",
+    }
+    assert [section["name"] for section in db.get_sections(SESSION_A)] == ["S-02"]
+    _assert_analysis_invalidated(SESSION_A)
+    assert db.get_sections(SESSION_B) == []
+
+
+@pytest.mark.asyncio
+async def test_delete_section_shifts_later_ids_down_by_one(temp_db):
+    db.save_sections(
+        SESSION_A,
+        [_section_dict("S-01"), _section_dict("S-02", 10.0), _section_dict("S-03", 20.0)],
+    )
+    result = await write_handlers.delete_section(SESSION_A, SectionDeleteArgs(section_id=1))
+    assert result["deleted"] == {"section_id": 1, "name": "S-02"}
+    assert result["total"] == 2
+    assert [section["name"] for section in db.get_sections(SESSION_A)] == ["S-01", "S-03"]
+
+
+@pytest.mark.asyncio
+async def test_delete_section_invalidates_even_without_prior_results(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    result = await write_handlers.delete_section(SESSION_A, SectionDeleteArgs(section_id=0))
+    assert result["ok"] is True
+    assert result["invalidated"] is True
+    assert db.get_sections(SESSION_A) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler_name, helper_name", [
+    ("update_section", "_update_section_sync"),
+    ("delete_section", "_delete_section_sync"),
+])
+async def test_section_list_shrinking_mid_edit_returns_out_of_range(
+    temp_db, monkeypatch, handler_name, helper_name
+):
+    _seed_two_sections_with_analysis(SESSION_A)
+
+    def _lost_index(*_args):
+        raise HTTPException(404, "Section index 1 out of range (0-0)")
+
+    monkeypatch.setattr(write_handlers, helper_name, _lost_index)
+    args = (
+        SectionUpdateArgs(section_id=1, azimuth=5.0)
+        if handler_name == "update_section"
+        else SectionDeleteArgs(section_id=1)
+    )
+    result = await getattr(write_handlers, handler_name)(SESSION_A, args)
+    assert result["ok"] is False
+    assert result["error"] == "section_id_out_of_range"
+    assert "list_sections" in result["message"]
+    _assert_analysis_intact(SESSION_A)
+
+
+# ---------------------------------------------------------------------------
+# generate_sections_curve: APPEND, section-count guard, invalid polyline
+# ---------------------------------------------------------------------------
+
+
+def _curve_args(**overrides: Any) -> SectionCurveArgs:
+    fields: Dict[str, Any] = {"points": [[0.0, 0.0], [100.0, 0.0]], "spacing": 10.0}
+    fields.update(overrides)
+    return SectionCurveArgs(**fields)
+
+
+@pytest.mark.asyncio
+async def test_generate_sections_curve_appends_sections(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    result = await write_handlers.generate_sections_curve(SESSION_A, _curve_args())
+    assert result["ok"] is True
+    assert result["n_added"] == 10
+    assert result["n_sections"] == 11
+    stored = db.get_sections(SESSION_A)
+    assert len(stored) == 11
+    assert stored[0]["name"] == "S-01"
+    assert len({section["name"] for section in stored}) == 11
+    assert db.get_sections(SESSION_B) == []
+
+
+@pytest.mark.asyncio
+async def test_generate_sections_curve_invalidates_analysis(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    _seed_analysis(SESSION_A)
+    result = await write_handlers.generate_sections_curve(
+        SESSION_A, _curve_args(spacing=50.0)
+    )
+    assert result["ok"] is True
+    assert result["n_added"] == 2
+    _assert_analysis_invalidated(SESSION_A)
+
+
+@pytest.mark.asyncio
+async def test_generate_sections_curve_payload_stays_within_observation_budget(temp_db):
+    result = await write_handlers.generate_sections_curve(
+        SESSION_A, _curve_args(points=[[0.0, 0.0], [2000.0, 0.0]], spacing=10.0)
+    )
+    assert result["n_added"] == 200
+    assert result["n_sections"] == 200
+    assert result["sections_shown"] == 30
+    assert result["sections_truncated"] is True
+    assert len(json.dumps(result, ensure_ascii=False)) < 4000
+
+
+@pytest.mark.asyncio
+async def test_curve_of_exactly_200_sections_is_accepted(temp_db):
+    result = await write_handlers.generate_sections_curve(
+        SESSION_A, _curve_args(points=[[0.0, 0.0], [2005.0, 0.0]], spacing=10.0)
+    )
+    assert result["ok"] is True
+    assert result["n_added"] == 200
+    assert len(db.get_sections(SESSION_A)) == 200
+
+
+@pytest.mark.asyncio
+async def test_curve_of_201_sections_is_rejected_before_writing(temp_db):
+    result = await write_handlers.generate_sections_curve(
+        SESSION_A, _curve_args(points=[[0.0, 0.0], [2015.0, 0.0]], spacing=10.0)
+    )
+    assert result["ok"] is False
+    assert result["error"] == "too_many_sections"
+    assert db.get_sections(SESSION_A) == []
+
+
+@pytest.mark.asyncio
+async def test_two_km_curve_at_1_m_spacing_writes_nothing(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    _seed_analysis(SESSION_A)
+    before = _edit_snapshot(SESSION_A)
+    result = await write_handlers.generate_sections_curve(
+        SESSION_A, _curve_args(points=[[0.0, 0.0], [2000.0, 0.0]], spacing=1.0)
+    )
+    assert result == {
+        "ok": False,
+        "error": "too_many_sections",
+        "message": "La curva generaría más de 200 secciones; aumenta el espaciamiento.",
+    }
+    assert _edit_snapshot(SESSION_A) == before
+
+
+@pytest.mark.asyncio
+async def test_duplicate_points_make_an_invalid_curve(temp_db):
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    before = db.get_sections(SESSION_A)
+    result = await write_handlers.generate_sections_curve(
+        SESSION_A, _curve_args(points=[[5.0, 5.0], [5.0, 5.0]])
+    )
+    assert result["ok"] is False
+    assert result["error"] == "invalid_curve"
+    assert db.get_sections(SESSION_A) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("busy_status", ["running", "processing"])
+async def test_busy_session_rejects_curve_with_process_running(temp_db, busy_status):
+    _seed_two_sections_with_analysis(SESSION_A)
+    db.update_process_status(SESSION_A, busy_status, 0, 2)
+    before = _edit_snapshot(SESSION_A)
+    result = await write_handlers.generate_sections_curve(SESSION_A, _curve_args())
+    assert result["ok"] is False
+    assert result["error"] == "process_running"
+    assert _edit_snapshot(SESSION_A) == before

@@ -24,6 +24,7 @@ Reason codes: ``autonomous_clean_state``, ``replace_existing_state``,
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from core.ai_v2.agent.models import PolicyDecision, ToolRisk, ToolSpec, ToolState
@@ -70,12 +71,53 @@ def _active_counts(spec: ToolSpec, state: ToolState) -> list[int]:
     return counts
 
 
-def decide(spec: ToolSpec, state: ToolState) -> PolicyDecision:
+class _SafeFormat(dict[str, Any]):
+    """Format mapping that keeps unknown placeholders as literal ``{key}``."""
+
+    def __missing__(self, key: str) -> str:
+        return "{" + key + "}"
+
+
+def _format_impact(
+    template: str, count: int, args: Mapping[str, Any] | None
+) -> str | None:
+    """Fill an impact template from the call args and the state count.
+
+    The state ``count`` always wins over a ``count`` key in the args, so a
+    model-supplied value can never misstate the invalidated results. Returns
+    None when the template is malformed; the caller then falls back.
+    """
+    values: dict[str, Any] = dict(args or {})
+    values["count"] = count
+    try:
+        return template.format_map(_SafeFormat(values))
+    except (IndexError, KeyError, ValueError, AttributeError, TypeError):
+        return None
+
+
+def _always_confirm_summary(
+    spec: ToolSpec, state: ToolState, args: Mapping[str, Any] | None
+) -> str:
+    generic = f"'{spec.name}' requiere confirmación explícita del usuario."
+    if not spec.impact_summary:
+        return generic
+    count = max(_active_counts(spec, state), default=0)
+    formatted = _format_impact(spec.impact_summary, count, args)
+    return generic if formatted is None else formatted
+
+
+def decide(
+    spec: ToolSpec,
+    state: ToolState,
+    args: Mapping[str, Any] | None = None,
+) -> PolicyDecision:
     """Return the policy decision for one tool call.
 
     Args:
         spec: The tool being invoked, from the frozen catalog.
         state: Aggregate snapshot of the session at decision time.
+        args: Validated call arguments, used to fill ``impact_summary``
+            placeholders on always-confirm tools. Missing keys stay literal.
     """
     if spec.risk in _NEVER_CONFIRM_RISKS:
         return PolicyDecision(
@@ -91,9 +133,7 @@ def decide(spec: ToolSpec, state: ToolState) -> PolicyDecision:
         return PolicyDecision(
             requires_confirmation=True,
             reason_code=REASON_ALWAYS_CONFIRM,
-            human_summary_es=(
-                f"'{spec.name}' requiere confirmación explícita del usuario."
-            ),
+            human_summary_es=_always_confirm_summary(spec, state, args),
         )
 
     if not spec.state_keys:

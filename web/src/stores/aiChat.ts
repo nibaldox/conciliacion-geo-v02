@@ -91,6 +91,9 @@ export const WRITE_TOOL_QUERY_KEYS: Record<string, ReadonlyArray<ReadonlyArray<s
   generate_sections_auto: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
   generate_sections_manual: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
   add_section_click: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
+  generate_sections_curve: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
+  update_section: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
+  delete_section: [...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']],
   run_reconciliation: [['process-status'], ['results'], ['profile'], ['export-levels']],
 };
 

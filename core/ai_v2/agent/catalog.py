@@ -1,4 +1,4 @@
-"""v1 agent tool catalog (18 tools) — plan section 5.3.
+"""v1 agent tool catalog (21 tools) — plan section 5.3.
 
 Each :class:`ToolSpec` derives its JSON schema from the arg model that
 mirrors the REAL router request parameters. No imports from ``api/``:
@@ -25,8 +25,11 @@ from core.ai_v2.agent.models import (
     RunReconciliationArgs,
     SectionAutoArgs,
     SectionClickArgs,
+    SectionCurveArgs,
+    SectionDeleteArgs,
     SectionIdArgs,
     SectionManualArgs,
+    SectionUpdateArgs,
     ToolRisk,
     ToolSpec,
 )
@@ -256,6 +259,48 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         idempotent=True,
         impact_summary=(
             "Genera un archivo descargable sin modificar datos de la sesión"
+        ),
+    ),
+    ToolSpec(
+        name="update_section",
+        description=(
+            "Edit one cross-section by its section_id (index from the sections list): "
+            "change only the given fields (name, origin, azimuth, lengths, sector). "
+            "Changing a section invalidates the previous analysis."
+        ),
+        args_model=SectionUpdateArgs,
+        risk=ToolRisk.REPLACE,
+        state_keys=("n_results",),
+        impact_summary="Edita una sección e invalida {count} resultados existentes",
+    ),
+    ToolSpec(
+        name="delete_section",
+        description=(
+            "Delete one cross-section by its section_id. Always asks the user for "
+            "confirmation, invalidates the analysis, and shifts the section_id of "
+            "later sections down by one."
+        ),
+        args_model=SectionDeleteArgs,
+        risk=ToolRisk.DESTRUCTIVE,
+        state_keys=("n_results",),
+        impact_summary=(
+            "Elimina la sección con section_id {section_id} e invalida {count} "
+            "resultados; los section_id posteriores bajan en 1."
+        ),
+    ),
+    ToolSpec(
+        name="generate_sections_curve",
+        description=(
+            "Generate cross-sections perpendicular to a polyline (for example a crest "
+            "or contour segment) every `spacing` metres. Sections are appended to the "
+            "existing ones and invalidate the previous analysis."
+        ),
+        args_model=SectionCurveArgs,
+        risk=ToolRisk.REPLACE,
+        state_keys=("n_sections",),
+        impact_summary=(
+            "Añade secciones e invalida el análisis actual "
+            "({count} secciones existentes)"
         ),
     ),
 )

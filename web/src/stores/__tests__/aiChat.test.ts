@@ -658,6 +658,65 @@ describe('write tool query dependencies', () => {
     }
     expect(WRITE_TOOL_QUERY_KEYS.run_reconciliation).toContainEqual(['export-levels']);
   });
+
+  it('maps update_section and delete_section to the section dependents and process status', async () => {
+    const { WRITE_TOOL_QUERY_KEYS, SECTION_DEPENDENT_QUERY_KEYS } = await import('../aiChat');
+    for (const name of ['update_section', 'delete_section']) {
+      expect(WRITE_TOOL_QUERY_KEYS[name]).toEqual([...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']]);
+    }
+  });
+
+  it('notifies the observer after a successful update_section or delete_section tool_result', () => {
+    const observer = vi.fn();
+    useAIChat.getState().setWriteResultObserver(observer);
+    for (const name of ['update_section', 'delete_section']) {
+      useAIChat.getState().applyAgentEvent({
+        type: 'tool_result',
+        invocation_id: `inv_${name}`,
+        name,
+        ok: true,
+        summary: 'sección editada',
+        duration_ms: 8,
+        error: null,
+      } as AgentEvent);
+    }
+    expect(observer.mock.calls).toEqual([['update_section'], ['delete_section']]);
+  });
+
+  it('maps generate_sections_curve to the section dependents and process status', async () => {
+    const { WRITE_TOOL_QUERY_KEYS, SECTION_DEPENDENT_QUERY_KEYS } = await import('../aiChat');
+    expect(WRITE_TOOL_QUERY_KEYS.generate_sections_curve).toEqual([...SECTION_DEPENDENT_QUERY_KEYS, ['process-status']]);
+  });
+
+  it('notifies the observer after a successful generate_sections_curve tool_result', () => {
+    const observer = vi.fn();
+    useAIChat.getState().setWriteResultObserver(observer);
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_result',
+      invocation_id: 'inv_curve',
+      name: 'generate_sections_curve',
+      ok: true,
+      summary: '8 secciones añadidas',
+      duration_ms: 8,
+      error: null,
+    } as AgentEvent);
+    expect(observer.mock.calls).toEqual([['generate_sections_curve']]);
+  });
+
+  it('does not notify the observer for a failed update_section tool_result', () => {
+    const observer = vi.fn();
+    useAIChat.getState().setWriteResultObserver(observer);
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_result',
+      invocation_id: 'inv_fail',
+      name: 'update_section',
+      ok: false,
+      summary: '',
+      duration_ms: 3,
+      error: 'section_id_out_of_range',
+    } as AgentEvent);
+    expect(observer).not.toHaveBeenCalled();
+  });
 });
 
 describe('aiChat store — ui_context from the user section selection', () => {
