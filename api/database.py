@@ -347,15 +347,67 @@ def session_exists(session_id: str) -> bool:
         conn.close()
 
 
-def cleanup_old_sessions(max_age_hours: int = 24):
-    """Delete sessions older than max_age_hours."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-    # Use same format as SQLite CURRENT_TIMESTAMP: 'YYYY-MM-DD HH:MM:SS'
-    cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+def touch_session(session_id: str) -> None:
     conn = get_connection()
-    conn.execute("DELETE FROM sessions WHERE created_at < ?", (cutoff_str,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute("UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def cleanup_old_sessions(max_age_days: int | None = None) -> int:
+    from core import config
+
+    days = config.DEPLOY.session_ttl_days if max_age_days is None else max_age_days
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    empty_cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_connection()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        predicate = """
+            COALESCE(updated_at, created_at) < ?
+               OR (COALESCE(updated_at, created_at) < ?
+                   AND (sections IS NULL OR sections IN ('', '[]'))
+                   AND (settings IS NULL OR settings IN ('', '{}'))
+                   AND NOT EXISTS (SELECT 1 FROM meshes WHERE session_id = sessions.id)
+                   AND NOT EXISTS (SELECT 1 FROM results WHERE session_id = sessions.id))
+        """
+        conn.execute(
+            f"DELETE FROM ai_conversations WHERE session_id IN (SELECT id FROM sessions WHERE {predicate})",
+            (cutoff, empty_cutoff),
+        )
+        cursor = conn.execute(f"DELETE FROM sessions WHERE {predicate}", (cutoff, empty_cutoff))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def list_recent_sessions(limit: int) -> list[dict[str, Any]]:
+    conn = get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT s.id AS session_id, s.created_at,
+                   COALESCE(s.updated_at, s.created_at) AS last_used_at,
+                   (SELECT filename FROM meshes m WHERE m.session_id = s.id AND m.type = 'design'
+                    ORDER BY m.uploaded_at DESC, m.rowid DESC LIMIT 1) AS design_filename,
+                   (SELECT filename FROM meshes m WHERE m.session_id = s.id AND m.type = 'topo'
+                    ORDER BY m.uploaded_at DESC, m.rowid DESC LIMIT 1) AS topo_filename,
+                   CASE WHEN json_valid(s.sections) THEN
+                       CASE WHEN json_type(s.sections) = 'array' THEN json_array_length(s.sections) ELSE 0 END
+                   ELSE 0 END AS n_sections,
+                   (SELECT count(*) FROM results r WHERE r.session_id = s.id) AS n_results,
+                   s.process_status
+            FROM sessions s
+            WHERE EXISTS (SELECT 1 FROM meshes m WHERE m.session_id = s.id)
+            ORDER BY COALESCE(s.updated_at, s.created_at) DESC, s.id
+            LIMIT ?
+        """, (limit,)).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
 
 # --- Horizontal deviation (3D heatmap) results ---

@@ -344,7 +344,7 @@ def test_rows_are_removed_with_their_session_by_cleanup(heatmap_session):
     db.save_horizontal_deviation(survivor, "A", "key", {"n": 1}, {"n": 1})
     conn = db.get_connection()
     conn.execute(
-        "UPDATE sessions SET created_at = '2000-01-01 00:00:00' WHERE id = ?",
+        "UPDATE sessions SET updated_at = '2000-01-01 00:00:00' WHERE id = ?",
         (session_id,),
     )
     conn.commit()
