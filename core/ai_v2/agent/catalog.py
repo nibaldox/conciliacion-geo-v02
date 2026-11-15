@@ -111,7 +111,8 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
             "Run the full reconciliation pipeline (cut sections, extract "
             "bench parameters, compare design vs as-built) over all "
             "sections. Replaces ALL previous results of the session; "
-            "typically takes about 42 seconds."
+            "typically takes about 42 seconds. Uses the session's saved "
+            "detection settings; pass a field only to override it for this run."
         ),
         args_model=RunReconciliationArgs,
         risk=ToolRisk.EXPENSIVE_REPLACE,

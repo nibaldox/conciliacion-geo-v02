@@ -1,6 +1,6 @@
 # Inventario REST — Ola 2 del agente (§5.5)
 
-Metodología: conteo verificado contra los decorators `@router.*` de `api/routers/*.py` el 9-nov-2026 — **64 endpoints exactos**. `GET /api/v1/health` vive en `api/main.py`, fuera de los routers, y queda fuera del alcance. Clasificaciones:
+Metodología: conteo verificado contra los decorators `@router.*` de `api/routers/*.py` el 15-nov-2026 — **65 endpoints exactos**. `GET /api/v1/health` vive en `api/main.py`, fuera de los routers, y queda fuera del alcance. Clasificaciones:
 
 - **CUBIERTO** — herramienta actual del catálogo v1 (14 ToolSpec; `query_results` añade lectura filtrada de resultados por cota/banco/sector/sección/parámetro/estado).
 - **OLA-2** — candidato; `PENDING_USER_DECISION`: no se implementa ni se excluye sin la decisión explícita del usuario.
@@ -28,12 +28,12 @@ Metodología: conteo verificado contra los decorators `@router.*` de `api/router
 | POST | /blast/preview | OLA-2 | Tronadura: preview rápido de diseño; revisar coste antes de toolizar |
 | POST | /blast/upload | OLA-2 | Tronadura: carga de CSV de pozos |
 | GET | /blast/definitions | OLA-2 | Tronadura: catálogos READ |
-| GET | /blast/{session_id}/summary | OLA-2 ⚠️ | READ; `{session_id}` en path → requiere revisión de aislamiento de sesión antes de toolizar (vector anti-spoof que la política prohíbe) |
+| GET | /blast/{session_id}/summary | OLA-2 ⚠️ | READ; `{session_id}` en path → requiere revisión de aislamiento de sesión antes de toolizar (vector anti-spoof que la política prohíbe) — PLANIFICADO F4 |
 | GET | /blast/{session_id}/holes | OLA-2 ⚠️ | Ídem |
 | GET | /blast/{session_id}/holes/{hole_id} | OLA-2 ⚠️ | Ídem |
 | GET | /blast/holes/3d | FRONTEND | Payload de visualización Cesium |
 
-## /api/v1/export (7)
+## /api/v1/export (8)
 
 | Método | Ruta | Clasificación | Detalle |
 |---|---|---|---|
@@ -42,6 +42,7 @@ Metodología: conteo verificado contra los decorators `@router.*` de `api/router
 | GET | /export/dxf | CUBIERTO | export_report |
 | GET | /export/images | CUBIERTO | export_report |
 | GET | /export/pdf | CUBIERTO | export_report |
+| GET | /export/levels | OLA-2 (PLANIFICADO F2) | Lista cotas nominales por sector; la usa export_report para validar filtros |
 | GET | /export/blast-diagnostics | OLA-2 | READ de diagnósticos de tronadura |
 | GET | /export/blast-rejections | OLA-2 | READ de rechazos de importación |
 
@@ -78,8 +79,8 @@ Metodología: conteo verificado contra los decorators `@router.*` de `api/router
 | GET | /process/profiles/{section_id} | CUBIERTO | get_profile |
 | PUT | /process/results/{section_id}/reconciled | OLA-2 | Bench drag&drop (REPLACE del estado reconciliado) → confirmación |
 | GET | /process/profiles/{section_id}/blast-holes | OLA-2 | READ tronadura↔geotecnia |
-| GET | /process/blast-correlation | OLA-2 | READ |
-| GET | /process/blast-correlation/damage-model | OLA-2 | READ |
+| GET | /process/blast-correlation | OLA-2 | READ — PLANIFICADO F4 |
+| GET | /process/blast-correlation/damage-model | OLA-2 | READ — PLANIFICADO F4 |
 | GET | /process/design-achievement | CUBIERTO | get_design_achievement (acepta filtros por sector/sección/cota/banco) |
 | GET | /process/proposed-compliance | CUBIERTO | get_proposed_compliance (acepta filtros por sector/sección/cota/banco) |
 
@@ -92,10 +93,10 @@ Metodología: conteo verificado contra los decorators `@router.*` de `api/router
 | POST | /sections/manual | CUBIERTO | generate_sections_manual |
 | POST | /sections/click | CUBIERTO | add_section_click (AÑADE) |
 | POST | /sections/from-file | OLA-2 | REPLACE → confirmación; requiere mecanismo file_ref (frontend sube el archivo y pasa la observación) |
-| PUT | /sections/{section_id} | OLA-2 | REPLACE parcial → confirmación |
-| DELETE | /sections/{section_id} | DESTRUCTIVO | Nivel 3 |
+| PUT | /sections/{section_id} | OLA-2 | REPLACE parcial → confirmación — PLANIFICADO F5 |
+| DELETE | /sections/{section_id} | DESTRUCTIVO | Nivel 3 — PLANIFICADO F5 |
 | DELETE | /sections | DESTRUCTIVO | Borra TODAS las secciones — nivel 3 con confirmación que nombre el alcance total |
-| POST | /sections/curve | OLA-2 | Autoría de secciones (REPLACE) → confirmación |
+| POST | /sections/curve | OLA-2 | Autoría de secciones (REPLACE) → confirmación — PLANIFICADO F5 |
 
 ## /api/v1/session (1)
 
@@ -107,7 +108,7 @@ Metodología: conteo verificado contra los decorators `@router.*` de `api/router
 
 | Método | Ruta | Clasificación | Detalle |
 |---|---|---|---|
-| GET | /settings | OLA-2 | Settings READ |
+| GET | /settings | OLA-2 | Settings READ — PLANIFICADO F2 |
 | PUT | /settings | OLA-2 (CONFIG) | REPLACE de settings/tolerancias → confirmación obligatoria (nivel CONFIG) |
 
 ## /api/v1/simulations (7)
@@ -127,9 +128,9 @@ Metodología: conteo verificado contra los decorators `@router.*` de `api/router
 | Clasificación | Endpoints |
 |---|---|
 | CUBIERTO | 16 |
-| OLA-2 (incl. 5 DESTRUCTIVOS nivel 3 + PUT /settings CONFIG) | 33 |
+| OLA-2 (incl. 5 DESTRUCTIVOS nivel 3 + PUT /settings CONFIG) | 34 |
 | FRONTEND | 7 |
 | EXCLUIDO | 8 |
-| **Total** | **64** |
+| **Total** | **65** |
 
-Los 33 OLA-2 quedan como `PENDING_USER_DECISION` (§5.5 del plan): el pedido original fue "todas las herramientas de la app", así que el alcance — completo, núcleo (tronadura + settings + sesión) o reducido — lo decide el usuario, no el asistente.
+Los 34 OLA-2 quedan como `PENDING_USER_DECISION` (§5.5 del plan): el pedido original fue "todas las herramientas de la app", así que el alcance — completo, núcleo (tronadura + settings + sesión) o reducido — lo decide el usuario, no el asistente.

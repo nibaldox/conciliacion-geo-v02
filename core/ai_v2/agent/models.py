@@ -181,13 +181,19 @@ class SectionClickArgs(_StrictArgs):
 class RunReconciliationArgs(_StrictArgs):
     """Arguments for ``run_reconciliation`` (POST /process).
 
-    Optional overrides mirroring ``api.schemas.ProcessSettings``; every
-    field omitted keeps the session's current setting.
+    Optional per-run overrides mirroring ``api.schemas.ProcessSettings``.
+    A field left as ``None`` keeps the session's saved detection setting.
     """
 
-    resolution: float = Field(default=0.1, gt=0.0, le=10.0)
-    face_threshold: float = Field(default=30.0, ge=0.0, le=90.0)
-    berm_threshold: float = Field(default=10.0, ge=0.0, le=90.0)
+    resolution: Optional[float] = Field(
+        default=None, gt=0.0, le=10.0, allow_inf_nan=False
+    )
+    face_threshold: Optional[float] = Field(
+        default=None, ge=0.0, le=90.0, allow_inf_nan=False
+    )
+    berm_threshold: Optional[float] = Field(
+        default=None, ge=0.0, le=90.0, allow_inf_nan=False
+    )
 
 
 class ExportReportArgs(_StrictArgs):

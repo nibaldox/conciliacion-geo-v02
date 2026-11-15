@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 
+import api.ai_agent_conversations as conversations
 from core.ai_v2.prompts import (
     get_all_template_names,
     load_prompt_template,
@@ -68,3 +69,12 @@ def test_render_prompt_with_dict_kwargs():
     template = "PF={pf_promedio}"
     out = render_prompt(template, **{"pf_promedio": 0.42})
     assert out == "PF=0.42"
+
+
+def test_agent_system_prompt_production_loader_rule_5(monkeypatch):
+    monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
+    text = conversations.agent_system_prompt()
+    assert "AÑADEN secciones" in text
+    assert "`add_section_click` se ejecuta sin confirmación" in text
+    assert "generar secciones reemplaza TODAS" not in text
+    assert "procées" not in text

@@ -380,6 +380,17 @@ def _run_pipeline_sync(
     return _execute_pipeline_sync(session_id, sections_raw, body_overrides)
 
 
+def _merge_process_cfg(settings: dict, body_overrides: dict) -> dict:
+    """Return the saved process settings with per-run overrides applied.
+
+    Pure: neither argument is mutated. Overrides win key by key.
+    """
+    return {
+        **settings.get("process", {}),
+        **body_overrides.get("process", {}),
+    }
+
+
 def _execute_pipeline_sync(
     session_id: str,
     sections_raw: list,
@@ -403,10 +414,9 @@ def _execute_pipeline_sync(
 
     # Merge settings: DB defaults ← body overrides
     settings = db.get_settings(session_id) or {}
-    process_cfg = settings.get("process", {})
+    process_cfg = _merge_process_cfg(settings, body_overrides)
     tolerances = settings.get("tolerances", {})
 
-    process_cfg.update(body_overrides.get("process", {}))
     tolerances.update(body_overrides.get("tolerances", {}))
 
     # Fall back to DEFAULT_TOLERANCES if no tolerances were provided

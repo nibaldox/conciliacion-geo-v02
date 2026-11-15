@@ -34,6 +34,7 @@ from core.ai_v2.agent.models import (
     ToolRisk,
 )
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 SESSION_A = "sess-A"
 SESSION_B = "sess-B"
@@ -502,6 +503,101 @@ async def test_run_reconciliation_resets_status_on_unexpected_error(
     with pytest.raises(RuntimeError):
         await run_reconciliation(SESSION_A, RunReconciliationArgs())
     assert db.get_process_status(SESSION_A)["status"] == "idle"
+
+
+# ---------------------------------------------------------------------------
+# run_reconciliation: saved detection settings are the default
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def pipeline_calls(monkeypatch):
+    calls: list = []
+
+    def _fake_pipeline(session_id, sections_raw, body_overrides):
+        calls.append(body_overrides)
+        return {
+            "status": "complete",
+            "total_sections": len(sections_raw),
+            "total_results": 0,
+            "profile_warnings": {},
+        }
+
+    monkeypatch.setattr(write_handlers, "_run_pipeline_sync", _fake_pipeline)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_run_reconciliation_without_args_keeps_saved_detection_settings(
+    api_isolated_db, pipeline_calls
+):
+    db.get_or_create_session(SESSION_A)
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    db.save_settings(
+        SESSION_A,
+        {"process": {"resolution": 0.2, "face_threshold": 35.0, "berm_threshold": 12.0}},
+    )
+    result = await run_reconciliation(SESSION_A, RunReconciliationArgs())
+    assert result["ok"] is True
+    assert pipeline_calls == [{"process": {}}]
+
+
+@pytest.mark.asyncio
+async def test_run_reconciliation_explicit_threshold_overrides_saved(
+    api_isolated_db, pipeline_calls
+):
+    db.get_or_create_session(SESSION_A)
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    db.save_settings(SESSION_A, {"process": {"face_threshold": 35.0}})
+    result = await run_reconciliation(
+        SESSION_A, RunReconciliationArgs(face_threshold=40)
+    )
+    assert result["ok"] is True
+    assert pipeline_calls == [{"process": {"face_threshold": 40.0}}]
+
+
+@pytest.mark.asyncio
+async def test_run_reconciliation_zero_override_is_not_dropped(
+    api_isolated_db, pipeline_calls
+):
+    db.get_or_create_session(SESSION_A)
+    db.save_sections(SESSION_A, [_section_dict("S-01")])
+    await run_reconciliation(
+        SESSION_A, RunReconciliationArgs(face_threshold=0.0, resolution=2.0)
+    )
+    assert pipeline_calls == [
+        {"process": {"face_threshold": 0.0, "resolution": 2.0}}
+    ]
+
+
+def test_run_reconciliation_args_default_to_no_override():
+    assert RunReconciliationArgs().model_dump(exclude_none=True) == {}
+
+
+@pytest.mark.parametrize(
+    "field", ["resolution", "face_threshold", "berm_threshold"]
+)
+@pytest.mark.parametrize(
+    "value", [float("nan"), float("inf"), float("-inf")]
+)
+def test_run_reconciliation_args_reject_non_finite_values(field, value):
+    with pytest.raises(ValidationError):
+        RunReconciliationArgs(**{field: value})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"resolution": 0.0},
+        {"resolution": 10.5},
+        {"face_threshold": -0.1},
+        {"face_threshold": 90.5},
+        {"berm_threshold": 91.0},
+    ],
+)
+def test_run_reconciliation_args_keep_existing_bounds(payload):
+    with pytest.raises(ValidationError):
+        RunReconciliationArgs(**payload)
 
 
 # ---------------------------------------------------------------------------

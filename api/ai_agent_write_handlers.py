@@ -296,13 +296,7 @@ async def run_reconciliation(
             "error": "no_sections",
             "message": _MSG_NO_SECTIONS,
         }
-    body_overrides = {
-        "process": {
-            "resolution": args.resolution,
-            "face_threshold": args.face_threshold,
-            "berm_threshold": args.berm_threshold,
-        }
-    }
+    body_overrides = {"process": args.model_dump(exclude_none=True)}
     try:
         result = await asyncio.to_thread(
             _run_pipeline_sync, session_id, sections_raw, body_overrides
