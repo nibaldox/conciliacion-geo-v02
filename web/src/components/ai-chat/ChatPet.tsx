@@ -89,11 +89,6 @@ export function ChatPet({ state = 'idle', size = 'launcher', trackPointer = true
           </radialGradient>
         </defs>
         <ellipse className="ai-pet__shade" cx="28" cy="50.6" rx="14" ry="2.2" />
-        <g className="ai-pet__dust">
-          <circle cx="11" cy="49" r="1.6" />
-          <circle cx="45" cy="49" r="1.6" />
-          <circle cx="8" cy="47.5" r="1.1" />
-        </g>
         <g className="ai-pet__tilt">
           <g className="ai-pet__rig">
             <g>
@@ -161,6 +156,39 @@ export function ChatPet({ state = 'idle', size = 'launcher', trackPointer = true
             </g>
           </g>
         </g>
+        <g data-testid="ai-pet-shovel" className="ai-pet__shovel">
+          <rect
+            className="ai-pet__shovel-shaft"
+            x="47"
+            y="19.6"
+            width="1.9"
+            height="21.6"
+            rx="0.95"
+          />
+          <rect
+            className="ai-pet__shovel-grip"
+            x="44.9"
+            y="18.4"
+            width="6.1"
+            height="2.1"
+            rx="1.05"
+          />
+          <path
+            className="ai-pet__shovel-blade"
+            d="M44.2 40H51.7V45.4Q51.7 49.2 47.95 50.9Q44.2 49.2 44.2 45.4Z"
+          />
+          <path className="ai-pet__shovel-shine" d="M45.8 41.4V45.6" />
+        </g>
+        <g className="ai-pet__clods">
+          <circle cx="53" cy="41" r="1.7" />
+          <circle cx="54.8" cy="39.6" r="1.25" />
+          <circle cx="51.3" cy="39.4" r="1.4" />
+        </g>
+        <g className="ai-pet__dig-dust">
+          <circle cx="44.8" cy="50.4" r="1.3" />
+          <circle cx="51" cy="50.4" r="1.3" />
+          <circle cx="47.9" cy="51" r="1" />
+        </g>
         <g className="ai-pet__spark">
           <path d="M8 12 l1 2.4 2.4 1 -2.4 1 -1 2.4 -1 -2.4 -2.4 -1 2.4 -1Z" />
           <path d="M47 8 l.8 1.9 1.9 .8 -1.9 .8 -.8 1.9 -.8 -1.9 -1.9 -.8 1.9 -.8Z" />
@@ -181,10 +209,6 @@ export function ChatPet({ state = 'idle', size = 'launcher', trackPointer = true
             <circle cx="41.6" cy="8" r="1.1" />
             <circle cx="45.5" cy="8" r="1.1" />
             <circle cx="49.4" cy="8" r="1.1" />
-          </g>
-          <g className="ai-pet__bubble-gear">
-            <circle cx="45.5" cy="8" r="2.6" strokeWidth="1.5" strokeDasharray="1.3 .75" />
-            <circle cx="45.5" cy="8" r=".9" strokeWidth=".9" />
           </g>
           <text className="ai-pet__bubble-q" x="45.5" y="10.6">
             ?

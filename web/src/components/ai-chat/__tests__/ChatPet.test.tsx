@@ -14,6 +14,11 @@ describe('ChatPet', () => {
     expect(getByTestId('ai-pet-bubble')).toBeInTheDocument();
     expect(container.querySelector('.ai-pet__mouth, .ai-pet__nose, .ai-pet__pupil')).toBeNull();
   });
+  it('renders the shovel without the old gear in tool state', () => {
+    const { container, getByTestId } = render(<ChatPet state="tool" />);
+    expect(getByTestId('ai-pet-shovel')).toBeInTheDocument();
+    expect(container.querySelector('.ai-pet__bubble-gear')).toBeNull();
+  });
   it('uses unique gradient ids', () => {
     const { container } = render(<><ChatPet /><ChatPet /></>);
     const ids = [...container.querySelectorAll('linearGradient, radialGradient')].map((el) => el.id);
