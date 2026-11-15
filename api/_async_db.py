@@ -65,6 +65,26 @@ async def blast_slot() -> AsyncIterator[None]:
         semaphore.release()
 
 
+_UPLOAD_LIMITS = weakref.WeakKeyDictionary()
+_UPLOAD_LIMITS_GUARD = threading.Lock()
+
+
+@asynccontextmanager
+async def upload_parse_slot() -> AsyncIterator[None]:
+    from core import config
+
+    limit = config.DEPLOY.upload_parse_concurrency
+    loop = asyncio.get_running_loop()
+    with _UPLOAD_LIMITS_GUARD:
+        entry = _UPLOAD_LIMITS.get(loop)
+        if entry is None or entry[0] != limit:
+            entry = (limit, asyncio.Semaphore(limit))
+            _UPLOAD_LIMITS[loop] = entry
+        semaphore = entry[1]
+    async with semaphore:
+        yield
+
+
 async def run_blast_limited(fn: Callable[..., _T], /, *args: Any) -> _T:
     """Run ``fn(*args)`` on the default executor while holding a blast slot."""
     async with blast_slot():

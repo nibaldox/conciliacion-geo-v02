@@ -2,7 +2,6 @@ import sqlite3
 import json
 import uuid
 import zlib
-import functools
 import tempfile
 import os
 import threading
@@ -12,8 +11,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 
+import numpy as np
 import trimesh
 from core import load_mesh
+from core.config import DEPLOY
+from api.byte_cache import ByteBudget, ByteLruCache, trimesh_nbytes
 
 _DATA_DIR = Path(
     os.environ.get(
@@ -205,6 +207,16 @@ def init_db():
             uploaded_at TEXT DEFAULT CURRENT_TIMESTAMP,
             import_options TEXT,
             import_report TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS mesh_arrays (
+            mesh_id TEXT PRIMARY KEY REFERENCES meshes(id) ON DELETE CASCADE,
+            format INTEGER NOT NULL,
+            n_vertices INTEGER NOT NULL,
+            n_faces INTEGER NOT NULL,
+            vertices BLOB NOT NULL,
+            faces BLOB NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS results (
@@ -528,6 +540,48 @@ def _horizontal_deviation_from_row(row: sqlite3.Row) -> Dict[str, Any]:
 
 
 _MESH_BLOB_CHUNK_BYTES = 1024 * 1024
+MESH_ARRAYS_FORMAT = 1
+
+
+def save_mesh_arrays(mesh_id: str, mesh: trimesh.Trimesh) -> None:
+    vertices = np.ascontiguousarray(mesh.vertices, dtype='<f8')
+    faces = np.ascontiguousarray(mesh.faces, dtype='<i8')
+    conn = get_connection()
+    try:
+        cur = conn.execute(
+            "INSERT OR REPLACE INTO mesh_arrays (mesh_id, format, n_vertices, n_faces, vertices, faces) VALUES (?, ?, ?, ?, zeroblob(?), zeroblob(?))",
+            (mesh_id, MESH_ARRAYS_FORMAT, len(vertices), len(faces), vertices.nbytes, faces.nbytes),
+        )
+        for column, array in (("vertices", vertices), ("faces", faces)):
+            data = memoryview(array).cast('B')
+            with conn.blobopen('mesh_arrays', column, cur.lastrowid) as blob:
+                for start in range(0, len(data), _MESH_BLOB_CHUNK_BYTES):
+                    blob.write(data[start:start + _MESH_BLOB_CHUNK_BYTES])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_mesh_arrays(mesh_id: str) -> Optional[trimesh.Trimesh]:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT rowid, format, n_vertices, n_faces, length(vertices) AS vl, length(faces) AS fl FROM mesh_arrays WHERE mesh_id = ?", (mesh_id,)
+        ).fetchone()
+        if (row is None or row['format'] != MESH_ARRAYS_FORMAT
+                or row['n_vertices'] < 0 or row['n_faces'] < 0
+                or row['vl'] != row['n_vertices'] * 24 or row['fl'] != row['n_faces'] * 24):
+            return None
+        vertices = np.empty((row['n_vertices'], 3), dtype='<f8')
+        faces = np.empty((row['n_faces'], 3), dtype='<i8')
+        for column, array in (("vertices", vertices), ("faces", faces)):
+            data = memoryview(array).cast('B')
+            with conn.blobopen('mesh_arrays', column, row['rowid'], readonly=True) as blob:
+                for start in range(0, len(data), _MESH_BLOB_CHUNK_BYTES):
+                    data[start:start + _MESH_BLOB_CHUNK_BYTES] = blob.read(min(_MESH_BLOB_CHUNK_BYTES, len(data) - start))
+        return trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    finally:
+        conn.close()
 
 
 def save_mesh(
@@ -653,9 +707,16 @@ def get_mesh_by_id(mesh_id: str) -> Optional[Dict[str, Any]]:
     }
 
 
-@functools.lru_cache(maxsize=4)
+@ByteLruCache(ByteBudget(DEPLOY.trimesh_cache_mb * _MIB), name="trimesh", sizer=trimesh_nbytes)
 def get_trimesh_by_id(mesh_id: str) -> trimesh.Trimesh:
-    """Get trimesh by its ID, cached in memory (max 4 meshes ~ 4x196 MB)."""
+    """Get a mesh by ID, cached under a dedicated byte budget."""
+    mesh = load_mesh_arrays(mesh_id)
+    if mesh is not None:
+        from core import config
+        from core.section_index import get_face_grid_index
+        if len(mesh.faces) >= config.SECTION_INDEX.min_faces:
+            get_face_grid_index(mesh)
+        return mesh
     conn = get_connection()
     row = conn.execute(
         "SELECT filename, data, import_options FROM meshes WHERE id = ?", (mesh_id,)
@@ -678,6 +739,10 @@ def get_trimesh_by_id(mesh_id: str) -> trimesh.Trimesh:
             mesh, _ = import_dxf_surface(tmp, layers=options.get("layers"), units=options.get("units"))
         else:
             mesh = load_mesh(tmp)
+        from core import config
+        from core.section_index import get_face_grid_index
+        if len(mesh.faces) >= config.SECTION_INDEX.min_faces:
+            get_face_grid_index(mesh)
         # Force evaluation to cache in-memory
         _ = mesh.vertices
         _ = mesh.faces

@@ -235,3 +235,73 @@ class TestMeshRouterIntegration:
         assert len(cached["faces"]) == len(raw["faces"])
         assert again is cached
         meshes_router._get_decimated_vertices_cached.cache_clear()
+
+
+def test_custom_sizer_is_used():
+    cache = ByteLruCache(ByteBudget(100), sizer=lambda _: 37)
+    @cache
+    def load():
+        return object()
+    load()
+    assert load.cache_info().bytes == 37
+
+
+def test_trimesh_size_includes_grid():
+    import trimesh
+    from api.byte_cache import trimesh_nbytes
+    from core.section_index import get_face_grid_index
+    mesh = trimesh.creation.box()
+    grid = get_face_grid_index(mesh)
+    expected = mesh.vertices.nbytes + mesh.faces.nbytes + grid.sorted_keys.nbytes + grid.order.nbytes
+    expected += sum(v.nbytes for v in mesh._cache.cache.values() if isinstance(v, np.ndarray))
+    assert trimesh_nbytes(mesh) == expected
+
+
+def test_single_flight_stores_before_release(monkeypatch):
+    cache = ByteLruCache(ByteBudget(10000))
+    started, proceed, waiting = threading.Event(), threading.Event(), threading.Event()
+    original_store = cache._store
+    original_claim = cache._claim
+    calls = []
+    def store(key, value):
+        started.set()
+        assert proceed.wait(5)
+        original_store(key, value)
+    def claim(key):
+        event, owner = original_claim(key)
+        if not owner:
+            waiting.set()
+        return event, owner
+    monkeypatch.setattr(cache, "_store", store)
+    monkeypatch.setattr(cache, "_claim", claim)
+    @cache
+    def load(key):
+        calls.append(key)
+        return key
+    first = threading.Thread(target=load, args=(1,))
+    second = threading.Thread(target=load, args=(1,))
+    first.start()
+    assert started.wait(5)
+    second.start()
+    try:
+        assert waiting.wait(5)
+    finally:
+        proceed.set()
+        first.join(5)
+        second.join(5)
+    assert calls == [1]
+
+
+def test_real_trimeshes_evict_by_bytes():
+    import trimesh
+    from api.byte_cache import trimesh_nbytes
+    small = trimesh.creation.box()
+    large = trimesh.creation.icosphere(subdivisions=2)
+    cache = ByteLruCache(ByteBudget(trimesh_nbytes(large)), sizer=trimesh_nbytes)
+    @cache
+    def load(key):
+        return small if key == 0 else large
+    load(0)
+    load(1)
+    assert load.cache_info().currsize == 1
+    assert load.cache_info().bytes == trimesh_nbytes(large)

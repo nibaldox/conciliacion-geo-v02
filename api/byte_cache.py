@@ -176,6 +176,18 @@ def estimate_size(value: Any) -> int:
     return total
 
 
+def trimesh_nbytes(mesh: Any) -> int:
+    from core.section_index import FaceGridIndex
+
+    total = mesh.vertices.nbytes + mesh.faces.nbytes
+    for value in mesh._cache.cache.values():
+        if isinstance(value, np.ndarray):
+            total += value.nbytes
+        elif isinstance(value, FaceGridIndex):
+            total += value.sorted_keys.nbytes + value.order.nbytes
+    return int(total)
+
+
 class ByteBudget:
     """Shared byte accounting for one or more :class:`ByteLruCache` instances."""
 
@@ -223,7 +235,8 @@ class ByteLruCache:
     the first one to finish instead of recomputing.
     """
 
-    def __init__(self, budget: ByteBudget, *, name: str = "byte_cache") -> None:
+    def __init__(self, budget: ByteBudget, *, name: str = "byte_cache", sizer: Callable[[Any], int] | None = None) -> None:
+        self.sizer = sizer or estimate_size
         self.budget = budget
         self.name = name
         self._entries: "OrderedDict[Hashable, tuple[Any, int]]" = OrderedDict()
@@ -236,10 +249,11 @@ class ByteLruCache:
         @functools.wraps(fn)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             key = _make_key(args, kwargs)
-            hit, value = self._lookup(key)
-            if hit:
-                return value
-            event, owner = self._claim(key)
+            with self._lock:
+                hit, value = self._lookup(key)
+                if hit:
+                    return value
+                event, owner = self._claim(key)
             if not owner:
                 event.wait()
                 hit, value = self._lookup(key)
@@ -247,10 +261,10 @@ class ByteLruCache:
                     return value
             try:
                 value = fn(*args, **kwargs)
+                self._store(key, value)
             finally:
                 if owner:
                     self._release_claim(key, event)
-            self._store(key, value)
             return value
 
         setattr(wrapper, "cache_clear", self.clear)
@@ -283,7 +297,7 @@ class ByteLruCache:
         event.set()
 
     def _store(self, key: Hashable, value: Any) -> None:
-        size = estimate_size(value)
+        size = self.sizer(value)
         with self._lock:
             self._discard(key)
             while True:

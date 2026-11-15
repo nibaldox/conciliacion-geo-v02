@@ -31,7 +31,7 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 import api.database as db
 import api.dxf_uploads as dxf_uploads
 from api.schemas import DxfImportConfirmation
-from api._async_db import run_db
+from api._async_db import run_db, upload_parse_slot
 from api.byte_cache import mesh_cache
 from core import (
     HorizontalFaceGeometry,
@@ -1005,7 +1005,8 @@ async def upload_mesh(
         if size == 0:
             raise HTTPException(400, "Empty file")
 
-        mesh = await asyncio.to_thread(load_mesh, tmp)
+        async with upload_parse_slot():
+            mesh = await asyncio.to_thread(load_mesh, tmp)
 
         raw_bounds = get_mesh_bounds(mesh)
         clean_bounds = {
@@ -1018,7 +1019,6 @@ async def upload_mesh(
         }
         n_vertices = len(mesh.vertices)
         n_faces = len(mesh.faces)
-        del mesh
 
         session_id = await run_db(db.get_or_create_session, get_session_id(request))
         mesh_id = await run_db(
@@ -1031,6 +1031,11 @@ async def upload_mesh(
             n_faces=n_faces,
             bounds=clean_bounds,
         )
+        try:
+            await run_db(db.save_mesh_arrays, mesh_id, mesh)
+        except Exception:
+            logger.warning("Unable to persist mesh arrays", exc_info=True)
+        del mesh
     except HTTPException:
         raise
     except Exception as exc:
@@ -1131,6 +1136,10 @@ async def confirm_dxf(request: Request, body: DxfImportConfirmation):
             import_options={"layers": body.layers, "units": body.units},
             import_report=report,
         )
+        try:
+            await run_db(db.save_mesh_arrays, mesh_id, mesh)
+        except Exception:
+            logger.warning("Unable to persist mesh arrays", exc_info=True)
         consumed = dxf_uploads.take(body.upload_id, session_id)
         if consumed:
             os.unlink(consumed["path"])

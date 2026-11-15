@@ -150,3 +150,16 @@ def test_nonoverlapping_surface_bounds_add_machine_warning(client):
         headers={"X-Session-ID": "dxf-overlap"},
     )
     assert "SURFACES_NO_XY_OVERLAP" in confirmed.json()["import_report"]["warnings"]
+
+
+def test_confirmation_persists_arrays(client, tmp_path):
+    inspected = _inspect(client)
+    result = client.post("/api/v1/meshes/dxf/confirm", json={"upload_id": inspected.json()["upload_id"], "layers": ["SURFACE"], "units": 6}, headers={"X-Session-ID": "dxf-owner"})
+    assert result.status_code == 200
+    saved = db.load_mesh_arrays(result.json()["mesh_id"])
+    from core import import_dxf_surface
+    path = tmp_path / "surface.dxf"
+    path.write_bytes(_dxf_bytes())
+    expected, _ = import_dxf_surface(str(path), layers=["SURFACE"], units=6)
+    assert np.array_equal(saved.vertices, expected.vertices)
+    assert np.array_equal(saved.faces, expected.faces)

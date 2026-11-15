@@ -180,6 +180,8 @@ class DeployDefaults:
 
     # Runtime
     workers: int = field(default_factory=lambda: _env_int("CONCILIACION_WORKERS", 1))
+    trimesh_cache_mb: int = field(default_factory=lambda: _env_int("CONCILIACION_TRIMESH_CACHE_MB", 2048) if _env_int("CONCILIACION_TRIMESH_CACHE_MB", 2048) > 0 else 2048)
+    upload_parse_concurrency: int = field(default_factory=lambda: _env_int("CONCILIACION_UPLOAD_PARSE_CONCURRENCY", 2) if _env_int("CONCILIACION_UPLOAD_PARSE_CONCURRENCY", 2) > 0 else 2)
     data_dir: str = field(default_factory=lambda: os.environ.get("CONCILIACION_DATA_DIR", ""))
 
 
