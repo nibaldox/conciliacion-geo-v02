@@ -11,9 +11,13 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import Enum
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
+_FilterSectorName = Annotated[str, Field(min_length=1, max_length=120)]
+_FilterSectionName = Annotated[str, Field(min_length=1, max_length=60)]
+_FilterLevelLabel = Annotated[str, Field(min_length=1, max_length=20)]
 
 
 class ToolRisk(str, Enum):
@@ -200,10 +204,20 @@ class ExportReportArgs(_StrictArgs):
     """Arguments for ``export_report`` (GET /export/{format}).
 
     ``format`` matches the real export routes: excel, word, pdf, dxf
-    and images.
+    and images. The filters do NOT mirror the REST query parameters
+    literally: ``sector``, ``section`` and ``levels_by_sector`` are checked
+    against the session's real sectors and nominal level labels, then sent
+    as one camelCase ``filters`` document, while ``project`` and ``author``
+    map to the router's metadata parameters. There is no flat ``level``
+    filter because nominal labels are grouped per sector.
     """
 
     format: Literal["excel", "word", "pdf", "dxf", "images"]
+    sector: Optional[list[_FilterSectorName]] = Field(default=None, max_length=20)
+    section: Optional[list[_FilterSectionName]] = Field(default=None, max_length=50)
+    levels_by_sector: Optional[dict[_FilterSectorName, list[_FilterLevelLabel]]] = None
+    project: Optional[str] = Field(default=None, max_length=120)
+    author: Optional[str] = Field(default=None, max_length=120)
 
 
 class MeshIdArgs(_StrictArgs):

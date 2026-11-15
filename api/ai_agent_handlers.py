@@ -48,6 +48,7 @@ from core.compliance_status import (
     STATUS_RAMPA_OK,
 )
 from core.report_data import compute_dashboard_weighted_score
+from core.report_levels import BENCH_TYPES, assign_nominal_levels
 
 Handler = Callable[[str, Any], Awaitable[Dict[str, Any]]]
 
@@ -149,6 +150,25 @@ _PARAMETER_STATUS_FIELDS: Dict[str, str] = {
     "berm": "berm_status",
 }
 _MAX_LEVEL_ENTRIES = 60
+_TOLERANCE_UNITS: Dict[str, str] = {
+    "bench_height": "m",
+    "face_angle": "deg",
+    "berm_width": "m",
+    "inter_ramp_angle": "deg",
+    "overall_angle": "deg",
+    "crest_toe_deviation": "m",
+}
+_TOLERANCE_BOUND_KEYS: Tuple[str, ...] = ("neg", "pos", "min")
+_PROCESS_SETTING_KEYS: Tuple[str, ...] = ("resolution", "face_threshold", "berm_threshold")
+_BLAST_SETTING_KEYS: Tuple[str, ...] = ("rock_density_tm3", "height_fallback_m")
+_CLASSIFICATION_RULES: Dict[str, str] = {
+    "bench_height": "CUMPLE si la desviación está dentro de −neg/+pos; FUERA DE TOLERANCIA hasta 1,5× ese límite; NO CUMPLE sobre 1,5×",
+    "face_angle": "CUMPLE si la desviación está dentro de −neg/+pos; FUERA DE TOLERANCIA hasta 1,5× ese límite; NO CUMPLE sobre 1,5×",
+    "berm_width": "CUMPLE si el ancho real es mayor o igual al mínimo; NO CUMPLE si es menor; sin banda FUERA DE TOLERANCIA",
+    "crest_toe_deviation": "Desplazamiento de cresta y pata en el cumplimiento propuesto: misma regla de 1,5× que la altura",
+    "inter_ramp_angle": "Informativo: se reporta en el Excel y no clasifica bancos",
+    "overall_angle": "Informativo: se reporta en el Excel y no clasifica bancos",
+}
 
 
 ResultT = TypeVar("ResultT")
@@ -446,6 +466,47 @@ async def get_results_summary(session_id: str, args: NoArgs) -> Dict[str, Any]:
     }
 
 
+def _settings_view(merged: Dict[str, Any]) -> Dict[str, Any]:
+    """Project merged settings onto the agent payload, critical keys first."""
+    raw_tolerances = merged.get("tolerances") or {}
+    tolerances: Dict[str, Any] = {}
+    for key, unit in _TOLERANCE_UNITS.items():
+        entry = raw_tolerances.get(key)
+        bounds = (
+            {bound: entry[bound] for bound in _TOLERANCE_BOUND_KEYS if bound in entry}
+            if isinstance(entry, dict)
+            else {}
+        )
+        tolerances[key] = {**bounds, "unit": unit}
+    payload: Dict[str, Any] = {
+        "ok": True,
+        "tolerances": tolerances,
+        "classification_rules": dict(_CLASSIFICATION_RULES),
+    }
+    raw_process = merged.get("process") or {}
+    process = {key: raw_process[key] for key in _PROCESS_SETTING_KEYS if key in raw_process}
+    if process:
+        payload["process"] = process
+    raw_blast = merged.get("blast") or {}
+    blast = {key: raw_blast[key] for key in _BLAST_SETTING_KEYS if key in raw_blast}
+    if blast:
+        payload["blast"] = blast
+    return payload
+
+
+async def get_settings(session_id: str, args: NoArgs) -> Dict[str, Any]:
+    """Detection settings and compliance tolerances, as ``GET /settings`` merges them.
+
+    Reuses the router's ``_merged_settings_sync`` so the agent and the REST
+    endpoint cannot drift. Only the tolerance bounds, the process knobs and
+    the two blast tunables are projected; hole lists never leave the database.
+    """
+    from api.routers.settings import _merged_settings_sync
+
+    merged = await _run_off_loop(_merged_settings_sync, session_id)
+    return _settings_view(merged)
+
+
 async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
     """One section summarized via the router's own profile computation."""
     from api.routers.process import _build_profile_payload_sync
@@ -635,35 +696,32 @@ def _payload_size(payload: Dict[str, Any]) -> int:
 
 
 def _fit_query_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Iteratively trim bulky lists until the payload fits the byte budget.
-
-    Priority order: drop ``weighted_score.by_section`` first, then halve
-    ``sections`` / ``levels`` / ``rows`` in turn (floors 8 / 12 / 10),
-    re-measuring after every step and stopping as soon as the payload
-    fits. ``weighted_score`` (without ``by_section``), ``pct_by_parameter``
-    and ``status_by_parameter`` are never removed: an oversized payload is
-    better than losing the score the model must answer with.
-    """
-    if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
+    """Fit the observation, preserving nominal levels ahead of detail lists."""
+    limit = min(_MAX_PAYLOAD_BYTES, 4000)
+    if _payload_size(payload) < limit:
         return payload
-
     weighted = payload.get("weighted_score")
     if isinstance(weighted, dict):
         weighted.pop("by_section", None)
-        if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
-            return payload
-
-    progress = True
-    while _payload_size(payload) >= _MAX_PAYLOAD_BYTES and progress:
-        progress = False
-        for key, floor in _PAYLOAD_LIST_FLOORS:
-            entries = payload.get(key)
-            if not isinstance(entries, list) or len(entries) <= floor:
-                continue
-            payload[key] = entries[: max(floor, len(entries) // 2)]
-            progress = True
-            if _payload_size(payload) < _MAX_PAYLOAD_BYTES:
-                return payload
+    for key in ("levels", "rows", "sections"):
+        entries = payload.get(key)
+        while isinstance(entries, list) and entries and _payload_size(payload) >= limit:
+            entries.pop()
+            if key == "levels":
+                payload["levels_truncated"] = True
+    nominal = payload.get("nominal_levels", {})
+    while _payload_size(payload) >= limit and nominal:
+        sector = next(reversed(nominal))
+        entries = nominal[sector]
+        if entries:
+            entries.pop()
+        if not entries:
+            del nominal[sector]
+        payload["nominal_levels_truncated"] = True
+    for key in ("filters", "by_type", "by_section_status", "status_by_parameter", "pct_by_parameter"):
+        value = payload.get(key)
+        while isinstance(value, dict) and value and _payload_size(payload) >= limit:
+            value.pop(next(reversed(value)))
     return payload
 
 
@@ -721,6 +779,21 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
         )[:_MAX_LEVEL_ENTRIES]
     ]
 
+    nominal_levels: Dict[str, List[Dict[str, Any]]] = {}
+    for row in filtered:
+        if row.get("type") in BENCH_TYPES:
+            sector = row.get("sector")
+            name = "" if sector is None or not str(sector).strip() else str(sector)
+            nominal_levels.setdefault(name, [])
+    assignment = assign_nominal_levels(filtered)
+    for level in sorted(assignment.levels, key=lambda item: item.elevation, reverse=True):
+        nominal_levels.setdefault(level.sector, []).append({
+            "label": level.label,
+            "min": round(level.min_level, 1),
+            "max": round(level.max_level, 1),
+            "n": level.n_rows,
+        })
+
     rows_out: Optional[List[Dict[str, Any]]] = None
     if args.include_rows:
         rows_out = [
@@ -760,14 +833,6 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
         "weighted_score": weighted_score,
         "n_total_rows": unfiltered_count,
         "n_matched_rows": len(filtered),
-        "filters": {
-            "sector": list(args.sector or []),
-            "section": list(args.section or []),
-            "level": list(args.level or []),
-            "bench": list(args.bench or []),
-            "parameter": args.parameter,
-            "status": args.status,
-        },
         "pct_by_parameter": {
             param: _pct_entry(counters[status_field])
             for param, status_field in _PARAMETER_STATUS_FIELDS.items()
@@ -786,6 +851,16 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
                 for key, value in counters["berm_status"].items()
             },
         },
+        "filters": {
+            "sector": list(args.sector or []),
+            "section": list(args.section or []),
+            "level": list(args.level or []),
+            "bench": list(args.bench or []),
+            "parameter": args.parameter,
+            "status": args.status,
+        },
+        "levels_truncated": len(level_counter) > _MAX_LEVEL_ENTRIES,
+        "nominal_levels": nominal_levels,
         "by_type": {_json_key(key): value for key, value in counters["type"].items()},
         "by_section_status": {
             _json_key(key): value for key, value in counters["section_status"].items()
@@ -813,6 +888,7 @@ _HANDLERS: Dict[str, Handler] = {
     "get_mesh_info": get_mesh_info,
     "list_sections": list_sections,
     "get_results_summary": get_results_summary,
+    "get_settings": get_settings,
     "get_profile": get_profile,
     "get_design_achievement": get_design_achievement,
     "get_proposed_compliance": get_proposed_compliance,
@@ -833,6 +909,7 @@ __all__ = [
     "get_profile",
     "get_proposed_compliance",
     "get_results_summary",
+    "get_settings",
     "get_workflow_state",
     "list_meshes",
     "list_sections",

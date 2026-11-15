@@ -1,4 +1,4 @@
-"""v1 agent tool catalog (14 tools) — plan section 5.3.
+"""v1 agent tool catalog (15 tools) — plan section 5.3.
 
 Each :class:`ToolSpec` derives its JSON schema from the arg model that
 mirrors the REAL router request parameters. No imports from ``api/``:
@@ -131,6 +131,18 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
     ),
     ToolSpec(
+        name="get_settings",
+        description=(
+            "Return the session's detection settings and the compliance tolerances with units: "
+            "bench height and face angle use neg/pos limits with a 1.5x FUERA DE TOLERANCIA band; "
+            "berm width uses a minimum (below it is NO CUMPLE); inter-ramp and overall angles "
+            "are informative only."
+        ),
+        args_model=NoArgs,
+        risk=ToolRisk.READ,
+        impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
+    ),
+    ToolSpec(
         name="get_profile",
         description=(
             "Return summarized profile data for ONE section by its "
@@ -186,7 +198,8 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
             "list of available levels with counts, and optionally "
             "(include_rows=true) up to row_limit rows with "
             "design vs as-built values and deviations. Use it when the "
-            "user asks about a specific level, bench, sector or status."
+            "user asks about a specific level, bench, sector or status. "
+            "nominal_levels contains export labels by sector; levels_truncated signals omitted exact levels."
         ),
         args_model=ResultQueryArgs,
         risk=ToolRisk.READ,
@@ -196,7 +209,12 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         name="export_report",
         description=(
             "Generate a report export (excel, word, pdf, dxf or images) "
-            "and return its download metadata; never file bytes."
+            "and return its download metadata; never file bytes. Optional "
+            "filters: sector and section (exact names of the session), and "
+            "levels_by_sector (sector -> nominal level labels such as '3065', "
+            "not exact toe elevations). project and author are report "
+            "metadata. dxf takes no filters or metadata; images take filters "
+            "only. This is not a literal mirror of the REST query parameters."
         ),
         args_model=ExportReportArgs,
         risk=ToolRisk.EXPORT,

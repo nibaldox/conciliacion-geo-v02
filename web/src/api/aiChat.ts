@@ -189,6 +189,7 @@ export interface ExportDownloadInfo {
   filename: string;
   endpoint: string;
   contentType: string;
+  query?: ExportQuery;
 }
 
 interface ExportDownloadSpec {
@@ -238,6 +239,88 @@ const EXPORT_DOWNLOADS: Record<string, ExportDownloadSpec> = {
   },
 };
 
+type ExportQueryKey = 'filters' | 'project' | 'author';
+
+type ExportQuery = Partial<Record<ExportQueryKey, string>>;
+
+const EXPORT_QUERY_KEYS: ReadonlyArray<ExportQueryKey> = [
+  'filters',
+  'project',
+  'author',
+];
+
+const EXPORT_QUERY_MAX_LENGTH = 4000;
+
+function exportSpecFor(format: string): ExportDownloadSpec | undefined {
+  return Object.prototype.hasOwnProperty.call(EXPORT_DOWNLOADS, format)
+    ? EXPORT_DOWNLOADS[format]
+    : undefined;
+}
+
+/**
+ * Keep only the query keys the export endpoints accept (filters, project,
+ * author), each a string of 1..4000 characters. Unknown keys, non-strings,
+ * empty and oversized values are dropped. Returns undefined when none remain.
+ */
+function sanitizeExportQuery(raw: unknown): ExportQuery | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return undefined;
+  }
+  const source = raw as Record<string, unknown>;
+  const query: ExportQuery = {};
+  for (const key of EXPORT_QUERY_KEYS) {
+    const value = source[key];
+    if (typeof value !== 'string') continue;
+    const length = Array.from(value).length;
+    if (length < 1 || length > EXPORT_QUERY_MAX_LENGTH) continue;
+    query[key] = value;
+  }
+  return Object.keys(query).length > 0 ? query : undefined;
+}
+
+function buildExportInfo(
+  format: string,
+  query: ExportQuery | undefined,
+): ExportDownloadInfo | null {
+  const spec = exportSpecFor(format);
+  if (!spec) return null;
+  return query ? { format, ...spec, query } : { format, ...spec };
+}
+
+function exportQueryString(query: unknown): string {
+  const safe = sanitizeExportQuery(query);
+  if (!safe) return '';
+  const params = new URLSearchParams();
+  for (const key of EXPORT_QUERY_KEYS) {
+    const value = safe[key];
+    if (value !== undefined) params.append(key, value);
+  }
+  return `?${params.toString()}`;
+}
+
+/**
+ * Read the `download` field of a tool_result event (export_report only).
+ *
+ * The payload is untrusted: `format` must be a key of EXPORT_DOWNLOADS and
+ * the query is reduced by sanitizeExportQuery. Endpoint, filename and
+ * content type always come from the table, never from the payload. Returns
+ * null for an absent payload or an unknown format.
+ */
+export function exportDownloadFromEvent(
+  download: unknown,
+): ExportDownloadInfo | null {
+  if (
+    typeof download !== 'object' ||
+    download === null ||
+    Array.isArray(download)
+  ) {
+    return null;
+  }
+  const { format, query } = download as { format?: unknown; query?: unknown };
+  if (typeof format !== 'string') return null;
+  return buildExportInfo(format, sanitizeExportQuery(query));
+}
+
 function matchFormat(summary: string): string {
   const match = /"format"\s*:\s*"([^"]+)"/.exec(summary);
   return match?.[1] ?? '';
@@ -267,9 +350,7 @@ export function extractExportDownload(
     if (!/"ok"\s*:\s*true/.test(summary)) return null;
     format = matchFormat(summary);
   }
-  const spec = format ? EXPORT_DOWNLOADS[format] : undefined;
-  if (!spec) return null;
-  return { format, ...spec };
+  return buildExportInfo(format, undefined);
 }
 
 /**
@@ -288,7 +369,7 @@ export async function downloadExportFile(
   }
   const base = resolveBaseUrl();
   const suffix = info.endpoint.replace(/^\/api\/v1/, '');
-  const url = `${base}${suffix}`;
+  const url = `${base}${suffix}${exportQueryString(info.query)}`;
   const headers: Record<string, string> = {};
   const sessionId = getSessionId();
   if (sessionId) headers['X-Session-ID'] = sessionId;

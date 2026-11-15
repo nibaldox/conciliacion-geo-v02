@@ -13,6 +13,7 @@ import sys
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from core.ai_v2.agent.confirmations import (
     PendingRun,
@@ -1203,3 +1204,176 @@ class TestObservationContent:
         result = _observation_content({"huge": "x" * 10000})
         assert len(result) <= _OBSERVATION_MAX_CHARS
         assert result.endswith("...[truncated]")
+
+
+# ---------------------------------------------------------------------------
+# T2.2a-1: export download metadata on tool_result events
+# ---------------------------------------------------------------------------
+
+EXPORT_FILTERS = '{"sector":["Norte"]}'
+EXPORT_CALL_ARGS = '{"format": "excel"}'
+
+
+def _export_payload(**overrides: Any) -> dict[str, Any]:
+    """Handler payload whose JSON exceeds the 200-char summary cut."""
+    payload: dict[str, Any] = {
+        "ok": True,
+        "format": "excel",
+        "filler": "y" * 300,
+        "query": {"filters": EXPORT_FILTERS},
+    }
+    payload.update(overrides)
+    return payload
+
+
+async def _run_export(payload: dict[str, Any]) -> tuple[list[Any], Any]:
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[
+                    tool_call("export_report", EXPORT_CALL_ARGS, call_id="call_1")
+                ]
+            ),
+            ChatTurn(text="Listo."),
+        ]
+    )
+    events, provider, _, _ = await run_simple(
+        provider, {"export_report": RecordingHandler(payload)}
+    )
+    return events, provider
+
+
+def _single_result(events: list[Any]) -> ToolResultEvent:
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert len(results) == 1
+    return results[0]
+
+
+@pytest.mark.asyncio
+async def test_export_download_meta_survives_the_summary_cut():
+    events, _ = await _run_export(_export_payload())
+    result = _single_result(events)
+    assert result.ok is True
+    assert "query" not in result.summary
+    assert result.download is not None
+    assert result.download.format == "excel"
+    assert result.download.query == {"filters": EXPORT_FILTERS}
+
+
+@pytest.mark.asyncio
+async def test_export_download_meta_round_trips_through_ndjson():
+    events, _ = await _run_export(_export_payload())
+    result = _single_result(events)
+    line = event_to_ndjson(result)
+    assert json.loads(line)["download"] == {
+        "format": "excel",
+        "query": {"filters": EXPORT_FILTERS},
+    }
+    assert parse_event_line(line).download == result.download
+
+
+@pytest.mark.asyncio
+async def test_export_payload_with_ok_false_carries_no_download():
+    events, _ = await _run_export(
+        _export_payload(ok=False, error="invalid_filters")
+    )
+    assert _single_result(events).download is None
+
+
+@pytest.mark.asyncio
+async def test_other_tool_returning_format_and_query_carries_no_download():
+    provider = ScriptedChatProvider(
+        [
+            ChatTurn(
+                tool_calls=[tool_call("get_workflow_state", "", call_id="call_1")]
+            ),
+            ChatTurn(text="Listo."),
+        ]
+    )
+    handler = RecordingHandler(
+        {"ok": True, "format": "excel", "query": {"filters": EXPORT_FILTERS}}
+    )
+    events, _, _, _ = await run_simple(provider, {"get_workflow_state": handler})
+    assert _single_result(events).download is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"filters": EXPORT_FILTERS, "endpoint": "/api/v1/evil"},
+        {"filters": "x" * 4001},
+        "filters=evil",
+    ],
+    ids=["extra_key", "value_over_4000", "not_a_mapping"],
+)
+async def test_invalid_query_drops_download_and_turn_continues(query: Any):
+    from core.ai_v2.agent.loop import _compact_summary
+
+    payload = _export_payload(query=query)
+    events, provider = await _run_export(payload)
+    result = _single_result(events)
+    assert result.ok is True
+    assert result.download is None
+    assert result.summary == _compact_summary(payload)
+    assert isinstance(events[-1], DoneEvent)
+    assert events[-1].finish_reason == "stop"
+    assert any(isinstance(e, TextEvent) for e in events)
+    tool_messages = [m for m in provider.requests[1] if m.get("role") == "tool"]
+    assert json.loads(tool_messages[-1]["content"])["ok"] is True
+
+
+def test_non_export_tool_result_serializes_without_download_key():
+    event = ToolResultEvent(
+        invocation_id="inv_abc",
+        name="get_workflow_state",
+        ok=True,
+        summary="sin datos",
+        duration_ms=1.5,
+    )
+    assert event_to_ndjson(event) == (
+        '{"type":"tool_result","invocation_id":"inv_abc",'
+        '"name":"get_workflow_state","ok":true,"summary":"sin datos",'
+        '"duration_ms":1.5,"error":null}'
+    )
+
+
+class TestExportDownloadMeta:
+    """Validation contract of the download metadata carried to the browser."""
+
+    def test_accepts_the_three_known_query_keys(self):
+        from core.ai_v2.agent.events import ExportDownloadMeta
+
+        meta = ExportDownloadMeta(
+            format="pdf",
+            query={"filters": "{}", "project": "Mina", "author": "Ana"},
+        )
+        assert meta.query["project"] == "Mina"
+
+    def test_query_defaults_to_empty_dict(self):
+        from core.ai_v2.agent.events import ExportDownloadMeta
+
+        assert ExportDownloadMeta(format="dxf").query == {}
+
+    def test_value_length_bounds_are_1_to_4000(self):
+        from core.ai_v2.agent.events import ExportDownloadMeta
+
+        ExportDownloadMeta(format="excel", query={"filters": "x" * 4000})
+        with pytest.raises(ValidationError):
+            ExportDownloadMeta(format="excel", query={"filters": "x" * 4001})
+        with pytest.raises(ValidationError):
+            ExportDownloadMeta(format="excel", query={"filters": ""})
+
+    def test_rejects_unknown_query_key(self):
+        from core.ai_v2.agent.events import ExportDownloadMeta
+
+        with pytest.raises(ValidationError):
+            ExportDownloadMeta(format="excel", query={"endpoint": "/x"})
+
+    def test_rejects_unknown_format_and_extra_fields(self):
+        from core.ai_v2.agent.events import ExportDownloadMeta
+
+        with pytest.raises(ValidationError):
+            ExportDownloadMeta(format="csv")
+        with pytest.raises(ValidationError):
+            ExportDownloadMeta(format="excel", url="/x")

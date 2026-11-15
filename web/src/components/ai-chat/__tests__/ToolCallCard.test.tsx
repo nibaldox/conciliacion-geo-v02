@@ -18,6 +18,7 @@ vi.mock('../../../api/client', () => ({
 }));
 
 import { useAIChat } from '../../../stores/aiChat';
+import type { AgentToolResultDownload } from '../../../api/agentChat';
 import { ToolCallCard } from '../ToolCallCard';
 import { initChatI18n, renderWithProviders } from './chatTestUtils';
 
@@ -244,5 +245,106 @@ describe('ToolCallCard — export_report download action', () => {
         'aiChat.notice.download_failed',
       );
     });
+  });
+});
+
+describe('ToolCallCard — download payload of the tool_result event', () => {
+  const PDF_SUMMARY = JSON.stringify({
+    ok: true,
+    format: 'pdf',
+    filename: 'Informe_Ejecutivo.pdf',
+    endpoint: '/api/v1/export/pdf',
+  });
+
+  it('(a) prefers message.download and sends its filters to the endpoint URL', async () => {
+    const mockFetch = vi.fn(async () =>
+      new Response('binary', {
+        status: 200,
+        headers: {
+          'Content-Type':
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:fake');
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    try {
+      renderWithProviders(
+        <ToolCallCard
+          message={{
+            kind: 'tool',
+            id: 't_dl_a',
+            invocationId: 'inv_dl_a',
+            name: 'export_report',
+            status: 'ok',
+            summary: PDF_SUMMARY,
+            error: null,
+            download: {
+              format: 'excel',
+              query: { filters: '{"sector":["Norte"]}' },
+            },
+          }}
+        />,
+      );
+      await userEvent.click(screen.getByTestId('ai-chat-tool-toggle'));
+      await userEvent.click(screen.getByTestId('ai-chat-tool-download'));
+      await waitFor(() => {
+        expect(createObjectURL).toHaveBeenCalledTimes(1);
+      });
+      const [url] = mockFetch.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe(
+        '/api/v1/export/excel?filters=%7B%22sector%22%3A%5B%22Norte%22%5D%7D',
+      );
+    } finally {
+      createObjectURL.mockRestore();
+      click.mockRestore();
+    }
+  });
+
+  it('(e) shows no download button for a download.format outside the table, without falling back to the summary', () => {
+    const unknownFormat = {
+      format: 'rar',
+    } as unknown as AgentToolResultDownload;
+    renderWithProviders(
+      <ToolCallCard
+        message={{
+          kind: 'tool',
+          id: 't_dl_e',
+          invocationId: 'inv_dl_e',
+          name: 'export_report',
+          status: 'ok',
+          summary: EXPORT_OK_SUMMARY,
+          error: null,
+          download: unknownFormat,
+        }}
+      />,
+    );
+    expect(screen.queryByTestId('ai-chat-tool-download')).toBeNull();
+  });
+
+  it('(d) without a download payload the summary still drives the button', async () => {
+    renderWithProviders(
+      <ToolCallCard
+        message={{
+          kind: 'tool',
+          id: 't_dl_d',
+          invocationId: 'inv_dl_d',
+          name: 'export_report',
+          status: 'ok',
+          summary: EXPORT_OK_SUMMARY,
+          error: null,
+          download: null,
+        }}
+      />,
+    );
+    await userEvent.click(screen.getByTestId('ai-chat-tool-toggle'));
+    expect(screen.getByTestId('ai-chat-tool-download')).toHaveTextContent(
+      'Descargar archivo',
+    );
   });
 });

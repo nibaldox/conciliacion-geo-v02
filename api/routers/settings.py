@@ -87,18 +87,16 @@ def _get_default_settings() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("")
-async def get_settings(request: Request):
-    """
-    Return current settings merged with core defaults.
+def _merged_settings_sync(session_id: str) -> Dict[str, Any]:
+    """Return the session's stored settings deep-merged over core defaults.
 
-    DB values override defaults; any missing key falls back to the
-    corresponding value from core.config.
+    Shared by ``GET /settings`` and the agent ``get_settings`` tool. Only the
+    ``process``/``tolerances``/``blast`` blocks of the defaults come back; any
+    other stored key (e.g. ``blast_holes``) is never part of the result.
     """
-    session_id = await run_db(db.get_or_create_session, request.state.session_id)
     defaults = _get_default_settings()
 
-    stored = await run_db(db.get_settings, session_id)
+    stored = db.get_settings(session_id)
     if not stored:
         return defaults
 
@@ -114,6 +112,18 @@ async def get_settings(request: Request):
             merged[key] = defaults[key]
 
     return merged
+
+
+@router.get("")
+async def get_settings(request: Request):
+    """
+    Return current settings merged with core defaults.
+
+    DB values override defaults; any missing key falls back to the
+    corresponding value from core.config.
+    """
+    session_id = await run_db(db.get_or_create_session, request.state.session_id)
+    return await run_db(_merged_settings_sync, session_id)
 
 
 # ---------------------------------------------------------------------------

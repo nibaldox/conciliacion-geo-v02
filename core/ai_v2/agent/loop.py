@@ -91,6 +91,7 @@ from core.ai_v2.agent.events import (
     ConfirmationRequiredEvent,
     DoneEvent,
     ErrorEvent,
+    ExportDownloadMeta,
     TextEvent,
     ToolCallEvent,
     ToolResultEvent,
@@ -147,6 +148,7 @@ _OBSERVATION_PRESERVE_KEYS = frozenset(
         "n_total_rows",
         "n_matched_rows",
         "warnings",
+        "tolerances",
     }
 )
 
@@ -766,6 +768,31 @@ async def _handle_tool_call(
     return events, None
 
 
+_EXPORT_TOOL_NAME = "export_report"
+
+
+def _export_download(
+    name: str, observation: dict[str, Any]
+) -> ExportDownloadMeta | None:
+    """Download metadata of a successful ``export_report`` payload, or None.
+
+    Read from the full handler payload, never from the 200-char summary.
+    A payload that does not validate carries no download; the observation
+    answered to the model is unchanged and nothing is raised into the loop.
+    """
+    if name != _EXPORT_TOOL_NAME or observation.get("ok") is not True:
+        return None
+    try:
+        return ExportDownloadMeta.model_validate(
+            {
+                "format": observation.get("format"),
+                "query": observation.get("query") or {},
+            }
+        )
+    except (TypeError, ValidationError):
+        return None
+
+
 async def _execute_tool(
     *,
     invocation_id: str,
@@ -809,6 +836,7 @@ async def _execute_tool(
         reason = "tool_execution_failed"
         summary = MSG_TOOL_FAILED
     duration_ms = (time.perf_counter_ns() - started_ns) / 1_000_000
+    download = _export_download(call.name, observation) if ok else None
     events = [
         ToolCallEvent(
             invocation_id=invocation_id,
@@ -823,6 +851,7 @@ async def _execute_tool(
             summary=summary,
             error=reason,
             duration_ms=duration_ms,
+            download=download,
         ),
     ]
     return events, observation

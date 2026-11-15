@@ -341,3 +341,63 @@ class TestSettingsRoundTrip:
         assert body["blast"]["rock_density_tm3"] == 2.9
         assert body["blast"]["height_fallback_m"] == 18.0
         assert body["blast"]["sector_density"] == {"Este": 2.8, "Oeste": 2.6}
+
+
+# ===========================================================================
+# GET /settings ↔ _merged_settings_sync (shared with the agent get_settings tool)
+# ===========================================================================
+
+_HELPER_PARITY_BODY: Dict[str, Any] = {
+    "process": {"resolution": 0.25, "face_threshold": 40.0, "berm_threshold": 20.0},
+    "tolerances": {
+        "bench_height": {"neg": 1.0, "pos": 1.5},
+        "berm_width": {"min": 6.0},
+    },
+    "blast": {"rock_density_tm3": 3.0, "height_fallback_m": 12.0, "sector_density": {"A": 2.5}},
+}
+
+# Captured from GET /settings before the _merged_settings_sync extraction.
+_REST_GOLDEN_CUSTOM: Dict[str, Any] = {
+    "blast": {
+        "height_fallback_m": 12.0,
+        "rock_density_tm3": 3.0,
+        "sector_density": {"A": 2.5},
+    },
+    "process": {"berm_threshold": 20.0, "face_threshold": 40.0, "resolution": 0.25},
+    "tolerances": {
+        "bench_height": {"neg": 1.0, "pos": 1.5},
+        "berm_width": {"min": 6.0},
+        "crest_toe_deviation": {"neg": 1.0, "pos": 1.0},
+        "face_angle": {"neg": 5.0, "pos": 5.0},
+        "inter_ramp_angle": {"neg": 3.0, "pos": 2.0},
+        "overall_angle": {"neg": 2.0, "pos": 2.0},
+    },
+}
+
+
+class TestGetSettingsHelperParity:
+    def test_rest_body_unchanged_after_helper_extraction(self, client: TestClient):
+        headers = {"X-Session-ID": "helper-golden"}
+        put = client.put("/api/v1/settings", json=_HELPER_PARITY_BODY, headers=headers)
+        assert put.status_code == 200
+        assert client.get("/api/v1/settings", headers=headers).json() == _REST_GOLDEN_CUSTOM
+
+    def test_rest_matches_merged_helper_for_stored_settings(self, client: TestClient):
+        import api.database as db
+        from api.routers.settings import _merged_settings_sync
+
+        headers = {"X-Session-ID": "helper-stored"}
+        assert client.put("/api/v1/settings", json=_HELPER_PARITY_BODY, headers=headers).status_code == 200
+        body = client.get("/api/v1/settings", headers=headers).json()
+        session_id = db.get_or_create_session("helper-stored")
+        assert _merged_settings_sync(session_id) == body
+
+    def test_rest_matches_merged_helper_for_defaults(self, client: TestClient):
+        import api.database as db
+        from api.routers.settings import _merged_settings_sync
+
+        headers = {"X-Session-ID": "helper-defaults"}
+        body = client.get("/api/v1/settings", headers=headers).json()
+        session_id = db.get_or_create_session("helper-defaults")
+        assert _merged_settings_sync(session_id) == body
+

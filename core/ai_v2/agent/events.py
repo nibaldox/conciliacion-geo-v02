@@ -9,11 +9,24 @@ both in sync. A stream that asks for confirmation ends in
 """
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, TypeAdapter, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    SerializerFunctionWrapHandler,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+    model_serializer,
+)
 
 from core.ai_v2.models import AIUsage
+
+_EXPORT_QUERY_KEYS = frozenset({"filters", "project", "author"})
+_EXPORT_QUERY_VALUE_MAX_CHARS = 4000
 
 
 class TextEvent(BaseModel):
@@ -41,8 +54,41 @@ class ToolCallEvent(BaseModel):
     requires_confirmation: bool
 
 
+class ExportDownloadMeta(BaseModel):
+    """Download metadata of a successful ``export_report`` call.
+
+    The browser builds the export URL from this field, never from the
+    200-char summary. ``query`` only admits the keys the export endpoints
+    take as parameters, each value 1 to 4000 characters.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: Literal["excel", "word", "pdf", "dxf", "images"]
+    query: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("query")
+    @classmethod
+    def _query_keys_and_lengths(cls, value: dict[str, str]) -> dict[str, str]:
+        unknown = sorted(set(value) - _EXPORT_QUERY_KEYS)
+        if unknown:
+            raise ValueError(f"unsupported export query keys: {unknown}")
+        for key, item in value.items():
+            if not 1 <= len(item) <= _EXPORT_QUERY_VALUE_MAX_CHARS:
+                raise ValueError(
+                    f"export query value {key!r} must have 1 to "
+                    f"{_EXPORT_QUERY_VALUE_MAX_CHARS} characters"
+                )
+        return value
+
+
 class ToolResultEvent(BaseModel):
-    """Outcome of one tool execution, with summaries never blobs."""
+    """Outcome of one tool execution, with summaries never blobs.
+
+    ``download`` is set only for a successful ``export_report``. While it
+    is None the key is left out of the NDJSON line, so every other
+    tool_result event keeps the exact pre-download serialization.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +99,16 @@ class ToolResultEvent(BaseModel):
     summary: str
     duration_ms: float = Field(ge=0.0)
     error: str | None = None
+    download: ExportDownloadMeta | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_absent_download(
+        self, handler: SerializerFunctionWrapHandler
+    ) -> dict[str, Any]:
+        data = handler(self)
+        if self.download is None:
+            data.pop("download", None)
+        return data
 
 
 class ConfirmationRequiredEvent(BaseModel):
@@ -136,6 +192,7 @@ __all__ = [
     "ConfirmationRequiredEvent",
     "DoneEvent",
     "ErrorEvent",
+    "ExportDownloadMeta",
     "TextEvent",
     "ToolCallEvent",
     "ToolResultEvent",

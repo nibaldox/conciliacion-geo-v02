@@ -80,6 +80,7 @@ EXPECTED_TOOL_NAMES = {
     "generate_sections_auto",
     "generate_sections_manual",
     "run_reconciliation",
+    "get_settings",
     "get_results_summary",
     "get_profile",
     "get_design_achievement",
@@ -98,7 +99,7 @@ EXTRA_FIELD_PAYLOADS = {
     SectionManualArgs: {"sections": [{"origin": [0.0, 0.0], "azimuth": 0.0}], "spoof": 1},
     SectionClickArgs: {"origin": [0.0, 0.0], "injected": "x"},
     RunReconciliationArgs: {"resolution": 0.1, "unknown_key": 3},
-    ExportReportArgs: {"format": "excel", "path": "/etc/passwd"},
+    ExportReportArgs: {"format": "excel", "path": "/etc/passwd", "level": ["3065"]},
     MeshIdArgs: {"mesh_id": "abc", "session_id": "other"},
     SectionIdArgs: {"section_id": "0", "force": True},
     NoArgs: {"anything": 1},
@@ -109,8 +110,8 @@ EXTRA_FIELD_PAYLOADS = {
 
 
 class TestCatalog:
-    def test_catalog_has_exactly_14_tools(self) -> None:
-        assert len(AGENT_TOOLS) == 14
+    def test_catalog_has_exactly_15_tools(self) -> None:
+        assert len(AGENT_TOOLS) == 15
         assert {spec.name for spec in AGENT_TOOLS} == EXPECTED_TOOL_NAMES
 
     def test_names_are_unique(self) -> None:
@@ -137,6 +138,7 @@ class TestCatalog:
             ("generate_sections_auto", ToolRisk.REPLACE, ("n_sections",), 30.0, False),
             ("generate_sections_manual", ToolRisk.REPLACE, ("n_sections",), 30.0, False),
             ("run_reconciliation", ToolRisk.EXPENSIVE_REPLACE, ("n_results",), 300.0, False),
+            ("get_settings", ToolRisk.READ, (), 30.0, False),
             ("get_results_summary", ToolRisk.READ, (), 30.0, False),
             ("get_profile", ToolRisk.READ, (), 30.0, False),
             ("get_design_achievement", ToolRisk.READ, (), 30.0, False),
@@ -232,6 +234,18 @@ class TestStrictArgs:
     def test_export_rejects_unknown_format(self) -> None:
         with pytest.raises(ValidationError):
             ExportReportArgs.model_validate({"format": "csv"})
+
+    def test_export_fields_follow_the_frozen_contract(self) -> None:
+        assert set(ExportReportArgs.model_fields) == {
+            "format",
+            "sector",
+            "section",
+            "levels_by_sector",
+            "project",
+            "author",
+        }
+        assert ExportReportArgs.__doc__ is not None
+        assert "literal" in ExportReportArgs.__doc__.lower()
 
 
 class TestToolState:

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent } from '../../api/agentChat';
+import type { AgentEvent, AgentToolResultDownload } from '../../api/agentChat';
 
 const { mockGet, mockDelete, mockGetSessionId, mockFetch } = vi.hoisted(() => ({
   mockGet: vi.fn(),
@@ -605,6 +605,49 @@ describe('aiChat store — incremental text merging', () => {
   });
 });
 
+
+describe('aiChat store — export download payload', () => {
+  it('stores the download of a tool_result on its tool card', () => {
+    const download: AgentToolResultDownload = {
+      format: 'excel',
+      query: { filters: '{"sector":["Norte"]}' },
+    };
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_call',
+      invocation_id: 'inv_dl',
+      name: 'export_report',
+      args: { format: 'excel' },
+      requires_confirmation: false,
+    });
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_result',
+      invocation_id: 'inv_dl',
+      name: 'export_report',
+      ok: true,
+      summary: '{"ok": true, "format": "excel"}',
+      duration_ms: 5,
+      error: null,
+      download,
+    });
+    const card = useAIChat.getState().messages.find((m) => m.kind === 'tool');
+    expect(card).toMatchObject({ status: 'ok', download });
+  });
+
+  it('keeps a tool card without a download key when the event has none', () => {
+    useAIChat.getState().applyAgentEvent({
+      type: 'tool_result',
+      invocation_id: 'inv_nd',
+      name: 'get_workflow_state',
+      ok: true,
+      summary: 'estado',
+      duration_ms: 1,
+      error: null,
+    });
+    const card = useAIChat.getState().messages.find((m) => m.kind === 'tool');
+    expect(card).toBeDefined();
+    expect(card).not.toHaveProperty('download');
+  });
+});
 
 describe('write tool query dependencies', () => {
   it('invalidates all section dependents and export levels after reconciliation', async () => {

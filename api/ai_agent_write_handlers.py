@@ -22,7 +22,9 @@ Section semantics mirror the REST router (``api.routers.sections``):
   (losing callers get a clean ``process_running`` observation), and
   resets the status to ``idle`` whenever the pipeline does not complete
   so the session can never stay stuck at ``running``.
-- ``export_report`` returns download METADATA only — never binary.
+- ``export_report`` returns download METADATA only — never binary. Its
+  ``sector``/``levels_by_sector`` filters are checked against the session's
+  real sectors and nominal levels before they reach the router.
 
 The ``api.routers`` helpers are imported at the bottom of this module,
 after ``ALL_HANDLERS``: a top-of-module import would create a
@@ -35,13 +37,16 @@ Aggregated with the strictly read-only ``READ_HANDLERS`` into
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, Dict
+import json
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Sequence
 
 import api.database as db
 import numpy as np
 from api._async_db import run_db
 from api.ai_agent_handlers import READ_HANDLERS
+from api.schemas import ExportFilters
 from fastapi import HTTPException
+from pydantic import ValidationError
 from core.ai_v2.agent.catalog import TOOL_CATALOG
 from core.ai_v2.agent.models import (
     ExportReportArgs,
@@ -50,6 +55,7 @@ from core.ai_v2.agent.models import (
     SectionClickArgs,
     SectionManualArgs,
 )
+from core.report_levels import assign_nominal_levels
 from core.section_cutter import (
     SectionLine,
     compute_local_azimuth,
@@ -95,6 +101,37 @@ _EXPORT_NOTE = (
     "El archivo se genera para su descarga en la interfaz; el "
     "contenido binario nunca viaja al modelo."
 )
+_MSG_DXF_FILTERS = "El DXF no admite filtros ni metadatos."
+_MSG_TOO_MANY_FILTERS = (
+    "Demasiadas cotas o secciones para un solo informe; acota el filtro."
+)
+_MSG_LEVEL_SECTOR_LIMIT = "El filtro de cotas admite como máximo 20 sectores."
+_MSG_UNKNOWN_SECTOR = (
+    "El sector «{sector}» no existe en esta sesión. Sectores válidos: {valid}."
+)
+_MSG_EMPTY_LEVEL_LIST = (
+    "La lista de cotas del sector «{sector}» está vacía: indique al menos "
+    "una cota o quite el sector."
+)
+_MSG_INVALID_LEVEL = (
+    "La cota «{label}» no es una cota nominal del sector «{sector}». "
+    "Cotas válidas: {valid}."
+)
+_MSG_NO_SECTOR_LEVELS = (
+    "El sector «{sector}» no tiene cotas nominales en esta sesión."
+)
+_MAX_LEVEL_SECTORS = 20
+_MAX_LISTED_SECTORS = 20
+_MAX_LISTED_LEVELS = 30
+_MAX_FILTER_JSON_CHARS = 4000
+_MAX_PAYLOAD_BYTES = 4096
+_EXPORT_QUERY_KEYS: Dict[str, tuple[str, ...]] = {
+    "excel": ("filters", "project", "author"),
+    "word": ("filters", "project", "author"),
+    "pdf": ("filters", "project", "author"),
+    "images": ("filters",),
+    "dxf": (),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -326,16 +363,178 @@ async def run_reconciliation(
     }
 
 
+def _error(code: str, message: str) -> Dict[str, Any]:
+    return {"ok": False, "error": code, "message": message}
+
+
+def _listing(items: Sequence[str], limit: int) -> str:
+    shown = ", ".join(items[:limit])
+    hidden = len(items) - limit
+    return f"{shown} y {hidden} más" if hidden > 0 else shown
+
+
+def _session_sectors_and_levels(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[set[str], dict[str, list[str]]]:
+    """Real sector names of the rows and their nominal labels per sector."""
+    sectors: set[str] = set()
+    for row in rows:
+        raw = row.get("sector")
+        if raw is not None and str(raw).strip():
+            sectors.add(str(raw))
+    labels: dict[str, list[str]] = {}
+    for level in assign_nominal_levels(rows).levels:
+        labels.setdefault(level.sector, []).append(level.label)
+    return sectors, {
+        name: list(dict.fromkeys(values)) for name, values in labels.items()
+    }
+
+
+def _filters_summary(
+    sectors: Sequence[str],
+    sections: Sequence[str],
+    levels_by_sector: Mapping[str, Sequence[str]],
+    omitted: str,
+) -> str:
+    parts: list[str] = []
+    if sectors:
+        label = "Sector" if len(sectors) == 1 else "Sectores"
+        parts.append(f"{label} {', '.join(sectors)}")
+    if sections:
+        label = "sección" if len(sections) == 1 else "secciones"
+        parts.append(f"{label} {', '.join(sections)}")
+    for sector, labels in levels_by_sector.items():
+        parts.append(f"cotas {sector}: {', '.join(labels)}")
+    text = "; ".join(parts) if parts else "Sin filtros: informe completo"
+    text = text[:1].upper() + text[1:]
+    if omitted:
+        text = f"{text}. Imágenes no admite {omitted}; se omiten"
+    return text
+
+
 async def export_report(session_id: str, args: ExportReportArgs) -> Dict[str, Any]:
-    """Return download metadata for one export format; never bytes."""
+    """Return download metadata for one export format; never bytes.
+
+    ``sector`` and ``levels_by_sector`` are checked against the session's
+    real sectors and nominal level labels (``core.report_levels``), the same
+    labels ``GET /export/levels`` lists. Accepted filters travel as one
+    camelCase ``filters`` document that ``GET /export/{format}`` parses with
+    ``api.routers.export._parse_filters``. ``query`` carries only the keys the
+    format accepts and is absent when there is nothing to send. Rejections
+    are observations; nothing is raised.
+    """
     n_results = await run_db(db.get_results_count, session_id)
     if n_results < 1:
-        return {
-            "ok": False,
-            "error": "no_results",
-            "message": _MSG_NO_RESULTS,
-        }
-    return {
+        return _error("no_results", _MSG_NO_RESULTS)
+
+    sectors = list(dict.fromkeys(args.sector or []))
+    sections = list(dict.fromkeys(args.section or []))
+    levels_input = dict(args.levels_by_sector or {})
+    project = (args.project or "").strip() or None
+    author = (args.author or "").strip() or None
+    has_filters = bool(sectors or sections or levels_input)
+
+    if args.format == "dxf" and (has_filters or project or author):
+        return _error("invalid_filters", _MSG_DXF_FILTERS)
+
+    omitted: list[str] = []
+    if args.format == "images":
+        omitted = [
+            name for name, value in (("proyecto", project), ("autor", author)) if value
+        ]
+        project = author = None
+
+    if len(levels_input) > _MAX_LEVEL_SECTORS:
+        return _error("invalid_filters", _MSG_LEVEL_SECTOR_LIMIT)
+
+    raw_rows = await run_db(db.get_results, session_id)
+    rows = [row for row in raw_rows if isinstance(row, Mapping)]
+    if sectors or levels_input:
+        valid_sectors, labels_by_sector = _session_sectors_and_levels(rows)
+        valid_text = _listing(sorted(valid_sectors), _MAX_LISTED_SECTORS) or "ninguno"
+        for name in [*sectors, *levels_input]:
+            if name not in valid_sectors:
+                return _error(
+                    "unknown_sector",
+                    _MSG_UNKNOWN_SECTOR.format(sector=name, valid=valid_text),
+                )
+        for sector, labels in levels_input.items():
+            if not labels:
+                return _error(
+                    "empty_level_list",
+                    _MSG_EMPTY_LEVEL_LIST.format(sector=sector),
+                )
+        for sector, labels in levels_input.items():
+            valid_labels = labels_by_sector.get(sector, [])
+            for label in labels:
+                if label in valid_labels:
+                    continue
+                if valid_labels:
+                    message = _MSG_INVALID_LEVEL.format(
+                        label=label,
+                        sector=sector,
+                        valid=_listing(valid_labels, _MAX_LISTED_LEVELS),
+                    )
+                else:
+                    message = _MSG_NO_SECTOR_LEVELS.format(sector=sector)
+                return _error("invalid_level", message)
+
+    levels_by_sector = {
+        sector: list(dict.fromkeys(labels)) for sector, labels in levels_input.items()
+    }
+    export_filters = ExportFilters()
+    filters_json: Optional[str] = None
+    if has_filters:
+        try:
+            export_filters = ExportFilters.model_validate(
+                {
+                    "sector": sectors,
+                    "section": sections,
+                    "levelsBySector": levels_by_sector,
+                }
+            )
+        except ValidationError:
+            return _error("invalid_filters", _MSG_TOO_MANY_FILTERS)
+        filters_json = json.dumps(
+            export_filters.model_dump(by_alias=True, exclude_defaults=True),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        if len(filters_json) > _MAX_FILTER_JSON_CHARS:
+            return _error("invalid_filters", _MSG_TOO_MANY_FILTERS)
+
+    from api.routers.export import _report_filters
+    from core.report_data import filter_comparisons
+    from core.report_levels import BENCH_TYPES
+
+    valid_sections = {str(row["section"]) for row in rows if row.get("section") is not None}
+    for section in sections:
+        if section not in valid_sections:
+            valid_text = _listing(sorted(valid_sections), 20) or "ninguna"
+            return _error(
+                "unknown_section",
+                f"La sección «{section}» no existe en esta sesión. Secciones válidas: {valid_text}.",
+            )
+
+    filtered = filter_comparisons(rows, _report_filters(export_filters)) if has_filters else rows
+    n_rows = sum(1 for row in filtered if row.get("type") in BENCH_TYPES)
+    if has_filters and not n_rows:
+        return _error(
+            "no_rows_for_filters",
+            "Los filtros no seleccionan ningún banco; revisa el sector, las secciones y las cotas.",
+        )
+
+    candidates: Dict[str, Optional[str]] = {
+        "filters": filters_json,
+        "project": project,
+        "author": author,
+    }
+    query = {
+        key: candidates[key]
+        for key in _EXPORT_QUERY_KEYS[args.format]
+        if candidates[key]
+    }
+    payload: Dict[str, Any] = {
         "ok": True,
         "format": args.format,
         "filename": _EXPORT_FILENAMES[args.format],
@@ -343,7 +542,16 @@ async def export_report(session_id: str, args: ExportReportArgs) -> Dict[str, An
         "method": "GET",
         "content_type": _EXPORT_MEDIA_TYPES[args.format],
         "note": _EXPORT_NOTE,
+        "filters_summary": _filters_summary(
+            sectors, sections, levels_by_sector, " ni ".join(omitted)
+        ),
+        "n_rows": n_rows,
     }
+    if query:
+        payload["query"] = query
+    if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > _MAX_PAYLOAD_BYTES:
+        return _error("invalid_filters", _MSG_TOO_MANY_FILTERS)
+    return payload
 
 
 # ---------------------------------------------------------------------------

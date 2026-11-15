@@ -40,6 +40,24 @@ export interface AgentToolResultEvent {
   summary: string;
   duration_ms: number;
   error: string | null;
+  download?: AgentToolResultDownload | null;
+}
+
+export type AgentExportFormat = 'excel' | 'word' | 'pdf' | 'dxf' | 'images';
+
+export interface AgentToolResultDownloadQuery {
+  filters?: string;
+  project?: string;
+  author?: string;
+}
+
+/**
+ * Export coordinates of a successful export_report tool_result. Mirrors
+ * `core/ai_v2/agent/events.py`; absent or null for every other result.
+ */
+export interface AgentToolResultDownload {
+  format: AgentExportFormat;
+  query?: AgentToolResultDownloadQuery;
 }
 
 export interface AgentConfirmationRequiredEvent {

@@ -962,3 +962,40 @@ async def test_pending_created_by_loop_carries_args_summary():
     assert created.args_summary == (
         "Añade secciones e invalida el análisis actual (3 secciones existentes)"
     )
+
+
+@pytest.mark.asyncio
+async def test_approved_resume_sibling_export_carries_download_meta():
+    export_handler = RecordingHandler(
+        {
+            "ok": True,
+            "format": "excel",
+            "filler": "y" * 300,
+            "query": {"filters": '{"sector":["Norte"]}'},
+        }
+    )
+    replace_handler = RecordingHandler({"n_sections": 5})
+    executor = {
+        "generate_sections_auto": replace_handler,
+        "export_report": export_handler,
+    }
+    calls = [
+        tool_call("generate_sections_auto", AUTO_ARGS_JSON, call_id="c-conf"),
+        tool_call("export_report", '{"format": "excel"}', call_id="c-export"),
+    ]
+    _, store, invocation_id = await pause_for_confirmation(
+        executor, ToolState(n_sections=3), tool_calls=calls
+    )
+    continuation = ScriptedChatProvider([ChatTurn(text="Listo.")])
+    events = await resume(
+        store, invocation_id, executor,
+        ToolState(n_sections=3), approved=True, provider=continuation,
+    )
+    results = [e for e in events if isinstance(e, ToolResultEvent)]
+    assert [r.name for r in results] == ["generate_sections_auto", "export_report"]
+    assert results[0].download is None
+    assert results[1].ok is True
+    assert results[1].download is not None
+    assert results[1].download.format == "excel"
+    assert results[1].download.query == {"filters": '{"sector":["Norte"]}'}
+

@@ -9,6 +9,7 @@ import {
   parseAgentEventLine,
   type AgentEvent,
   type AgentFinishReason,
+  type AgentToolResultDownload,
 } from './agentChat.ts';
 
 const NDJSON_FIXTURE = [
@@ -123,6 +124,32 @@ describe('parseAgentEventLine', () => {
       const line = JSON.stringify(event);
       expect(parseAgentEventLine(line)).toEqual(event);
     }
+  });
+
+  it('keeps the optional download payload of an export tool_result', () => {
+    const download: AgentToolResultDownload = {
+      format: 'excel',
+      query: { filters: '{"sector":["Norte"]}' },
+    };
+    const line = JSON.stringify({
+      type: 'tool_result',
+      invocation_id: 'inv_x',
+      name: 'export_report',
+      ok: true,
+      summary: '{"ok": true, "format": "excel"}',
+      duration_ms: 3,
+      error: null,
+      download,
+    });
+    const event = parseAgentEventLine(line);
+    if (!event || !isToolResultEvent(event)) throw new Error('expected tool_result event');
+    expect(event.download).toEqual(download);
+  });
+
+  it('leaves download undefined for a tool_result without the field', () => {
+    const event = parseFixture()[2];
+    if (!isToolResultEvent(event)) throw new Error('expected tool_result event');
+    expect(event.download).toBeUndefined();
   });
 });
 

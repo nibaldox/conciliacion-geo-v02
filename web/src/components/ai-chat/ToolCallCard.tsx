@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { downloadExportFile, extractExportDownload } from '../../api/aiChat';
+import {
+  downloadExportFile,
+  exportDownloadFromEvent,
+  extractExportDownload,
+  type ExportDownloadInfo,
+} from '../../api/aiChat';
 import type { ChatMessage } from '../../stores/aiChat';
 import { useAIChat } from '../../stores/aiChat';
 import { Spinner } from '../ui/Spinner';
@@ -11,12 +16,23 @@ export type ConfirmationCardMessage = Extract<
   { kind: 'confirmation' }
 >;
 
+/**
+ * The tool_result `download` payload wins when present (it carries the
+ * export filters); the summary is only the fallback for results without it.
+ */
+function exportDownloadInfoOf(
+  message: ToolCardMessage,
+): ExportDownloadInfo | null {
+  if (message.download) return exportDownloadFromEvent(message.download);
+  return extractExportDownload(message.summary);
+}
+
 function ExportDownloadButton({ message }: { message: ToolCardMessage }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const info =
     message.name === 'export_report' && message.status === 'ok'
-      ? extractExportDownload(message.summary)
+      ? exportDownloadInfoOf(message)
       : null;
   if (!info) return null;
   const handleDownload = async () => {

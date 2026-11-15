@@ -5,7 +5,9 @@ import {
   confirmChat,
   deleteConversation,
   downloadExportFile,
+  exportDownloadFromEvent,
   extractExportDownload,
+  type ExportDownloadInfo,
   fetchConversationHistory,
   fetchProviders,
   readAgentEventStream,
@@ -364,6 +366,169 @@ describe('extractExportDownload', () => {
       extractExportDownload('{"ok": false, "error": "no_results"}'),
     ).toBeNull();
     expect(extractExportDownload('{"ok": true, "format": "rar"}')).toBeNull();
+  });
+
+  it('rejects prototype keys as formats instead of building a broken info', () => {
+    expect(
+      extractExportDownload('{"ok": true, "format": "constructor"}'),
+    ).toBeNull();
+    expect(
+      extractExportDownload('{"ok": true, "format": "__proto__"}'),
+    ).toBeNull();
+  });
+});
+
+describe('exportDownloadFromEvent (tool_result download payload)', () => {
+  const EXCEL_TYPE =
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  it('carries the query of the event into the info (filters/project/author)', () => {
+    expect(
+      exportDownloadFromEvent({
+        format: 'excel',
+        query: { filters: '{"sector":["Norte"]}', project: 'Demo', author: 'Ana' },
+      }),
+    ).toEqual({
+      format: 'excel',
+      filename: 'Conciliacion_Geotecnica.xlsx',
+      endpoint: '/api/v1/export/excel',
+      contentType: EXCEL_TYPE,
+      query: { filters: '{"sector":["Norte"]}', project: 'Demo', author: 'Ana' },
+    });
+  });
+
+  it('(b) ignores unknown query keys and endpoint/url coordinates in the payload', () => {
+    expect(
+      exportDownloadFromEvent({
+        format: 'pdf',
+        endpoint: 'https://evil.example/x',
+        url: 'https://evil.example/y',
+        query: {
+          endpoint: '/evil',
+          url: 'https://evil.example',
+          x: 'y',
+          filters: '{}',
+        },
+      }),
+    ).toEqual({
+      format: 'pdf',
+      filename: 'Informe_Ejecutivo.pdf',
+      endpoint: '/api/v1/export/pdf',
+      contentType: 'application/pdf',
+      query: { filters: '{}' },
+    });
+  });
+
+  it('(c) drops a value longer than 4000 characters and keeps exactly 4000', () => {
+    expect(
+      exportDownloadFromEvent({
+        format: 'excel',
+        query: { filters: 'x'.repeat(4001) },
+      })?.query,
+    ).toBeUndefined();
+    expect(
+      exportDownloadFromEvent({
+        format: 'excel',
+        query: { filters: 'x'.repeat(4000) },
+      })?.query,
+    ).toEqual({ filters: 'x'.repeat(4000) });
+  });
+
+  it('drops non-string and empty query values and omits query when none remain', () => {
+    const info = exportDownloadFromEvent({
+      format: 'word',
+      query: { filters: 42, project: '', author: null },
+    });
+    expect(info).toEqual({
+      format: 'word',
+      filename: 'Informe_Conciliacion.docx',
+      endpoint: '/api/v1/export/word',
+      contentType:
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
+    expect(info).not.toHaveProperty('query');
+  });
+
+  it('(e) returns null when the format is outside the table or not a string', () => {
+    expect(
+      exportDownloadFromEvent({ format: 'rar', query: { filters: '{}' } }),
+    ).toBeNull();
+    expect(exportDownloadFromEvent({ format: 'constructor' })).toBeNull();
+    expect(exportDownloadFromEvent({ format: '__proto__' })).toBeNull();
+    expect(exportDownloadFromEvent({ format: 42 })).toBeNull();
+    expect(exportDownloadFromEvent({})).toBeNull();
+    expect(exportDownloadFromEvent(null)).toBeNull();
+    expect(exportDownloadFromEvent(undefined)).toBeNull();
+    expect(exportDownloadFromEvent('excel')).toBeNull();
+  });
+});
+
+describe('downloadExportFile with the event query', () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    client.defaults.baseURL = '/api/v1';
+  });
+
+  async function downloadAndCaptureUrl(info: ExportDownloadInfo): Promise<string> {
+    const mockFetch = vi.fn(async () =>
+      new Response('binary', {
+        status: 200,
+        headers: { 'Content-Type': 'application/pdf' },
+      }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:fake');
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => {});
+    try {
+      await downloadExportFile(info);
+      const [url] = mockFetch.mock.calls[0] as unknown as [string, RequestInit];
+      return url;
+    } finally {
+      createObjectURL.mockRestore();
+      click.mockRestore();
+    }
+  }
+
+  it('(a) appends the filters encoded by URLSearchParams to the table endpoint', async () => {
+    const info = exportDownloadFromEvent({
+      format: 'excel',
+      query: { filters: '{"sector":["Norte"]}' },
+    });
+    if (!info) throw new Error('expected export info');
+    await expect(downloadAndCaptureUrl(info)).resolves.toBe(
+      '/api/v1/export/excel?filters=%7B%22sector%22%3A%5B%22Norte%22%5D%7D',
+    );
+  });
+
+  it('keeps the table endpoint when the info carries a foreign endpoint or unknown query key', async () => {
+    const tampered = {
+      format: 'pdf',
+      filename: 'Informe_Ejecutivo.pdf',
+      endpoint: '/api/v1/export/pdf',
+      contentType: 'application/pdf',
+      query: { endpoint: '/evil', x: 'y', filters: '{}' },
+    } as ExportDownloadInfo;
+    await expect(downloadAndCaptureUrl(tampered)).resolves.toBe(
+      '/api/v1/export/pdf?filters=%7B%7D',
+    );
+  });
+
+  it('(c) never appends an oversized value to the URL', async () => {
+    const info: ExportDownloadInfo = {
+      format: 'excel',
+      filename: 'Conciliacion_Geotecnica.xlsx',
+      endpoint: '/api/v1/export/excel',
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      query: { filters: 'x'.repeat(4001) },
+    };
+    await expect(downloadAndCaptureUrl(info)).resolves.toBe(
+      '/api/v1/export/excel',
+    );
   });
 });
 

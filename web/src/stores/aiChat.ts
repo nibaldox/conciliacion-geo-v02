@@ -20,7 +20,7 @@ import {
   type ConversationHistoryResponse,
   type SanitizedHistoryMessage,
 } from '../api/aiChat';
-import type { AgentEvent } from '../api/agentChat';
+import type { AgentEvent, AgentToolResultDownload } from '../api/agentChat';
 import { getSessionId } from '../api/client';
 import {
   resolveChatModelSelection,
@@ -40,6 +40,7 @@ export type ChatMessage =
       status: 'running' | 'ok' | 'error';
       summary: string | null;
       error: string | null;
+      download?: AgentToolResultDownload | null;
     }
   | {
       kind: 'confirmation';
@@ -802,6 +803,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
         const index = state.messages.findIndex(
           (m) => m.kind === 'tool' && m.invocationId === event.invocation_id,
         );
+        const download = event.download ? { download: event.download } : {};
         const messages = [...state.messages];
         if (index >= 0) {
           const card = messages[index] as Extract<
@@ -813,6 +815,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
             status: event.ok ? 'ok' : 'error',
             summary: event.summary,
             error: event.error,
+            ...download,
           };
         } else {
           messages.push({
@@ -823,6 +826,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
             status: event.ok ? 'ok' : 'error',
             summary: event.summary,
             error: event.error,
+            ...download,
           });
         }
         set({ messages });

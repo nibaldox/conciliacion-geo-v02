@@ -217,6 +217,7 @@ async def _call_all(session_id: str) -> Dict[str, Dict[str, Any]]:
     outputs["get_design_achievement"] = await READ_HANDLERS["get_design_achievement"](session_id, NoArgs())
     outputs["get_proposed_compliance"] = await READ_HANDLERS["get_proposed_compliance"](session_id, NoArgs())
     outputs["query_results"] = await READ_HANDLERS["query_results"](session_id, ResultQueryArgs())
+    outputs["get_settings"] = await READ_HANDLERS["get_settings"](session_id, NoArgs())
     return outputs
 
 
@@ -231,7 +232,7 @@ class TestMappingCompleteness:
             name for name, spec in TOOL_CATALOG.items() if spec.risk is ToolRisk.READ
         }
         assert set(READ_HANDLERS) == expected
-        assert len(expected) == 9
+        assert len(expected) == 10
 
     def test_no_non_read_tool_is_mapped(self):
         read_names = {
@@ -362,7 +363,7 @@ class TestSummarySizeBound:
         outputs["get_profile"] = await READ_HANDLERS["get_profile"](
             session_a, SectionIdArgs(section_id="0")
         )
-        assert len(outputs) == 9
+        assert len(outputs) == 10
         for name, payload in outputs.items():
             serialized = json.dumps(payload, ensure_ascii=False)
             assert len(serialized.encode("utf-8")) < SIZE_BOUND_BYTES, name
@@ -381,6 +382,166 @@ class TestSummarySizeBound:
 # ---------------------------------------------------------------------------
 # Per-handler behavior
 # ---------------------------------------------------------------------------
+
+
+_SETTINGS_TOLERANCE_UNITS: Dict[str, str] = {
+    "bench_height": "m",
+    "face_angle": "deg",
+    "berm_width": "m",
+    "inter_ramp_angle": "deg",
+    "overall_angle": "deg",
+    "crest_toe_deviation": "m",
+}
+_SETTINGS_CLASSIFICATION_RULES: Dict[str, str] = {
+    "bench_height": "CUMPLE si la desviación está dentro de −neg/+pos; FUERA DE TOLERANCIA hasta 1,5× ese límite; NO CUMPLE sobre 1,5×",
+    "face_angle": "CUMPLE si la desviación está dentro de −neg/+pos; FUERA DE TOLERANCIA hasta 1,5× ese límite; NO CUMPLE sobre 1,5×",
+    "berm_width": "CUMPLE si el ancho real es mayor o igual al mínimo; NO CUMPLE si es menor; sin banda FUERA DE TOLERANCIA",
+    "crest_toe_deviation": "Desplazamiento de cresta y pata en el cumplimiento propuesto: misma regla de 1,5× que la altura",
+    "inter_ramp_angle": "Informativo: se reporta en el Excel y no clasifica bancos",
+    "overall_angle": "Informativo: se reporta en el Excel y no clasifica bancos",
+}
+_CUSTOM_SETTINGS: Dict[str, Any] = {
+    "process": {"resolution": 0.25, "face_threshold": 40.0, "berm_threshold": 20.0},
+    "tolerances": {
+        "bench_height": {"neg": 1.0, "pos": 1.5},
+        "face_angle": {"neg": 3.0, "pos": 4.0},
+        "berm_width": {"min": 6.0},
+        "crest_toe_deviation": {"neg": 0.5, "pos": 0.8},
+    },
+    "blast": {"rock_density_tm3": 3.0, "height_fallback_m": 12.0, "sector_density": {"A": 2.5}},
+}
+
+
+def _synthetic_blast_holes(count: int) -> List[Dict[str, Any]]:
+    return [
+        {
+            "hole_id": f"H{index:05d}",
+            "x": 1000.0 + index * 0.1,
+            "y": 2000.0 - index * 0.1,
+            "z": 15.0,
+            "kg": 120.5,
+            "sector": "Norte",
+            "section": "S-01",
+        }
+        for index in range(count)
+    ]
+
+
+@pytest.mark.asyncio
+class TestGetSettings:
+    async def test_payload_keys_are_ordered_critical_first(self, api_isolated_db):
+        session_id = db.create_session()
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        assert list(payload) == ["ok", "tolerances", "classification_rules", "process", "blast"]
+        assert payload["ok"] is True
+        assert payload["classification_rules"] == _SETTINGS_CLASSIFICATION_RULES
+
+    async def test_classification_rules_hold_six_exact_keys(self, api_isolated_db):
+        session_id = db.create_session()
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        rules = payload["classification_rules"]
+        assert set(rules) == {
+            "bench_height",
+            "face_angle",
+            "berm_width",
+            "crest_toe_deviation",
+            "inter_ramp_angle",
+            "overall_angle",
+        }
+        assert "mínimo" in rules["berm_width"]
+        assert "1,5" not in rules["berm_width"]
+        assert "classification_rule" not in payload
+
+    async def test_payload_with_classification_rules_stays_under_2048_bytes(self, api_isolated_db):
+        session_id = db.create_session()
+        for settings in (None, _CUSTOM_SETTINGS):
+            if settings is not None:
+                db.save_settings(session_id, settings)
+            payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+            size = len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            assert size <= 2048, size
+
+    async def test_tolerances_hold_six_keys_each_with_unit(self, api_isolated_db):
+        session_id = db.create_session()
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        assert list(payload["tolerances"]) == list(_SETTINGS_TOLERANCE_UNITS)
+        for key, unit in _SETTINGS_TOLERANCE_UNITS.items():
+            assert list(payload["tolerances"][key])[-1] == "unit", key
+            assert payload["tolerances"][key]["unit"] == unit, key
+
+    async def test_custom_tolerances_are_returned_not_defaults(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_settings(session_id, _CUSTOM_SETTINGS)
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        assert payload["tolerances"]["bench_height"] == {"neg": 1.0, "pos": 1.5, "unit": "m"}
+        assert payload["tolerances"]["face_angle"] == {"neg": 3.0, "pos": 4.0, "unit": "deg"}
+        assert payload["tolerances"]["berm_width"] == {"min": 6.0, "unit": "m"}
+        assert payload["tolerances"]["crest_toe_deviation"] == {
+            "neg": 0.5,
+            "pos": 0.8,
+            "unit": "m",
+        }
+        assert payload["tolerances"]["overall_angle"] == {"neg": 2.0, "pos": 2.0, "unit": "deg"}
+        assert payload["process"] == {"resolution": 0.25, "face_threshold": 40.0, "berm_threshold": 20.0}
+        assert payload["blast"] == {"rock_density_tm3": 3.0, "height_fallback_m": 12.0}
+
+    async def test_no_settings_returns_core_defaults_like_rest(self, api_isolated_db):
+        from api.routers.settings import _get_default_settings
+
+        session_id = db.create_session()
+        defaults = _get_default_settings()
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        assert payload["process"] == defaults["process"]
+        assert payload["blast"] == {
+            "rock_density_tm3": defaults["blast"]["rock_density_tm3"],
+            "height_fallback_m": defaults["blast"]["height_fallback_m"],
+        }
+        for key, unit in _SETTINGS_TOLERANCE_UNITS.items():
+            entry = dict(payload["tolerances"][key])
+            assert entry.pop("unit") == unit, key
+            assert entry == defaults["tolerances"][key], key
+
+    async def test_blast_holes_never_reach_the_payload(self, api_isolated_db):
+        session_id = db.create_session()
+        holes = _synthetic_blast_holes(11000)
+        db.save_settings(
+            session_id,
+            {**_CUSTOM_SETTINGS, "blast_holes": holes, "accepted_rows": holes},
+        )
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        text = json.dumps(payload, ensure_ascii=False)
+        assert len(text.encode("utf-8")) <= 2048
+        assert "blast_holes" not in text
+        assert "accepted_rows" not in text
+        assert payload["process"]["face_threshold"] == 40.0
+
+    async def test_only_neg_pos_min_entries_are_exposed(self, api_isolated_db):
+        session_id = db.create_session()
+        db.save_settings(
+            session_id,
+            {"tolerances": {"face_angle": {"neg": 3.0, "pos": 4.0, "junk": 9.0}}},
+        )
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        assert payload["tolerances"]["face_angle"] == {"neg": 3.0, "pos": 4.0, "unit": "deg"}
+
+    async def test_settings_are_scoped_to_own_session(self, api_isolated_db):
+        session_a = db.create_session()
+        session_b = db.create_session()
+        db.save_settings(session_a, _CUSTOM_SETTINGS)
+        payload_a = await READ_HANDLERS["get_settings"](session_a, NoArgs())
+        payload_b = await READ_HANDLERS["get_settings"](session_b, NoArgs())
+        assert payload_a["process"]["face_threshold"] == 40.0
+        assert payload_b["process"]["face_threshold"] == 30.0
+
+    async def test_tolerances_survive_observation_compaction(self, api_isolated_db):
+        from core.ai_v2.agent.loop import _observation_content
+
+        session_id = db.create_session()
+        db.save_settings(session_id, _CUSTOM_SETTINGS)
+        payload = await READ_HANDLERS["get_settings"](session_id, NoArgs())
+        observation = {**payload, "bulk": [{"pad": "y" * 100} for _ in range(200)]}
+        content = json.loads(_observation_content(observation))
+        assert content["tolerances"] == payload["tolerances"]
 
 
 @pytest.mark.asyncio
@@ -1087,3 +1248,51 @@ class TestQueryResultsPayloadPriority:
             '"status_by_parameter"',
         ):
             assert critical in head
+
+
+@pytest.mark.asyncio
+class TestNominalQueryLevels:
+    async def test_exact_level_cap_is_reported(self, api_isolated_db):
+        sid = db.create_session()
+        db.save_results(sid, [_comparison_row("S", "A", STATUS_CUMPLE, 80, bench_num=i + 1, level=str(3000 + i)) for i in range(62)])
+        result = await READ_HANDLERS["query_results"](sid, ResultQueryArgs())
+        assert result["levels_truncated"] is True
+
+    async def test_labels_match_export_endpoint_and_filters(self, api_test_client):
+        sid = db.create_session()
+        db.save_results(sid, [_comparison_row(f"S-{i}", sector, STATUS_CUMPLE, 80, bench_num=i + 1, level=level) for i, (sector, level) in enumerate([( "A", "3065"), ("A", "3066"), ("B", "3095")])])
+        response = api_test_client.get("/api/v1/export/levels", headers={"X-Session-ID": sid})
+        assert response.status_code == 200
+        result = await READ_HANDLERS["query_results"](sid, ResultQueryArgs())
+        expected = {s["sector"]: [level["label"] for level in s["levels"]] for s in response.json()["sectors"]}
+        assert {sector: [level["label"] for level in levels] for sector, levels in result["nominal_levels"].items()} == expected
+        filtered = await READ_HANDLERS["query_results"](sid, ResultQueryArgs(sector=["A"], level=["3065"]))
+        assert filtered["n_matched_rows"] == 1
+        assert set(filtered["nominal_levels"]) == {"A"}
+
+    async def test_large_payload_budget_and_priority(self, api_isolated_db):
+        sid = db.create_session()
+        db.save_results(sid, [_comparison_row(f"S-{i}", "A", STATUS_CUMPLE, 80, bench_num=i + 1, level=str(3000 + i * 15)) for i in range(150)])
+        result = await READ_HANDLERS["query_results"](sid, ResultQueryArgs(include_rows=True, row_limit=50))
+        text = json.dumps(result, ensure_ascii=False)
+        print(f"large payload bytes={len(text.encode('utf-8'))}; chars={len(text)}")
+        assert len(text.encode("utf-8")) <= 4096
+        for key in ("weighted_score", "pct_by_parameter", "nominal_levels", "levels_truncated"):
+            assert text.index(f'"{key}"') < 4000
+        assert result["levels_truncated"] is True
+        assert result["nominal_levels_truncated"] is True
+
+    async def test_budget_trim_marks_exact_levels_below_cap(self, api_isolated_db, monkeypatch):
+        import api.ai_agent_handlers as handlers
+
+        sid = db.create_session()
+        db.save_results(sid, [_comparison_row("S", "A", STATUS_CUMPLE, 80, bench_num=i + 1, level=str(3000 + 15 * i)) for i in range(20)])
+        full = await READ_HANDLERS["query_results"](sid, ResultQueryArgs())
+        assert full["levels_truncated"] is False
+        monkeypatch.setattr(handlers, "_MAX_PAYLOAD_BYTES", 1700)
+        cut = await READ_HANDLERS["query_results"](sid, ResultQueryArgs())
+        assert cut["levels_truncated"] is True
+        assert cut["nominal_levels_truncated"] is True
+        kept = cut["nominal_levels"].get("A", [])
+        assert kept == full["nominal_levels"]["A"][:len(kept)]
+        assert len(json.dumps(cut, ensure_ascii=False).encode("utf-8")) < 1700
