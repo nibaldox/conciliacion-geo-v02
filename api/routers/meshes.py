@@ -363,7 +363,7 @@ def _point_at_distance(section: SectionLine, distance: float, elevation: float) 
 def _horizontal_drape_index(topo_mesh):
     from scipy.spatial import cKDTree
 
-    triangles = topo_mesh.vertices[topo_mesh.faces, :2]
+    triangles = np.asarray(topo_mesh.vertices)[np.asarray(topo_mesh.faces), :2]
     centers = (triangles.min(axis=1) + triangles.max(axis=1)) / 2
     radius = np.linalg.norm((triangles.max(axis=1) - triangles.min(axis=1)) / 2, axis=1)
     buckets = np.floor(np.log2(np.maximum(radius, 1e-12))).astype(np.int64)
@@ -400,14 +400,15 @@ def _drape_horizontal_cell(topo_mesh, corners, spatial_index=None):
     for tree, indices, radius in trees:
         for candidates, local in zip(candidates_by_point, tree.query_ball_point(grid[:, :2], radius + 1e-8)):
             candidates.extend(indices[local])
-    for index, candidates in enumerate(candidates_by_point):
-        if not candidates:
-            continue
-        triangles = topo_mesh.vertices[topo_mesh.faces[candidates]]
+    counts = np.fromiter((len(candidates) for candidates in candidates_by_point), dtype=np.intp)
+    if counts.sum():
+        point_indices = np.repeat(np.arange(len(grid)), counts)
+        candidate_indices = np.concatenate([c for c in candidates_by_point if len(c)])
+        triangles = np.asarray(topo_mesh.vertices)[np.asarray(topo_mesh.faces)[candidate_indices]]
         a = triangles[:, 0, :2]
         ab = triangles[:, 1, :2] - a
         ac = triangles[:, 2, :2] - a
-        ap = grid[index, :2] - a
+        ap = grid[point_indices, :2] - a
         denominator = ab[:, 0] * ac[:, 1] - ab[:, 1] * ac[:, 0]
         nondegenerate = np.abs(denominator) > 1e-12
         safe = np.where(nondegenerate, denominator, 1.0)
@@ -416,7 +417,11 @@ def _drape_horizontal_cell(topo_mesh, corners, spatial_index=None):
         inside = nondegenerate & (u >= -1e-9) & (v >= -1e-9) & (u + v <= 1 + 1e-9)
         if np.any(inside):
             z = triangles[:, 0, 2] + u * (triangles[:, 1, 2] - triangles[:, 0, 2]) + v * (triangles[:, 2, 2] - triangles[:, 0, 2])
-            heights[index] = np.max(z[inside])
+            maxima = np.full(len(grid), -np.inf)
+            np.maximum.at(maxima, point_indices[inside], z[inside])
+            hit = np.zeros(len(grid), dtype=bool)
+            hit[point_indices[inside]] = True
+            heights[hit] = maxima[hit]
     covered = np.isfinite(heights)
     grid[covered, 2] = heights[covered] + HORIZONTAL_DEVIATION.drape_lift_m
     faces = []
