@@ -127,6 +127,7 @@ class DetectionDefaults:
 @dataclass(frozen=True)
 class PipelineDefaults:
     """Defaults for the processing pipeline."""
+    process_status_min_interval_s: float = 0.5
     section_length: float = 200.0     # meters
     section_spacing: float = 20.0     # meters (for auto-generation)
     target_faces_visual: int = 30000  # target faces for mesh decimation
@@ -182,6 +183,8 @@ class DeployDefaults:
     workers: int = field(default_factory=lambda: _env_int("CONCILIACION_WORKERS", 1))
     trimesh_cache_mb: int = field(default_factory=lambda: _env_int("CONCILIACION_TRIMESH_CACHE_MB", 2048) if _env_int("CONCILIACION_TRIMESH_CACHE_MB", 2048) > 0 else 2048)
     upload_parse_concurrency: int = field(default_factory=lambda: _env_int("CONCILIACION_UPLOAD_PARSE_CONCURRENCY", 2) if _env_int("CONCILIACION_UPLOAD_PARSE_CONCURRENCY", 2) > 0 else 2)
+    process_threads: int = field(default_factory=lambda: _env_int("CONCILIACION_PROCESS_THREADS", 4) if _env_int("CONCILIACION_PROCESS_THREADS", 4) > 0 else 4)
+    process_concurrency: int = field(default_factory=lambda: _env_int("CONCILIACION_PROCESS_CONCURRENCY", 2) if _env_int("CONCILIACION_PROCESS_CONCURRENCY", 2) > 0 else 2)
     data_dir: str = field(default_factory=lambda: os.environ.get("CONCILIACION_DATA_DIR", ""))
 
 

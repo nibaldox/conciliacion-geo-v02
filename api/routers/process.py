@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import tempfile
+import time
 import warnings
 from datetime import date, timedelta
 from pathlib import Path
@@ -27,7 +28,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 import api.database as db
 import api.schemas as schemas
-from api._async_db import run_blast_limited
+from api._async_db import run_blast_limited, run_db, run_process_limited
 from api.blast_identity import blast_data_status, blast_hole_id, blast_row_ids
 from core import (
     load_mesh,
@@ -50,7 +51,7 @@ from core.calculo_tronadura import proyectar_pozos_en_seccion
 from core.blast_correlation import compute_blast_geotech_correlation, compute_powder_factor
 from core.blast_model import fit_powder_factor_damage_model
 from core.column_utils import KILOS_CANDIDATES, first_present_column
-from core.config import DEFAULTS, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
+from core.config import DEFAULTS, DEPLOY, DETECTION, TOLERANCES as DEFAULT_TOLERANCES
 from core.design_achievement import (
     build_design_achievement_summary,
     build_sector_achievement_summary,
@@ -366,9 +367,8 @@ def _run_pipeline_sync(
 ) -> dict:
     """Thin stable alias around :func:`_execute_pipeline_sync`.
 
-    Synchronous helper invoked via ``run_in_executor`` from
-    :func:`run_process` and via ``asyncio.to_thread`` from the agent's
-    ``run_reconciliation`` handler.
+    Synchronous helper invoked via the dedicated process executor from
+    :func:`run_process` and the agent's ``run_reconciliation`` handler.
 
     CALLERS OWN THE FAILURE RESET: every caller must reset
     ``process_status`` to ``idle`` on failure (:func:`run_process` does;
@@ -491,7 +491,8 @@ def _execute_pipeline_sync(
     # uses background threads; no event-loop blocking).
     completed = 0
     section_profile_warnings: Dict[str, Dict[str, List[str]]] = {}
-    with ThreadPoolExecutor() as executor:
+    last_status_write = time.monotonic()
+    with ThreadPoolExecutor(max_workers=DEPLOY.process_threads) as executor:
         for idx, sec, p_d, p_t, comps, profile_warnings in executor.map(
             _process_section, enumerate(sections)
         ):
@@ -500,9 +501,12 @@ def _execute_pipeline_sync(
             comparison_results.extend(comps)
             section_profile_warnings[sec.name] = profile_warnings
             completed += 1
-            db.update_process_status(
-                session_id, "processing", completed, len(sections), completed
-            )
+            now = time.monotonic()
+            if completed == len(sections) or now - last_status_write >= DEFAULTS.process_status_min_interval_s:
+                db.update_process_status(
+                    session_id, "processing", completed, len(sections), completed
+                )
+                last_status_write = time.monotonic()
 
     # Persist results
     # Save extraction cache for each section
@@ -563,9 +567,9 @@ async def run_process(request: Request, body: Optional[schemas.ProcessSettings] 
     DB persistence) is executed off the event loop via ``run_in_executor``.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
 
-        claimed = db.try_begin_process(session_id)
+        claimed = await run_db(db.try_begin_process, session_id)
         if not claimed:
             logger.warning(
                 "Process rejected: status=409 detail=%s", _MSG_PROCESS_RUNNING
@@ -573,7 +577,7 @@ async def run_process(request: Request, body: Optional[schemas.ProcessSettings] 
             raise HTTPException(409, detail=_MSG_PROCESS_RUNNING)
 
         try:
-            sections_raw = db.get_sections(session_id)
+            sections_raw = await run_db(db.get_sections, session_id)
             if not sections_raw:
                 raise HTTPException(400, "Load sections first")
 
@@ -582,14 +586,14 @@ async def run_process(request: Request, body: Optional[schemas.ProcessSettings] 
                 body_dict = body.model_dump() if hasattr(body, "model_dump") else body.dict()
                 body_overrides = body_dict
 
-            return await _run_in_executor(
+            return await run_process_limited(
                 _run_pipeline_sync, session_id, sections_raw, body_overrides
             )
         except HTTPException:
-            db.update_process_status(session_id, "idle")
+            await run_db(db.update_process_status, session_id, "idle")
             raise
         except Exception:
-            db.update_process_status(session_id, "idle")
+            await run_db(db.update_process_status, session_id, "idle")
             raise
     except HTTPException as exc:
         logger.warning("Process rejected: status=%s detail=%s", exc.status_code, exc.detail)

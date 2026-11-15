@@ -39,7 +39,7 @@ from typing import Any, Awaitable, Callable, Dict
 
 import api.database as db
 import numpy as np
-from api._async_db import run_db
+from api._async_db import run_db, run_process_limited
 from api.ai_agent_handlers import READ_HANDLERS
 from fastapi import HTTPException
 from core.ai_v2.agent.catalog import TOOL_CATALOG
@@ -304,7 +304,7 @@ async def run_reconciliation(
         }
     }
     try:
-        result = await asyncio.to_thread(
+        result = await run_process_limited(
             _run_pipeline_sync, session_id, sections_raw, body_overrides
         )
     except HTTPException as exc:

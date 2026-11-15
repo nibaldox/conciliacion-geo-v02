@@ -20,6 +20,7 @@ import os
 import threading
 import weakref
 from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncIterator, Awaitable, Callable, TypeVar
 
 _T = TypeVar("_T")
@@ -83,6 +84,56 @@ async def upload_parse_slot() -> AsyncIterator[None]:
         semaphore = entry[1]
     async with semaphore:
         yield
+
+
+_PROCESS_LIMITS = weakref.WeakKeyDictionary()
+_PROCESS_LIMITS_GUARD = threading.Lock()
+_PROCESS_EXECUTOR = None
+_PROCESS_EXECUTOR_LIMIT = None
+_PROCESS_EXECUTOR_GUARD = threading.Lock()
+
+
+@asynccontextmanager
+async def process_slot() -> AsyncIterator[None]:
+    from core import config
+
+    limit = config.DEPLOY.process_concurrency
+    loop = asyncio.get_running_loop()
+    with _PROCESS_LIMITS_GUARD:
+        entry = _PROCESS_LIMITS.get(loop)
+        if entry is None or entry[0] != limit:
+            entry = (limit, asyncio.Semaphore(limit))
+            _PROCESS_LIMITS[loop] = entry
+        semaphore = entry[1]
+    async with semaphore:
+        yield
+
+
+def _process_executor(limit: int) -> ThreadPoolExecutor:
+    global _PROCESS_EXECUTOR, _PROCESS_EXECUTOR_LIMIT
+    with _PROCESS_EXECUTOR_GUARD:
+        if _PROCESS_EXECUTOR is None or _PROCESS_EXECUTOR_LIMIT != limit:
+            previous = _PROCESS_EXECUTOR
+            _PROCESS_EXECUTOR = ThreadPoolExecutor(max_workers=limit, thread_name_prefix="pipeline")
+            _PROCESS_EXECUTOR_LIMIT = limit
+            if previous is not None:
+                previous.shutdown(wait=False)
+        return _PROCESS_EXECUTOR
+
+
+async def run_process_limited(fn: Callable[..., _T], /, *args: Any) -> _T:
+    from core import config
+
+    async with process_slot():
+        loop = asyncio.get_running_loop()
+        future = loop.run_in_executor(_process_executor(config.DEPLOY.process_concurrency), fn, *args)
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            try:
+                await asyncio.shield(future)
+            finally:
+                raise
 
 
 async def run_blast_limited(fn: Callable[..., _T], /, *args: Any) -> _T:
