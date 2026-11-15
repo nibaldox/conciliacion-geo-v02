@@ -95,7 +95,7 @@ limits==5.8.0
     # via slowapi
 lxml==6.1.1
     # via python-docx
-markupsafe==3.0.3
+markupsafe==3.0.4
     # via jinja2
 matplotlib==3.10.9 ; python_full_version < '3.11'
     # via conciliacion-geotecnica
