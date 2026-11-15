@@ -1,4 +1,4 @@
-"""v1 agent tool catalog (15 tools) — plan section 5.3.
+"""v1 agent tool catalog (18 tools) — plan section 5.3.
 
 Each :class:`ToolSpec` derives its JSON schema from the arg model that
 mirrors the REAL router request parameters. No imports from ``api/``:
@@ -16,6 +16,8 @@ from pydantic import BaseModel
 
 from core.ai_v2.agent.models import (
     AchievementFilterArgs,
+    BlastCorrelationArgs,
+    BlastDamageArgs,
     ExportReportArgs,
     MeshIdArgs,
     NoArgs,
@@ -202,6 +204,39 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
             "nominal_levels contains export labels by sector; levels_truncated signals omitted exact levels."
         ),
         args_model=ResultQueryArgs,
+        risk=ToolRisk.READ,
+        impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
+    ),
+    ToolSpec(
+        name="get_blast_summary",
+        description=(
+            "Summarize the session's blast holes: hole count, data status, rock density, "
+            "bench height and inclination convention with their source and status, "
+            "explosive coverage (unknown explosives are never treated as ANFO), "
+            "deduplication and footprint counts."
+        ),
+        args_model=NoArgs,
+        risk=ToolRisk.READ,
+        impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
+    ),
+    ToolSpec(
+        name="get_blast_correlation",
+        description=(
+            "Correlate blast holes with the cross-sections: per section hole count, charge, "
+            "powder factor (g/t) and over/under-break, with units, status and source; optional "
+            "tolerance (m) and survey_date filter."
+        ),
+        args_model=BlastCorrelationArgs,
+        risk=ToolRisk.READ,
+        impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
+    ),
+    ToolSpec(
+        name="get_blast_damage_model",
+        description=(
+            "Fit of over-break versus powder factor across sections, with the number of points "
+            "and fit status; optional tolerance (m) and survey_date."
+        ),
+        args_model=BlastDamageArgs,
         risk=ToolRisk.READ,
         impact_summary="Solo lectura: sin efecto sobre los datos de la sesión",
     ),

@@ -128,6 +128,20 @@ _RULE_12_LINE = (
     "No menciones la línea de contexto ni el section_id al usuario."
 )
 
+_RULE_13_LINE = (
+    "13. **Tronadura**: para pozos, factor de carga o sobreexcavación usa "
+    "`get_blast_summary`, `get_blast_correlation` y `get_blast_damage_model`; son solo lectura. "
+    "Cita el factor de carga en g/t con su estado y su origen, y declara los supuestos: "
+    "densidad de roca (si su estado es DEFAULT, di que el factor de carga es provisorio porque usa 2,7 t/m³ por defecto), "
+    "altura de banco y convención de inclinación. "
+    "Los explosivos desconocidos no tienen energía y nunca se tratan como ANFO. "
+    "La cobertura energética es una fracción de 0 a 1, no una masa. "
+    "La sobreexcavación y el déficit están en metros. "
+    "No afirmes que la tronadura causó un daño en la berma o la cresta sin un ajuste del modelo de daño con puntos suficientes; "
+    "si `n_points` es 0 o no hay ajuste, dilo. "
+    "La tolerancia de proyección de pozos está en metros (15 m por defecto)."
+)
+
 _RULE_LINE = re.compile(r"^(\d+)\. \*\*", re.MULTILINE)
 
 
@@ -169,7 +183,7 @@ def test_agent_system_prompt_rules_numbered_once_and_no_voseo(monkeypatch):
     monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
     text = conversations.agent_system_prompt()
     numbers = [int(m.group(1)) for m in _RULE_LINE.finditer(_rules_section(text))]
-    assert numbers == list(range(1, 13))
+    assert numbers == list(range(1, 14))
     for new_text in (
         _rule_line(text, 6),
         _rule_line(text, 11),
@@ -186,3 +200,15 @@ def test_agent_system_prompt_rule_12_screen_context(monkeypatch):
     assert rule_12 == _RULE_12_LINE
     for word in _VOSEO_FORBIDDEN:
         assert word not in rule_12.lower(), (word, rule_12)
+
+
+def test_agent_system_prompt_rule_13_blast_tools(monkeypatch):
+    monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
+    text = conversations.agent_system_prompt()
+    rule_13 = _rule_line(text, 13)
+    assert rule_13 == _RULE_13_LINE
+    assert _RULE_13_LINE in text
+    for tool in ("get_blast_summary", "get_blast_correlation", "get_blast_damage_model"):
+        assert f"`{tool}`" in rule_13, tool
+    for word in _VOSEO_FORBIDDEN:
+        assert word not in rule_13.lower(), (word, rule_13)

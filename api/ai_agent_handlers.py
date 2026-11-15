@@ -26,8 +26,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import math
 import sqlite3
 from collections import Counter
+from datetime import date
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import api.database as db
@@ -35,6 +38,8 @@ from fastapi import HTTPException
 from core.ai_v2.agent.catalog import TOOL_CATALOG
 from core.ai_v2.agent.models import (
     AchievementFilterArgs,
+    BlastCorrelationArgs,
+    BlastDamageArgs,
     MeshIdArgs,
     NoArgs,
     ResultQueryArgs,
@@ -51,6 +56,8 @@ from core.report_data import compute_dashboard_weighted_score
 from core.report_levels import BENCH_TYPES, assign_nominal_levels
 
 Handler = Callable[[str, Any], Awaitable[Dict[str, Any]]]
+
+_logger = logging.getLogger(__name__)
 
 _MAX_SECTION_ENTRIES = 30
 _MAX_LIST_ENTRIES = 50
@@ -688,6 +695,471 @@ async def get_proposed_compliance(session_id: str, args: AchievementFilterArgs) 
     return out
 
 
+_BLAST_NO_DATA_MESSAGE = "La sesión no tiene pozos de tronadura cargados."
+_BLAST_NO_RESULTS_MESSAGE = (
+    "No hay resultados de conciliación: ejecuta el procesamiento antes de correlacionar la tronadura."
+)
+_BLAST_FAILED_MESSAGE = "No se pudo calcular la tronadura para esta sesión."
+_BLAST_UNKNOWN_POLICY = "Explosivo desconocido: sin energía, nunca se asume ANFO"
+_BLAST_DENSITY_UNIT = "t/m³"
+_BLAST_DENSITY_SAVED_SOURCE = "settings.blast.rock_density_tm3"
+_BLAST_DENSITY_DEFAULT_SOURCE = "core.config default"
+_BLAST_BENCH_UNIT = "m"
+_BLAST_METRE_UNIT = "m"
+_BLAST_MAX_WARNINGS = 10
+_BLAST_PAYLOAD_BUDGET = 3900
+_BLAST_PF_UNIT = "g/t"
+_BLAST_ENERGY_UNIT = "fracción 0–1"
+_BLAST_KG_UNIT = "kg"
+_BLAST_FIT_MIN_SAMPLES = 5
+_BLAST_MAX_POINTS = 12
+
+
+def _finite_positive(value: Any) -> Optional[float]:
+    """Return ``value`` as a float when it is a finite number above zero."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if math.isfinite(number) and number > 0.0:
+        return number
+    return None
+
+
+def _blast_density(settings: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Rock density exactly as the correlation pipeline receives it.
+
+    ``GET /process/blast-correlation`` forwards ``blast.rock_density_tm3``
+    unchanged (``api/routers/process.py:1401-1409``). A stored finite positive
+    value is used and reported SAVED. An absent value makes the core fall back
+    to ``core.config`` BLAST (DEFAULT, ``MISSING_DENSITY``). A present but
+    unusable value (zero, negative, non-numeric) yields a PF that is NaN, so it
+    is reported INVALID with no value.
+    """
+    from core.config import BLAST
+
+    default = float(BLAST.rock_density_tm3)
+    blast = settings.get("blast")
+    raw = blast.get("rock_density_tm3") if isinstance(blast, dict) else None
+    if raw is None:
+        return (
+            {
+                "value": default,
+                "unit": _BLAST_DENSITY_UNIT,
+                "status": "DEFAULT",
+                "source": _BLAST_DENSITY_DEFAULT_SOURCE,
+            },
+            ["MISSING_DENSITY"],
+        )
+    stored = _finite_positive(raw)
+    if stored is None:
+        return (
+            {
+                "value": None,
+                "unit": _BLAST_DENSITY_UNIT,
+                "status": "INVALID",
+                "source": _BLAST_DENSITY_SAVED_SOURCE,
+            },
+            ["INVALID_DENSITY", "MISSING_DENSITY"],
+        )
+    density = {
+        "value": stored,
+        "unit": _BLAST_DENSITY_UNIT,
+        "status": "SAVED",
+        "source": _BLAST_DENSITY_SAVED_SOURCE,
+    }
+    return density, (["DENSITY_EQUALS_DEFAULT"] if stored == default else [])
+
+
+def _sector_density_sectors(settings: Dict[str, Any]) -> Tuple[set, bool]:
+    """Sectors with a saved per-sector density, and whether any override exists."""
+    blast = settings.get("blast")
+    raw = blast.get("sector_density") if isinstance(blast, dict) else None
+    if not isinstance(raw, dict) or not raw:
+        return set(), False
+    sectors = {str(sector) for sector, rho in raw.items() if _finite_positive(rho) is not None}
+    return sectors, True
+
+
+def _blast_bench_height(holes: List[Any]) -> Tuple[Dict[str, Any], List[str]]:
+    """Bench height from the per-hole event attributes, read-only."""
+    values = set()
+    statuses = set()
+    sources = set()
+    confirmed = True
+    for hole in holes:
+        record = hole if isinstance(hole, dict) else {}
+        value = _finite_positive(record.get("bench_height_m"))
+        if value is None:
+            statuses.add("MISSING")
+            confirmed = False
+            continue
+        values.add(value)
+        status = record.get("bench_height_status")
+        statuses.add(status if isinstance(status, str) else "MISSING")
+        source = record.get("bench_height_source")
+        sources.add(source if isinstance(source, str) else "")
+        if record.get("bench_height_user_confirmed") is not True or record.get("bench_height_assumption_flag") is True:
+            confirmed = False
+    warnings: List[str] = []
+    if "MISSING" in statuses:
+        warnings.append("MISSING_BENCH_HEIGHT")
+    if len(values) > 1:
+        warnings.append("MIXED_BENCH_HEIGHT")
+    if not values:
+        return {
+            "value": None,
+            "unit": _BLAST_BENCH_UNIT,
+            "status": "MISSING",
+            "source": "",
+            "user_confirmed": False,
+        }, warnings
+    single_value = len(values) == 1
+    bench = {
+        "value": next(iter(values)) if single_value else None,
+        "unit": _BLAST_BENCH_UNIT,
+        "status": next(iter(statuses)) if single_value and len(statuses) == 1 else "MIXED",
+        "source": next(iter(sources)) if len(sources) == 1 else "MIXED",
+        "user_confirmed": confirmed and single_value,
+    }
+    return bench, warnings
+
+
+def _blast_summary_sync(session_id: str) -> Dict[str, Any]:
+    """Compact, audited digest of the session's holes (runs off the event loop)."""
+    from api.routers.blast import blast_summary_payload
+
+    settings = db.get_settings(session_id) or {}
+    holes = settings.get("blast_holes")
+    if not isinstance(holes, list) or not holes:
+        return {"ok": False, "error": "no_blast_data", "message": _BLAST_NO_DATA_MESSAGE}
+    report = blast_summary_payload(settings)
+    density, density_warnings = _blast_density(settings)
+    bench, bench_warnings = _blast_bench_height(holes)
+    geometry = settings.get("geometry_configuration")
+    geometry = geometry if isinstance(geometry, dict) else {}
+    explosive_counts: Counter = Counter(
+        hole.get("explosive_status") if isinstance(hole, dict) else None for hole in holes
+    )
+    unknown_holes = sum(explosive_counts[key] for key in (None, "", "UNKNOWN"))
+    consolidation = report.get("consolidation_report") or {}
+    conflicts = consolidation.get("conflicts")
+    footprint = report.get("footprint_report") or {}
+    codes: List[str] = list(density_warnings)
+    codes.extend(bench_warnings)
+    for entry in settings.get("event_warnings") or []:
+        code = entry.get("warning_code") if isinstance(entry, dict) else None
+        if isinstance(code, str) and code and code not in codes:
+            codes.append(code)
+    return {
+        "ok": True,
+        "data_status": report.get("data_status"),
+        "n_holes": report.get("n_holes"),
+        "rock_density": density,
+        "bench_height": bench,
+        "inclination": {
+            "convention": geometry.get("inclination_convention"),
+            "sign": geometry.get("inclination_sign_convention"),
+            "unit": geometry.get("inclination_unit"),
+            "user_confirmed": geometry.get("geometry_user_confirmed") is True,
+        },
+        "explosives": {
+            "unknown_holes": unknown_holes,
+            "unvalidated_reference_holes": explosive_counts.get("UNVALIDATED_REFERENCE", 0),
+            "unknown_policy": _BLAST_UNKNOWN_POLICY,
+        },
+        "dedup": {
+            "rows_in": consolidation.get("rows_in"),
+            "exact_copies_removed": consolidation.get("exact_copies_removed"),
+            "holes_with_decks": consolidation.get("holes_with_decks"),
+            "conflicts": len(conflicts) if isinstance(conflicts, list) else None,
+        },
+        "footprint": {
+            "mode": footprint.get("mode"),
+            "n_estimated": footprint.get("n_estimated"),
+            "n_user": footprint.get("n_user"),
+            "n_missing": footprint.get("n_missing"),
+        },
+        "warnings": codes[:_BLAST_MAX_WARNINGS],
+    }
+
+
+async def get_blast_summary(session_id: str, args: NoArgs) -> Dict[str, Any]:
+    """Blast digest over the shared settings blob, bounded by the blast slots."""
+    from api._async_db import run_blast_limited
+
+    return await run_blast_limited(_blast_summary_sync, session_id)
+
+
+def _round_or_none(value: Any, digits: int) -> Optional[float]:
+    """Round a finite number for output; NaN, None and non-numbers become None."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(number, digits) if math.isfinite(number) else None
+
+
+def _json_bytes(payload: Any) -> int:
+    return len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+
+def _blast_tolerance(requested: Optional[float]) -> Dict[str, Any]:
+    """Inclusion radius actually applied by the REST helpers, with its origin."""
+    from core.config import DEFAULTS
+
+    if requested is None:
+        return {
+            "value": float(DEFAULTS.blast_correlation_radius_m),
+            "unit": _BLAST_METRE_UNIT,
+            "status": "DEFAULT",
+            "source": "core.config DEFAULTS.blast_correlation_radius_m",
+        }
+    return {
+        "value": float(requested),
+        "unit": _BLAST_METRE_UNIT,
+        "status": "REQUESTED",
+        "source": "tool arg",
+    }
+
+
+def _density_context(settings: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str], set]:
+    density, warnings = _blast_density(settings)
+    sector_sectors, overridden = _sector_density_sectors(settings)
+    if overridden:
+        warnings = warnings + ["SECTOR_DENSITY_OVERRIDE"]
+    return density, warnings, sector_sectors
+
+
+def _pf_density_status(density: Dict[str, Any], sector_sectors: set) -> str:
+    status = density["status"]
+    if status == "SAVED":
+        return "RHO_SAVED"
+    if status == "INVALID":
+        return "RHO_INVALID"
+    return "RHO_MIXED" if sector_sectors else "RHO_DEFAULT"
+
+
+def _voronoi_row_status(row: Any, density_saved: bool, sector_sectors: set) -> str:
+    """Per-section Voronoi status; never VALID unless the row's density was saved.
+
+    With the density not user-provided the value is MISSING_DENSITY, followed by
+    any other blocking status the REST row reports (for example MISSING_FOOTPRINT).
+    """
+    if int(row.num_wells) == 0:
+        return "NO_DATA"
+    counts = row.pf_voronoi_bench_status_counts or {}
+    if density_saved or row.sector in sector_sectors:
+        if not counts:
+            return "NO_DATA"
+        ordered = sorted(counts.items(), key=lambda item: (-int(item[1]), str(item[0])))
+        return ",".join(f"{key}:{int(value)}" for key, value in ordered)
+    others = sorted({str(key) for key in counts} - {"VALID", "MISSING_DENSITY"})
+    return ",".join(["MISSING_DENSITY", *others])
+
+
+def _correlation_row(row: Any, density_saved: bool, sector_sectors: set) -> Dict[str, Any]:
+    return {
+        "section": row.section_name,
+        "wells": int(row.num_wells),
+        "kg": _round_or_none(row.total_kg, 1),
+        "pf_g_per_ton": _round_or_none(row.pf_g_per_ton_avg, 1),
+        "pf_voronoi_g_per_ton": _round_or_none(row.pf_voronoi_bench_g_per_ton_section, 1),
+        "pf_voronoi_status": _voronoi_row_status(row, density_saved, sector_sectors),
+        "energy_coverage_fraction": _round_or_none(row.energy_coverage_kg_fraction, 3),
+        "over_break": _round_or_none(row.avg_over_break, 2),
+        "under_break": _round_or_none(row.avg_under_break, 2),
+    }
+
+
+def _correlation_digest(response: Any, settings: Dict[str, Any], requested_tolerance: Optional[float]) -> Dict[str, Any]:
+    density, density_warnings, sector_sectors = _density_context(settings)
+    density_saved = density["status"] == "SAVED"
+    rows = sorted(response.rows, key=lambda row: (-int(row.num_wells), row.section_name))
+    wells_total = sum(int(row.num_wells) for row in rows)
+    kg_known = all(row.total_kg is not None for row in rows)
+    warnings = list(density_warnings)
+    if rows and wells_total == 0:
+        warnings.append("NO_HOLES_IN_TOLERANCE")
+    base: Dict[str, Any] = {
+        "ok": True,
+        "data_status": response.data_status,
+        "tolerance": _blast_tolerance(requested_tolerance),
+        "magnitudes": {
+            "rock_density": density,
+            "pf_g_per_ton": {
+                "unit": _BLAST_PF_UNIT,
+                "status": _pf_density_status(density, sector_sectors),
+                "source": "section mean of 1000*kg/(B*S*H*rho); B*S from design columns or knn proxy",
+            },
+            "pf_voronoi_g_per_ton": {
+                "unit": _BLAST_PF_UNIT,
+                "status": "PER_SECTION" if density_saved else "MISSING_DENSITY",
+                "source": "section value of 1000*kg/(voronoi_area*bench_height*rho)",
+            },
+            "energy_coverage_fraction": {
+                "unit": _BLAST_ENERGY_UNIT,
+                "status": "PER_SECTION",
+                "source": "kg-weighted share with known explosive energy; UNKNOWN explosives are not covered",
+            },
+            "over_break": {
+                "unit": _BLAST_METRE_UNIT,
+                "status": "PER_SECTION",
+                "source": "mean of positive delta_crest (delta_toe without crest); positive = over-excavation; null without comparison rows",
+            },
+            "under_break": {
+                "unit": _BLAST_METRE_UNIT,
+                "status": "PER_SECTION",
+                "source": "mean of negative deltas; negative = debt",
+            },
+            "kg": {
+                "unit": _BLAST_KG_UNIT,
+                "status": "PER_SECTION",
+                "source": "sum of projected hole charges; null when any charge is unknown",
+            },
+        },
+        "warnings": warnings[:_BLAST_MAX_WARNINGS],
+        "n_sections": int(response.n_sections),
+        "n_sections_with_holes": sum(1 for row in rows if int(row.num_wells) > 0),
+        "wells_total": wells_total,
+        "kg_total": round(sum(float(row.total_kg) for row in rows), 1) if kg_known else None,
+        "temporal_filter": {
+            key: value for key, value in (response.temporal_filter or {}).items() if key != "policy"
+        },
+        "rows": [],
+        "rows_omitted": len(rows),
+    }
+    shown: List[Dict[str, Any]] = []
+    for row in rows:
+        entry = _correlation_row(row, density_saved, sector_sectors)
+        candidate = dict(base, rows=shown + [entry], rows_omitted=len(rows) - len(shown) - 1)
+        if _json_bytes(candidate) > _BLAST_PAYLOAD_BUDGET:
+            break
+        shown.append(entry)
+    base["rows"] = shown
+    base["rows_omitted"] = len(rows) - len(shown)
+    return base
+
+
+def _damage_digest(response: Any, settings: Dict[str, Any], requested_tolerance: Optional[float]) -> Dict[str, Any]:
+    density, density_warnings, sector_sectors = _density_context(settings)
+    points = list(response.points)
+    fit = response.fit
+    warnings = list(density_warnings)
+    if not points:
+        warnings.append("NO_DAMAGE_POINTS")
+    fit_payload = None
+    if fit is not None:
+        fit_payload = {
+            "beta0_m": fit.beta0,
+            "beta1_m_per_gt": fit.beta1,
+            "r_squared": fit.r_squared,
+            "p_value": fit.p_value,
+            "n": fit.n,
+            "confidence": fit.confidence,
+            "ci_beta1_low_m_per_gt": fit.ci_beta1_low,
+            "ci_beta1_high_m_per_gt": fit.ci_beta1_high,
+        }
+    base: Dict[str, Any] = {
+        "ok": True,
+        "data_status": response.data_status,
+        "fit_status": "FIT" if fit is not None else "INSUFFICIENT_SAMPLES",
+        "n_points": len(points),
+        "min_samples": _BLAST_FIT_MIN_SAMPLES,
+        "tolerance": _blast_tolerance(requested_tolerance),
+        "magnitudes": {
+            "rock_density": density,
+            "pf_g_per_ton": {
+                "unit": _BLAST_PF_UNIT,
+                "status": _pf_density_status(density, sector_sectors),
+                "source": "section mean of 1000*kg/(B*S*H*rho); x of the fit",
+            },
+            "over_break": {
+                "unit": _BLAST_METRE_UNIT,
+                "status": "PER_SECTION",
+                "source": "mean of positive delta_crest per section; y of the fit",
+            },
+        },
+        "fit": fit_payload,
+        "temporal_filter": {
+            key: value for key, value in (response.temporal_filter or {}).items() if key != "policy"
+        },
+        "warnings": warnings[:_BLAST_MAX_WARNINGS],
+        "points": [],
+        "points_omitted": len(points),
+    }
+    shown: List[Dict[str, Any]] = []
+    for point in points[:_BLAST_MAX_POINTS]:
+        entry = {
+            "section": point.section_name,
+            "pf_g_per_ton": _round_or_none(point.pf_g_per_ton, 1),
+            "over_break": _round_or_none(point.over_break, 2),
+        }
+        candidate = dict(base, points=shown + [entry], points_omitted=len(points) - len(shown) - 1)
+        if _json_bytes(candidate) > _BLAST_PAYLOAD_BUDGET:
+            break
+        shown.append(entry)
+    base["points"] = shown
+    base["points_omitted"] = len(points) - len(shown)
+    return base
+
+
+def _blast_results_guard(session_id: str) -> Optional[Dict[str, Any]]:
+    """Shared precondition of both blast digests: holes, then sections and results."""
+    settings = db.get_settings(session_id) or {}
+    holes = settings.get("blast_holes")
+    if not isinstance(holes, list) or not holes:
+        return {"ok": False, "error": "no_blast_data", "message": _BLAST_NO_DATA_MESSAGE}
+    if not db.get_sections(session_id) or db.get_results_count(session_id) < 1:
+        return {"ok": False, "error": "no_results", "message": _BLAST_NO_RESULTS_MESSAGE}
+    return None
+
+
+def _blast_correlation_sync(session_id: str, tolerance: Optional[float], survey_date: Optional[date]) -> Dict[str, Any]:
+    from api.routers.process import _build_blast_correlation_sync
+
+    guard = _blast_results_guard(session_id)
+    if guard is not None:
+        return guard
+    settings = db.get_settings(session_id) or {}
+    response = _build_blast_correlation_sync(session_id, tolerance, survey_date)
+    return _correlation_digest(response, settings, tolerance)
+
+
+def _blast_damage_sync(session_id: str, tolerance: Optional[float], survey_date: Optional[date]) -> Dict[str, Any]:
+    from api.routers.process import _build_damage_model_sync
+
+    guard = _blast_results_guard(session_id)
+    if guard is not None:
+        return guard
+    settings = db.get_settings(session_id) or {}
+    response = _build_damage_model_sync(session_id, tolerance, survey_date)
+    return _damage_digest(response, settings, tolerance)
+
+
+async def get_blast_correlation(session_id: str, args: BlastCorrelationArgs) -> Dict[str, Any]:
+    """Per-section blast↔geotech digest from ``GET /process/blast-correlation``."""
+    from api._async_db import run_blast_limited
+
+    try:
+        return await run_blast_limited(_blast_correlation_sync, session_id, args.tolerance, args.survey_date)
+    except Exception:
+        _logger.exception("Agent blast correlation failed")
+        return {"ok": False, "error": "blast_failed", "message": _BLAST_FAILED_MESSAGE}
+
+
+async def get_blast_damage_model(session_id: str, args: BlastDamageArgs) -> Dict[str, Any]:
+    """Over-break versus PF fit digest from the damage-model REST helper."""
+    from api._async_db import run_blast_limited
+
+    try:
+        return await run_blast_limited(_blast_damage_sync, session_id, args.tolerance, args.survey_date)
+    except Exception:
+        _logger.exception("Agent blast damage model failed")
+        return {"ok": False, "error": "blast_failed", "message": _BLAST_FAILED_MESSAGE}
+
+
 _PAYLOAD_LIST_FLOORS = (("sections", 8), ("levels", 12), ("rows", 10))
 
 
@@ -893,6 +1365,9 @@ _HANDLERS: Dict[str, Handler] = {
     "get_design_achievement": get_design_achievement,
     "get_proposed_compliance": get_proposed_compliance,
     "query_results": query_results,
+    "get_blast_summary": get_blast_summary,
+    "get_blast_correlation": get_blast_correlation,
+    "get_blast_damage_model": get_blast_damage_model,
 }
 
 READ_HANDLERS: Dict[str, Handler] = {
@@ -904,6 +1379,7 @@ READ_HANDLERS: Dict[str, Handler] = {
 
 __all__ = [
     "READ_HANDLERS",
+    "get_blast_summary",
     "get_design_achievement",
     "get_mesh_info",
     "get_profile",

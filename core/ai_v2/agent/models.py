@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date
 from enum import Enum
 from typing import Annotated, Literal, Optional
 
@@ -270,8 +271,36 @@ class AchievementFilterArgs(_StrictArgs):
     bench: Optional[list[int]] = Field(default=None, max_length=50)
 
 
+class BlastCorrelationArgs(_StrictArgs):
+    """Arguments for ``get_blast_correlation`` (GET /process/blast-correlation).
+
+    ``tolerance`` is the perpendicular inclusion radius in metres; ``None``
+    keeps the core default. ``survey_date`` applies the same temporal filter
+    as the REST query parameter.
+    """
+
+    tolerance: Optional[float] = Field(
+        default=None, gt=0.0, le=100.0, allow_inf_nan=False
+    )
+    survey_date: Optional[date] = None
+
+
+class BlastDamageArgs(_StrictArgs):
+    """Arguments for ``get_blast_damage_model`` (GET /process/blast-correlation/damage-model).
+
+    Same fields and semantics as :class:`BlastCorrelationArgs`.
+    """
+
+    tolerance: Optional[float] = Field(
+        default=None, gt=0.0, le=100.0, allow_inf_nan=False
+    )
+    survey_date: Optional[date] = None
+
+
 __all__ = [
     "AchievementFilterArgs",
+    "BlastCorrelationArgs",
+    "BlastDamageArgs",
     "ExportReportArgs",
     "MeshIdArgs",
     "NoArgs",

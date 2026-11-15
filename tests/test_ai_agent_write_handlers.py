@@ -113,7 +113,7 @@ def _save_box_mesh(session_id: str, mesh_type: str) -> str:
 
 def test_all_handlers_cover_exactly_the_catalog():
     assert set(ALL_HANDLERS.keys()) == set(TOOL_CATALOG.keys())
-    assert len(ALL_HANDLERS) == len(TOOL_CATALOG) == 15
+    assert len(ALL_HANDLERS) == len(TOOL_CATALOG) == 18
 
 
 def test_read_handlers_stay_strictly_read_only():
@@ -123,6 +123,8 @@ def test_read_handlers_stay_strictly_read_only():
         if spec.risk is ToolRisk.READ
     }
     assert "get_settings" in expected_read
+    assert "get_blast_summary" in expected_read
+    assert {"get_blast_correlation", "get_blast_damage_model"} <= expected_read
     assert set(READ_HANDLERS.keys()) == expected_read
     assert expected_read.isdisjoint(_EXPECTED_WRITE_TOOLS)
 

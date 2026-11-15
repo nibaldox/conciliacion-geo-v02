@@ -17,7 +17,7 @@ import hashlib
 import json
 import threading
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Tuple, cast
+from typing import Any, Dict, List, Mapping, Optional, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -957,14 +957,8 @@ async def get_blast_definitions(request: Request) -> dict:
     }
 
 
-@router.get("/{session_id}/summary", response_model=schemas.BlastSessionSummary)
-async def get_blast_holes_summary(session_id: str, request: Request) -> dict:
-    if session_id != request.state.session_id:
-        raise HTTPException(
-            status_code=403,
-            detail={"error_code": "SESSION_ID_MISMATCH"},
-        )
-    settings = db.get_settings(session_id) or {}
+def blast_summary_payload(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Session blast summary shared by ``GET /blast/{id}/summary`` and the agent digest."""
     records = settings.get("blast_holes", [])
     n_holes = len(records) if isinstance(records, list) else 0
     meta = settings.get("blast_upload_meta") or {}
@@ -974,6 +968,16 @@ async def get_blast_holes_summary(session_id: str, request: Request) -> dict:
         "footprint_report": meta.get("footprint_report") or None,
         **blast_data_status(settings),
     }
+
+
+@router.get("/{session_id}/summary", response_model=schemas.BlastSessionSummary)
+async def get_blast_holes_summary(session_id: str, request: Request) -> dict:
+    if session_id != request.state.session_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"error_code": "SESSION_ID_MISMATCH"},
+        )
+    return blast_summary_payload(db.get_settings(session_id) or {})
 
 
 @router.get("/{session_id}/holes")

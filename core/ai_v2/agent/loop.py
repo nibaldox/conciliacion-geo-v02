@@ -149,6 +149,16 @@ _OBSERVATION_PRESERVE_KEYS = frozenset(
         "n_matched_rows",
         "warnings",
         "tolerances",
+        "rock_density",
+        "bench_height",
+        "inclination",
+        "explosives",
+        "data_status",
+        "magnitudes",
+        "tolerance",
+        "fit",
+        "fit_status",
+        "n_points",
     }
 )
 

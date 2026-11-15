@@ -56,6 +56,8 @@ from core.ai_v2.agent.events import (
 )
 from core.ai_v2.agent.models import (
     AchievementFilterArgs,
+    BlastCorrelationArgs,
+    BlastDamageArgs,
     ExportReportArgs,
     MeshIdArgs,
     NoArgs,
@@ -87,6 +89,9 @@ EXPECTED_TOOL_NAMES = {
     "get_proposed_compliance",
     "query_results",
     "export_report",
+    "get_blast_summary",
+    "get_blast_correlation",
+    "get_blast_damage_model",
 }
 
 ALL_ARGS_MODELS = sorted(
@@ -106,13 +111,48 @@ EXTRA_FIELD_PAYLOADS = {
     SectionDefinitionArgs: {"origin": [0.0, 0.0], "azimuth": 0.0, "blob": None},
     ResultQueryArgs: {"level": ["3065"], "session_id": "other"},
     AchievementFilterArgs: {"bench": [3], "force": True},
+    BlastCorrelationArgs: {"tolerance": 10.0, "survey_date": "2026-06-01", "session_id": "other"},
+    BlastDamageArgs: {"tolerance": 10.0, "survey_date": "2026-06-01", "section": ["S-01"]},
 }
 
 
 class TestCatalog:
-    def test_catalog_has_exactly_15_tools(self) -> None:
-        assert len(AGENT_TOOLS) == 15
+    def test_catalog_has_exactly_18_tools(self) -> None:
+        assert len(AGENT_TOOLS) == 18
         assert {spec.name for spec in AGENT_TOOLS} == EXPECTED_TOOL_NAMES
+
+    def test_get_blast_correlation_is_read_with_frozen_text(self) -> None:
+        spec = TOOL_CATALOG["get_blast_correlation"]
+        assert spec.args_model is BlastCorrelationArgs
+        assert spec.risk is ToolRisk.READ
+        assert spec.description == (
+            "Correlate blast holes with the cross-sections: per section hole count, charge, "
+            "powder factor (g/t) and over/under-break, with units, status and source; optional "
+            "tolerance (m) and survey_date filter."
+        )
+        assert spec.impact_summary == "Solo lectura: sin efecto sobre los datos de la sesión"
+
+    def test_get_blast_damage_model_is_read_with_frozen_text(self) -> None:
+        spec = TOOL_CATALOG["get_blast_damage_model"]
+        assert spec.args_model is BlastDamageArgs
+        assert spec.risk is ToolRisk.READ
+        assert spec.description == (
+            "Fit of over-break versus powder factor across sections, with the number of points "
+            "and fit status; optional tolerance (m) and survey_date."
+        )
+        assert spec.impact_summary == "Solo lectura: sin efecto sobre los datos de la sesión"
+
+    def test_get_blast_summary_is_noargs_read_with_frozen_text(self) -> None:
+        spec = TOOL_CATALOG["get_blast_summary"]
+        assert spec.args_model is NoArgs
+        assert spec.risk is ToolRisk.READ
+        assert spec.description == (
+            "Summarize the session's blast holes: hole count, data status, rock density, "
+            "bench height and inclination convention with their source and status, "
+            "explosive coverage (unknown explosives are never treated as ANFO), "
+            "deduplication and footprint counts."
+        )
+        assert spec.impact_summary == "Solo lectura: sin efecto sobre los datos de la sesión"
 
     def test_names_are_unique(self) -> None:
         names = [spec.name for spec in AGENT_TOOLS]
@@ -145,6 +185,9 @@ class TestCatalog:
             ("get_proposed_compliance", ToolRisk.READ, (), 30.0, False),
             ("query_results", ToolRisk.READ, (), 30.0, False),
             ("export_report", ToolRisk.EXPORT, (), 30.0, True),
+            ("get_blast_summary", ToolRisk.READ, (), 30.0, False),
+            ("get_blast_correlation", ToolRisk.READ, (), 30.0, False),
+            ("get_blast_damage_model", ToolRisk.READ, (), 30.0, False),
         ],
     )
     def test_spec_metadata(
@@ -246,6 +289,37 @@ class TestStrictArgs:
         }
         assert ExportReportArgs.__doc__ is not None
         assert "literal" in ExportReportArgs.__doc__.lower()
+
+
+class TestBlastArgs:
+    @pytest.mark.parametrize("model", [BlastCorrelationArgs, BlastDamageArgs], ids=lambda m: m.__name__)
+    @pytest.mark.parametrize("tolerance", [0.0, -1.0, 100.5, float("nan"), float("inf"), float("-inf")])
+    def test_tolerance_must_be_finite_positive_and_at_most_100(self, model, tolerance) -> None:
+        with pytest.raises(ValidationError):
+            model.model_validate({"tolerance": tolerance})
+
+    @pytest.mark.parametrize("model", [BlastCorrelationArgs, BlastDamageArgs], ids=lambda m: m.__name__)
+    @pytest.mark.parametrize("tolerance", [0.5, 15.0, 100.0])
+    def test_tolerance_accepts_meters_within_bounds(self, model, tolerance) -> None:
+        assert model.model_validate({"tolerance": tolerance}).tolerance == tolerance
+
+    @pytest.mark.parametrize("model", [BlastCorrelationArgs, BlastDamageArgs], ids=lambda m: m.__name__)
+    def test_defaults_leave_tolerance_and_survey_date_unset(self, model) -> None:
+        args = model.model_validate({})
+        assert args.tolerance is None
+        assert args.survey_date is None
+
+    @pytest.mark.parametrize("model", [BlastCorrelationArgs, BlastDamageArgs], ids=lambda m: m.__name__)
+    @pytest.mark.parametrize("value", ["2026-13-01", "01/06/2026", "2026-06-01T10:00", 20260601])
+    def test_survey_date_must_be_iso_date(self, model, value) -> None:
+        with pytest.raises(ValidationError):
+            model.model_validate({"survey_date": value})
+
+    def test_survey_date_parses_to_date(self) -> None:
+        from datetime import date
+
+        args = BlastCorrelationArgs.model_validate({"survey_date": "2026-06-01"})
+        assert args.survey_date == date(2026, 6, 1)
 
 
 class TestToolState:
