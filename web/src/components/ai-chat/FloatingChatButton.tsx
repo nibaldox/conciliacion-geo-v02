@@ -38,18 +38,9 @@ function useAgentChatInvalidationBridge() {
   }, [queryClient]);
 }
 
-/**
- * Desktop-only extra gap between the panel's bottom edge and the stored
- * rect bottom, so the launcher button (56px + 12px clearance) stays
- * visible below the panel instead of being covered by it. The button
- * renders at z-[95] above the panel's z-[90].
- */
-const PANEL_BOTTOM_GAP_PX = 68;
-
 export function FloatingChatButton() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [choreo, setChoreo] = useState<'opening' | 'closing' | null>(null);
   const [unread, setUnread] = useState(false);
   const petState = usePetState({ unread });
   const streaming = useAIChat((s) => s.streaming);
@@ -82,10 +73,8 @@ export function FloatingChatButton() {
         data-slot="ai-chat-button"
         data-testid="ai-chat-button"
         aria-label={t(open ? 'aiChat.close' : 'aiChat.open')}
-        onClick={() => {
-          setChoreo(open ? 'closing' : 'opening');
-          setOpen((v) => !v);
-        }}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
         className={`ai-chat-launcher group fixed right-4 z-[95] h-14 w-14 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
           open ? 'hidden sm:flex' : 'flex'
         }`}
@@ -97,60 +86,16 @@ export function FloatingChatButton() {
         >
           {open ? t('aiChat.close') : t('aiChat.open')}
         </span>
-        <span
-          aria-hidden="true"
-          className={`ai-chat-halo ${choreo === 'opening' ? 'ai-chat-halo--pulse' : ''}`}
-        />
-        <span
-          data-testid="ai-chat-pet-layer"
-          aria-hidden="true"
-          className={`ai-chat-fade pointer-events-none absolute inset-0 flex items-center justify-center motion-reduce:transition-none ${
-            open ? 'opacity-0 ai-chat-pose--pet-hidden' : 'opacity-100'
-          } ${
-            choreo === 'opening'
-              ? 'ai-chat-anim--pet-out'
-              : choreo === 'closing'
-                ? 'ai-chat-anim--pet-in'
-                : ''
-          }`}
-        >
-          <ChatPet state={petState} trackPointer={!open} />
-          {unread && (
-            <span
-              data-testid="ai-chat-pet-unread"
-              className="absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--color-surface)] bg-[var(--status-warn-text)]"
-            />
-          )}
-        </span>
-        <span
-          data-testid="ai-chat-close-icon"
-          aria-hidden="true"
-          className={`ai-chat-fade pointer-events-none absolute inset-0 flex items-center justify-center text-accent-fg motion-reduce:transition-none ${
-            open ? 'opacity-100' : 'opacity-0 ai-chat-pose--x-hidden'
-          } ${
-            choreo === 'opening'
-              ? 'ai-chat-anim--x-in'
-              : choreo === 'closing'
-                ? 'ai-chat-anim--x-out'
-                : ''
-          }`}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="h-6 w-6"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.5}
-            strokeLinecap="round"
-          >
-            <path d="M6 6l12 12" />
-            <path d="M18 6L6 18" />
-          </svg>
-        </span>
+        <ChatPet state={petState} trackPointer={!open} />
+        {unread && (
+          <span
+            data-testid="ai-chat-pet-unread"
+            aria-hidden="true"
+            className="absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--color-surface)] bg-[var(--status-warn-text)]"
+          />
+        )}
       </button>
-      {open && (
-        <ChatPanel onClose={() => setOpen(false)} bottomOffsetPx={PANEL_BOTTOM_GAP_PX} />
-      )}
+      {open && <ChatPanel onClose={() => setOpen(false)} />}
     </>
   );
 }

@@ -83,7 +83,9 @@ describe('ChatPanel — explicit deployment states', () => {
     expect(panel?.className).not.toContain('sm:right-4');
     expect(panel?.style.position).toBe('fixed');
     expect(panel?.style.width).toBe('380px');
-    expect(panel?.style.left).toBe(`${window.innerWidth - 380 - 16}px`);
+    expect(panel?.style.left).toBe('');
+    expect(panel?.style.right).toBe('16px');
+    expect(panel?.style.bottom).toBe('calc(84px + env(safe-area-inset-bottom))');
   });
 
   it('shows the no-tool-calls notice for a provider without tool support', async () => {

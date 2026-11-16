@@ -17,7 +17,11 @@ import { usePetState } from './petState';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TopoUploadZone } from './TopoUploadZone';
 import { ConfirmationCard, ToolCallCard } from './ToolCallCard';
-import { type ResizeDirection, useResizablePanel } from './useResizablePanel';
+import {
+  PANEL_ANCHOR_STYLE,
+  type ResizeDirection,
+  useResizablePanel,
+} from './useResizablePanel';
 
 const NOTICE_TONE: Record<ChatNotice['severity'], string> = {
   info: 'border-border text-text-secondary',
@@ -173,39 +177,28 @@ function NoticeBanner({ notice }: { notice: ChatNotice }) {
 
 interface ChatPanelProps {
   onClose: () => void;
-  /**
-   * Desktop-only extra gap subtracted from the stored rect height so the
-   * panel's bottom edge clears the floating launcher button (which stays
-   * fixed above it at z-[95]). Ignored on mobile (bottom sheet).
-   */
-  bottomOffsetPx?: number;
 }
 
 const RESIZE_HANDLES: ReadonlyArray<{
   direction: ResizeDirection;
-  labelKey: 'north' | 'south' | 'east' | 'west' | 'ne' | 'nw' | 'se' | 'sw';
+  labelKey: 'north' | 'west' | 'nw';
   orientation?: 'horizontal' | 'vertical';
   className: string;
 }> = [
   { direction: 'n', labelKey: 'north', orientation: 'horizontal', className: 'inset-x-3 top-0 h-1.5 cursor-n-resize' },
-  { direction: 's', labelKey: 'south', orientation: 'horizontal', className: 'inset-x-3 bottom-0 h-1.5 cursor-s-resize' },
-  { direction: 'e', labelKey: 'east', orientation: 'vertical', className: 'inset-y-3 right-0 w-1.5 cursor-e-resize' },
   { direction: 'w', labelKey: 'west', orientation: 'vertical', className: 'inset-y-3 left-0 w-1.5 cursor-w-resize' },
   { direction: 'nw', labelKey: 'nw', className: 'left-0 top-0 h-3 w-3 cursor-nw-resize' },
-  { direction: 'ne', labelKey: 'ne', className: 'right-0 top-0 h-3 w-3 cursor-ne-resize' },
-  { direction: 'sw', labelKey: 'sw', className: 'bottom-0 left-0 h-3 w-3 cursor-sw-resize' },
-  { direction: 'se', labelKey: 'se', className: 'bottom-0 right-0 h-3 w-3 cursor-se-resize' },
 ];
 
 /**
  * The chat panel: history, notices, confirmation cards, mesh upload and
  * the message input. Agent output is rendered as Markdown inside a
  * sandboxed renderer (no raw HTML ever reaches the DOM). On desktop the
- * panel is resizable from its edges/corners; on mobile it stays a
- * full-width bottom sheet. Escape closes the panel and focus is
- * restored to the previously focused element.
+ * panel sits above the launcher and is resizable from its north and west
+ * edges; on mobile it stays a full-width bottom sheet. Escape closes the
+ * panel and focus is restored to the previously focused element.
  */
-export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
+export function ChatPanel({ onClose }: ChatPanelProps) {
   const { t } = useTranslation();
   const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
@@ -316,17 +309,15 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
     void clearConversation();
   };
 
-  const bottomGap = Math.max(0, Math.round(bottomOffsetPx));
   const panelStyle: CSSProperties = {
     paddingBottom: 'env(safe-area-inset-bottom)',
     ...(resizable.isDesktop
       ? {
+          ...PANEL_ANCHOR_STYLE,
           position: 'fixed',
-          left: resizable.rect.left,
-          top: resizable.rect.top,
-          width: resizable.rect.width,
-          height: resizable.rect.height - bottomGap,
-          maxHeight: resizable.rect.height - bottomGap,
+          width: resizable.size.width,
+          height: resizable.size.height,
+          maxHeight: resizable.size.height,
         }
       : {}),
   };

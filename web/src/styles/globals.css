@@ -503,6 +503,11 @@ body {
     0 0 0 1px color-mix(in srgb, var(--color-accent-bright) 65%, transparent),
     var(--shadow-lg);
 }
+.ai-chat-launcher[aria-expanded="true"] {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-accent) 60%, transparent),
+    var(--shadow-lg);
+}
 .ai-pet {
   --ai-pet-ink: #17171c;
   --ai-pet-fur-hi: #ffffff;
@@ -1154,53 +1159,6 @@ body {
   }
 }
 
-/* ── pet ↔ close icon choreography (FloatingChatButton layers) ── */
-.ai-chat-fade {
-  will-change: transform, opacity;
-}
-.ai-chat-pose--pet-hidden {
-  transform: scale(0.72) rotate(-14deg) translateY(2px);
-}
-.ai-chat-pose--x-hidden {
-  transform: scale(0.6) rotate(90deg);
-}
-.ai-chat-anim--pet-out { animation: ai-chat-pet-out 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.ai-chat-anim--x-in { animation: ai-chat-x-in 240ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
-.ai-chat-anim--x-out { animation: ai-chat-x-out 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.ai-chat-anim--pet-in { animation: ai-chat-pet-in 240ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
-@keyframes ai-chat-pet-out {
-  from { opacity: 1; transform: scale(1) rotate(0deg); }
-  to { opacity: 0; transform: scale(0.72) rotate(-14deg) translateY(2px); }
-}
-@keyframes ai-chat-pet-in {
-  from { opacity: 0; transform: scale(0.72) rotate(-14deg) translateY(2px); }
-  to { opacity: 1; transform: scale(1) rotate(0deg); }
-}
-@keyframes ai-chat-x-in {
-  from { opacity: 0; transform: scale(0.6) rotate(-90deg); }
-  to { opacity: 1; transform: scale(1) rotate(0deg); }
-}
-@keyframes ai-chat-x-out {
-  from { opacity: 1; transform: scale(1) rotate(0deg); }
-  to { opacity: 0; transform: scale(0.6) rotate(90deg); }
-}
-.ai-chat-halo {
-  position: absolute;
-  inset: 0;
-  border-radius: 9999px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-bright) 60%, transparent);
-  opacity: 0;
-  pointer-events: none;
-}
-.ai-chat-halo--pulse {
-  animation: ai-chat-halo-pulse 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes ai-chat-halo-pulse {
-  0% { opacity: 0.35; transform: scale(0.86); }
-  60% { opacity: 0.15; }
-  100% { opacity: 0; transform: scale(1.16); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .ai-pet *,
   .ai-pet *::before,
@@ -1213,11 +1171,5 @@ body {
   }
   .ai-pet__tilt {
     transform: none;
-  }
-  .ai-chat-fade,
-  .ai-chat-halo {
-    animation: none;
-    transition: none;
-    will-change: auto;
   }
 }

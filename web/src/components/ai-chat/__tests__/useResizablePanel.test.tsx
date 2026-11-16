@@ -18,8 +18,15 @@ vi.mock('../../../api/client', () => ({
 import type { AIProvidersState } from '../../../api/aiChat';
 import { useAIChat } from '../../../stores/aiChat';
 import { ChatPanel } from '../ChatPanel';
-import { PANEL_RECT_STORAGE_KEY, type PanelRect } from '../useResizablePanel';
+import { PANEL_SIZE_STORAGE_KEY, type PanelSize } from '../useResizablePanel';
 import { initChatI18n, renderWithProviders } from './chatTestUtils';
+
+const LEGACY_RECT_STORAGE_KEY = 'conciliacion.aiChat.panelRect.v1';
+const ANCHOR_RIGHT = '16px';
+const ANCHOR_BOTTOM = 'calc(84px + env(safe-area-inset-bottom))';
+const ORIGINAL_WIDTH = window.innerWidth;
+const ORIGINAL_HEIGHT = window.innerHeight;
+const DEFAULT_SIZE: PanelSize = { width: 380, height: 480 };
 
 function providersBody(): AIProvidersState {
   return {
@@ -46,16 +53,27 @@ function stubMatchMedia(matches: boolean): void {
   );
 }
 
-const SEED: PanelRect = { left: 100, top: 100, width: 380, height: 480 };
-
-function seedRect(rect: PanelRect): void {
-  window.localStorage.setItem(PANEL_RECT_STORAGE_KEY, JSON.stringify(rect));
+function setViewport(width: number, height: number): void {
+  Object.defineProperty(window, 'innerWidth', {
+    value: width,
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(window, 'innerHeight', {
+    value: height,
+    configurable: true,
+    writable: true,
+  });
 }
 
-function storedRect(): PanelRect {
+function seedSize(value: unknown): void {
+  window.localStorage.setItem(PANEL_SIZE_STORAGE_KEY, JSON.stringify(value));
+}
+
+function storedSize(): PanelSize {
   return JSON.parse(
-    window.localStorage.getItem(PANEL_RECT_STORAGE_KEY) ?? 'null',
-  ) as PanelRect;
+    window.localStorage.getItem(PANEL_SIZE_STORAGE_KEY) ?? 'null',
+  ) as PanelSize;
 }
 
 function renderPanel(): HTMLElement {
@@ -76,6 +94,7 @@ function dragHandle(
 
 beforeEach(() => {
   window.localStorage.clear();
+  setViewport(1024, 768);
   mockGet.mockReset();
   mockGet.mockResolvedValue({ data: providersBody() });
   initChatI18n();
@@ -84,257 +103,218 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setViewport(ORIGINAL_WIDTH, ORIGINAL_HEIGHT);
 });
 
-describe('ChatPanel — resizable panel rect (desktop)', () => {
-  it('mounts with the default rect anchored bottom-right when nothing is stored', () => {
+describe('ChatPanel — desktop panel anchored above the launcher', () => {
+  it('anchors right/bottom to the launcher and ignores a stale v1 rect', () => {
+    setViewport(1600, 900);
+    window.localStorage.setItem(
+      LEGACY_RECT_STORAGE_KEY,
+      JSON.stringify({ left: 100, top: 50, width: 444, height: 690 }),
+    );
     const panel = renderPanel();
+    expect(panel.style.position).toBe('fixed');
+    expect(panel.style.right).toBe(ANCHOR_RIGHT);
+    expect(panel.style.bottom).toBe(ANCHOR_BOTTOM);
+    expect(panel.style.left).toBe('');
+    expect(panel.style.top).toBe('');
     expect(panel.style.width).toBe('380px');
     expect(panel.style.height).toBe('480px');
-    expect(panel.style.position).toBe('fixed');
-    expect(panel.style.left).toBe(`${window.innerWidth - 380 - 16}px`);
-    expect(panel.style.top).toBe(`${window.innerHeight - 480 - 16}px`);
+    expect(window.localStorage.getItem(LEGACY_RECT_STORAGE_KEY)).toBeNull();
   });
 
-  it("dragging 'e' moves the east edge: width +60 and left unchanged", () => {
-    seedRect(SEED);
+  it('mounts with the default size anchored when nothing is stored', () => {
     const panel = renderPanel();
-    dragHandle('e', { x: 400, y: 400 }, { x: 460, y: 400 });
-    expect(panel.style.width).toBe('440px');
-    expect(panel.style.left).toBe('100px');
-    expect(storedRect()).toEqual({ left: 100, top: 100, width: 440, height: 480 });
+    expect(panel.style.width).toBe(`${DEFAULT_SIZE.width}px`);
+    expect(panel.style.height).toBe(`${DEFAULT_SIZE.height}px`);
+    expect(panel.style.right).toBe(ANCHOR_RIGHT);
+    expect(panel.style.bottom).toBe(ANCHOR_BOTTOM);
   });
 
-  it("dragging 'w' moves the west edge: width +60 and left -60", () => {
-    seedRect(SEED);
+  it("dragging 'w' by -100px grows the width by 100 and keeps the right anchor", () => {
+    seedSize(DEFAULT_SIZE);
     const panel = renderPanel();
-    dragHandle('w', { x: 300, y: 400 }, { x: 240, y: 400 });
-    expect(panel.style.width).toBe('440px');
-    expect(panel.style.left).toBe('40px');
-    expect(storedRect()).toEqual({ left: 40, top: 100, width: 440, height: 480 });
+    dragHandle('w', { x: 300, y: 400 }, { x: 200, y: 400 });
+    expect(panel.style.width).toBe('480px');
+    expect(panel.style.right).toBe(ANCHOR_RIGHT);
+    expect(panel.style.bottom).toBe(ANCHOR_BOTTOM);
+    expect(panel.style.left).toBe('');
   });
 
-  it("dragging 'n' moves the north edge: height +60 and top -60", () => {
-    seedRect({ left: 100, top: 200, width: 380, height: 480 });
+  it("dragging 'n' upward by 60px grows the height and keeps the bottom anchor", () => {
+    seedSize(DEFAULT_SIZE);
     const panel = renderPanel();
     dragHandle('n', { x: 500, y: 400 }, { x: 500, y: 340 });
     expect(panel.style.height).toBe('540px');
-    expect(panel.style.top).toBe('140px');
+    expect(panel.style.bottom).toBe(ANCHOR_BOTTOM);
+    expect(panel.style.top).toBe('');
   });
 
-  it("dragging 's' moves the south edge: height +60 and top unchanged", () => {
-    seedRect(SEED);
+  it("corner 'nw' resizes both axes and keeps right/bottom anchored", () => {
+    seedSize(DEFAULT_SIZE);
     const panel = renderPanel();
-    dragHandle('s', { x: 500, y: 400 }, { x: 500, y: 460 });
+    dragHandle('nw', { x: 500, y: 500 }, { x: 440, y: 440 });
+    expect(panel.style.width).toBe('440px');
     expect(panel.style.height).toBe('540px');
-    expect(panel.style.top).toBe('100px');
-    expect(storedRect()).toEqual({ left: 100, top: 100, width: 380, height: 540 });
-  });
-
-  it("corner 'se' resizes both axes keeping left/top unchanged", () => {
-    seedRect(SEED);
-    const panel = renderPanel();
-    dragHandle('se', { x: 500, y: 500 }, { x: 540, y: 540 });
-    expect(panel.style.width).toBe('420px');
-    expect(panel.style.height).toBe('520px');
-    expect(panel.style.left).toBe('100px');
-    expect(panel.style.top).toBe('100px');
+    expect(panel.style.right).toBe(ANCHOR_RIGHT);
+    expect(panel.style.bottom).toBe(ANCHOR_BOTTOM);
   });
 
   it('clamps both dimensions at the 320px minimum', () => {
-    seedRect({ left: 400, top: 100, width: 380, height: 480 });
+    seedSize(DEFAULT_SIZE);
     const panel = renderPanel();
-
     dragHandle('w', { x: 300, y: 400 }, { x: 5000, y: 400 });
     expect(panel.style.width).toBe('320px');
-    expect(panel.style.left).toBe('460px');
-
     dragHandle('n', { x: 500, y: 300 }, { x: 500, y: 5000 });
     expect(panel.style.height).toBe('320px');
-    expect(panel.style.top).toBe('260px');
   });
 
-  it('keeps the east/south edges inside the viewport margin (8px)', () => {
-    seedRect(SEED);
-    const first = renderWithProviders(<ChatPanel onClose={() => undefined} />);
-    const panel = screen.getByTestId('ai-chat-panel');
-
-    dragHandle('e', { x: 400, y: 400 }, { x: 5000, y: 400 });
-    expect(panel.style.width).toBe(`${window.innerWidth - 108}px`);
-    expect(100 + (window.innerWidth - 8 - 100)).toBeLessThanOrEqual(
-      window.innerWidth - 8,
-    );
-    first.unmount();
-
-    seedRect(SEED);
-    const secondRender = renderWithProviders(<ChatPanel onClose={() => undefined} />);
-    const second = screen.getByTestId('ai-chat-panel');
-    dragHandle('s', { x: 500, y: 400 }, { x: 500, y: 5000 });
-    expect(second.style.height).toBe(`${window.innerHeight - 108}px`);
-    expect(100 + (window.innerHeight - 8 - 100)).toBeLessThanOrEqual(
-      window.innerHeight - 8,
-    );
-    secondRender.unmount();
-  });
-
-  it('keeps the west/north edges inside the viewport margin (8px)', () => {
-    seedRect(SEED);
-    const first = renderWithProviders(<ChatPanel onClose={() => undefined} />);
-    const panel = screen.getByTestId('ai-chat-panel');
-
+  it('keeps the panel 8px inside the top and left viewport edges', () => {
+    seedSize(DEFAULT_SIZE);
+    const panel = renderPanel();
     dragHandle('w', { x: 300, y: 400 }, { x: -5000, y: 400 });
-    expect(panel.style.left).toBe('8px');
-    expect(panel.style.width).toBe(`${100 + 380 - 8}px`);
-    first.unmount();
-
-    seedRect({ left: 100, top: 200, width: 380, height: 480 });
-    const secondRender = renderWithProviders(<ChatPanel onClose={() => undefined} />);
-    const second = screen.getByTestId('ai-chat-panel');
+    expect(panel.style.width).toBe(`${window.innerWidth - 16 - 8}px`);
     dragHandle('n', { x: 500, y: 400 }, { x: 500, y: -5000 });
-    expect(second.style.top).toBe('8px');
-    expect(second.style.height).toBe(`${200 + 480 - 8}px`);
-    secondRender.unmount();
+    expect(panel.style.height).toBe(`${window.innerHeight - 84 - 8}px`);
   });
 
-  it('persists the full rect on pointerUp and restores left/top after remount', () => {
-    seedRect(SEED);
-    const first = renderWithProviders(<ChatPanel onClose={() => undefined} />);
-    const panel = screen.getByTestId('ai-chat-panel');
+  it('persists only width and height under the v2 key', () => {
+    seedSize(DEFAULT_SIZE);
+    renderPanel();
     dragHandle('w', { x: 300, y: 400 }, { x: 240, y: 400 });
-    dragHandle('s', { x: 500, y: 400 }, { x: 500, y: 460 });
-    expect(panel.style.left).toBe('40px');
-    expect(storedRect()).toEqual({ left: 40, top: 100, width: 440, height: 540 });
+    dragHandle('n', { x: 500, y: 400 }, { x: 500, y: 340 });
+    expect(storedSize()).toEqual({ width: 440, height: 540 });
+    expect(Object.keys(storedSize()).sort()).toEqual(['height', 'width']);
+  });
+
+  it('restores the stored size after remount, still anchored to the launcher', () => {
+    seedSize(DEFAULT_SIZE);
+    const first = renderWithProviders(<ChatPanel onClose={() => undefined} />);
+    dragHandle('w', { x: 300, y: 400 }, { x: 240, y: 400 });
+    dragHandle('n', { x: 500, y: 400 }, { x: 500, y: 340 });
     first.unmount();
 
     const restored = renderPanel();
-    expect(restored.style.left).toBe('40px');
-    expect(restored.style.top).toBe('100px');
     expect(restored.style.width).toBe('440px');
     expect(restored.style.height).toBe('540px');
+    expect(restored.style.right).toBe(ANCHOR_RIGHT);
+    expect(restored.style.bottom).toBe(ANCHOR_BOTTOM);
   });
 
-  it('falls back to the clamped default rect on corrupt JSON', () => {
-    window.localStorage.setItem(PANEL_RECT_STORAGE_KEY, '{not json');
-    const panel = renderPanel();
-    expect(panel.style.width).toBe('380px');
-    expect(panel.style.height).toBe('480px');
-    expect(panel.style.left).toBe(`${window.innerWidth - 380 - 16}px`);
-    expect(panel.style.top).toBe(`${window.innerHeight - 480 - 16}px`);
-  });
-
-  it('clamps an out-of-range stored rect into the current viewport', () => {
-    seedRect({ left: -9999, top: -9999, width: 99999, height: -50 });
-    const panel = renderPanel();
-    expect(panel.style.width).toBe(`${window.innerWidth - 16}px`);
-    expect(panel.style.height).toBe('320px');
-    expect(panel.style.left).toBe('8px');
-    expect(panel.style.top).toBe('8px');
-  });
-
-  it('re-anchors a legacy stored {width, height} without left/top bottom-right', () => {
-    window.localStorage.setItem(
-      PANEL_RECT_STORAGE_KEY,
-      JSON.stringify({ width: 420, height: 500 }),
-    );
-    const panel = renderPanel();
-    expect(panel.style.width).toBe('420px');
-    expect(panel.style.height).toBe('500px');
-    expect(panel.style.left).toBe(`${window.innerWidth - 420 - 16}px`);
-    expect(panel.style.top).toBe(`${window.innerHeight - 500 - 16}px`);
-  });
-
-  it('keyboard on the west handle moves width and left by 16px (64 with Shift) and persists', () => {
+  it('keyboard on the west handle grows width 16px (64 with Shift) and persists', () => {
     const panel = renderPanel();
     const handle = screen.getByTestId('ai-chat-resize-w');
     handle.focus();
-
     fireEvent.keyDown(handle, { key: 'ArrowLeft' });
     expect(panel.style.width).toBe('396px');
-    expect(panel.style.left).toBe(`${window.innerWidth - 380 - 16 - 16}px`);
     fireEvent.keyDown(handle, { key: 'ArrowLeft', shiftKey: true });
     expect(panel.style.width).toBe('460px');
     fireEvent.keyDown(handle, { key: 'ArrowRight' });
     expect(panel.style.width).toBe('444px');
-
-    expect(storedRect()).toEqual({
-      left: window.innerWidth - 380 - 16 - 16 - 64 + 16,
-      top: window.innerHeight - 480 - 16,
-      width: 444,
-      height: 480,
-    });
+    expect(panel.style.right).toBe(ANCHOR_RIGHT);
+    expect(storedSize()).toEqual({ width: 444, height: 480 });
   });
 
-  it('keyboard on the east handle grows eastward keeping left fixed', () => {
-    seedRect(SEED);
+  it('keyboard on the north handle grows height with ArrowUp and persists', () => {
     const panel = renderPanel();
-    const handle = screen.getByTestId('ai-chat-resize-e');
+    const handle = screen.getByTestId('ai-chat-resize-n');
     handle.focus();
-
-    fireEvent.keyDown(handle, { key: 'ArrowRight' });
-    expect(panel.style.width).toBe('396px');
-    expect(panel.style.left).toBe('100px');
-    expect(storedRect()).toEqual({ left: 100, top: 100, width: 396, height: 480 });
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(panel.style.height).toBe('496px');
+    fireEvent.keyDown(handle, { key: 'ArrowDown' });
+    expect(panel.style.height).toBe('480px');
+    expect(storedSize()).toEqual({ width: 380, height: 480 });
   });
 
-  it('re-clamps the rect when the window resizes', () => {
-    seedRect({
-      left: window.innerWidth - 380 - 16,
-      top: window.innerHeight - 480 - 16,
-      width: 380,
-      height: 480,
-    });
+  it('stays anchored on window resize and re-clamps the size (c)', () => {
+    setViewport(1600, 900);
+    seedSize({ width: 900, height: 600 });
     const panel = renderPanel();
-    const descriptor = Object.getOwnPropertyDescriptor(window, 'innerWidth');
-    Object.defineProperty(window, 'innerWidth', {
-      value: 500,
-      configurable: true,
-      writable: true,
-    });
-    try {
-      fireEvent(window, new Event('resize'));
-      expect(panel.style.left).toBe('112px');
-      expect(panel.style.width).toBe('380px');
-    } finally {
-      if (descriptor) Object.defineProperty(window, 'innerWidth', descriptor);
-      else Reflect.deleteProperty(window, 'innerWidth');
-    }
+    expect(panel.style.width).toBe('900px');
+    expect(panel.style.height).toBe('600px');
+    setViewport(500, 500);
+    fireEvent(window, new Event('resize'));
+    expect(panel.style.width).toBe(`${500 - 16 - 8}px`);
+    expect(panel.style.height).toBe(`${500 - 84 - 8}px`);
+    expect(panel.style.right).toBe(ANCHOR_RIGHT);
+    expect(panel.style.bottom).toBe(ANCHOR_BOTTOM);
   });
 
-  it('renders all eight handles with separator role and localized labels', () => {
+  it('renders only the n, w and nw handles (d)', () => {
     renderWithProviders(<ChatPanel onClose={() => undefined} />);
-    for (const direction of ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se']) {
+    for (const direction of ['n', 'w', 'nw']) {
       const handle = screen.getByTestId(`ai-chat-resize-${direction}`);
       expect(handle).toHaveAttribute('role', 'separator');
       expect(handle).toHaveAttribute('tabindex', '0');
-      expect(handle).toHaveAttribute(
-        'aria-label',
-        expect.stringContaining('Redimensionar panel'),
-      );
+      expect(handle).toHaveAttribute('aria-label', expect.stringContaining('Redimensionar panel'));
     }
-    expect(screen.getByTestId('ai-chat-resize-w')).toHaveAttribute(
-      'aria-orientation',
-      'vertical',
-    );
-    expect(screen.getByTestId('ai-chat-resize-n')).toHaveAttribute(
-      'aria-orientation',
-      'horizontal',
-    );
+    for (const direction of ['s', 'e', 'ne', 'sw', 'se']) {
+      expect(screen.queryByTestId(`ai-chat-resize-${direction}`)).toBeNull();
+    }
+    expect(screen.getByTestId('ai-chat-resize-w')).toHaveAttribute('aria-orientation', 'vertical');
+    expect(screen.getByTestId('ai-chat-resize-n')).toHaveAttribute('aria-orientation', 'horizontal');
+  });
+
+  it('clamps a stored size to a small viewport (e)', () => {
+    setViewport(500, 600);
+    seedSize({ width: 900, height: 900 });
+    const panel = renderPanel();
+    expect(panel.style.width).toBe(`${500 - 16 - 8}px`);
+    expect(panel.style.height).toBe(`${600 - 84 - 8}px`);
+    expect(panel.style.right).toBe(ANCHOR_RIGHT);
+    expect(panel.style.bottom).toBe(ANCHOR_BOTTOM);
+  });
+
+  it('enforces the 320px minimum on a stored size', () => {
+    seedSize({ width: 100, height: 100 });
+    const panel = renderPanel();
+    expect(panel.style.width).toBe('320px');
+    expect(panel.style.height).toBe('320px');
+  });
+
+  it('falls back to the default size on corrupt or non-numeric v2 values', () => {
+    window.localStorage.setItem(PANEL_SIZE_STORAGE_KEY, '{not json');
+    const corrupt = renderPanel();
+    expect(corrupt.style.width).toBe('380px');
+    expect(corrupt.style.height).toBe('480px');
+    expect(corrupt.style.right).toBe(ANCHOR_RIGHT);
+    expect(corrupt.style.bottom).toBe(ANCHOR_BOTTOM);
+  });
+
+  it('ignores non-numeric v2 fields and a non-object payload', () => {
+    seedSize({ width: 'wide', height: null });
+    const nonNumeric = renderWithProviders(<ChatPanel onClose={() => undefined} />);
+    expect(screen.getByTestId('ai-chat-panel').style.width).toBe('380px');
+    expect(screen.getByTestId('ai-chat-panel').style.height).toBe('480px');
+    nonNumeric.unmount();
+    seedSize(42);
+    const scalar = renderPanel();
+    expect(scalar.style.width).toBe('380px');
+    expect(scalar.style.height).toBe('480px');
+  });
+
+  it('drops a corrupt legacy v1 value without crashing', () => {
+    window.localStorage.setItem(LEGACY_RECT_STORAGE_KEY, '{bad');
+    const panel = renderPanel();
+    expect(panel.style.width).toBe('380px');
+    expect(window.localStorage.getItem(LEGACY_RECT_STORAGE_KEY)).toBeNull();
   });
 });
 
 describe('ChatPanel — resizable panel (mobile bottom sheet)', () => {
-  it('hides the handles and applies neither inline size nor rect', () => {
+  it('hides the handles and applies neither inline size nor anchor', () => {
     stubMatchMedia(false);
     renderWithProviders(<ChatPanel onClose={() => undefined} />);
     const panel = screen.getByTestId('ai-chat-panel');
-    for (const direction of ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se']) {
-      expect(
-        screen.queryByTestId(`ai-chat-resize-${direction}`),
-      ).toBeNull();
+    for (const direction of ['n', 'w', 'nw']) {
+      expect(screen.queryByTestId(`ai-chat-resize-${direction}`)).toBeNull();
     }
     expect(panel.style.width).toBe('');
     expect(panel.style.height).toBe('');
     expect(panel.style.maxHeight).toBe('');
+    expect(panel.style.right).toBe('');
+    expect(panel.style.bottom).toBe('');
     expect(panel.style.left).toBe('');
     expect(panel.style.top).toBe('');
     expect(panel.style.position).toBe('');
