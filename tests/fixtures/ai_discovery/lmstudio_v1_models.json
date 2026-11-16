@@ -1,0 +1,20 @@
+{
+ "data": [
+  {
+   "id": "text-embedding-nomic-embed-text-v1.5",
+   "object": "model",
+   "owned_by": "organization_owner"
+  },
+  {
+   "id": "minicpm-v-4.7-35b-a3b",
+   "object": "model",
+   "owned_by": "organization_owner"
+  },
+  {
+   "id": "laguna-s-2.1",
+   "object": "model",
+   "owned_by": "organization_owner"
+  }
+ ],
+ "object": "list"
+}

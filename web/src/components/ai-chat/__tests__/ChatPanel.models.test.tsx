@@ -163,7 +163,7 @@ describe('ChatPanel — detected loaded models', () => {
     renderWithProviders(<ChatPanel onClose={noop} />);
 
     expect(await screen.findByTestId('ai-chat-models-notice')).toHaveTextContent(
-      'No se pudo consultar LM Studio',
+      'No se pudo consultar el servidor de IA local',
     );
     expect(screen.getByTestId('ai-chat-status')).toHaveTextContent('SIN CONEXIÓN');
     expect(screen.getByTestId('ai-chat-session-model-input')).toBeInTheDocument();
@@ -428,7 +428,7 @@ describe('ChatPanel — detected loaded models', () => {
     renderWithProviders(<ChatPanel onClose={noop} />);
 
     expect(await screen.findByTestId('ai-chat-models-notice')).toHaveTextContent(
-      'no expone la API de modelos de LM Studio',
+      'no expone una API compatible para detectar modelos cargados',
     );
     expect(screen.getByTestId('ai-chat-status')).toHaveTextContent(
       'API NO COMPATIBLE',
@@ -631,7 +631,7 @@ describe('ChatPanel — draft ownership and stale notices', () => {
     await userEvent.type(screen.getByTestId('ai-chat-input'), 'hola');
     await userEvent.click(screen.getByTestId('ai-chat-send'));
     expect(await screen.findByTestId('ai-chat-notice')).toHaveTextContent(
-      'No se pudo consultar LM Studio',
+      'No se pudo consultar el servidor de IA local',
     );
 
     mockGet.mockResolvedValueOnce({ data: single('alpha') });

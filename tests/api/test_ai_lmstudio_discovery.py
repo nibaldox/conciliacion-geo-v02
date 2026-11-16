@@ -230,6 +230,7 @@ async def test_redirects_are_not_followed():
     assert calls == [
         "http://lmstudio.test/api/v1/models",
         "http://lmstudio.test/api/v0/models",
+        "http://lmstudio.test/v1/models",
     ]
 
 
@@ -798,3 +799,83 @@ async def test_real_http_round_trip_uses_the_provider_base_url(
     assert result.status == "ok"
     assert [m.id for m in result.models] == ["alpha"]
     assert calls == ["http://lmstudio.test/api/v1/models"]
+
+
+def fixture_payload(name):
+    from pathlib import Path
+    return json.loads((Path(__file__).parents[1] / "fixtures" / "ai_discovery" / name).read_text())
+
+
+@pytest.mark.asyncio
+async def test_strata_openai_status_discovery():
+    calls = []
+    result = await run_discovery({"/v1/models": (200, fixture_payload("strata_v1_models.json"))}, calls)
+    assert result.status == "ok"
+    assert result.source == "openai_status"
+    assert [m.id for m in result.models] == ["qwen3.8-flash-next-unsloth-ud-q4_k_xl"]
+    assert result.models[0].tool_use is None
+    assert len(calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_openai_downloads_without_status_are_unsupported():
+    result = await run_discovery({"/v1/models": (200, fixture_payload("lmstudio_v1_models.json"))}, [])
+    assert result.status == "not_supported"
+
+
+@pytest.mark.asyncio
+async def test_openai_unloaded_and_invalid_ids_are_excluded():
+    payload = {"data": [{"id": "off", "status": {"value": "unloaded"}},
+                        {"id": "bad\u0001id", "status": {"value": "loaded"}}]}
+    result = await run_discovery({"/v1/models": (200, payload)}, [])
+    assert result.status == "ok"
+    assert result.models == ()
+
+
+@pytest.mark.asyncio
+async def test_openai_unauthorized_is_unavailable():
+    result = await run_discovery({"/v1/models": (401, {})}, [])
+    assert result.status == "unavailable"
+
+
+@pytest.mark.parametrize("source,expected", [("openai_status", "Strata · Servidor IA"), ("v1", "LM Studio · Local"), ("v0", "LM Studio · Local"), (None, None)])
+def test_backend_label_from_source(client, monkeypatch, source, expected):
+    enable_chat(monkeypatch)
+    monkeypatch.delenv("CONCILIACION_LOCAL_AI_LABEL", raising=False)
+    fake = _FakeDiscovery(DiscoveryResult("ok", source, ()))
+    monkeypatch.setattr(ai_router, "discover_lmstudio_models", fake)
+    assert providers_body(client)["chat_backend_label"] == expected
+    assert fake.calls == 1
+
+
+def test_backend_label_override_and_disabled(client, monkeypatch):
+    enable_chat(monkeypatch)
+    monkeypatch.setenv("CONCILIACION_LOCAL_AI_LABEL", "  Equipo local  ")
+    monkeypatch.setattr(ai_router, "discover_lmstudio_models", _FakeDiscovery(DiscoveryResult("ok", "v1", ())))
+    assert providers_body(client)["chat_backend_label"] == "Equipo local"
+    monkeypatch.setenv(ai_router.CHAT_FLAG_ENV, "false")
+    assert providers_body(client)["chat_backend_label"] is None
+
+
+@pytest.mark.asyncio
+async def test_openai_fallback_carries_bearer_and_wins_after_server_error():
+    seen = []
+    def handler(request):
+        seen.append((request.url.path, request.headers.get("authorization")))
+        if request.url.path == "/v1/models":
+            return httpx.Response(200, json=fixture_payload("strata_v1_models.json"))
+        return httpx.Response(500)
+    result = await discover_lmstudio_models(base_url=BASE, api_key="secret", transport=httpx.MockTransport(handler))
+    assert result.source == "openai_status"
+    assert len(seen) == 3
+    assert all(auth == "Bearer secret" for _, auth in seen)
+    assert "secret" not in json.dumps(result.as_payload())
+
+
+def test_backend_label_sanitized_bounded_and_local_only(client, monkeypatch):
+    enable_chat(monkeypatch)
+    monkeypatch.setenv("CONCILIACION_LOCAL_AI_LABEL", "  A\x01" + "x" * 100 + "  ")
+    monkeypatch.setattr(ai_router, "discover_lmstudio_models", _FakeDiscovery(DiscoveryResult("ok", "v1", ())))
+    assert providers_body(client)["chat_backend_label"] == "A" + "x" * 59
+    monkeypatch.setenv(ai_router.LOCAL_ONLY_ENV, "0")
+    assert providers_body(client)["chat_backend_label"] is None

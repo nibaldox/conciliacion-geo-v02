@@ -11,8 +11,8 @@ actually LOADED (in memory), as opposed to merely downloaded:
   ``not-loaded``) and ``data[].capabilities`` (list, may include
   ``tool_use``). Used ONLY as a fallback for older LM Studio builds.
 
-``GET /v1/models`` is deliberately NOT used: it lists every downloaded
-model and says nothing about what is loaded.
+``GET /v1/models`` is used only when entries explicitly carry a status
+dictionary; LM Studio lists downloads without that evidence and is rejected.
 
 Everything here is presentation-free and fail-closed: only loaded chat
 instances are returned, ids are bounded/cleaned, and NO base URL, token
@@ -252,6 +252,25 @@ def parse_models_v0(payload: object) -> list[LoadedModel] | None:
     return _dedupe(models)
 
 
+def parse_models_openai_status(payload: object) -> list[LoadedModel] | None:
+    """Accept only explicit loaded status; a download-only list is unsupported."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return None
+    entries = payload["data"]
+    if not any(isinstance(e, dict) and isinstance(e.get("status"), dict) for e in entries):
+        return None
+    models = []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("status"), dict):
+            continue
+        if entry["status"].get("value") != "loaded":
+            continue
+        model_id = _clean_model_id(entry.get("id"))
+        if model_id is not None:
+            models.append(LoadedModel(id=model_id, label=None, tool_use=None))
+    return _dedupe(models)
+
+
 async def _fetch_models(
     client: httpx.AsyncClient, url: str, parser
 ) -> tuple[str, list[LoadedModel] | None]:
@@ -297,8 +316,9 @@ async def discover_lmstudio_models(
     Tries ``/api/v1/models`` first and falls back to ``/api/v0/models``
     whenever v1 is not usable (unsupported OR a server/transport error):
     older builds and reverse proxies can fail v1 while still serving v0.
-    ``not_supported`` is reported ONLY when the server answered and BOTH
-    surfaces are unknown; any transport failure is ``unavailable``.
+    Always try the third status-bearing OpenAI surface after both fail,
+    including after errors, so a working fallback wins. Only three
+    unsupported responses yield ``not_supported``; errors yield unavailable.
 
     The request reuses the provider's own API key, never follows
     redirects, never trusts proxy env vars and never raises: any failure
@@ -333,6 +353,11 @@ async def discover_lmstudio_models(
         )
         if status_v0 == "ok":
             return DiscoveryResult(STATUS_OK, "v0", tuple(models or ()))
-        if status_v1 == "unsupported" and status_v0 == "unsupported":
+        status_openai, models = await _fetch_models(
+            client, f"{root.rstrip('/')}/v1/models", parse_models_openai_status
+        )
+        if status_openai == "ok":
+            return DiscoveryResult(STATUS_OK, "openai_status", tuple(models or ()))
+        if all(s == "unsupported" for s in (status_v1, status_v0, status_openai)):
             return DiscoveryResult(STATUS_NOT_SUPPORTED, None, ())
         return DiscoveryResult(STATUS_UNAVAILABLE, None, ())

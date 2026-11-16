@@ -44,6 +44,7 @@ export interface AIProvidersState {
   supports_tool_calls: Record<string, boolean>;
   chat_enabled: boolean;
   chat_provider: string | null;
+  chat_backend_label?: string | null;
   chat_local_only: boolean;
   chat_model: string;
   chat_models?: AIChatModelsState;

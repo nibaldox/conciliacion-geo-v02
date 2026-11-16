@@ -188,6 +188,15 @@ async def health() -> dict:
     }
 
 
+def _chat_backend_label(source: str | None) -> str | None:
+    if not _chat_enabled() or not _local_only_active():
+        return None
+    label = re.sub(r"[\x00-\x1f\x7f]", "", os.environ.get("CONCILIACION_LOCAL_AI_LABEL", "")).strip()[:60].strip()
+    if label:
+        return label
+    return {"openai_status": "Strata · Servidor IA", "v1": "LM Studio · Local", "v0": "LM Studio · Local"}.get(source)
+
+
 @router.get("/providers")
 async def providers() -> dict:
     """Return the configured provider presets with tool-calling capability.
@@ -205,7 +214,7 @@ async def providers() -> dict:
 
     ``chat_models`` is additive and reports what is ACTUALLY loaded:
     ``status`` (``ok`` / ``unavailable`` / ``not_supported`` /
-    ``disabled``), the discovery ``source`` (``v1`` / ``v0``), the loaded
+    ``disabled``), the discovery ``source`` (``v1`` / ``v0`` / ``openai_status``), the loaded
     chat ``models`` (instance id + label + tool support) and the
     server-side ``selected`` model with its ``selected_source``
     (``override`` / ``auto``). The payload never carries the provider
@@ -227,6 +236,7 @@ async def providers() -> dict:
             or PROVIDER_PRESETS[ProviderType.LMSTUDIO]["default_model"]
         ),
         "chat_models": chat_models,
+        "chat_backend_label": _chat_backend_label(chat_models.get("source")),
     }
 
 

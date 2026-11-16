@@ -362,7 +362,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
               data-testid="ai-chat-local-badge"
               className="shrink-0 rounded bg-surface-muted px-1.5 py-0.5 font-medium text-text-secondary"
             >
-              {t('aiChat.header.local_badge')}
+              {providerState?.chat_backend_label?.trim() || t('aiChat.header.local_badge')}
             </span>
           )}
           {headerModel && (

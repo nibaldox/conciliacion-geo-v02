@@ -86,6 +86,12 @@ describe('ChatPanel — explicit deployment states', () => {
     expect(panel?.style.left).toBe(`${window.innerWidth - 380 - 16}px`);
   });
 
+  it('uses the backend label when provided', async () => {
+    mockGet.mockResolvedValueOnce({ data: providersBody({ chat_backend_label: 'Strata · Servidor IA' }) });
+    renderWithProviders(<ChatPanel onClose={() => undefined} />);
+    expect(await screen.findByTestId('ai-chat-local-badge')).toHaveTextContent('Strata · Servidor IA');
+  });
+
   it('shows the no-tool-calls notice for a provider without tool support', async () => {
     mockGet.mockResolvedValueOnce({
       data: providersBody({
@@ -219,7 +225,7 @@ describe('ChatPanel — placeholder model handling', () => {
     await userEvent.type(input, 'hola');
     await userEvent.click(screen.getByTestId('ai-chat-send'));
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(screen.getByText('Indica el modelo cargado en LM Studio antes de enviar mensajes.')).toBeInTheDocument();
+    expect(screen.getByText('Indica el modelo cargado en el servidor de IA local antes de enviar mensajes.')).toBeInTheDocument();
     expect(input).toHaveValue('hola');
 
     await userEvent.type(screen.getByTestId('ai-chat-session-model-input'), 'qwen3-32b');
