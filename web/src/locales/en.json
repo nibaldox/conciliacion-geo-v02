@@ -1802,7 +1802,8 @@
       "empty": "New conversation. Ask about the workflow status or request loading a topography.",
       "you": "You",
       "agent": "Assistant",
-      "streaming": "The assistant is working…"
+      "streaming": "The assistant is working…",
+      "scroll_latest": "Jump to latest"
     },
     "tool": {
      "running": "running \"{{name}}\"…",

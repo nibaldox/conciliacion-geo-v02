@@ -63,6 +63,11 @@ export interface PendingConfirmation {
   argsSummary: string;
 }
 
+export interface PanelScrollState {
+  top: number;
+  atBottom: boolean;
+}
+
 export const SECTION_DEPENDENT_QUERY_KEYS: ReadonlyArray<ReadonlyArray<string>> = [
   ['sections'],
   ['results'],
@@ -245,6 +250,7 @@ interface AIChatState {
   notice: ChatNotice | null;
   abortController: AbortController | null;
   writeResultObserver: ((toolName: string) => void) | null;
+  panelScroll: PanelScrollState | null;
 
   init: () => Promise<void>;
   send: (message: string) => Promise<boolean>;
@@ -259,6 +265,7 @@ interface AIChatState {
   setWriteResultObserver: (
     observer: ((toolName: string) => void) | null,
   ) => void;
+  setPanelScroll: (panelScroll: PanelScrollState | null) => void;
   applyAgentEvent: (event: AgentEvent) => void;
   reset: () => void;
 }
@@ -282,6 +289,7 @@ const initialState = {
   notice: null as ChatNotice | null,
   abortController: null as AbortController | null,
   writeResultObserver: null as ((toolName: string) => void) | null,
+  panelScroll: null as PanelScrollState | null,
 };
 
 /**
@@ -742,6 +750,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
         messages: [],
         activeTextId: null,
         pendingConfirmation: null,
+        panelScroll: null,
         notice: { severity: 'info', key: 'aiChat.notice.cleared' },
       });
     } finally {
@@ -750,6 +759,8 @@ export const useAIChat = create<AIChatState>((set, get) => ({
   },
 
   setWriteResultObserver: (observer) => set({ writeResultObserver: observer }),
+
+  setPanelScroll: (panelScroll) => set({ panelScroll }),
 
   applyAgentEvent: (event: AgentEvent) => {
     switch (event.type) {

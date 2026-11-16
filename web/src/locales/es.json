@@ -1802,7 +1802,8 @@
       "empty": "Conversación nueva. Pregunta por el estado del flujo o pide cargar una topografía.",
       "you": "Tú",
       "agent": "Asistente",
-      "streaming": "El asistente está trabajando…"
+      "streaming": "El asistente está trabajando…",
+      "scroll_latest": "Ir a lo último"
     },
     "tool": {
      "running": "ejecutando «{{name}}»…",
