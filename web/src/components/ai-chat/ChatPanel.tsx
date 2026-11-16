@@ -12,10 +12,17 @@ import {
   type ChatModelSelection,
 } from '../../utils/chatModelSelection';
 import { Spinner } from '../ui/Spinner';
+import { ChatPet } from './ChatPet';
+import { usePetState } from './petState';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TopoUploadZone } from './TopoUploadZone';
+import { useChatAutoScroll } from './useChatAutoScroll';
 import { ConfirmationCard, ToolCallCard } from './ToolCallCard';
-import { type ResizeDirection, useResizablePanel } from './useResizablePanel';
+import {
+  PANEL_ANCHOR_STYLE,
+  type ResizeDirection,
+  useResizablePanel,
+} from './useResizablePanel';
 
 const NOTICE_TONE: Record<ChatNotice['severity'], string> = {
   info: 'border-border text-text-secondary',
@@ -80,7 +87,7 @@ function derivePanelStatus(options: {
   return 'configured';
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageItem({ message }: { message: ChatMessage }) {
   const { t } = useTranslation();
   if (message.kind === 'tool') return <ToolCallCard message={message} />;
   if (message.kind === 'confirmation') {
@@ -88,37 +95,36 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   }
   if (message.kind === 'observation') {
     return (
-      <div
+      <p
         data-slot="ai-chat-observation"
-        className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-xs text-text-secondary"
+        className="whitespace-pre-wrap break-words text-xs text-text-muted"
       >
-        <p className="whitespace-pre-wrap break-words">{message.text}</p>
+        {message.text}
+      </p>
+    );
+  }
+  if (message.kind === 'user') {
+    return (
+      <div
+        data-slot="ai-chat-message"
+        data-kind="user"
+        className="border-t border-border/50 pt-3 first:border-t-0 first:pt-0"
+      >
+        <span className="sr-only">{t('aiChat.messages.you')}</span>
+        <p className="whitespace-pre-wrap break-words border-l-2 border-accent/60 pl-3 text-sm text-text-secondary">
+          {message.text}
+        </p>
       </div>
     );
   }
-  const isUser = message.kind === 'user';
   return (
     <div
       data-slot="ai-chat-message"
-      data-kind={message.kind}
-      className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+      data-kind="agent"
+      className="text-text-primary"
     >
-      <div
-        className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-          isUser
-            ? 'bg-accent text-accent-fg'
-            : 'border border-border bg-surface text-text-primary'
-        }`}
-      >
-        <span className="sr-only">
-          {isUser ? t('aiChat.messages.you') : t('aiChat.messages.agent')}
-        </span>
-        {message.kind === 'agent' ? (
-          <MarkdownMessage content={message.text} />
-        ) : (
-          <p className="whitespace-pre-wrap break-words">{message.text}</p>
-        )}
-      </div>
+      <span className="sr-only">{t('aiChat.messages.agent')}</span>
+      <MarkdownMessage content={message.text} />
     </div>
   );
 }
@@ -171,42 +177,32 @@ function NoticeBanner({ notice }: { notice: ChatNotice }) {
 
 interface ChatPanelProps {
   onClose: () => void;
-  /**
-   * Desktop-only extra gap subtracted from the stored rect height so the
-   * panel's bottom edge clears the floating launcher button (which stays
-   * fixed above it at z-[95]). Ignored on mobile (bottom sheet).
-   */
-  bottomOffsetPx?: number;
 }
 
 const RESIZE_HANDLES: ReadonlyArray<{
   direction: ResizeDirection;
-  labelKey: 'north' | 'south' | 'east' | 'west' | 'ne' | 'nw' | 'se' | 'sw';
+  labelKey: 'north' | 'west' | 'nw';
   orientation?: 'horizontal' | 'vertical';
   className: string;
 }> = [
   { direction: 'n', labelKey: 'north', orientation: 'horizontal', className: 'inset-x-3 top-0 h-1.5 cursor-n-resize' },
-  { direction: 's', labelKey: 'south', orientation: 'horizontal', className: 'inset-x-3 bottom-0 h-1.5 cursor-s-resize' },
-  { direction: 'e', labelKey: 'east', orientation: 'vertical', className: 'inset-y-3 right-0 w-1.5 cursor-e-resize' },
   { direction: 'w', labelKey: 'west', orientation: 'vertical', className: 'inset-y-3 left-0 w-1.5 cursor-w-resize' },
   { direction: 'nw', labelKey: 'nw', className: 'left-0 top-0 h-3 w-3 cursor-nw-resize' },
-  { direction: 'ne', labelKey: 'ne', className: 'right-0 top-0 h-3 w-3 cursor-ne-resize' },
-  { direction: 'sw', labelKey: 'sw', className: 'bottom-0 left-0 h-3 w-3 cursor-sw-resize' },
-  { direction: 'se', labelKey: 'se', className: 'bottom-0 right-0 h-3 w-3 cursor-se-resize' },
 ];
 
 /**
  * The chat panel: history, notices, confirmation cards, mesh upload and
  * the message input. Agent output is rendered as Markdown inside a
  * sandboxed renderer (no raw HTML ever reaches the DOM). On desktop the
- * panel is resizable from its edges/corners; on mobile it stays a
- * full-width bottom sheet. Escape closes the panel and focus is
- * restored to the previously focused element.
+ * panel sits above the launcher and is resizable from its north and west
+ * edges; on mobile it stays a full-width bottom sheet. Escape closes the
+ * panel and focus is restored to the previously focused element.
  */
-export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
+export function ChatPanel({ onClose }: ChatPanelProps) {
   const { t } = useTranslation();
   const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
+  const petState = usePetState({ unread: false });
   const streaming = useAIChat((s) => s.streaming);
   const sendInFlight = useAIChat((s) => s.sendInFlight);
   const clearing = useAIChat((s) => s.clearing);
@@ -223,11 +219,17 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
   const clearConversation = useAIChat((s) => s.clearConversation);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const handledAcceptanceRef = useRef<string | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const { unseen, handleScroll, jumpToLatest } = useChatAutoScroll({
+    scrollRef,
+    contentRef,
+    messages,
+  });
 
   useEffect(() => {
     if (!acceptedDraft || handledAcceptanceRef.current === acceptedDraft.id) {
@@ -253,11 +255,6 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
       restoreFocusRef.current?.focus();
     };
   }, []);
-
-  useEffect(() => {
-    const list = listRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [messages, notice]);
 
   const chatEnabled = providerState?.chat_enabled ?? false;
   const provider = providerState?.chat_provider ?? null;
@@ -313,17 +310,15 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
     void clearConversation();
   };
 
-  const bottomGap = Math.max(0, Math.round(bottomOffsetPx));
   const panelStyle: CSSProperties = {
     paddingBottom: 'env(safe-area-inset-bottom)',
     ...(resizable.isDesktop
       ? {
+          ...PANEL_ANCHOR_STYLE,
           position: 'fixed',
-          left: resizable.rect.left,
-          top: resizable.rect.top,
-          width: resizable.rect.width,
-          height: resizable.rect.height - bottomGap,
-          maxHeight: resizable.rect.height - bottomGap,
+          width: resizable.size.width,
+          height: resizable.size.height,
+          maxHeight: resizable.size.height,
         }
       : {}),
   };
@@ -343,9 +338,10 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
     >
       <header className="shrink-0 border-b border-border px-3 py-2">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">
-            {t('aiChat.title')}
-          </h2>
+          <div className="flex shrink-0 items-center gap-2">
+            <ChatPet size="inline" state={petState} trackPointer={false} />
+            <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">{t('aiChat.title')}</h2>
+          </div>
           <button
             type="button"
             data-testid="ai-chat-close"
@@ -410,134 +406,58 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
-        {notice && <NoticeBanner notice={notice} />}
-        {!providerStateLoaded && (
-          <div
-            role="status"
-            className="flex items-center gap-2 text-xs text-text-muted"
-          >
-            <Spinner size="sm" />
-            {t('aiChat.header.status_loading')}
-          </div>
-        )}
-        {providerStateLoaded && !chatEnabled && (
-          <div
-            role="status"
-            data-testid="ai-chat-disabled-notice"
-            className="rounded-lg border border-border px-3 py-2 text-xs text-text-secondary"
-          >
-            {t('aiChat.notice.chat_disabled')}
-          </div>
-        )}
-        {providerStateLoaded && chatEnabled && !supportsTools && (
-          <div
-            role="status"
-            data-testid="ai-chat-no-tools-notice"
-            className="rounded-lg border border-border px-3 py-2 text-xs text-text-secondary"
-          >
-            {t('aiChat.notice.provider_no_tools')}
-          </div>
-        )}
-        {placeholderModel && (
-          <div
-            role="status"
-            data-testid="ai-chat-placeholder-model-warning"
-            className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
-          >
-            <p>{t('aiChat.notice.placeholder_model_warn')}</p>
-            <label className="mt-2 block">
-              <span className="text-[11px] text-text-muted">
-                {t('aiChat.model.session_label')}
-              </span>
-              <input
-                type="text"
-                data-testid="ai-chat-session-model-input"
-                value={sessionModel}
-                onChange={(e) => setSessionModel(e.target.value)}
-                aria-label={t('aiChat.model.session_label')}
-                placeholder="qwen3-32b"
-                disabled={busy}
-                className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </label>
-          </div>
-        )}
-        {chatEnabled && selection.kind === 'pick' && (
-          <div
-            role="status"
-            data-testid={
-              selection.model === null
-                ? 'ai-chat-models-notice'
-                : 'ai-chat-model-selector'
-            }
-            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${
-              selection.model === null
-                ? 'border-[var(--color-status-warning)]'
-                : 'border-border'
-            }`}
-          >
-            {selection.model === null && (
-              <div className="flex items-start justify-between gap-2">
-                <p>{t('aiChat.notice.models_required')}</p>
-              </div>
-            )}
-            <label
-              className={selection.model === null ? 'mt-2 block' : 'block'}
-            >
-              <span className="text-[11px] text-text-muted">
-                {t('aiChat.model.selector_label')}
-              </span>
-              <select
-                data-testid="ai-chat-model-select"
-                value={selection.model ?? ''}
-                onChange={(e) => setSessionModel(e.target.value, 'detected')}
-                aria-label={t('aiChat.model.selector_label')}
-                disabled={busy}
-                className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value="">{t('aiChat.model.selector_placeholder')}</option>
-                {selection.models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {modelOptionLabel(model, selection.models)}
-                    {model.tool_use === false
-                      ? ` · ${t('aiChat.model.no_tools_suffix')}`
-                      : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
-        {chatEnabled &&
-          selection.kind === 'unresolved' &&
-          modelsState?.status !== 'disabled' && (
+      <div
+        ref={scrollRef}
+        data-testid="ai-chat-scroll"
+        onScroll={handleScroll}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-2"
+      >
+        <div ref={contentRef} className="flex shrink-0 flex-col gap-3">
+          {notice && <NoticeBanner notice={notice} />}
+          {!providerStateLoaded && (
             <div
               role="status"
-              data-testid="ai-chat-models-notice"
+              className="flex items-center gap-2 text-xs text-text-muted"
+            >
+              <Spinner size="sm" />
+              {t('aiChat.header.status_loading')}
+            </div>
+          )}
+          {providerStateLoaded && !chatEnabled && (
+            <div
+              role="status"
+              data-testid="ai-chat-disabled-notice"
+              className="rounded-lg border border-border px-3 py-2 text-xs text-text-secondary"
+            >
+              {t('aiChat.notice.chat_disabled')}
+            </div>
+          )}
+          {providerStateLoaded && chatEnabled && !supportsTools && (
+            <div
+              role="status"
+              data-testid="ai-chat-no-tools-notice"
+              className="rounded-lg border border-border px-3 py-2 text-xs text-text-secondary"
+            >
+              {t('aiChat.notice.provider_no_tools')}
+            </div>
+          )}
+          {placeholderModel && (
+            <div
+              role="status"
+              data-testid="ai-chat-placeholder-model-warning"
               className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
             >
-              <div className="flex items-start justify-between gap-2">
-                <p>
-                  {t(
-                    selection.status === 'ok'
-                      ? 'aiChat.notice.models_none'
-                      : selection.status === 'not_supported'
-                        ? 'aiChat.notice.models_unsupported'
-                        : 'aiChat.notice.models_unreachable',
-                  )}
-                </p>
-              </div>
+              <p>{t('aiChat.notice.placeholder_model_warn')}</p>
               <label className="mt-2 block">
                 <span className="text-[11px] text-text-muted">
-                  {t('aiChat.model.manual_label')}
+                  {t('aiChat.model.session_label')}
                 </span>
                 <input
                   type="text"
                   data-testid="ai-chat-session-model-input"
                   value={sessionModel}
                   onChange={(e) => setSessionModel(e.target.value)}
-                  aria-label={t('aiChat.model.manual_label')}
+                  aria-label={t('aiChat.model.session_label')}
                   placeholder="qwen3-32b"
                   disabled={busy}
                   className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
@@ -545,40 +465,132 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
               </label>
             </div>
           )}
-        {chosenToolUse === false && (
+          {chatEnabled && selection.kind === 'pick' && (
+            <div
+              role="status"
+              data-testid={
+                selection.model === null
+                  ? 'ai-chat-models-notice'
+                  : 'ai-chat-model-selector'
+              }
+              className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${
+                selection.model === null
+                  ? 'border-[var(--color-status-warning)]'
+                  : 'border-border'
+              }`}
+            >
+              {selection.model === null && (
+                <div className="flex items-start justify-between gap-2">
+                  <p>{t('aiChat.notice.models_required')}</p>
+                </div>
+              )}
+              <label
+                className={selection.model === null ? 'mt-2 block' : 'block'}
+              >
+                <span className="text-[11px] text-text-muted">
+                  {t('aiChat.model.selector_label')}
+                </span>
+                <select
+                  data-testid="ai-chat-model-select"
+                  value={selection.model ?? ''}
+                  onChange={(e) => setSessionModel(e.target.value, 'detected')}
+                  aria-label={t('aiChat.model.selector_label')}
+                  disabled={busy}
+                  className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="">{t('aiChat.model.selector_placeholder')}</option>
+                  {selection.models.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {modelOptionLabel(model, selection.models)}
+                      {model.tool_use === false
+                        ? ` · ${t('aiChat.model.no_tools_suffix')}`
+                        : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+          {chatEnabled &&
+            selection.kind === 'unresolved' &&
+            modelsState?.status !== 'disabled' && (
+              <div
+                role="status"
+                data-testid="ai-chat-models-notice"
+                className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p>
+                    {t(
+                      selection.status === 'ok'
+                        ? 'aiChat.notice.models_none'
+                        : selection.status === 'not_supported'
+                          ? 'aiChat.notice.models_unsupported'
+                          : 'aiChat.notice.models_unreachable',
+                    )}
+                  </p>
+                </div>
+                <label className="mt-2 block">
+                  <span className="text-[11px] text-text-muted">
+                    {t('aiChat.model.manual_label')}
+                  </span>
+                  <input
+                    type="text"
+                    data-testid="ai-chat-session-model-input"
+                    value={sessionModel}
+                    onChange={(e) => setSessionModel(e.target.value)}
+                    aria-label={t('aiChat.model.manual_label')}
+                    placeholder="qwen3-32b"
+                    disabled={busy}
+                    className="mt-1 w-full rounded-md border border-border bg-surface px-2 py-1 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  />
+                </label>
+              </div>
+            )}
+          {chosenToolUse === false && (
+            <div
+              role="status"
+              data-testid="ai-chat-model-no-tools"
+              className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+            >
+              {t('aiChat.notice.model_no_tools')}
+            </div>
+          )}
+          {messages.length === 0 && providerStateLoaded && (
+            <p className="py-4 text-center text-xs text-text-muted">
+              {t('aiChat.messages.empty')}
+            </p>
+          )}
           <div
-            role="status"
-            data-testid="ai-chat-model-no-tools"
-            className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+            data-testid="ai-chat-messages"
+            role="log"
+            aria-live="polite"
+            className="flex flex-col gap-3"
           >
-            {t('aiChat.notice.model_no_tools')}
+            {messages.map((message) => (
+              <MessageItem key={message.id} message={message} />
+            ))}
           </div>
-        )}
-        {messages.length === 0 && providerStateLoaded && (
-          <p className="py-4 text-center text-xs text-text-muted">
-            {t('aiChat.messages.empty')}
-          </p>
-        )}
-        <div
-          ref={listRef}
-          data-testid="ai-chat-messages"
-          role="log"
-          aria-live="polite"
-          className="flex flex-col gap-2"
-        >
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {streaming && (
+            <div
+              role="status"
+              data-testid="ai-chat-streaming-indicator"
+              className="flex items-center gap-2 text-xs text-text-muted"
+            >
+              <ChatPet size="inline" state={petState} trackPointer={false} />
+              {t('aiChat.messages.streaming')}
+            </div>
+          )}
         </div>
-        {streaming && (
-          <div
-            role="status"
-            data-testid="ai-chat-streaming-indicator"
-            className="flex items-center gap-2 text-xs text-text-muted"
+        {unseen && (
+          <button
+            type="button"
+            data-testid="ai-chat-scroll-latest"
+            onClick={jumpToLatest}
+            className="sticky bottom-2 z-10 mt-2 self-center rounded-full border border-border bg-surface-raised px-3 py-1 text-xs font-medium text-text-primary shadow-lg hover:bg-surface-muted"
           >
-            <Spinner size="sm" />
-            {t('aiChat.messages.streaming')}
-          </div>
+            {t('aiChat.messages.scroll_latest')}
+          </button>
         )}
       </div>
 

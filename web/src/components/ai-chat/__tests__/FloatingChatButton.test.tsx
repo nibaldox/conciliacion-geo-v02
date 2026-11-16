@@ -28,6 +28,12 @@ function CaptureClient({ out }: { out: { client?: QueryClient } }) {
   return null;
 }
 
+function launcherPet(button: HTMLElement): HTMLElement {
+  const pet = button.querySelector<HTMLElement>('.ai-pet--launcher');
+  if (!pet) throw new Error('launcher pet not rendered');
+  return pet;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   mockGet.mockReset();
@@ -83,7 +89,7 @@ describe('FloatingChatButton', () => {
     vi.unstubAllEnvs();
   });
 
-  it('morphs into the close control: X visible only when open, pet only when closed', async () => {
+  it('keeps the animated pet visible on the launcher while open and shows no close icon', async () => {
     vi.stubEnv('VITE_AI_CHAT', 'true');
     mockGet.mockResolvedValue({
       data: {
@@ -97,18 +103,67 @@ describe('FloatingChatButton', () => {
     });
     renderWithProviders(<FloatingChatButton />);
     const button = screen.getByTestId('ai-chat-button');
-    expect(screen.getByTestId('ai-chat-pet-layer')).not.toHaveClass('opacity-0');
-    expect(screen.getByTestId('ai-chat-close-icon')).toHaveClass('opacity-0');
+    expect(screen.queryByTestId('ai-chat-close-icon')).toBeNull();
 
     await userEvent.click(button);
     expect(screen.getByTestId('ai-chat-panel')).toBeInTheDocument();
-    expect(screen.getByTestId('ai-chat-close-icon')).not.toHaveClass('opacity-0');
-    expect(screen.getByTestId('ai-chat-pet-layer')).toHaveClass('opacity-0');
+    expect(screen.queryByTestId('ai-chat-close-icon')).toBeNull();
+    const pet = launcherPet(button);
+    expect(pet).toHaveClass('ai-pet--launcher');
+    expect(pet.closest('.opacity-0')).toBeNull();
 
     await userEvent.click(button);
     expect(screen.queryByTestId('ai-chat-panel')).toBeNull();
-    expect(screen.getByTestId('ai-chat-close-icon')).toHaveClass('opacity-0');
-    expect(screen.getByTestId('ai-chat-pet-layer')).not.toHaveClass('opacity-0');
+    expect(launcherPet(button)).toHaveClass('ai-pet--launcher');
+    expect(screen.queryByTestId('ai-chat-close-icon')).toBeNull();
+    vi.unstubAllEnvs();
+  });
+
+  it('shows the live turn on the launcher pet while the panel is open', async () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    renderWithProviders(<FloatingChatButton />);
+    const button = screen.getByTestId('ai-chat-button');
+    await userEvent.click(button);
+    act(() =>
+      useAIChat.setState({
+        streaming: true,
+        messages: [
+          {
+            kind: 'tool',
+            id: 't1',
+            invocationId: 't1',
+            name: 'query_results',
+            status: 'running',
+            summary: null,
+            error: null,
+          },
+        ],
+      }),
+    );
+    expect(launcherPet(button)).toHaveClass('ai-pet--tool');
+    act(() => useAIChat.setState({ messages: [] }));
+    expect(launcherPet(button)).toHaveClass('ai-pet--thinking');
+    vi.unstubAllEnvs();
+  });
+
+  it('toggles from the launcher and reports aria-expanded and the aria-label', async () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    renderWithProviders(<FloatingChatButton />);
+    const button = screen.getByTestId('ai-chat-button');
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(button).toHaveClass('flex');
+
+    await userEvent.click(button);
+    expect(screen.getByTestId('ai-chat-panel')).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    expect(button).toHaveAttribute('aria-label', 'Cerrar asistente');
+    expect(button).toHaveClass('hidden', 'sm:flex');
+
+    await userEvent.click(button);
+    expect(screen.queryByTestId('ai-chat-panel')).toBeNull();
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    expect(button).toHaveAttribute('aria-label', 'Abrir asistente de IA');
+    expect(button).toHaveClass('flex');
     vi.unstubAllEnvs();
   });
 
@@ -241,4 +296,15 @@ describe('FloatingChatButton', () => {
     expect(invalidateSpy).not.toHaveBeenCalled();
     vi.unstubAllEnvs();
   });
+});
+
+
+it('reflects the active turn and confirmation in the launcher', () => {
+  vi.stubEnv('VITE_AI_CHAT', 'true');
+  renderWithProviders(<FloatingChatButton />);
+  act(() => useAIChat.setState({ streaming: true }));
+  expect(screen.getByTestId('ai-chat-pet').closest('.ai-pet')).toHaveAttribute('data-state', 'thinking');
+  act(() => useAIChat.setState({ pendingConfirmation: { invocationId: '1', name: 'tool', argsSummary: '' } }));
+  expect(screen.getByTestId('ai-chat-pet').closest('.ai-pet')).toHaveAttribute('data-state', 'confirm');
+  vi.unstubAllEnvs();
 });

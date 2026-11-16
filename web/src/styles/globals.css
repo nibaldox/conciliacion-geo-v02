@@ -489,6 +489,7 @@ body {
 }
 
 /* ── AI chat pet (floating launcher mascot) ──────────────────── */
+/* The mascot uses its own brand colors, deliberately not theme tokens. */
 .ai-chat-launcher {
   background-image: linear-gradient(140deg, var(--color-accent) 0%, var(--color-accent-bright) 100%);
   box-shadow:
@@ -502,172 +503,673 @@ body {
     0 0 0 1px color-mix(in srgb, var(--color-accent-bright) 65%, transparent),
     var(--shadow-lg);
 }
+.ai-chat-launcher[aria-expanded="true"] {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-accent) 60%, transparent),
+    var(--shadow-lg);
+}
 .ai-pet {
-  /* Character brand palette — the mascot keeps its own colors on
-     purpose; these are the blob pet's colors, NOT theme tokens. */
-  --ai-pet-fur-hi: #ffffff;
-  --ai-pet-fur-lo: #e8e8ec;
   --ai-pet-ink: #17171c;
+  --ai-pet-fur-hi: #ffffff;
+  --ai-pet-fur-lo: #e4e5ea;
   --ai-pet-helmet: #f2b21b;
-  --ai-pet-helmet-deep: color-mix(in srgb, #f2b21b 84%, black);
-  --ai-pet-helmet-band: color-mix(in srgb, #f2b21b 90%, black);
-  --ai-pet-helmet-hi: #f9cd6b;
+  --ai-pet-helmet-stroke: #c98f0c;
+  --ai-pet-helmet-band: #dc9f12;
+  --ai-pet-helmet-brim: #d0950f;
+  --ai-pet-helmet-hi: #fbd77d;
   --ai-pet-lamp: #ffe9ae;
   --ai-pet-lamp-glow: #ffc94d;
-  --ai-pet-badge: #2f8fe0;
-  display: block;
+  --ai-pet-lamp-house: #23232b;
+  --ai-pet-lamp-off: #8d919b;
+  --ai-pet-lamp-error: #ff7a66;
+  --ai-pet-blue: #2c77c3;
+  --ai-pet-ok: #2f9e5a;
+  --ai-pet-warn: #b7791f;
+  --ai-pet-danger: #d64545;
+  --ai-pet-dust: #e9e3d4;
+  --ai-pet-wood: #9a6634;
+  --ai-pet-wood-hi: #c08a52;
+  --ai-pet-steel: #a9b2bc;
+  --ai-pet-steel-edge: #6f7883;
+  --ai-pet-dirt: #c49a5c;
+  --ai-pet-dirt-hi: #dcb57a;
+  --ai-pet-dirt-edge: #5a4024;
+  --ai-pet-spark: #fff3c4;
+  --ai-pet-sweat: #9fd3ff;
+  --ai-pet-sweat-stroke: #4b9be0;
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: none;
 }
-.ai-pet__tilt {
-  display: block;
-  transform: rotate(-6deg);
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  will-change: transform;
-}
-.ai-chat-launcher:hover .ai-pet__tilt,
-.ai-chat-launcher:focus-visible .ai-pet__tilt {
-  transform: rotate(0deg) scale(1.05);
-}
-.ai-pet__body {
-  display: block;
-  transform-origin: 50% 60%;
-  animation: ai-pet-breathe 6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-  will-change: transform;
+.ai-pet--inline {
+  width: 22px;
+  height: 22px;
 }
 .ai-pet__svg {
   display: block;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
 }
-.ai-pet__fur { fill: url(#ai-pet-fur); }
-.ai-pet__fur-hi { stop-color: var(--ai-pet-fur-hi); }
-.ai-pet__fur-lo { stop-color: var(--ai-pet-fur-lo); }
-.ai-pet__shade { fill: var(--ai-pet-ink); opacity: 0.12; }
-.ai-pet__sheen { fill: url(#ai-pet-sheen); }
-.ai-pet__sheen-hi { stop-color: #ffffff; stop-opacity: 0.85; }
-.ai-pet__sheen-lo { stop-color: #ffffff; stop-opacity: 0; }
-.ai-pet__eyes {
-  transition: transform 80ms ease-out;
-  will-change: transform;
-}
-.ai-pet__eye {
+.ai-pet__shade {
   fill: var(--ai-pet-ink);
+  opacity: 0.14;
+}
+.ai-pet__fur {
+  stroke: rgba(23, 23, 28, 0.16);
+  stroke-width: 0.8;
+}
+.ai-pet__eyes {
+  fill: var(--ai-pet-ink);
+  transform: translate(var(--ai-pet-ex, 0px), var(--ai-pet-ey, 0px));
+  transition: transform 80ms ease-out;
+}
+.ai-pet__eye-open ellipse {
   transform-box: fill-box;
   transform-origin: center;
   animation: ai-pet-blink 6s infinite;
 }
-.ai-pet__helmet-dome { fill: var(--ai-pet-helmet); }
-.ai-pet__helmet-band { fill: var(--ai-pet-helmet-band); }
-.ai-pet__helmet-ridge { fill: var(--ai-pet-helmet-hi); }
-.ai-pet__helmet-brim { fill: var(--ai-pet-helmet-deep); }
-.ai-pet__lamp-bracket { fill: var(--ai-pet-ink); }
+.ai-pet__eye-happy,
+.ai-pet__eye-squint,
+.ai-pet__eye-closed {
+  display: none;
+  fill: none;
+  stroke: var(--ai-pet-ink);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ai-pet--done .ai-pet__eye-open,
+.ai-pet--error .ai-pet__eye-open,
+.ai-pet--off .ai-pet__eye-open {
+  display: none;
+}
+.ai-pet--done .ai-pet__eye-happy,
+.ai-pet--error .ai-pet__eye-squint,
+.ai-pet--off .ai-pet__eye-closed {
+  display: inline;
+}
+.ai-pet__helmet-dome {
+  fill: var(--ai-pet-helmet);
+  stroke: var(--ai-pet-helmet-stroke);
+  stroke-width: 0.6;
+}
+.ai-pet__helmet-band {
+  fill: var(--ai-pet-helmet-band);
+}
+.ai-pet__helmet-hi {
+  fill: none;
+  stroke: var(--ai-pet-helmet-hi);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.ai-pet__helmet-brim {
+  fill: var(--ai-pet-helmet-brim);
+}
+.ai-pet__lamp-house {
+  fill: var(--ai-pet-lamp-house);
+}
+.ai-pet__lamp {
+  fill: var(--ai-pet-lamp);
+}
+.ai-pet__lamp-core {
+  fill: var(--ai-pet-fur-hi);
+}
 .ai-pet__lamp-glow {
-  fill: var(--ai-pet-lamp-glow);
-  opacity: 0.3;
+  opacity: 0.25;
   transform-box: fill-box;
   transform-origin: center;
 }
-.ai-pet__lamp { fill: var(--ai-pet-lamp); }
-.ai-pet__lamp-core { fill: #ffffff; }
-.ai-pet__badge-pill { fill: var(--ai-pet-badge); }
-.ai-pet__dot { fill: var(--color-accent-fg); }
-.ai-pet--working .ai-pet__dot {
-  animation: ai-pet-dots 1.2s linear infinite;
-}
-.ai-pet--working .ai-pet__dot:nth-of-type(2) { animation-delay: 0.15s; }
-.ai-pet--working .ai-pet__dot:nth-of-type(3) { animation-delay: 0.3s; }
-.ai-pet--working .ai-pet__lamp-glow {
+.ai-pet--thinking .ai-pet__lamp-glow,
+.ai-pet--tool .ai-pet__lamp-glow {
   animation: ai-pet-lamp 1.6s ease-in-out infinite;
 }
-
-@keyframes ai-pet-breathe {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-1.5px) scale(1.015); }
+.ai-pet--unread .ai-pet__lamp-glow,
+.ai-pet--error .ai-pet__lamp-glow {
+  animation: ai-pet-lamp-blink 2.4s ease-in-out infinite;
+}
+.ai-pet--off .ai-pet__lamp {
+  fill: var(--ai-pet-lamp-off);
+}
+.ai-pet--off .ai-pet__lamp-core,
+.ai-pet--off .ai-pet__lamp-glow {
+  opacity: 0;
+  animation: none;
+}
+.ai-pet--error .ai-pet__lamp {
+  fill: var(--ai-pet-lamp-error);
+}
+.ai-pet__rig,
+.ai-pet__helmet,
+.ai-pet__tilt {
+  transform-box: view-box;
+  transform-origin: 28px 50px;
+}
+.ai-pet__tilt {
+  transform: rotate(-6deg);
+  transition: transform 220ms;
+}
+.ai-chat-launcher:hover .ai-pet__tilt,
+.ai-chat-launcher:focus-visible .ai-pet__tilt {
+  transform: rotate(0) scale(1.05);
+}
+.ai-pet__rig {
+  animation: ai-pet-breathe 6s ease-in-out infinite;
+}
+.ai-pet--thinking .ai-pet__rig {
+  animation: ai-pet-sway 2.6s ease-in-out infinite;
+}
+.ai-pet--confirm .ai-pet__rig {
+  transform: rotate(9deg);
+  animation: none;
+}
+.ai-pet--done .ai-pet__rig {
+  animation: ai-pet-hop 1.6s cubic-bezier(0.3, 0, 0.3, 1) infinite;
+}
+.ai-pet--error .ai-pet__rig {
+  animation: ai-pet-shake 2s ease-in-out infinite;
+}
+.ai-pet--off .ai-pet__rig {
+  filter: saturate(0.35);
+  opacity: 0.85;
+  animation: none;
+  transform: translateY(1.5px) scale(1.03, 0.96);
+}
+.ai-pet--off .ai-pet__helmet {
+  transform: translateY(3.2px) rotate(-7deg);
+  transform-origin: 28px 26px;
+}
+.ai-pet--off .ai-pet__eyes {
+  transform: none;
+}
+.ai-pet--unread .ai-pet__rig {
+  animation: ai-pet-hop-small 2.4s cubic-bezier(0.3, 0, 0.3, 1) infinite;
+}
+.ai-pet__bubble {
+  opacity: 0;
+  transform: scale(0.5) translateY(3px);
+  transform-box: fill-box;
+  transform-origin: 0% 100%;
+  transition:
+    opacity 180ms,
+    transform 260ms;
+}
+.ai-pet--thinking .ai-pet__bubble,
+.ai-pet--confirm .ai-pet__bubble,
+.ai-pet--done .ai-pet__bubble,
+.ai-pet--error .ai-pet__bubble {
+  opacity: 1;
+  transform: none;
+}
+.ai-pet__bubble-bg {
+  fill: var(--ai-pet-fur-hi);
+  stroke: rgba(23, 23, 28, 0.18);
+  stroke-width: 0.6;
+}
+.ai-pet__bubble-dots,
+.ai-pet__bubble-q,
+.ai-pet__bubble-bang,
+.ai-pet__bubble-check {
+  display: none;
+}
+.ai-pet--thinking .ai-pet__bubble-dots,
+.ai-pet--tool .ai-pet--confirm .ai-pet__bubble-q,
+.ai-pet--done .ai-pet__bubble-check,
+.ai-pet--error .ai-pet__bubble-bang {
+  display: inline;
+}
+.ai-pet__bubble-dots circle {
+  fill: var(--ai-pet-blue);
+  animation: ai-pet-dot 1.2s linear infinite;
+}
+.ai-pet__bubble-dots circle:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.ai-pet__bubble-dots circle:nth-child(3) {
+  animation-delay: 0.3s;
+}
+.ai-pet__bubble-q,
+.ai-pet__bubble-bang {
+  font:
+    700 7px system-ui,
+    sans-serif;
+  text-anchor: middle;
+}
+.ai-pet__bubble-q {
+  fill: var(--ai-pet-warn);
+}
+.ai-pet__bubble-bang {
+  fill: var(--ai-pet-danger);
+}
+.ai-pet__bubble-check {
+  fill: none;
+  stroke: var(--ai-pet-ok);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ai-pet__spark,
+.ai-pet__sweat,
+.ai-pet__sleep {
+  display: none;
+}
+.ai-pet--tool .ai-pet--done .ai-pet__spark,
+.ai-pet--error .ai-pet__sweat,
+.ai-pet--off .ai-pet__sleep {
+  display: inline;
+}
+.ai-pet__spark path {
+  fill: var(--ai-pet-spark);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ai-pet-twinkle 1.6s ease-in-out infinite;
+}
+.ai-pet__spark path:nth-child(2) {
+  animation-delay: 0.4s;
+}
+.ai-pet__spark path:nth-child(3) {
+  animation-delay: 0.8s;
+}
+.ai-pet__sweat {
+  fill: var(--ai-pet-sweat);
+  stroke: var(--ai-pet-sweat-stroke);
+  stroke-width: 0.4;
+  animation: ai-pet-drip 2s ease-in infinite;
+}
+.ai-pet__sleep text {
+  font:
+    800 6px system-ui,
+    sans-serif;
+  fill: var(--ai-pet-fur-hi);
+  animation: ai-pet-zz 2.4s ease-out infinite;
+  transform-box: fill-box;
+}
+.ai-pet__sleep text:nth-child(2) {
+  animation-delay: 1.2s;
+}
+.ai-pet--inline .ai-pet__bubble,
+.ai-pet--inline .ai-pet--inline .ai-pet__spark,
+.ai-pet--inline .ai-pet__sleep {
+  display: none;
 }
 @keyframes ai-pet-blink {
-  0%, 96.4%, 100% {
+  0%,
+  96.4%,
+  100% {
     transform: scaleY(1);
-    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
   }
-  97.9% { transform: scaleY(0.05); }
-  99.4% { transform: scaleY(1); }
+  97.9% {
+    transform: scaleY(0.05);
+  }
+  99.4% {
+    transform: scaleY(1);
+  }
 }
-@keyframes ai-pet-dots {
-  0%, 100% { opacity: 0.3; }
-  40% { opacity: 1; }
+@keyframes ai-pet-breathe {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-1.2px) scale(1.012);
+  }
 }
 @keyframes ai-pet-lamp {
-  0%, 100% { opacity: 0.15; transform: scale(0.9); }
-  50% { opacity: 0.6; transform: scale(1.1); }
+  0%,
+  100% {
+    opacity: 0.15;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.15);
+  }
+}
+@keyframes ai-pet-lamp-blink {
+  0%,
+  60%,
+  100% {
+    opacity: 0.2;
+  }
+  70%,
+  90% {
+    opacity: 0.9;
+  }
+  80% {
+    opacity: 0.2;
+  }
+}
+@keyframes ai-pet-dot {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+@keyframes ai-pet-sway {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
+@keyframes ai-pet-hop {
+  0%,
+  55%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  8% {
+    transform: scale(1.07, 0.92);
+  }
+  22% {
+    transform: translateY(-6px) scale(0.95, 1.06);
+  }
+  36% {
+    transform: scale(1.06, 0.93);
+  }
+  45% {
+    transform: scale(0.99, 1.01);
+  }
+}
+@keyframes ai-pet-hop-small {
+  0%,
+  70%,
+  100% {
+    transform: translateY(0);
+  }
+  78% {
+    transform: translateY(-3px);
+  }
+  86% {
+    transform: translateY(0);
+  }
+  92% {
+    transform: translateY(-1.2px);
+  }
+}
+@keyframes ai-pet-shake {
+  0%,
+  30%,
+  100% {
+    transform: translateX(0);
+  }
+  5% {
+    transform: translateX(-1.6px) rotate(-2deg);
+  }
+  10% {
+    transform: translateX(1.6px) rotate(2deg);
+  }
+  15% {
+    transform: translateX(-1.2px);
+  }
+  20% {
+    transform: translateX(1px);
+  }
+  25% {
+    transform: translateX(-0.5px);
+  }
+}
+@keyframes ai-pet-twinkle {
+  0%,
+  100% {
+    opacity: 0;
+    transform: scale(0.3) rotate(0);
+  }
+  40% {
+    opacity: 1;
+    transform: scale(1) rotate(45deg);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(0.4) rotate(90deg);
+  }
+}
+@keyframes ai-pet-drip {
+  0% {
+    opacity: 0;
+    transform: translateY(-1px);
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(3px);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes ai-pet-zz {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(4px, -7px) scale(1.1);
+  }
 }
 
-/* ── pet ↔ close icon choreography (FloatingChatButton layers) ── */
-.ai-chat-fade {
-  will-change: transform, opacity;
+.ai-pet__shovel,
+.ai-pet__clods,
+.ai-pet__dig-dust {
+  display: none;
 }
-.ai-chat-pose--pet-hidden {
-  transform: scale(0.72) rotate(-14deg) translateY(2px);
+.ai-pet--tool .ai-pet__shovel,
+.ai-pet--tool .ai-pet__clods,
+.ai-pet--tool .ai-pet__dig-dust {
+  display: inline;
 }
-.ai-chat-pose--x-hidden {
-  transform: scale(0.6) rotate(90deg);
-}
-.ai-chat-anim--pet-out { animation: ai-chat-pet-out 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.ai-chat-anim--x-in { animation: ai-chat-x-in 240ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
-.ai-chat-anim--x-out { animation: ai-chat-x-out 280ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.ai-chat-anim--pet-in { animation: ai-chat-pet-in 240ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
-@keyframes ai-chat-pet-out {
-  from { opacity: 1; transform: scale(1) rotate(0deg); }
-  to { opacity: 0; transform: scale(0.72) rotate(-14deg) translateY(2px); }
-}
-@keyframes ai-chat-pet-in {
-  from { opacity: 0; transform: scale(0.72) rotate(-14deg) translateY(2px); }
-  to { opacity: 1; transform: scale(1) rotate(0deg); }
-}
-@keyframes ai-chat-x-in {
-  from { opacity: 0; transform: scale(0.6) rotate(-90deg); }
-  to { opacity: 1; transform: scale(1) rotate(0deg); }
-}
-@keyframes ai-chat-x-out {
-  from { opacity: 1; transform: scale(1) rotate(0deg); }
-  to { opacity: 0; transform: scale(0.6) rotate(90deg); }
-}
-.ai-chat-halo {
-  position: absolute;
-  inset: 0;
-  border-radius: 9999px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent-bright) 60%, transparent);
+.ai-pet--tool .ai-pet__bubble {
   opacity: 0;
-  pointer-events: none;
+  transform: scale(.5) translateY(3px);
 }
-.ai-chat-halo--pulse {
-  animation: ai-chat-halo-pulse 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.ai-pet__shovel {
+  transform-box: view-box;
+  transform-origin: 46px 32px;
+  animation: ai-pet-shovel 0.9s cubic-bezier(.45, 0, .4, 1) infinite;
 }
-@keyframes ai-chat-halo-pulse {
-  0% { opacity: 0.35; transform: scale(0.86); }
-  60% { opacity: 0.15; }
-  100% { opacity: 0; transform: scale(1.16); }
+.ai-pet__shovel-shaft {
+  fill: var(--ai-pet-wood);
+}
+.ai-pet__shovel-grip {
+  fill: var(--ai-pet-wood-hi);
+  stroke: var(--ai-pet-wood);
+  stroke-width: .5;
+}
+.ai-pet__shovel-blade {
+  fill: var(--ai-pet-steel);
+  stroke: var(--ai-pet-steel-edge);
+  stroke-width: .6;
+  stroke-linejoin: round;
+}
+.ai-pet__shovel-shine {
+  fill: none;
+  stroke: var(--ai-pet-fur-hi);
+  stroke-opacity: .7;
+  stroke-width: .7;
+  stroke-linecap: round;
+}
+.ai-pet--tool .ai-pet__rig {
+  animation: ai-pet-dig-shovel 0.9s cubic-bezier(.45, 0, .4, 1) infinite;
+}
+.ai-pet--tool .ai-pet__helmet {
+  animation: ai-pet-lag-shovel 0.9s cubic-bezier(.45, 0, .4, 1) 0.05s infinite;
+}
+.ai-pet--tool .ai-pet__eyes {
+  transform: translate(1.3px, .7px);
+}
+.ai-pet__clods circle {
+  fill: var(--ai-pet-dirt);
+  stroke: var(--ai-pet-dirt-edge);
+  stroke-width: 0.55;
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: ai-pet-clod 0.9s ease-out infinite;
+}
+.ai-pet__clods circle:nth-child(2) {
+  fill: var(--ai-pet-dirt-hi);
+  animation-name: ai-pet-clod-b;
+}
+.ai-pet__clods circle:nth-child(3) {
+  animation-name: ai-pet-clod-c;
+}
+.ai-pet__dig-dust circle {
+  fill: var(--ai-pet-dust);
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: ai-pet-dig-puff 0.9s ease-out infinite;
+}
+.ai-pet--inline .ai-pet__clods,
+.ai-pet--inline .ai-pet__dig-dust {
+  display: none;
+}
+@keyframes ai-pet-shovel {
+  0% {
+    transform: translateY(-4px) rotate(9deg);
+  }
+  28% {
+    transform: translateY(-4.6px) rotate(7deg);
+  }
+  40% {
+    transform: translateY(1.2px) rotate(0deg);
+  }
+  56% {
+    transform: translateY(1.2px) rotate(0deg);
+  }
+  74% {
+    transform: translateY(-2.2px) rotate(-24deg);
+  }
+  100% {
+    transform: translateY(-4px) rotate(9deg);
+  }
+}
+@keyframes ai-pet-dig-shovel {
+  0%,
+  30%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  42% {
+    transform: translateY(1.5px) scale(1.05, .94);
+  }
+  56% {
+    transform: translateY(.4px) scale(1.01, .99);
+  }
+  74% {
+    transform: translateY(-1px) rotate(-3deg) scale(.98, 1.03);
+  }
+}
+@keyframes ai-pet-lag-shovel {
+  0%,
+  32%,
+  100% {
+    transform: translateY(0);
+  }
+  45% {
+    transform: translateY(1.2px);
+  }
+  76% {
+    transform: translateY(-1.2px) rotate(-2deg);
+  }
+}
+@keyframes ai-pet-clod {
+  0%,
+  70% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  74% {
+    opacity: 1;
+    transform: translate(0, -1px) scale(1);
+  }
+  92% {
+    opacity: 1;
+    transform: translate(1.5px, -11px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(2px, -13px) scale(0.9);
+  }
+}
+@keyframes ai-pet-clod-b {
+  0%,
+  71% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  75% {
+    opacity: 1;
+    transform: translate(0.5px, -1px) scale(1);
+  }
+  92% {
+    opacity: 1;
+    transform: translate(-2px, -12px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-2.5px, -14px) scale(0.9);
+  }
+}
+@keyframes ai-pet-clod-c {
+  0%,
+  70% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  74% {
+    opacity: 1;
+    transform: translate(0, -1px) scale(1);
+  }
+  92% {
+    opacity: 1;
+    transform: translate(-5px, -9px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-6px, -10px) scale(0.9);
+  }
+}
+@keyframes ai-pet-dig-puff {
+  0%,
+  40% {
+    opacity: 0;
+    transform: scale(.4);
+  }
+  44% {
+    opacity: .9;
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: translateY(-2.5px) scale(1.5);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ai-pet__body,
-  .ai-pet__eye,
-  .ai-pet--working .ai-pet__dot,
-  .ai-pet--working .ai-pet__lamp-glow {
-    animation: none;
-    will-change: auto;
+  .ai-pet *,
+  .ai-pet *::before,
+  .ai-pet *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .ai-pet__eyes {
+    transform: none !important;
   }
   .ai-pet__tilt {
     transform: none;
-    transition: none;
-    will-change: auto;
-  }
-  .ai-pet__eyes {
-    transition: none;
-    will-change: auto;
-  }
-  .ai-chat-fade,
-  .ai-chat-halo {
-    animation: none;
-    transition: none;
-    will-change: auto;
   }
 }

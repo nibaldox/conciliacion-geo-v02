@@ -1816,7 +1816,8 @@
       "empty": "New conversation. Ask about the workflow status or request loading a topography.",
       "you": "You",
       "agent": "Assistant",
-      "streaming": "The assistant is working…"
+      "streaming": "The assistant is working…",
+      "scroll_latest": "Jump to latest"
     },
     "tool": {
      "running": "running \"{{name}}\"…",
@@ -1852,13 +1853,8 @@
     },
     "resize": {
       "north": "Resize panel (top edge)",
-      "south": "Resize panel (bottom edge)",
-      "east": "Resize panel (right edge)",
       "west": "Resize panel (left edge)",
-      "ne": "Resize panel (top-right corner)",
-      "nw": "Resize panel (top-left corner)",
-      "se": "Resize panel (bottom-right corner)",
-      "sw": "Resize panel (bottom-left corner)"
+      "nw": "Resize panel (top-left corner)"
     }
   }
 }
