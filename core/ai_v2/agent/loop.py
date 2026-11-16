@@ -142,6 +142,7 @@ _OBSERVATION_TRUNCATED_SUFFIX = "...[truncated]"
 
 _OBSERVATION_PRESERVE_KEYS = frozenset(
     {
+        "horizontal_deviation",
         "weighted_score",
         "pct_by_parameter",
         "status_by_parameter",
@@ -328,7 +329,20 @@ def _structured_truncate(text: str, keep: int) -> dict[str, Any] | None:
         if _is_json_scalar(value):
             out[key] = value
         elif key in _OBSERVATION_PRESERVE_KEYS:
-            out[key] = _bounded_nested(value, keep)
+            if key == "horizontal_deviation" and isinstance(value, dict):
+                out[key] = dict(value)
+                rows = value.get("rows")
+                if isinstance(rows, list) and len(rows) > keep:
+                    end = keep
+                    if end and rows[end - 1][0] == rows[end][0]:
+                        bench = rows[end][0]
+                        while end and rows[end - 1][0] == bench:
+                            end -= 1
+                    out[key]["rows"] = rows[:end]
+                    out[key]["rows_shown"] = end
+                    out[key]["truncated"] = True
+            else:
+                out[key] = _bounded_nested(value, keep)
     return out
 
 

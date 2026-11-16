@@ -155,7 +155,9 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
         name="get_profile",
         description=(
             "Return summarized profile data for ONE section by its "
-            "index-based section_id (0, 1, 2, ...)."
+            "index-based section_id (0, 1, 2, ...). Returns horizontal deviation dH "
+            "per design bench at reference heights: negative = faltante (underbreak), "
+            "positive = sobreexcavación (overbreak). Use the meaning column of each row in rows verbatim."
         ),
         args_model=SectionIdArgs,
         risk=ToolRisk.READ,

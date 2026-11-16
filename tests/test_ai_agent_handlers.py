@@ -713,6 +713,8 @@ class TestGetProfile:
         db.save_results(session_id, [_comparison_row("S-01", "A", STATUS_NO_CUMPLE, 30.0)])
         profile = await READ_HANDLERS["get_profile"](session_id, SectionIdArgs(section_id="0"))
         assert profile["found"] is True
+        assert profile["horizontal_deviation"]["available"] is True
+        assert "summary" in profile["horizontal_deviation"]
         assert profile["name"] == "S-01"
         assert profile["sector"] == "A"
         assert profile["n_points_design"] > 0
@@ -2137,3 +2139,51 @@ def test_damage_digest_strong_linear_points_report_the_fit():
     assert digest["fit"]["confidence"] == "HIGH"
     assert _digest_bytes(digest) <= 4096
 
+
+
+def test_horizontal_deviation_digest_semantics():
+    from api.ai_agent_handlers import _horizontal_deviation_digest
+
+    assert _horizontal_deviation_digest(None)["available"] is False
+    samples = [
+        {"design_bench_num": 1, "height_above_toe": 5.16, "deviation": -2.424, "category": "underbreak_moderate"},
+        {"design_bench_num": 1, "height_above_toe": 10, "deviation": 4, "category": "overbreak_severe"},
+        {"design_bench_num": 1, "height_above_toe": 15, "deviation": -0.5, "category": "within_tolerance"},
+        {"design_bench_num": 2, "height_above_toe": 5, "deviation": float("nan"), "status": "ambiguous"},
+        {"design_bench_num": 2, "height_above_toe": 10, "deviation": 1.2, "category": "overbreak_minor"},
+    ]
+    result = _horizontal_deviation_digest({"samples": samples, "summary": {"max_abs_deviation": 209.892744}, "thresholds": {"within": 1, "moderate": 1.8, "severe": 3}})
+    assert result["columns"] == ["bench", "h_m", "dH_m", "meaning", "severity"]
+    assert result["rows"] == [
+        [1, 5.2, -2.42, "faltante", "moderado"],
+        [1, 10, 4, "sobreexcavación", "severo"],
+        [1, 15, -0.5, "faltante", "dentro de tolerancia"],
+        [2, 5, None, "sin medición", "Cruce ambiguo"],
+        [2, 10, 1.2, "sobreexcavación", "leve"],
+    ]
+    assert "motivo" in result["columns_note"]
+    assert result["summary"]["max_abs_m"] == 209.89
+    assert "1,8" in result["severity_ranges"]
+    json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("bench_count,truncated", [(17, False), (60, True)])
+def test_horizontal_deviation_payload_budget(bench_count, truncated):
+    from api.ai_agent_handlers import _horizontal_deviation_digest, _fit_profile_deviation
+    from core.ai_v2.agent.loop import _dumps_safe, _observation_content
+
+    samples = [{"design_bench_num": i // 3 + 1, "height_above_toe": i % 3 * 5, "deviation": -2.42, "category": "underbreak_moderate"} for i in range(bench_count * 3)]
+    hd = _horizontal_deviation_digest({"samples": samples, "summary": {"measured": len(samples), "total": len(samples)}, "thresholds": {"within": 1, "moderate": 1.8, "severe": 3}})
+    payload = _fit_profile_deviation({"found": True, "name": "S-01", "horizontal_deviation": hd})
+    assert len(json.dumps(payload, ensure_ascii=False)) < 4000
+    assert len(_dumps_safe(payload)) <= 4000
+    assert _observation_content(payload) == _dumps_safe(payload)
+    assert hd["truncated"] is truncated
+    assert hd["benches_total"] == bench_count
+    assert hd["samples_total"] == bench_count * 3
+    assert hd["rows_shown"] == len(hd["rows"])
+    assert len(hd["rows"]) % 3 == 0
+    assert [row[0] for row in hd["rows"]] == [i // 3 + 1 for i in range(len(hd["rows"]))]
+    assert hd["columns"] and hd["columns_note"]
+    assert hd["convention"] and hd["summary"]["measured"] == len(samples)
+    json.dumps(payload, allow_nan=False)

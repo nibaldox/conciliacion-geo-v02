@@ -1686,3 +1686,16 @@ class TestLevelsTruncatedPreservation:
         parsed = json.loads(compacted[3]["content"])
         assert parsed == {"ok": True, "levels_truncated": True, "n_total_rows": 3}
 
+
+
+def test_horizontal_deviation_survives_structured_truncation():
+    from core.ai_v2.agent.loop import _structured_truncate
+
+    hd = {"available": True, "convention": "negativo = faltante", "summary": {"measured": 10, "total": 12}, "benches_total": 10, "samples_total": 30, "rows_shown": 30, "truncated": False, "columns": ["bench", "h_m", "dH_m", "meaning", "severity"], "columns_note": "motivo", "rows": [[i, 3, -2, "faltante", "leve"] for i in range(10) for _ in range(3)]}
+    result = _structured_truncate(json.dumps({"horizontal_deviation": hd}), 4)["horizontal_deviation"]
+    assert result["convention"] == hd["convention"]
+    assert result["summary"] == hd["summary"]
+    assert result["columns"] == hd["columns"] and result["columns_note"] == hd["columns_note"]
+    assert result["rows_shown"] == len(result["rows"]) and result["truncated"] is True
+    assert len(result["rows"]) <= 4
+    assert len(result["rows"]) % 3 == 0

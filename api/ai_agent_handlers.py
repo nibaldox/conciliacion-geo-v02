@@ -515,6 +515,119 @@ async def get_settings(session_id: str, args: NoArgs) -> Dict[str, Any]:
     return _settings_view(merged)
 
 
+_DH_CATEGORIES = {
+    "within_tolerance": "dentro de tolerancia",
+    "underbreak_minor": "leve",
+    "underbreak_moderate": "moderado",
+    "underbreak_severe": "severo",
+    "overbreak_minor": "leve",
+    "overbreak_moderate": "moderado",
+    "overbreak_severe": "severo",
+}
+_DH_STATUSES = {
+    "missing": "Sin cruce único",
+    "ambiguous": "Cruce ambiguo",
+    "horizontal_segment": "Tramo horizontal",
+}
+
+
+def _finite_number(value: Any) -> Optional[float]:
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    ):
+        return value
+    return None
+
+
+def _horizontal_deviation_digest(hd: Optional[dict]) -> dict:
+    if not isinstance(hd, dict):
+        return {"available": False, "reason": "perfil de diseño o topografía no disponible"}
+    points = hd.get("points") or []
+    counts = Counter(p.get("category", "") for p in points)
+    original = hd.get("summary") or {}
+    source_thresholds = hd.get("thresholds") or {}
+    thresholds = {
+        k: _finite_number(source_thresholds.get(k))
+        for k in ("within", "moderate", "severe")
+    }
+    def label(value: Optional[float]) -> str:
+        return str(value).replace(".", ",") if value is not None else "?"
+
+    within, moderate, severe = (
+        label(thresholds[k]) for k in ("within", "moderate", "severe")
+    )
+    rows = []
+    samples = sorted(
+        hd.get("samples") or [],
+        key=lambda s: (s.get("design_bench_num") or 0, s.get("height_above_toe") or 0),
+    )
+    for sample in samples:
+        bench = sample.get("design_bench_num")
+        deviation = _finite_number(sample.get("deviation"))
+        height = _finite_number(sample.get("height_above_toe"))
+        if deviation is None:
+            value = None
+            meaning = "sin medición"
+            severity = _DH_STATUSES.get(sample.get("status"), "Sin medición")
+        else:
+            value = round(deviation, 2)
+            meaning = (
+                "faltante" if deviation < 0 else
+                "sobreexcavación" if deviation > 0 else "sin desviación"
+            )
+            severity = _DH_CATEGORIES.get(sample.get("category"), "sin clasificar")
+        rows.append([bench, round(height, 1) if height is not None else None,
+                     value, meaning, severity])
+    maximum = _finite_number(original.get("max_abs_deviation"))
+    return {
+        "available": True,
+        "convention": (
+            "dH: desplazamiento horizontal de la cara real vs diseño a igual cota. "
+            "Negativo = FALTANTE (cara real delante del diseño, roca por excavar). "
+            "Positivo = SOBREEXCAVACIÓN (cara real detrás del diseño, dentro del macizo)."
+        ),
+        "unit": "m",
+        "thresholds_m": thresholds,
+        "severity_ranges": (
+            f"dentro de tolerancia ≤{within} m; leve {within}–{moderate} m; "
+            f"moderado {moderate}–{severe} m; severo >{severe} m"
+        ),
+        "summary": {
+            "scope": "vértices de la topografía sobre caras de diseño",
+            "measured": _finite_number(original.get("measured")),
+            "total": _finite_number(original.get("total")),
+            "within_percent": _finite_number(original.get("within_percent")),
+            "max_abs_m": round(maximum, 2) if maximum is not None else None,
+            "n_faltante": sum(v for k, v in counts.items() if k.startswith("underbreak_")),
+            "n_sobreexcavacion": sum(v for k, v in counts.items() if k.startswith("overbreak_")),
+            "n_dentro_tolerancia": counts["within_tolerance"],
+        },
+        "benches_total": len({row[0] for row in rows}),
+        "samples_total": len(samples),
+        "rows_shown": len(rows),
+        "truncated": False,
+        "columns": ["bench", "h_m", "dH_m", "meaning", "severity"],
+        "columns_note": "severity: dentro de tolerancia/leve/moderado/severo; en filas sin medición contiene el motivo",
+        "rows": rows,
+    }
+
+
+def _fit_profile_deviation(payload: dict) -> dict:
+    digest = payload["horizontal_deviation"]
+    if digest.get("available"):
+        from core.ai_v2.agent.loop import _dumps_safe
+
+        while digest["rows"] and len(_dumps_safe(payload)) > 4000:
+            last_bench = digest["rows"][-1][0]
+            while digest["rows"] and digest["rows"][-1][0] == last_bench:
+                digest["rows"].pop()
+            digest["rows_shown"] = len(digest["rows"])
+            digest["truncated"] = True
+    return payload
+
+
 async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
     """One section summarized via the router's own profile computation."""
     from api.routers.process import _build_profile_payload_sync
@@ -539,7 +652,7 @@ async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
     warnings = payload.get("profile_warnings") or {}
     design_points = len((payload.get("design") or {}).get("distances", []))
     topo_points = len((payload.get("topo") or {}).get("distances", []))
-    return {
+    return _fit_profile_deviation({
         "found": True,
         "section_id": args.section_id,
         "name": payload.get("section_name"),
@@ -556,7 +669,8 @@ async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
         "n_warnings_topo": len(warnings.get("topo") or []),
         "worst_status": compliance["worst_status"],
         "section_score": compliance["section_score"],
-    }
+        "horizontal_deviation": _horizontal_deviation_digest(payload.get("horizontal_deviation")),
+    })
 
 
 def _dashboard_weighted_score_sync(

@@ -221,7 +221,7 @@ def test_agent_system_prompt_rules_numbered_once_and_no_voseo(monkeypatch):
     monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
     text = conversations.agent_system_prompt()
     numbers = [int(m.group(1)) for m in _RULE_LINE.finditer(_rules_section(text))]
-    assert numbers == list(range(1, 15))
+    assert numbers == list(range(1, 16))
     for new_text in (
         _rule_line(text, 5),
         _rule_line(text, 6),
@@ -275,3 +275,11 @@ def test_agent_system_prompt_mentions_every_write_tool(monkeypatch):
     assert write_tools
     for name in write_tools:
         assert f"`{name}`" in text, name
+
+
+def test_horizontal_deviation_rule(monkeypatch):
+    monkeypatch.setattr(conversations, "_agent_system_prompt_cache", None)
+    text = conversations.agent_system_prompt()
+    assert "15. **Desviación horizontal dH**" in text
+    assert "Negativo = faltante (roca que falta excavar), positivo = sobreexcavación" in text
+    assert 'Las muestras "sin medición" no indican cumplimiento ni cero' in text
