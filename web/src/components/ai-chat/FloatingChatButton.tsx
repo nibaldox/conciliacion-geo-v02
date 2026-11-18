@@ -21,7 +21,7 @@ export function isChatUiEnabled(envValue: string | undefined): boolean {
  * (inside the QueryClientProvider) so invalidation works even when the
  * panel itself is closed mid-stream.
  */
-function useAgentChatInvalidationBridge() {
+export function useAgentChatInvalidationBridge() {
   const queryClient = useQueryClient();
   useEffect(() => {
     useAIChat.getState().setWriteResultObserver((toolName) => {

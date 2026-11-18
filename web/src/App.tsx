@@ -27,7 +27,8 @@ import { EmptyState, type EmptyStateProps } from './components/ui/EmptyState';
 import { useStartDemo } from './components/demo/TryDemoButton';
 
 import { ExportPanel } from './components/export/ExportPanel';
-import { FloatingChatButton } from './components/ai-chat/FloatingChatButton';
+import { FloatingChatButton, isChatUiEnabled } from './components/ai-chat/FloatingChatButton';
+import { AgentWorkspaceShell } from './components/ai-chat/AgentWorkspaceShell';
 
 function WorkspaceEmptyState(props: EmptyStateProps) {
   return (
@@ -253,21 +254,29 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
     return () => i18n.off('languageChanged', handler);
   }, [i18n]);
 
+  const aiFirst = isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true';
+  const workspace = (
+    <AppLayout>
+      {!aiFirst && sessionRestoreFailed && (
+        <div role="alert" className="mx-4 mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--color-status-error)', color: 'var(--color-status-error)' }}>
+          {i18n.t('sessionRecovery.failed')}
+        </div>
+      )}
+      <ErrorBoundary>
+        <Suspense fallback={<LoadingSpinner />}>
+          <WorkspaceRouter />
+        </Suspense>
+      </ErrorBoundary>
+    </AppLayout>
+  );
   return (
     <QueryClientProvider client={queryClient}>
-      <AppLayout>
-        {sessionRestoreFailed && (
-          <div role="alert" className="mx-4 mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--color-status-error)', color: 'var(--color-status-error)' }}>
-            {i18n.t('sessionRecovery.failed')}
-          </div>
-        )}
-        <ErrorBoundary>
-          <Suspense fallback={<LoadingSpinner />}>
-            <WorkspaceRouter />
-          </Suspense>
-        </ErrorBoundary>
-      </AppLayout>
-      <FloatingChatButton />
+      {aiFirst ? (
+        <>
+          {sessionRestoreFailed && <div role="alert" className="fixed top-2 right-2 z-[100] rounded-lg border border-border bg-surface-raised p-3 text-sm text-text-primary">{i18n.t('sessionRecovery.failed')}</div>}
+          <AgentWorkspaceShell>{workspace}</AgentWorkspaceShell>
+        </>
+      ) : <>{workspace}<FloatingChatButton /></>}
     </QueryClientProvider>
   );
 }

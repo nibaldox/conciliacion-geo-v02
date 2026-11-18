@@ -170,7 +170,8 @@ function NoticeBanner({ notice }: { notice: ChatNotice }) {
 }
 
 interface ChatPanelProps {
-  onClose: () => void;
+  onClose?: () => void;
+  presentation?: 'floating' | 'embedded';
   /**
    * Desktop-only extra gap subtracted from the stored rect height so the
    * panel's bottom edge clears the floating launcher button (which stays
@@ -203,7 +204,8 @@ const RESIZE_HANDLES: ReadonlyArray<{
  * full-width bottom sheet. Escape closes the panel and focus is
  * restored to the previously focused element.
  */
-export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
+export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floating' }: ChatPanelProps) {
+  const embedded = presentation === 'embedded';
   const { t } = useTranslation();
   const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
@@ -228,6 +230,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
   const handledAcceptanceRef = useRef<string | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
 
   useEffect(() => {
     if (!acceptedDraft || handledAcceptanceRef.current === acceptedDraft.id) {
@@ -244,6 +247,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
   }, []);
 
   useEffect(() => {
+    if (embedded) return;
     restoreFocusRef.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
@@ -252,7 +256,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
     return () => {
       restoreFocusRef.current?.focus();
     };
-  }, []);
+  }, [embedded]);
 
   useEffect(() => {
     const list = listRef.current;
@@ -332,17 +336,17 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
     <section
       data-slot="ai-chat-panel"
       data-testid="ai-chat-panel"
-      role="dialog"
+      role={embedded ? undefined : "dialog"}
       aria-label={t('aiChat.title')}
       aria-busy={busy}
       onKeyDown={(e) => {
-        if (e.key === 'Escape') onClose();
+        if (!embedded && e.key === 'Escape') onClose?.();
       }}
-      className="fixed inset-x-0 bottom-0 z-[90] flex max-h-[72vh] flex-col rounded-t-xl border border-border bg-surface-raised text-text-primary shadow-lg sm:inset-x-auto sm:rounded-xl"
-      style={panelStyle}
+      className={embedded ? "flex h-full min-h-0 min-w-0 w-full flex-col bg-surface text-text-primary" : "fixed inset-x-0 bottom-0 z-[90] flex max-h-[72vh] flex-col rounded-t-xl border border-border bg-surface-raised text-text-primary shadow-lg sm:inset-x-auto sm:rounded-xl"}
+      style={embedded ? undefined : panelStyle}
     >
       <header className="shrink-0 border-b border-border px-3 py-2">
-        <div className="flex items-center justify-between gap-2">
+        {!embedded && <div className="flex items-center justify-between gap-2">
           <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">
             {t('aiChat.title')}
           </h2>
@@ -355,7 +359,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
           >
             ×
           </button>
-        </div>
+        </div>}
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
           {isLmStudioLocal && (
             <span
@@ -410,7 +414,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
+      <div ref={listRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
         {notice && <NoticeBanner notice={notice} />}
         {!providerStateLoaded && (
           <div
@@ -560,7 +564,6 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
           </p>
         )}
         <div
-          ref={listRef}
           data-testid="ai-chat-messages"
           role="log"
           aria-live="polite"
@@ -582,7 +585,9 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
         )}
       </div>
 
-      <TopoUploadZone />
+      <div className="shrink-0" hidden={embedded && !attachmentsOpen}>
+        <TopoUploadZone />
+      </div>
 
       <form
         className="flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"
@@ -591,6 +596,19 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
           handleSubmit();
         }}
       >
+        {embedded && (
+          <button
+            type="button"
+            data-testid="ai-chat-attachments"
+            aria-label={t('step1.title')}
+            title={t('step1.title')}
+            aria-expanded={attachmentsOpen}
+            onClick={() => setAttachmentsOpen((open) => !open)}
+            className="shrink-0 rounded-md border border-border px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
+          >
+            +
+          </button>
+        )}
         <input
           ref={inputRef}
           type="text"
@@ -623,7 +641,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0 }: ChatPanelProps) {
         )}
       </form>
 
-      {resizable.isDesktop &&
+      {!embedded && resizable.isDesktop &&
         RESIZE_HANDLES.map(({ direction, labelKey, orientation, className }) => (
           <div
             key={direction}

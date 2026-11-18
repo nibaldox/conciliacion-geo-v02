@@ -1,4 +1,5 @@
 {
+  "agentWorkspace": {"heading": "What would you like to reconcile?", "open": "Open workspace", "expandChat": "Expand chat", "chat": "Chat", "workspace": "Workspace", "navigation": "Workspace navigation"},
   "recentSessions": {
     "button": "Sessions",
     "title": "Recent sessions",

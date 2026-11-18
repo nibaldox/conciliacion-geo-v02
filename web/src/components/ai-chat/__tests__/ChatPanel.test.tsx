@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 
 const { mockGet, mockDelete, mockGetSessionId, mockFetch } = vi.hoisted(() => ({
@@ -307,5 +308,33 @@ describe('ChatPanel — a11y and history restore (T5)', () => {
       invocation_id: 'inv_rest',
       approved: true,
     });
+  });
+});
+
+
+describe('ChatPanel — embedded presentation', () => {
+  it('keeps the draft across presentation changes and exposes real upload controls', async () => {
+    mockGet.mockResolvedValue({ data: providersBody() });
+    const onClose = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const panelWithProvider = (presentation: 'embedded' | 'floating') => (
+      <QueryClientProvider client={client}><ChatPanel onClose={onClose} presentation={presentation} /></QueryClientProvider>
+    );
+    const view = render(panelWithProvider('embedded'));
+    const panel = screen.getByTestId('ai-chat-panel');
+    expect(panel).not.toHaveAttribute('role', 'dialog');
+    expect(panel.style.position).not.toBe('fixed');
+    expect(screen.queryByTestId('ai-chat-close')).toBeNull();
+    expect(screen.queryByTestId('ai-chat-resize-e')).toBeNull();
+    expect(screen.getByTestId('ai-chat-upload-dropzone')).not.toBeVisible();
+    await userEvent.click(screen.getByTestId('ai-chat-attachments'));
+    expect(screen.getByTestId('ai-chat-upload-type-design')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-chat-upload-type-topo')).toBeInTheDocument();
+    expect(screen.getByTestId('ai-chat-upload-dropzone')).toBeInTheDocument();
+    const input = screen.getByTestId('ai-chat-input');
+    await userEvent.type(input, 'borrador{Escape}');
+    expect(onClose).not.toHaveBeenCalled();
+    view.rerender(panelWithProvider('floating'));
+    expect(screen.getByTestId('ai-chat-input')).toHaveValue('borrador');
   });
 });

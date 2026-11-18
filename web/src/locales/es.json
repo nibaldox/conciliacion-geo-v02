@@ -1,4 +1,5 @@
 {
+  "agentWorkspace": {"heading": "¿Qué quieres conciliar?", "open": "Abrir espacio de trabajo", "expandChat": "Ampliar chat", "chat": "Chat", "workspace": "Espacio de trabajo", "navigation": "Navegación del espacio de trabajo"},
   "recentSessions": {
     "button": "Sesiones",
     "title": "Sesiones recientes",
