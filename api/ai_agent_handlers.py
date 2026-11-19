@@ -24,6 +24,7 @@ collection cycle (``api.routers`` imports ``ai`` at package init, and
 """
 from __future__ import annotations
 
+from api._async_db import run_db
 import asyncio
 import json
 import sqlite3
@@ -330,10 +331,10 @@ def _section_compliance(
 
 async def get_workflow_state(session_id: str, args: NoArgs) -> Dict[str, Any]:
     """Aggregate session state from SQL counts and small JSON columns."""
-    status = db.get_process_status(session_id)
-    n_results = db.get_results_count(session_id)
-    sections = db.get_sections(session_id)
-    meshes = db.get_all_meshes(session_id)
+    status = await run_db(db.get_process_status, session_id)
+    n_results = await run_db(db.get_results_count, session_id)
+    sections = await run_db(db.get_sections, session_id)
+    meshes = await run_db(db.get_all_meshes, session_id)
     design = next((m for m in meshes if m["type"] == "design"), None)
     topo = next((m for m in meshes if m["type"] == "topo"), None)
     return {
@@ -355,7 +356,7 @@ async def get_workflow_state(session_id: str, args: NoArgs) -> Dict[str, Any]:
 
 async def list_meshes(session_id: str, args: NoArgs) -> Dict[str, Any]:
     """List the session's persisted mesh rows without BLOB data."""
-    meshes = db.get_all_meshes(session_id)
+    meshes = await run_db(db.get_all_meshes, session_id)
     return {
         "n_meshes": len(meshes),
         "meshes": [_mesh_summary(row) for row in meshes],
@@ -364,7 +365,7 @@ async def list_meshes(session_id: str, args: NoArgs) -> Dict[str, Any]:
 
 async def get_mesh_info(session_id: str, args: MeshIdArgs) -> Dict[str, Any]:
     """Compact info for one mesh; scoped to the session for isolation."""
-    meshes = db.get_all_meshes(session_id)
+    meshes = await run_db(db.get_all_meshes, session_id)
     row = next((m for m in meshes if m["id"] == args.mesh_id), None)
     if row is None:
         return {"found": False, "mesh_id": args.mesh_id}
@@ -375,7 +376,7 @@ async def get_mesh_info(session_id: str, args: MeshIdArgs) -> Dict[str, Any]:
 
 async def list_sections(session_id: str, args: NoArgs) -> Dict[str, Any]:
     """Compact per-section summaries from the small sessions JSON list."""
-    sections = db.get_sections(session_id)
+    sections = await run_db(db.get_sections, session_id)
     entries: List[Dict[str, Any]] = []
     for index, sec in enumerate(sections):
         entries.append(
@@ -454,7 +455,7 @@ async def get_profile(session_id: str, args: SectionIdArgs) -> Dict[str, Any]:
         index = int(args.section_id)
     except ValueError:
         return {"found": False, "section_id": args.section_id, "error": "invalid_section_id"}
-    sections = db.get_sections(session_id)
+    sections = await run_db(db.get_sections, session_id)
     if index < 0 or index >= len(sections):
         return {"found": False, "section_id": args.section_id, "error": "section_id_out_of_range"}
     try:

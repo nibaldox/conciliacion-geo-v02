@@ -152,7 +152,7 @@ async def _get_design_mesh(session_id: str):
     mesh = await run_db(db.get_mesh, session_id, "design")
     if mesh is None:
         raise HTTPException(400, "Upload design mesh first")
-    return db.get_trimesh_by_id(mesh["id"])
+    return await run_db(db.get_trimesh_by_id, mesh["id"])
 
 
 async def _save_sections(session_id: str, sections: List[SectionLine]):

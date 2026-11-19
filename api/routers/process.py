@@ -829,9 +829,9 @@ async def get_profile(request: Request, section_id: int):
     runs off the event loop via ``run_in_executor``.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
 
-        sections_raw = db.get_sections(session_id)
+        sections_raw = await run_db(db.get_sections, session_id)
         if section_id < 0 or section_id >= len(sections_raw):
             raise HTTPException(404, "Section index out of range")
 

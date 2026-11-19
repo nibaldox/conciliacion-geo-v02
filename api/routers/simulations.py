@@ -41,6 +41,7 @@ engine.
 """
 from __future__ import annotations
 
+from api._async_db import run_db
 import asyncio
 import gzip
 import json
@@ -849,8 +850,8 @@ async def create_simulation(request: Request) -> JSONResponse:
         raise _structured_error(400, exc, error_code=exc.error_code, details=exc.details)
 
     # 2. Resolve the session + canonical accepted rows.
-    db.get_or_create_session(req.session_id)
-    settings = db.get_settings(req.session_id) or {}
+    await run_db(db.get_or_create_session, req.session_id)
+    settings = (await run_db(db.get_settings, req.session_id)) or {}
     accepted_rows = settings.get("accepted_rows") or settings.get("blast_holes") or []
     if not accepted_rows:
         raise _structured_error(
@@ -996,7 +997,8 @@ async def get_simulation(request: Request, simulation_id: str) -> Response:
     Kept as a backwards-compatible alias of ``GET /summary`` — the
     maintainer's Streamlit app reads this endpoint.
     """
-    row = db.get_blast_simulation(
+    row = await run_db(
+        db.get_blast_simulation,
         simulation_id, session_id=request.state.session_id
     )
     if row is None:
@@ -1028,7 +1030,8 @@ async def get_simulation_summary(request: Request, simulation_id: str) -> Respon
     ``SimulationResult.to_dict()`` exactly as it was written to SQLite
     by :func:`api.database.save_blast_simulation`.
     """
-    row = db.get_blast_simulation(
+    row = await run_db(
+        db.get_blast_simulation,
         simulation_id, session_id=request.state.session_id
     )
     if row is None:
@@ -1082,7 +1085,8 @@ async def get_simulation_profile(
     summary statistics and the SHA-256 of the resulting profile (the
     canonical audit trail for the derived data).
     """
-    row = db.get_blast_simulation(
+    row = await run_db(
+        db.get_blast_simulation,
         simulation_id, session_id=request.state.session_id
     )
     if row is None:
@@ -1231,7 +1235,8 @@ async def get_plan_slice(
     ``percentiles``, ``source_holes_projection`` and ``data_sha256`` —
     never only shape + aggregates.
     """
-    row = db.get_blast_simulation(
+    row = await run_db(
+        db.get_blast_simulation,
         simulation_id, session_id=request.state.session_id
     )
     if row is None:
@@ -1276,7 +1281,8 @@ async def get_section_slice(
     ``vertical_coordinates_m``, ``valid_mask``, ``percentiles``,
     ``source_holes_projection`` and ``data_sha256``.
     """
-    row = db.get_blast_simulation(
+    row = await run_db(
+        db.get_blast_simulation,
         simulation_id, session_id=request.state.session_id
     )
     if row is None:
@@ -1335,7 +1341,8 @@ async def export_simulation(
       Auto-gzipped when the payload exceeds 1 MB.
     * ``fmt=json_gz`` — always-gzipped canonical JSON.
     """
-    row = db.get_blast_simulation(
+    row = await run_db(
+        db.get_blast_simulation,
         simulation_id, session_id=request.state.session_id
     )
     if row is None:

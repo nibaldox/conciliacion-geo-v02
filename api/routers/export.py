@@ -10,6 +10,7 @@ Endpoints:
     GET /export/levels  Nominal levels per sector for the export filters
 """
 
+from api._async_db import run_db
 import asyncio
 import io
 import json
@@ -920,7 +921,7 @@ async def export_excel(
     so multi-section workbooks don't stall the event loop.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
 
         buffer, export_filters = await _run_in_executor(
             _build_excel_payload_sync,
@@ -1006,7 +1007,7 @@ async def export_word(
     executor so multi-section reports don't stall the event loop.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
 
         buffer, export_filters = await _run_in_executor(
             _build_word_payload_sync,
@@ -1164,7 +1165,7 @@ async def export_dxf(request: Request):
     exports don't stall the event loop.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
         tmp = await _run_in_executor(_build_dxf_payload_sync, session_id)
         return FileResponse(tmp, media_type="application/dxf", filename="Perfiles_3D.dxf")
     except HTTPException:
@@ -1208,7 +1209,7 @@ async def export_images(
     multi-section ZIP build doesn't stall the event loop.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
 
         zip_buffer, export_filters = await _run_in_executor(
             _build_images_zip_sync, session_id, filters
@@ -1286,7 +1287,7 @@ async def export_pdf(
     executor so the event loop stays responsive.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
         buffer, export_filters = await _run_in_executor(
             _build_pdf_payload_sync,
             session_id,
@@ -1356,7 +1357,7 @@ def _build_levels_payload_sync(session_id: str) -> Dict[str, Any]:
 async def export_levels(request: Request):
     """List the nominal levels of every sector, for the export level filter."""
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
         return await _run_in_executor(_build_levels_payload_sync, session_id)
     except HTTPException:
         raise
@@ -1430,7 +1431,7 @@ async def export_blast_diagnostics(request: Request):
     when the session has no blast upload persisted.
     """
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
         tmp = await _run_in_executor(_build_blast_diagnostics_payload_sync, session_id)
         return FileResponse(
             str(tmp),
@@ -1450,8 +1451,8 @@ async def export_blast_rejections(request: Request):
     from core.blast_export import export_rejected_rows_excel
 
     try:
-        session_id = db.get_or_create_session(request.state.session_id)
-        settings = db.get_settings(session_id) or {}
+        session_id = await run_db(db.get_or_create_session, request.state.session_id)
+        settings = (await run_db(db.get_settings, session_id)) or {}
         rejected = settings.get("rejected_rows") or []
         config = settings.get("geometry_configuration") or {}
         if not rejected and not settings.get("blast_upload_meta"):

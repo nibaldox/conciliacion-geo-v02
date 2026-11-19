@@ -27,6 +27,7 @@ from typing import Optional
 import numpy as np
 import trimesh
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from starlette.responses import Response
 
 import api.database as db
 import api.dxf_uploads as dxf_uploads
@@ -1329,6 +1330,51 @@ def _get_contours_cached(mesh_id: str, interval: float, grid_size: int) -> dict:
     }
 
 
+def _encode_mesh_json(payload: dict) -> bytes:
+    return json.dumps(
+        payload, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")
+    ).encode("utf-8")
+
+
+@mesh_cache
+def _vertices_body_cached(mesh_id: str, step: int) -> bytes:
+    try:
+        payload = _get_decimated_vertices_cached(mesh_id, step)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return _encode_mesh_json(payload)
+
+
+@mesh_cache
+def _roi_body_cached(session_id: str, mesh_id: str, xmin: float, ymin: float,
+                     xmax: float, ymax: float, step: int) -> bytes:
+    try:
+        payload = _get_roi_vertices_cached(session_id, mesh_id, xmin, ymin, xmax, ymax, step)
+    except ValueError as exc:
+        if "not found" in str(exc).lower():
+            raise HTTPException(404, "Mesh not found") from exc
+        raise HTTPException(422, str(exc)) from exc
+    return _encode_mesh_json(payload)
+
+
+@mesh_cache
+def _contours_body_cached(mesh_id: str, interval: float, grid_size: int) -> bytes:
+    try:
+        payload = _get_contours_cached(mesh_id, interval, grid_size)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return _encode_mesh_json(payload)
+
+
+@mesh_cache
+def _breaklines_body_cached(mesh_id: str, angle_threshold: float) -> bytes:
+    try:
+        payload = _get_breaklines_cached(mesh_id, angle_threshold)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return _encode_mesh_json(payload)
+
+
 @router.get("/{mesh_id}/vertices")
 async def mesh_vertices(request: Request, mesh_id: str, step: int = 8000):
     """
@@ -1337,10 +1383,8 @@ async def mesh_vertices(request: Request, mesh_id: str, step: int = 8000):
     ``step`` is the *maximum number of faces/points* to return (default 8000).
     """
     await _require_owned_mesh(request, mesh_id)
-    try:
-        return await run_db(_get_decimated_vertices_cached, mesh_id, step)
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
+    body = await run_db(_vertices_body_cached, mesh_id, step)
+    return Response(content=body, media_type="application/json")
 
 
 @router.get("/{mesh_id}/vertices/roi")
@@ -1364,18 +1408,10 @@ async def mesh_vertices_roi(
     if not any(mesh["id"] == mesh_id for mesh in session_meshes):
         raise HTTPException(404, "Mesh not found")
     cache_bounds = tuple(round(value, 2) for value in (xmin, ymin, xmax, ymax))
-    try:
-        return await run_db(
-            _get_roi_vertices_cached,
-            session_id,
-            mesh_id,
-            *cache_bounds,
-            step,
-        )
-    except ValueError as exc:
-        if "not found" in str(exc).lower():
-            raise HTTPException(404, "Mesh not found") from exc
-        raise HTTPException(422, str(exc)) from exc
+    body = await run_db(
+        _roi_body_cached, session_id, mesh_id, *cache_bounds, step,
+    )
+    return Response(content=body, media_type="application/json")
 
 
 @router.get("/{topo_id}/horizontal-deviation")
@@ -1421,7 +1457,8 @@ async def mesh_horizontal_deviation(
         await run_db(_persist_horizontal_deviation, session_id, cached_args, payload)
     except Exception:
         logger.exception("Unable to persist horizontal deviation result")
-    return payload
+    body = await run_db(_encode_mesh_json, payload)
+    return Response(content=body, media_type="application/json")
 
 
 @router.delete("/{mesh_id}")
@@ -1451,10 +1488,8 @@ async def mesh_contours(
     rendering with Chart.js or any line chart library.
     """
     await _require_owned_mesh(request, mesh_id)
-    try:
-        return await run_db(_get_contours_cached, mesh_id, interval, grid_size)
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
+    body = await run_db(_contours_body_cached, mesh_id, interval, grid_size)
+    return Response(content=body, media_type="application/json")
 
 
 @mesh_cache
@@ -1507,7 +1542,5 @@ async def mesh_breaklines(
     Return analytic structural breaklines (crests, toes) extracted from the mesh dihedral angles.
     """
     await _require_owned_mesh(request, mesh_id)
-    try:
-        return await run_db(_get_breaklines_cached, mesh_id, angle_threshold)
-    except ValueError as exc:
-        raise HTTPException(404, str(exc))
+    body = await run_db(_breaklines_body_cached, mesh_id, angle_threshold)
+    return Response(content=body, media_type="application/json")

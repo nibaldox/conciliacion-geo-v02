@@ -28,7 +28,11 @@ def test_word_export_exposes_download_headers_to_allowed_origin(monkeypatch):
     async def build_word_payload(*args):
         return io.BytesIO(b"test report"), ExportFilters()
 
+    async def _run_db(fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
     monkeypatch.setattr(export_router, "_run_in_executor", build_word_payload)
+    monkeypatch.setattr(export_router, "run_db", _run_db)
     monkeypatch.setattr(
         export_router, "StreamingResponse",
         lambda buffer, media_type, headers: Response(

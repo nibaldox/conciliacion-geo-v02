@@ -827,7 +827,7 @@ async def chat_confirm(
         )
         if (
             bound_conversation is not None
-            and db.get_ai_conversation(bound_conversation, session_id) is None
+            and (await run_db(db.get_ai_conversation, bound_conversation, session_id)) is None
         ):
             raise HTTPException(
                 status_code=404,
@@ -905,7 +905,7 @@ async def delete_chat_conversation(
     if worker_conflict is not None:
         raise HTTPException(status_code=503, detail=worker_conflict)
     session_id = await run_db(db.get_or_create_session, request.state.session_id)
-    deleted = db.delete_ai_conversation(conversation_id, session_id)
+    deleted = await run_db(db.delete_ai_conversation, conversation_id, session_id)
     response: dict[str, Any] = {"deleted": deleted, "pendings_invalidated": 0}
     if deleted:
         try:
@@ -1018,7 +1018,7 @@ async def get_chat_conversation(
     if worker_conflict is not None:
         raise HTTPException(status_code=503, detail=worker_conflict)
     session_id = await run_db(db.get_or_create_session, request.state.session_id)
-    stored = db.get_ai_conversation(conversation_id, session_id)
+    stored = await run_db(db.get_ai_conversation, conversation_id, session_id)
     if stored is None:
         return JSONResponse(status_code=404, content={"exists": False})
     try:

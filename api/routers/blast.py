@@ -25,7 +25,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, Request, Upload
 
 import api.database as db
 import api.schemas as schemas
-from api._async_db import run_blast_limited
+from api._async_db import run_blast_limited, run_db
 from api.blast_identity import blast_data_status, blast_hole_id, blast_row_ids
 from core.calculo_tronadura import procesar_pozos
 from core.blast_correlation import PF_DEFINITIONS
@@ -739,7 +739,7 @@ async def upload_blast_csv(
             },
         )
 
-    db.get_or_create_session(session_id)
+    await run_db(db.get_or_create_session, session_id)
 
     try:
         content = file.file.read()
@@ -860,7 +860,8 @@ async def upload_blast_csv(
         from core.blast_hole_consolidation import BLAST_ALGORITHM_VERSION
     except ImportError:
         BLAST_ALGORITHM_VERSION = None
-    db.save_blast_upload(
+    await run_db(
+        db.save_blast_upload,
         session_id,
         {
             "blast_algorithm_version": BLAST_ALGORITHM_VERSION,
@@ -936,7 +937,7 @@ def _build_hole_summaries(records: List[Dict[str, object]]) -> List[schemas.Blas
 @router.get("/definitions")
 async def get_blast_definitions(request: Request) -> dict:
     return {
-        **blast_data_status(db.get_settings(request.state.session_id) or {}),
+        **blast_data_status((await run_db(db.get_settings, request.state.session_id)) or {}),
         "pf_voronoi_bench_g_per_ton": {
             "formula": "1000*Q/(A*H*rho)",
             "numerator": "charge_kg",
@@ -964,7 +965,7 @@ async def get_blast_holes_summary(session_id: str, request: Request) -> dict:
             status_code=403,
             detail={"error_code": "SESSION_ID_MISMATCH"},
         )
-    settings = db.get_settings(session_id) or {}
+    settings = (await run_db(db.get_settings, session_id)) or {}
     records = settings.get("blast_holes", [])
     n_holes = len(records) if isinstance(records, list) else 0
     meta = settings.get("blast_upload_meta") or {}
@@ -986,7 +987,7 @@ async def get_blast_holes(
     if session_id != request.state.session_id:
         raise HTTPException(403, detail={"error_code": "SESSION_ID_MISMATCH"})
 
-    settings = db.get_settings(session_id) or {}
+    settings = (await run_db(db.get_settings, session_id)) or {}
     raw = settings.get("blast_holes", [])
     if not isinstance(raw, list):
         return schemas.BlastHolesResponse(session_id=session_id, holes=[], **blast_data_status(settings))
@@ -1000,7 +1001,7 @@ async def get_blast_holes(
 async def get_blast_hole_detail(session_id: str, hole_id: str, request: Request, row_id: Optional[str] = None):
     if session_id != request.state.session_id:
         raise HTTPException(403, detail={"error_code": "SESSION_ID_MISMATCH"})
-    settings = db.get_settings(session_id) or {}
+    settings = (await run_db(db.get_settings, session_id)) or {}
     records = settings.get("blast_holes") or []
     records = [r for r in records if isinstance(r, dict)]
     row_ids = blast_row_ids(session_id, records)
@@ -1225,11 +1226,11 @@ async def get_blast_holes_3d(
 ) -> schemas.BlastHoles3DResponse:
     """Return compact collar/toe coordinates and provenance for the session."""
     session_id = request.state.session_id
-    settings_version = db.read_settings_version(session_id)
-    settings = db.get_settings(session_id) or {}
+    settings_version = await run_db(db.read_settings_version, session_id)
+    settings = (await run_db(db.get_settings, session_id)) or {}
     section = None
     if section_id is not None:
-        section_rows = db.get_sections(session_id)
+        section_rows = await run_db(db.get_sections, session_id)
         if section_id >= len(section_rows):
             raise HTTPException(404, detail={"error_code": "SECTION_NOT_FOUND"})
         try:
@@ -1238,7 +1239,7 @@ async def get_blast_holes_3d(
             section = _section_from_dict(section_rows[section_id])
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(400, detail={"error_code": "SECTION_INVALID"}) from exc
-    if db.read_settings_version(session_id) != settings_version:
+    if (await run_db(db.read_settings_version, session_id)) != settings_version:
         settings_version = None
     return await run_blast_limited(
         _build_holes_3d, settings, session_id, section, corridor_m, section_id, settings_version
