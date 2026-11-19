@@ -115,6 +115,15 @@ describe('plan projection', () => {
     expect(Number.isFinite(focused.scale)).toBe(true);
     expect(focused.xMax - focused.xMin).toBeGreaterThan(0);
   });
+  it('falls back to the full surface when evaluated bounds have no extent', () => {
+    const vertices = { x: [0, 1000], y: [0, 1000], z: [0, 0] };
+    const full = createPlanProjection(vertices)!;
+    const focused = createPlanProjection(vertices, [[500, 500], [500, 500]])!;
+    expect(focused.xMin).toBe(full.xMin);
+    expect(focused.xMax).toBe(full.xMax);
+    expect(focused.yMin).toBe(full.yMin);
+    expect(focused.yMax).toBe(full.yMax);
+  });
 });
 
 describe('D11 — per-parameter compliance over MATCH benches only', () => {

@@ -13,12 +13,12 @@ const queryState = vi.hoisted(() => ({
   isError: false,
   refetch: vi.fn(),
 }));
+const sectionsState = vi.hoisted(() => ({
+  data: [{ id: 'section-1', name: 'S-01', sector: 'Norte', origin: [0, 0], azimuth: 0, length: 100 }],
+}));
 
 vi.mock('../../../../../api/hooks', () => ({
-  useSections: () => ({
-    data: [{ id: 'section-1', name: 'S-01', sector: 'Norte', origin: [0, 0], azimuth: 0, length: 100 }],
-    isLoading: false,
-  }),
+  useSections: () => ({ data: sectionsState.data, isLoading: false }),
   useProfile: () => queryState,
 }));
 
@@ -45,6 +45,7 @@ beforeEach(() => {
   queryState.isPending = false;
   queryState.isError = false;
   queryState.refetch.mockReset();
+  sectionsState.data = [{ id: 'section-1', name: 'S-01', sector: 'Norte', origin: [0, 0], azimuth: 0, length: 100 }];
   useSession.setState({ selectedSection: null });
   useTheme.setState({ isDark: true });
 });
@@ -97,6 +98,21 @@ describe('ProfilesGrid profile query states', () => {
 
     expect(screen.getByTestId('profile-plot')).toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('shows one shared axis-and-unit reference above the profile cards', () => {
+    queryState.data = {
+      design: { distances: [0, 10], elevations: [100, 90] },
+      topo: null,
+    };
+    sectionsState.data = [
+      { id: 'section-1', name: 'S-01', sector: 'Norte', origin: [0, 0], azimuth: 0, length: 100 },
+      { id: 'section-2', name: 'S-02', sector: 'Sur', origin: [0, 0], azimuth: 0, length: 100 },
+    ];
+    render(<I18nextProvider i18n={i18n}><ProfilesGrid /></I18nextProvider>);
+
+    expect(screen.getAllByText('Distancia (m) · Elevación (m)')).toHaveLength(1);
+    expect(screen.getAllByTestId('profile-plot')).toHaveLength(2);
   });
 
   it('uses readable sector text and secondary-color ticks in both themes', () => {

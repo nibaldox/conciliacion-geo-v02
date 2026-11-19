@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useCancelDxf,
@@ -46,7 +46,7 @@ function extractDetail(error: unknown): string | null {
  * of the in-flight request only — never in React state and never in
  * localStorage — and the file content is never sent to the model.
  */
-export function TopoUploadZone() {
+export function TopoUploadZone({ roleRequest = null }: { roleRequest?: Readonly<{ role: MeshType }> | null }) {
   const { t } = useTranslation();
   const designMeshId = useSession((s) => s.designMeshId);
   const topoMeshId = useSession((s) => s.topoMeshId);
@@ -64,11 +64,29 @@ export function TopoUploadZone() {
   const dxfUploadIdRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
-
+  const requestedRoleRef = useRef<Readonly<{ role: MeshType }> | null>(null);
+  const blockedRoleRequestRef = useRef<Readonly<{ role: MeshType }> | null>(null);
   const upload = useUploadMesh();
   const inspectDxf = useInspectDxf();
   const confirmDxf = useConfirmDxf();
   const cancelDxf = useCancelDxf();
+
+  useEffect(() => {
+    if (!roleRequest || requestedRoleRef.current === roleRequest) return;
+    requestedRoleRef.current = roleRequest;
+    const blocked = upload.isPending || inspectDxf.isPending || confirmDxf.isPending || fileRef.current !== null || dxfReport !== null || replaceWarn;
+    if (blockedRoleRequestRef.current === roleRequest && !blocked) {
+      blockedRoleRequestRef.current = null;
+      return;
+    }
+    if (blocked) {
+      blockedRoleRequestRef.current = roleRequest;
+      return;
+    }
+    blockedRoleRequestRef.current = null;
+    setMeshType(roleRequest.role);
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-testid="ai-chat-upload-type-${roleRequest.role}"]`)?.focus());
+  }, [roleRequest, upload.isPending, inspectDxf.isPending, confirmDxf.isPending, dxfReport, replaceWarn]);
 
   const currentMeshId = meshType === 'design' ? designMeshId : topoMeshId;
   const hasRealMesh =

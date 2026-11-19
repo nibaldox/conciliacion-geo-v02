@@ -8,14 +8,19 @@ import type { ComparisonResult, SectionResponse } from '../../api/types';
 import { useSession } from '../../stores/session';
 import type { BenchStatus } from './ProfileView/domain/types';
 import { Spinner } from '../ui/Spinner';
-import { InfoTip, SegmentedControl, StatusDot, SummaryPanel } from './SummaryControls';
-import { planColor, sectionParameterPassRate, sectionScore, type PlanColorBy, type PlanStatusKey } from './planColors';
+import { InfoTip, SegmentedControl, SummaryPanel } from './SummaryControls';
+import { planColor, planStatusStrokeDash, sectionParameterPassRate, sectionScore, type PlanColorBy, type PlanStatusKey } from './planColors';
 
 export type { PlanColorBy, PlanStatusKey } from './planColors';
 
 import { createPlanProjection, createSurfaceRaster, projectPlanPoint, sectionPlanPoints, planBounds, type Projection } from './planGeometry';
 
 export { createPlanProjection, projectPlanPoint } from './planGeometry';
+
+function StatusLegendItem({ status, label }: { status: PlanStatusKey; label: string }) {
+  const dasharray = planStatusStrokeDash(status);
+  return <span className="flex items-center gap-1.5"><svg className="shrink-0" width="24" height="10" aria-hidden="true"><line data-status-swatch={status} x1="1" y1="5" x2="23" y2="5" stroke={planColor('status', status)} strokeWidth="3" strokeLinecap="round" strokeDasharray={dasharray} /></svg>{label}</span>;
+}
 
 function GuideLine({ guide, projection }: { guide: GuideCurve; projection: Projection }) {
   const points = selectGuideLine(guide);
@@ -33,7 +38,7 @@ function PlanSection({ section, points, projection, status, labelPosition }: { s
   return (
     <g data-section-name={section.name} data-compliance-status={state} data-status={state}>
       <title>{label}</title>
-      <polyline points={projected.map((point) => point.join(',')).join(' ')} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" />
+      <polyline points={projected.map((point) => point.join(',')).join(' ')} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeDasharray={planStatusStrokeDash(state)} />
       <line x1={endpoint[0]} y1={endpoint[1]} x2={labelPosition[0]} y2={labelPosition[1] - 4} stroke={color} strokeWidth="1" opacity="0.45" />
       <text x={labelPosition[0]} y={labelPosition[1]} textAnchor={labelPosition[0] < 500 ? 'end' : 'start'} fill={color} fontSize="14" fontWeight="600" stroke="var(--color-surface-sunken)" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{section.name}</text>
     </g>
@@ -42,6 +47,7 @@ function PlanSection({ section, points, projection, status, labelPosition }: { s
 
 export interface CompliancePlanViewProps {
   results: readonly ComparisonResult[];
+  frameResults?: readonly ComparisonResult[];
   statuses: ReadonlyMap<string, BenchStatus>;
   variant?: 'panel' | 'hero';
   colorBy?: PlanColorBy;
@@ -50,7 +56,7 @@ export interface CompliancePlanViewProps {
   onSelectSection?: (name: string | null) => void;
 }
 
-export function CompliancePlanView({ results, statuses, variant = 'panel', colorBy = 'status', visibleStatuses, selectedSection, onSelectSection }: CompliancePlanViewProps) {
+export function CompliancePlanView({ results, frameResults, statuses, variant = 'panel', colorBy = 'status', visibleStatuses, selectedSection, onSelectSection }: CompliancePlanViewProps) {
   const { t } = useTranslation();
   const [fullSurface, setFullSurface] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -79,10 +85,15 @@ export function CompliancePlanView({ results, statuses, variant = 'panel', color
   const { data: vertices, isLoading, error } = useMeshVertices(topoMeshId);
   const { data: sections } = useSections();
   const names = new Set(results.map((row) => row.section));
-  const visibleSections = sections?.filter((section) => names.has(section.name)) ?? [];
-  const profiles = useSectionProfiles(visibleSections.map((section) => section.id));
-  const lines = visibleSections.map((section, index) => ({ section, points: sectionPlanPoints(section, profiles[index]?.data) })).filter((line) => line.points.length >= 2);
-  const [xMin, yMin, xMax, yMax] = planBounds(lines.flatMap((line) => line.points)) ?? [];
+  const frameNames = new Set((frameResults ?? results).map((row) => row.section));
+  const requestedNames = new Set([...names, ...frameNames]);
+  const profileSections = sections?.filter((section) => requestedNames.has(section.name)) ?? [];
+  const profiles = useSectionProfiles(profileSections.map((section) => section.id));
+  const allLines = profileSections.map((section, index) => ({ section, points: sectionPlanPoints(section, profiles[index]?.data) })).filter((line) => line.points.length >= 2);
+  const lines = allLines.filter(({ section }) => names.has(section.name));
+  const frameLines = allLines.filter(({ section }) => frameNames.has(section.name));
+  const frameBounds = planBounds(frameLines.flatMap((line) => line.points));
+  const [xMin, yMin, xMax, yMax] = frameBounds ?? [];
   const projection = useMemo(() => vertices ? createPlanProjection(vertices, !fullSurface && xMin !== undefined && yMin !== undefined && xMax !== undefined && yMax !== undefined ? [[xMin, yMin], [xMax, yMax]] : [], variant === 'panel') : null, [vertices, fullSurface, xMin, yMin, xMax, yMax, variant]);
   const raster = useMemo(() => vertices && projection ? createSurfaceRaster(vertices, projection) : '', [vertices, projection]);
   const sorted = [...lines].sort((a, b) => a.points[a.points.length - 1]![0] - b.points[b.points.length - 1]![0]);
@@ -141,7 +152,7 @@ export function CompliancePlanView({ results, statuses, variant = 'panel', color
               onClick={(event) => { event.stopPropagation(); if (enabled && !suppressClick.current) onSelectSection?.(section.name); suppressClick.current = false; }}
               onKeyDown={(event) => { if (enabled && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelectSection?.(section.name); } }}>
               {selected && <polyline points={coordinates} fill="none" stroke="var(--color-text-primary)" strokeWidth="9" vectorEffect="non-scaling-stroke" strokeLinecap="round" />}
-              <polyline data-plan-line="" points={coordinates} fill="none" stroke={color} strokeWidth={focused ? 5 : 3} vectorEffect="non-scaling-stroke" strokeLinecap="round" />
+              <polyline data-plan-line="" points={coordinates} fill="none" stroke={color} strokeWidth={focused ? 5 : 3} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeDasharray={colorBy === 'status' ? planStatusStrokeDash(status) : undefined} />
               {focused && <text x={endpoint[0]} y={endpoint[1]} dx={5 / view.zoom} dy={-5 / view.zoom} fill="var(--color-text-primary)" fontSize={14 / view.zoom} stroke="var(--color-surface-sunken)" strokeWidth={3 / view.zoom} paintOrder="stroke">{section.name}</text>}
               <polyline points={coordinates} fill="none" stroke="transparent" strokeWidth="14" vectorEffect="non-scaling-stroke" pointerEvents={enabled ? 'stroke' : 'none'} />
             </g>;
@@ -156,7 +167,7 @@ export function CompliancePlanView({ results, statuses, variant = 'panel', color
       </>}
       <div className="absolute left-2 top-2 bg-surface-raised"><SegmentedControl label={t('plan_view.title')} options={[{ value: 'evaluated', label: t('plan_view.evaluated_area') }, { value: 'full', label: t('plan_view.full_surface') }]} value={fullSurface ? 'full' : 'evaluated'} onChange={(value) => setFullSurface(value === 'full')} /></div>
       <div className="absolute right-2 top-2 flex flex-col bg-surface-raised text-text-primary">{([['zoom_in', '+', () => zoomAt(view.zoom * 1.5)], ['zoom_out', '−', () => zoomAt(view.zoom / 1.5)], ['zoom_reset', '↺', () => setView({ x: 0, y: 0, zoom: 1 })]] as const).map(([key, label, action]) => <button key={key} type="button" aria-label={t(`plan_view.${key}`)} className="h-8 w-8" onClick={action}>{label}</button>)}</div>
-      <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-3 bg-surface-raised px-2 py-1 text-xs text-text-muted">{colorBy === 'status' ? <>{([['ok', 'passing'], ['warn', 'outside'], ['nok', 'failing'], ['muted', 'no_score']] as const).map(([tone, label]) => <span className="flex items-center gap-1" key={tone}><StatusDot tone={tone} />{t(`plan_view.${label}`)}</span>)}</> : <><span>0 %</span><span aria-label={t('plan_view.color_scale')} className="h-2 w-32" style={{ background: 'linear-gradient(to right, #eb485d, #e68f19, #39ab60)' }} /><span>100 %</span></>}</div>
+      <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-3 bg-surface-raised px-2 py-1 text-xs text-text-muted">{colorBy === 'status' ? <>{([['CUMPLE', 'passing'], ['FUERA', 'outside'], ['NO_CUMPLE', 'failing'], ['UNKNOWN', 'no_score']] as const).map(([status, label]) => <StatusLegendItem status={status} label={t(`plan_view.${label}`)} key={status} />)}</> : <><span>0 %</span><span aria-label={t('plan_view.color_scale')} className="h-2 w-32" style={{ background: 'linear-gradient(to right, #eb485d, #e68f19, #39ab60)' }} /><span>100 %</span></>}</div>
     </div>;
   }
   return (
@@ -196,10 +207,10 @@ export function CompliancePlanView({ results, statuses, variant = 'panel', color
         </svg>
       )}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
-        <span className="flex items-center gap-1.5"><StatusDot tone="ok" />{t('plan_view.passing')}</span>
-        <span className="flex items-center gap-1.5"><StatusDot tone="warn" />{t('plan_view.outside')}</span>
-        <span className="flex items-center gap-1.5"><StatusDot tone="nok" />{t('plan_view.failing')}</span>
-        <span className="flex items-center gap-1.5"><StatusDot tone="muted" />{t('plan_view.no_score')}</span>
+        <StatusLegendItem status="CUMPLE" label={t('plan_view.passing')} />
+        <StatusLegendItem status="FUERA" label={t('plan_view.outside')} />
+        <StatusLegendItem status="NO_CUMPLE" label={t('plan_view.failing')} />
+        <StatusLegendItem status="UNKNOWN" label={t('plan_view.no_score')} />
       </div>
     </SummaryPanel>
   );

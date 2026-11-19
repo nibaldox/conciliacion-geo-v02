@@ -2,43 +2,28 @@ import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { AgentWorkspaceShell } from './AgentWorkspaceShell';
-import { useSession } from '../../stores/session';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('./FloatingChatButton', () => ({ useAgentChatInvalidationBridge: () => {} }));
 vi.mock('./ChatPanel', () => ({ ChatPanel: () => { const [value, setValue] = useState(''); return <input aria-label="draft" value={value} onChange={(e) => setValue(e.target.value)} />; } }));
 
-afterEach(() => { cleanup(); useSession.getState().reset(); });
+afterEach(cleanup);
 
 describe('AgentWorkspaceShell', () => {
-  it('opens workspace without losing the chat draft and returns to wide chat', () => {
+  it('shows workspace and one chat from the start without an isolated landing page', () => {
     render(<AgentWorkspaceShell><div>workspace content</div></AgentWorkspaceShell>);
-    const input = screen.getByLabelText('draft');
+    expect(screen.getByText('workspace content')).toBeTruthy();
+    expect(screen.getAllByLabelText('draft')).toHaveLength(1);
+    expect(screen.queryByText('agentWorkspace.open')).toBeNull();
+  });
+  it('preserves the same chat draft while switching mobile views', () => {
+    render(<AgentWorkspaceShell><div>workspace content</div></AgentWorkspaceShell>);
+    const input = screen.getByLabelText('draft') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'draft' } });
-    expect(screen.queryByText('workspace content')).toBeNull();
-    fireEvent.click(screen.getByText('agentWorkspace.open'));
-    expect(screen.getByText('workspace content')).toBeTruthy();
+    fireEvent.click(screen.getByText('agentWorkspace.chat'));
+    fireEvent.click(screen.getByText('agentWorkspace.workspace'));
+    fireEvent.click(screen.getByText('agentWorkspace.chat'));
     expect(screen.getByLabelText('draft')).toBe(input);
-    expect((input as HTMLInputElement).value).toBe('draft');
-    fireEvent.click(screen.getByText('agentWorkspace.expandChat'));
-    expect(screen.getByLabelText('draft')).toBe(input);
-  });
-  it('reveals workspace for a restored or newly loaded mesh', () => {
-    useSession.getState().setTopoMeshId('mesh-1');
-    render(<AgentWorkspaceShell><div>workspace content</div></AgentWorkspaceShell>);
-    expect(screen.getByText('workspace content')).toBeTruthy();
-  });
-  it('reveals workspace when a mesh arrives after opening', () => {
-    const { rerender } = render(<AgentWorkspaceShell><div>workspace content</div></AgentWorkspaceShell>);
-    fireEvent.change(screen.getByLabelText('draft'), { target: { value: 'draft' } });
-    useSession.getState().setDesignMeshId('mesh-new');
-    rerender(<AgentWorkspaceShell><div>workspace content</div></AgentWorkspaceShell>);
-    expect(screen.getByText('workspace content')).toBeTruthy();
-    expect((screen.getByLabelText('draft') as HTMLInputElement).value).toBe('draft');
-  });
-  it('does not open for blank mesh ids', () => {
-    useSession.getState().setTopoMeshId('  ');
-    render(<AgentWorkspaceShell><div>workspace content</div></AgentWorkspaceShell>);
-    expect(screen.queryByText('workspace content')).toBeNull();
+    expect(input.value).toBe('draft');
   });
 });

@@ -14,7 +14,8 @@ import {
 import { Spinner } from '../ui/Spinner';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TopoUploadZone } from './TopoUploadZone';
-import { ConfirmationCard, ToolCallCard } from './ToolCallCard';
+import { EmbeddedWorkflowGuide } from './EmbeddedWorkflowGuide';
+import { ConfirmationCard, ToolCallCard, ToolActivityGroup } from './ToolCallCard';
 import { type ResizeDirection, useResizablePanel } from './useResizablePanel';
 
 const NOTICE_TONE: Record<ChatNotice['severity'], string> = {
@@ -80,7 +81,7 @@ function derivePanelStatus(options: {
   return 'configured';
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({ message, embedded = false }: { message: ChatMessage; embedded?: boolean }) {
   const { t } = useTranslation();
   if (message.kind === 'tool') return <ToolCallCard message={message} />;
   if (message.kind === 'confirmation') {
@@ -90,13 +91,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     return (
       <div
         data-slot="ai-chat-observation"
-        className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-xs text-text-secondary"
+        className={embedded ? "min-w-0 border-b border-border py-3 text-xs text-text-secondary" : "rounded-lg border border-border bg-surface-muted px-3 py-2 text-xs text-text-secondary"}
       >
         <p className="whitespace-pre-wrap break-words">{message.text}</p>
       </div>
     );
   }
   const isUser = message.kind === 'user';
+  if (embedded) return <div data-slot="ai-chat-message" data-kind={message.kind} className="min-w-0 border-b border-border py-4 last:border-0">
+    <div className="mb-2 text-xs font-semibold text-text-secondary">{isUser ? t('aiChat.messages.you') : t('aiChat.messages.agent')}</div>
+    {message.kind === 'agent' ? <MarkdownMessage content={message.text} /> : <p className="whitespace-pre-wrap break-words text-sm font-medium">{message.text}</p>}
+  </div>;
   return (
     <div
       data-slot="ai-chat-message"
@@ -223,14 +228,45 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
   const setSessionModel = useAIChat((s) => s.setSessionModel);
   const loadProviderState = useAIChat((s) => s.loadProviderState);
   const clearConversation = useAIChat((s) => s.clearConversation);
-
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const legacyInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const handledAcceptanceRef = useRef<string | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmingClear, setConfirmingClear] = useState(false);
   const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
+  const isTouchDevice = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
+
+  const resizeInput = () => {
+    const textarea = inputRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const availableHeight = typeof window !== 'undefined'
+      ? (window.visualViewport?.height ?? window.innerHeight)
+      : 0;
+    const maxHeight = Math.min(168, Math.max(48, availableHeight - 250));
+    const contentHeight = textarea.scrollHeight;
+    const height = Math.min(contentHeight + 2, maxHeight);
+    textarea.style.height = `${height}px`;
+    textarea.style.overflowY = contentHeight + 2 > maxHeight ? 'auto' : 'hidden';
+  };
+
+  useEffect(() => {
+    resizeInput();
+  }, [draft, embedded]);
+
+  useEffect(() => {
+    const resize = () => resizeInput();
+    window.addEventListener('resize', resize);
+    window.visualViewport?.addEventListener('resize', resize);
+    return () => {
+      window.removeEventListener('resize', resize);
+      window.visualViewport?.removeEventListener('resize', resize);
+    };
+  }, [embedded]);
 
   useEffect(() => {
     if (!acceptedDraft || handledAcceptanceRef.current === acceptedDraft.id) {
@@ -252,7 +288,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
-    inputRef.current?.focus();
+    legacyInputRef.current?.focus();
     return () => {
       restoreFocusRef.current?.focus();
     };
@@ -260,8 +296,8 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
 
   useEffect(() => {
     const list = listRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [messages, notice]);
+    if (list && (!embedded || followRef.current)) list.scrollTop = list.scrollHeight;
+  }, [messages, notice, embedded]);
 
   const chatEnabled = providerState?.chat_enabled ?? false;
   const provider = providerState?.chat_provider ?? null;
@@ -305,6 +341,11 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
     const text = draft.trim();
     if (!text) return;
     void send(text);
+  };
+
+  const fillDraft = (text: string) => {
+    setDraft((current) => current.trim() ? current : text);
+    requestAnimationFrame(() => (embedded ? inputRef.current : legacyInputRef.current)?.focus());
   };
 
   const handleClear = () => {
@@ -369,15 +410,14 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
               {providerState?.chat_backend_label?.trim() || t('aiChat.header.local_badge')}
             </span>
           )}
-          {headerModel && (
-            <span
-              data-testid="ai-chat-model-chip"
-              className="min-w-0 truncate font-mono text-text-muted"
-              title={headerModel}
-            >
-              {headerModel}
-            </span>
-          )}
+          {headerModel && (embedded ? (
+            <details className="min-w-0 max-w-full text-text-secondary">
+              <summary className="cursor-pointer">{t('aiChat.activity.model')}</summary>
+              <span data-testid="ai-chat-model-chip" title={headerModel} className="block break-all font-mono text-text-secondary">{headerModel}</span>
+            </details>
+          ) : (
+            <span data-testid="ai-chat-model-chip" className="min-w-0 max-w-full truncate font-mono text-text-muted" title={headerModel}>{headerModel}</span>
+          ))}
           <span
             data-testid="ai-chat-status"
             data-status={status}
@@ -414,7 +454,8 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
         </div>
       </header>
 
-      <div ref={listRef} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
+      <div ref={listRef} onScroll={(event) => { const el = event.currentTarget; followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48; }} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
+        {embedded && <EmbeddedWorkflowGuide fillDraft={fillDraft} canDraft={providerStateLoaded && !turnActive && !clearing} />}
         {notice && <NoticeBanner notice={notice} />}
         {!providerStateLoaded && (
           <div
@@ -559,19 +600,23 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           </div>
         )}
         {messages.length === 0 && providerStateLoaded && (
-          <p className="py-4 text-center text-xs text-text-muted">
-            {t('aiChat.messages.empty')}
-          </p>
+          embedded ? <div className="mx-auto w-full max-w-3xl py-6 text-sm text-text-secondary"><p>{t('aiChat.activity.intro')}</p></div> : <p className="py-4 text-center text-xs text-text-muted">{t('aiChat.messages.empty')}</p>
         )}
         <div
           data-testid="ai-chat-messages"
           role="log"
           aria-live="polite"
-          className="flex flex-col gap-2"
+          className={embedded ? "mx-auto flex w-full max-w-3xl min-w-0 flex-col" : "flex flex-col gap-2"}
         >
-          {messages.map((message) => (
-            <MessageBubble key={message.id} message={message} />
-          ))}
+          {embedded ? (() => {
+            const groups: Array<ChatMessage | Extract<ChatMessage, { kind: 'tool' }>[]> = [];
+            for (const message of messages) {
+              const last = groups[groups.length - 1];
+              if (message.kind === 'tool') { if (Array.isArray(last)) last.push(message); else groups.push([message]); }
+              else groups.push(message);
+            }
+            return groups.map((item) => Array.isArray(item) ? <ToolActivityGroup key={item[0].id} messages={item} /> : <MessageBubble key={item.id} message={item} embedded />);
+          })() : messages.map((message) => <MessageBubble key={message.id} message={message} />)}
         </div>
         {streaming && (
           <div
@@ -585,46 +630,71 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
         )}
       </div>
 
-      <div className="shrink-0" hidden={embedded && !attachmentsOpen}>
+      <div
+        hidden={embedded && !attachmentsOpen}
+        className={`shrink-0 ${embedded ? 'px-3' : ''}`}
+      >
         <TopoUploadZone />
       </div>
 
       <form
-        className="flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"
+        data-testid="ai-chat-composer"
+        className={embedded ? "grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2 border-t border-border px-3 py-2" : "flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"}
         onSubmit={(e) => {
           e.preventDefault();
           handleSubmit();
         }}
       >
         {embedded && (
+          <textarea
+            ref={inputRef}
+            rows={1}
+            data-testid="ai-chat-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={() => setIsComposing(false)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || isComposing || isTouchDevice) return;
+              event.preventDefault();
+              handleSubmit();
+            }}
+            placeholder={t('aiChat.input.placeholder')}
+            aria-label={t('aiChat.input.aria')}
+            className="col-span-2 row-start-1 min-h-[2.25rem] w-full min-w-0 resize-none overflow-y-hidden rounded-md border border-border bg-surface px-3 py-1.5 text-sm leading-5"
+          />
+        )}
+        {embedded && (
           <button
             type="button"
             data-testid="ai-chat-attachments"
-            aria-label={t('step1.title')}
-            title={t('step1.title')}
+            aria-label={t('aiChat.activity.surfaces')}
+            title={t('aiChat.activity.surfaces')}
             aria-expanded={attachmentsOpen}
             onClick={() => setAttachmentsOpen((open) => !open)}
-            className="shrink-0 rounded-md border border-border px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
+            className="col-start-1 row-start-2 justify-self-start shrink-0 rounded-md border border-border px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
           >
-            +
+            <span aria-hidden="true">+ </span>{t('aiChat.activity.surfaces')}
           </button>
         )}
-        <input
-          ref={inputRef}
-          type="text"
-          data-testid="ai-chat-input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={t('aiChat.input.placeholder')}
-          aria-label={t('aiChat.input.aria')}
-          className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm"
-        />
+        {!embedded && (
+          <input
+            ref={legacyInputRef}
+            type="text"
+            data-testid="ai-chat-input"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={t('aiChat.input.placeholder')}
+            aria-label={t('aiChat.input.aria')}
+            className="min-w-0 flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm"
+          />
+        )}
         {turnActive ? (
           <button
             type="button"
             data-testid="ai-chat-stop"
             onClick={abort}
-            className="flex shrink-0 items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
+            className={embedded ? "col-start-2 row-start-2 flex shrink-0 items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-muted" : "flex shrink-0 items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"}
           >
             <Spinner size="sm" />
             {t('aiChat.input.stop')}
@@ -634,7 +704,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             type="submit"
             data-testid="ai-chat-send"
             disabled={clearing || !draft.trim()}
-            className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"
+            className={embedded ? "col-start-2 row-start-2 shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50" : "shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"}
           >
             {t('aiChat.input.send')}
           </button>

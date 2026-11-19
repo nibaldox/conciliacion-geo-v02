@@ -191,17 +191,18 @@ export function ProfilesGrid({ onSectionSelect }: ProfilesGridProps) {
   };
 
   return (
-    <div
-      className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
-    >
-      {sections.map((sec) => (
-        <MiniCard
-          key={sec.id}
-          section={sec}
-          isSelected={selectedSection === sec.id}
-          onSelect={() => handleSelect(sec)}
-        />
-      ))}
+    <div>
+      <div className="mb-1 text-xs text-text-muted">{t('profilesGrid.axis_descriptions')}</div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {sections.map((sec) => (
+          <MiniCard
+            key={sec.id}
+            section={sec}
+            isSelected={selectedSection === sec.id}
+            onSelect={() => handleSelect(sec)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

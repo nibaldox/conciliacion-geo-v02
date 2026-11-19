@@ -780,7 +780,7 @@ export function Dashboard() {
       {filteredResults.length === 0 ? <p role="status" className="text-sm text-text-muted">{t('dashboard.filters.no_matching_results')}</p> :
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 pt-6 xl:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] xl:grid-rows-[minmax(400px,1fr)]">
           <div data-slot="dashboard-plan" className="min-w-0 h-[60vh] min-h-[390px] xl:h-full xl:min-h-[400px]">
-            <CompliancePlanView results={filteredResults} statuses={profileStatuses} variant="hero" colorBy={colorBy} visibleStatuses={visibleStatuses} selectedSection={selectedVisible ? selectedSection : null} onSelectSection={setSelectedSection} />
+            <CompliancePlanView results={filteredResults} frameResults={results} statuses={profileStatuses} variant="hero" colorBy={colorBy} visibleStatuses={visibleStatuses} selectedSection={selectedVisible ? selectedSection : null} onSelectSection={setSelectedSection} />
           </div>
           <aside data-slot="dashboard-rail" className="min-w-0 px-4 pt-5 [&_[class$=bubble]]:max-w-48! xl:min-h-0 xl:overflow-y-auto xl:border-l xl:border-border">
             <KpiHeader globalScore={globalScore} counts={profileCounts} t={t} />

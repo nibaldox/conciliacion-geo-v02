@@ -5,16 +5,23 @@ import { LeftSidebar } from './LeftSidebar';
 import { ViewsToolbar } from './ViewsToolbar';
 import { DemoBanner } from '../demo/DemoBanner';
 import { useSession } from '../../stores/session';
+import { AgentWorkspaceShell } from '../ai-chat/AgentWorkspaceShell';
 
-interface AppLayoutProps { children: ReactNode }
+interface AppLayoutProps { children: ReactNode; assistant?: boolean }
 
-export function AppLayout({ children }: AppLayoutProps) {
+export function AppLayout({ children, assistant = false }: AppLayoutProps) {
   const view = useSession((s) => s.activeWorkspaceView);
   const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
   const isSpatialView = view === '3d';
   const isBlastView = view === 'blast';
   const { t } = useTranslation();
   const titles = { '3d': 'workspace.view3d', profiles: 'workspace.profiles', dashboard: 'workspace.summary', blast: 'workspace.blast', 'export-ai': 'workspace.export' };
+
+  const content = <div className={`min-h-0 flex-1 p-3 md:p-6 ${isSpatialView || isBlastView ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
+    <div className={`mx-auto flex w-full flex-col ${isSpatialView ? 'min-h-0 flex-1' : isBlastView ? 'min-h-0 flex-1 max-w-[1800px]' : 'min-h-full max-w-[1800px]'}`}>
+      <div className={isBlastView ? 'flex min-h-0 flex-1 flex-col' : 'min-h-0 flex-1'}>{children}</div>
+    </div>
+  </div>;
 
   return (
     <div data-slot="app-layout" className="flex h-dvh flex-col overflow-hidden bg-surface font-sans text-text-primary">
@@ -30,11 +37,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           <ViewsToolbar onNavigate={() => {
             if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches) setSidebarCollapsed(true);
           }} />
-          <div className={`min-h-0 flex-1 p-3 md:p-6 ${isSpatialView || isBlastView ? 'flex flex-col overflow-hidden' : 'overflow-auto'}`}>
-            <div className={`mx-auto flex w-full flex-col ${isSpatialView ? 'min-h-0 flex-1' : isBlastView ? 'min-h-0 flex-1 max-w-[1800px]' : 'min-h-full max-w-[1800px]'}`}>
-              <div className={isBlastView ? 'flex min-h-0 flex-1 flex-col' : 'min-h-0 flex-1'}>{children}</div>
-            </div>
-          </div>
+          {assistant ? <AgentWorkspaceShell>{content}</AgentWorkspaceShell> : content}
         </main>
       </div>
     </div>

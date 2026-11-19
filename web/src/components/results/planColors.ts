@@ -15,6 +15,13 @@ export function sectionScore(rows: readonly ComparisonResult[], section: string)
   return scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
 }
 
+export function planStatusStrokeDash(status: PlanStatusKey): string | undefined {
+  if (status === 'FUERA') return '10 6';
+  if (status === 'NO_CUMPLE') return '1 5';
+  if (status === 'UNKNOWN') return '10 3 1 3';
+  return undefined;
+}
+
 export function planColor(colorBy: PlanColorBy, value: number | PlanStatusKey | null): string {
   if (colorBy === 'status') {
     if (value === 'CUMPLE') return 'var(--status-ok-text)';

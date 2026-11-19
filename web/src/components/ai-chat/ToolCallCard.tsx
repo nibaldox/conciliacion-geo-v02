@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   downloadExportFile,
@@ -138,6 +138,27 @@ export function ToolCallCard({ message }: { message: ToolCardMessage }) {
       </div>
     </div>
   );
+}
+
+export function ToolActivityGroup({ messages }: { messages: ToolCardMessage[] }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  const unknown = (m: ToolCardMessage) => m.status === 'error' && m.invocationId.startsWith('restored_') && !m.error?.trim();
+  const error = messages.some((m) => m.status === 'error' && !unknown(m));
+  const hasUnknown = messages.some(unknown);
+  const running = messages.some((m) => m.status === 'running');
+  return <div className="min-w-0 border-y border-border py-2 text-xs text-text-secondary">
+    <button type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((v) => !v)} className="flex w-full items-center gap-2 text-left font-medium focus-visible:ring-2 focus-visible:ring-accent">
+      <span aria-hidden="true">{expanded ? '▾' : '▸'}</span><span>{t('aiChat.activity.title')} · {messages.length}</span><span className={error ? 'text-[var(--status-nok-text)]' : ''}>{error ? t('aiChat.tool.status_error') : running ? t('aiChat.activity.running') : hasUnknown ? t('aiChat.activity.unrecorded') : t('aiChat.tool.status_ok')}</span>
+    </button>
+    <div id={id} hidden={!expanded} className="min-w-0 space-y-3 pt-3">{messages.map((m) => <div key={m.id} className="min-w-0">
+      <p className="break-words font-medium text-text-primary">{t(`aiChat.activity.names.${m.name}`, { defaultValue: m.name })} · {unknown(m) ? t('aiChat.activity.unrecorded') : m.status === 'running' ? t('aiChat.activity.running') : t(m.status === 'ok' ? 'aiChat.tool.status_ok' : 'aiChat.tool.status_error')}</p>
+      {m.summary && <p className="mt-1 whitespace-pre-wrap break-words">{m.summary}</p>}
+      {m.status === 'error' && m.error && <p className="mt-1 whitespace-pre-wrap break-words text-[var(--status-nok-text)]">{m.error}</p>}
+      {m.status === 'ok' && <ExportDownloadButton message={m} />}
+    </div>)}</div>
+  </div>;
 }
 
 interface ConfirmationCardProps {

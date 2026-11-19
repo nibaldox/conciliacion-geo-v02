@@ -1632,7 +1632,8 @@
     "profileError": "No se pudo cargar este perfil.",
     "profileRefreshError": "No se pudo actualizar este perfil.",
     "profileEmpty": "Este perfil no tiene datos para mostrar.",
-    "retryProfile": "Reintentar perfil"
+    "retryProfile": "Reintentar perfil",
+    "axis_descriptions": "Distancia (m) · Elevación (m)"
   },
   "workspace": {
     "curve_view_hint": "La vista 3D se activa automáticamente. Elige una curva en la superficie para definir la sección.",
@@ -1807,6 +1808,24 @@
       "no_tools_suffix": "sin herramientas",
       "refresh": "Volver a consultar"
     },
+    "guidance": {
+        "load_design": "Falta la superficie de Diseño. Carga primero Diseño.",
+        "load_topo": "Falta la superficie de Topografía.",
+        "review": "Revisa el análisis y sus incumplimientos.",
+        "profile": "Revisa el perfil de la sección seleccionada.",
+        "review_cta": "Revisar incumplimientos",
+        "profile_cta": "Preguntar por este perfil",
+        "review_prompt": "Revisa la conciliación completada y explica los incumplimientos encontrados, citando los resultados pertinentes. No modifiques el análisis.",
+        "profile_prompt": "Explica el perfil de la sección seleccionada actualmente, incluidos sus resultados pertinentes. No modifiques el análisis.",
+        "sections": "Define las secciones para la conciliación antes de continuar.",
+        "parameters": "Revisa y confirma los parámetros de conciliación antes de continuar.",
+        "ready": "La conciliación está lista. Revisa la configuración antes de ejecutarla.",
+        "open_loader": "Abrir cargador de superficies",
+        "cta_design": "Cargar diseño",
+        "cta_topo": "Cargar topografía",
+        "processing": "La conciliación está en curso. Puedes consultar el flujo, sin iniciar otra acción.",
+        "prepare": "Prepara el siguiente paso: define secciones y confirma parámetros antes de ejecutar la conciliación."
+      },
     "input": {
       "placeholder": "Escribe tu mensaje…",
       "aria": "Mensaje para el asistente",
@@ -1818,6 +1837,39 @@
       "you": "Tú",
       "agent": "Asistente",
       "streaming": "El asistente está trabajando…"
+    },
+    "activity": {
+      "title": "Actividad del agente",
+      "running": "En curso",
+      "unrecorded": "Sin estado registrado",
+      "model": "Modelo",
+      "starter": "Guiarme para conciliar",
+      "draft": "Quiero comparar diseño y topografía. Revisa esta sesión y dime solo qué falta y el siguiente paso, en dos frases. En Superficies se carga un archivo a la vez. Si faltan ambas, guía solo la carga del Diseño; si falta una, indica cómo cargar esa. No generes secciones ni ejecutes el análisis.",
+      "intro": "Comienza con una guía o escribe tu consulta.",
+      "surfaces": "Superficies",
+      "names": {
+        "get_workflow_state": "Revisar estado del flujo",
+        "list_meshes": "Listar superficies",
+        "get_mesh_info": "Consultar superficie",
+        "list_sections": "Listar secciones",
+        "add_section_click": "Añadir sección",
+        "generate_sections_auto": "Generar secciones automáticamente",
+        "generate_sections_manual": "Generar secciones manuales",
+        "run_reconciliation": "Ejecutar conciliación",
+        "get_results_summary": "Consultar resumen",
+        "get_settings": "Consultar configuración",
+        "get_profile": "Consultar perfil",
+        "get_design_achievement": "Consultar logro de diseño",
+        "get_proposed_compliance": "Consultar propuesta de cumplimiento",
+        "query_results": "Consultar resultados",
+        "get_blast_summary": "Consultar resumen de tronadura",
+        "get_blast_correlation": "Consultar correlación de tronadura",
+        "get_blast_damage_model": "Consultar modelo de daño",
+        "export_report": "Exportar informe",
+        "update_section": "Actualizar sección",
+        "delete_section": "Eliminar sección",
+        "generate_sections_curve": "Generar secciones por curva"
+      }
     },
     "tool": {
      "running": "ejecutando «{{name}}»…",

@@ -6,7 +6,7 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 vi.mock('../../../stores/session', () => ({ useSession: (selector: (state: { topoMeshId: string }) => unknown) => selector({ topoMeshId: 'mesh' }) }));
 vi.mock('../../../api/hooks', () => ({
   useMeshVertices: () => ({ data: { x: [0, 100], y: [0, 100], z: [0, 1] } }),
-  useSections: () => ({ data: [{ id: '1', name: 'A', origin: [20, 20], azimuth: 0 }, { id: '2', name: 'B', origin: [60, 20], azimuth: 0 }] }),
+  useSections: () => ({ data: [{ id: '1', name: 'A', origin: [20, 20], azimuth: 0 }, { id: '2', name: 'B', origin: [60, 20], azimuth: 0 }, { id: '3', name: 'C', origin: [20, 60], azimuth: 0 }, { id: '4', name: 'D', origin: [60, 60], azimuth: 0 }] }),
   useSectionProfiles: (ids: string[]) => ids.map(() => ({ data: { topo: { distances: [0, 50], elevations: [1, 2] } } })),
 }));
 vi.mock('../planGeometry', async (importOriginal) => ({ ...await importOriginal<typeof import('../planGeometry')>(), createSurfaceRaster: () => 'raster' }));
@@ -35,6 +35,40 @@ describe('hero plan', () => {
     expect(overlay()).toBeNull();
     rerender(<CompliancePlanView {...props} selectedSection={null} />);
     expect(overlay()).toBeNull();
+  });
+  it('matches status line patterns to the visible legend and omits patterns for metrics', () => {
+    const rows = ['A', 'B', 'C', 'D'].map((section) => ({ section }) as ComparisonResult);
+    const states = new Map([
+      ['A', 'CUMPLE' as const],
+      ['B', 'FUERA' as const],
+      ['C', 'NO_CUMPLE' as const],
+      ['D', 'UNKNOWN' as const],
+    ]);
+    const { container, rerender } = render(<CompliancePlanView variant="hero" results={rows} statuses={states} />);
+    const dashFor = (element: Element | null) => element?.getAttribute('stroke-dasharray');
+    for (const status of ['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN']) {
+      const line = container.querySelector(`[data-status="${status}"] [data-plan-line]`);
+      const swatch = container.querySelector(`[data-status-swatch="${status}"]`);
+      expect(dashFor(line)).toBe(dashFor(swatch));
+      expect(line?.getAttribute('stroke')).toBe(swatch?.getAttribute('stroke'));
+    }
+    expect(dashFor(container.querySelector('[data-status="CUMPLE"] [data-plan-line]'))).toBeNull();
+    expect(dashFor(container.querySelector('[data-status="FUERA"] [data-plan-line]'))).toBeTruthy();
+    expect(dashFor(container.querySelector('[data-status="NO_CUMPLE"] [data-plan-line]'))).toBeTruthy();
+    rerender(<CompliancePlanView variant="hero" results={rows} statuses={states} colorBy="score" />);
+    expect(container.querySelectorAll('[data-plan-line][stroke-dasharray]')).toHaveLength(0);
+  });
+  it('keeps the evaluated framing stable when result filters change', () => {
+    const allRows = [...results, { section: 'B', height_status: 'NO_CUMPLE', section_score: 30 } as ComparisonResult];
+    const props = { variant: 'hero' as const, results: allRows, frameResults: allRows, statuses: new Map([['A', 'CUMPLE' as const], ['B', 'NO_CUMPLE' as const]]) };
+    const { container, rerender } = render(<CompliancePlanView {...props} />);
+    const line = () => container.querySelector('[data-section-name="B"] [data-plan-line]')!;
+    const before = line().getAttribute('points');
+    fireEvent.click(screen.getByRole('button', { name: 'plan_view.zoom_in' }));
+    const zoomedViewBox = screen.getByRole('img').getAttribute('viewBox');
+    rerender(<CompliancePlanView {...props} results={[allRows[1]!]} />);
+    expect(line().getAttribute('points')).toBe(before);
+    expect(screen.getByRole('img').getAttribute('viewBox')).toBe(zoomedViewBox);
   });
   it('selects accessibly and clears with Escape or empty space', () => {
     const onSelectSection = vi.fn();

@@ -1632,7 +1632,8 @@
     "profileError": "This profile could not be loaded.",
     "profileRefreshError": "This profile could not be refreshed.",
     "profileEmpty": "This profile has no data to display.",
-    "retryProfile": "Retry profile"
+    "retryProfile": "Retry profile",
+    "axis_descriptions": "Distance (m) · Elevation (m)"
   },
   "workspace": {
     "curve_view_hint": "The 3D view opens automatically. Choose a curve on the surface to define the section.",
@@ -1807,6 +1808,24 @@
       "no_tools_suffix": "no tools",
       "refresh": "Check again"
     },
+    "guidance": {
+        "load_design": "Design surface is missing. Load Design first.",
+        "load_topo": "The topography surface is missing.",
+        "review": "Review the analysis and its non-compliances.",
+        "profile": "Review the selected section profile.",
+        "review_cta": "Review non-compliances",
+        "profile_cta": "Ask about this profile",
+        "review_prompt": "Review the completed reconciliation and explain the non-compliances found, citing the relevant results. Do not modify the analysis.",
+        "profile_prompt": "Explain the profile of the currently selected section, including its relevant results. Do not modify the analysis.",
+        "sections": "Define the sections for the reconciliation before continuing.",
+        "parameters": "Review and confirm the reconciliation parameters before continuing.",
+        "ready": "The reconciliation is ready. Review the setup before running it.",
+        "open_loader": "Open surface loader",
+        "cta_design": "Load Design",
+        "cta_topo": "Load topography",
+        "processing": "Reconciliation is in progress. You can inspect the workflow without starting another action.",
+        "prepare": "Prepare the next step: define sections and confirm parameters before running reconciliation."
+      },
     "input": {
       "placeholder": "Type your message…",
       "aria": "Message for the assistant",
@@ -1818,6 +1837,39 @@
       "you": "You",
       "agent": "Assistant",
       "streaming": "The assistant is working…"
+    },
+    "activity": {
+      "title": "Agent activity",
+      "running": "In progress",
+      "unrecorded": "No status recorded",
+      "model": "Model",
+      "starter": "Guide me through reconciliation",
+      "draft": "I want to compare design and topography. Review this session and tell me only what is missing and the next step, in two sentences. In Surfaces, upload one file at a time. If both are missing, guide only the Design upload; if one is missing, explain how to upload that one. Do not generate sections or run the analysis.",
+      "intro": "Start with guidance or write your question.",
+      "surfaces": "Surfaces",
+      "names": {
+        "get_workflow_state": "Check workflow state",
+        "list_meshes": "List surfaces",
+        "get_mesh_info": "Inspect surface",
+        "list_sections": "List sections",
+        "add_section_click": "Add section",
+        "generate_sections_auto": "Generate sections automatically",
+        "generate_sections_manual": "Generate manual sections",
+        "run_reconciliation": "Run reconciliation",
+        "get_results_summary": "Get results summary",
+        "get_settings": "Get settings",
+        "get_profile": "Get profile",
+        "get_design_achievement": "Get design achievement",
+        "get_proposed_compliance": "Get compliance proposal",
+        "query_results": "Query results",
+        "get_blast_summary": "Get blast summary",
+        "get_blast_correlation": "Get blast correlation",
+        "get_blast_damage_model": "Get damage model",
+        "export_report": "Export report",
+        "update_section": "Update section",
+        "delete_section": "Delete section",
+        "generate_sections_curve": "Generate sections along curve"
+      }
     },
     "tool": {
      "running": "running \"{{name}}\"…",

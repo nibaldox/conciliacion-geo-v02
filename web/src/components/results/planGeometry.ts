@@ -21,19 +21,34 @@ export function createPlanProjection(vertices: VerticesResponse, focusPoints: re
     yMin = Math.min(yMin, y); yMax = Math.max(yMax, y);
   }
   if (!Number.isFinite(xMin) || xMax <= xMin || yMax <= yMin) return null;
-  const valid = focusPoints.filter((point) => point.every(Number.isFinite));
-  if (valid.length >= 2) {
-    xMin = Infinity; xMax = -Infinity; yMin = Infinity; yMax = -Infinity;
-    for (const [x, y] of valid) {
-      xMin = Math.min(xMin, x); xMax = Math.max(xMax, x);
-      yMin = Math.min(yMin, y); yMax = Math.max(yMax, y);
-    }
-    const padding = Math.max(10, Math.max(xMax - xMin, yMax - yMin) * paddingRatio);
-    xMin -= padding; xMax += padding; yMin -= padding; yMax += padding;
+  let focusXMin = Infinity, focusXMax = -Infinity, focusYMin = Infinity, focusYMax = -Infinity;
+  let validFocusCount = 0;
+  for (const [x, y] of focusPoints) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    validFocusCount++;
+    focusXMin = Math.min(focusXMin, x); focusXMax = Math.max(focusXMax, x);
+    focusYMin = Math.min(focusYMin, y); focusYMax = Math.max(focusYMax, y);
   }
-  const width = viewport.width - (labelled ? 440 : 120);
-  const scale = Math.min(width / (xMax - xMin), (viewport.height - 120) / (yMax - yMin));
-  return { ...viewport, xMin, yMin, xMax, yMax, scale, left: (viewport.width - (xMax - xMin) * scale) / 2, top: (viewport.height - (yMax - yMin) * scale) / 2 };
+  if (validFocusCount >= 2) {
+    const focusWidth = focusXMax - focusXMin;
+    const focusHeight = focusYMax - focusYMin;
+    if (Number.isFinite(focusWidth) && Number.isFinite(focusHeight) && (focusWidth > 0 || focusHeight > 0)) {
+      const padding = Math.max(10, Math.max(focusWidth, focusHeight) * paddingRatio);
+      if (Number.isFinite(padding) && [focusXMin - padding, focusXMax + padding, focusYMin - padding, focusYMax + padding].every(Number.isFinite)) {
+        xMin = focusXMin - padding;
+        xMax = focusXMax + padding;
+        yMin = focusYMin - padding;
+        yMax = focusYMax + padding;
+      }
+    }
+  }
+  const width = viewport.width - (labelled ? 440 : 40);
+  const height = viewport.height - (labelled ? 120 : 40);
+  const xSpan = xMax - xMin, ySpan = yMax - yMin;
+  if (!Number.isFinite(xSpan) || !Number.isFinite(ySpan) || xSpan <= 0 || ySpan <= 0 || width <= 0 || height <= 0) return null;
+  const scale = Math.min(width / xSpan, height / ySpan);
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  return { ...viewport, xMin, yMin, xMax, yMax, scale, left: (viewport.width - xSpan * scale) / 2, top: (viewport.height - ySpan * scale) / 2 };
 
 }
 
