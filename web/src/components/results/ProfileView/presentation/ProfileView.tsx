@@ -13,6 +13,7 @@ import { HorizontalDeviationOverview } from '../../HorizontalDeviationOverview';
 import { useFilterState, useCrossLinkState, useProfileViewModel } from '../application';
 import { hasProposalData } from '../domain';
 import { useSession } from '../../../../stores/session';
+import { useBenchFocus } from '../../../../stores/benchFocus';
 import { Spinner } from '../../../ui/Spinner';
 import { horizontalDeviationWarning } from '../../../../utils/horizontalDeviationMessages';
 
@@ -42,10 +43,36 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
   const crossLink = useCrossLinkState();
   const clearCrossLink = crossLink.clear;
   const { viewModel, isLoading, error, refetch } = useProfileViewModel(selectedSectionId);
+  const request = useBenchFocus((state) => state.request);
+  const consumeRequest = useBenchFocus((state) => state.consumeRequest);
+  const publishCurrent = useBenchFocus((state) => state.publishCurrent);
+  const setSelected = crossLink.setSelected;
+  const selectedBench = viewModel?.benches.find((bench) => bench.benchNumber === crossLink.selected) ?? null;
 
   useEffect(() => {
     clearCrossLink();
   }, [selectedSectionId, clearCrossLink]);
+
+  useEffect(() => {
+    if (!request || request.sectionId !== selectedSectionId || isLoading || error || viewModel?.section.id !== selectedSectionId) return;
+    const bench = viewModel.benches.find((item) => item.designBenchNumber === request.designBench);
+    if (bench) setSelected(bench.benchNumber);
+    consumeRequest(request.nonce);
+  }, [request, selectedSectionId, isLoading, error, viewModel, setSelected, consumeRequest]);
+
+  useEffect(() => {
+    if (!selectedSectionId || viewModel?.section.id !== selectedSectionId || !selectedBench) {
+      publishCurrent(null);
+      return;
+    }
+    publishCurrent({
+      sectionId: selectedSectionId,
+      benchNumber: selectedBench.benchNumber,
+      designBenchNumber: selectedBench.designBenchNumber ?? null,
+    });
+  }, [selectedSectionId, viewModel?.section.id, selectedBench, publishCurrent]);
+
+  useEffect(() => () => publishCurrent(null), [publishCurrent]);
 
   const selectedDesignStatuses = (viewModel?.comparisonBenchStatuses ?? []).filter((bench) =>
     selectedDesignBenches.length === 0 || (bench.designBenchNumber != null && selectedDesignBenches.includes(bench.designBenchNumber)));
@@ -83,7 +110,6 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
     return <LoadingState />;
   }
 
-  const selectedBench = viewModel.benches.find((bench) => bench.benchNumber === crossLink.selected) ?? null;
   const planToggleLabel = t('profile_plan.title');
   const proposalLayerAvailable =
     (viewModel.designBenches?.length ?? 0) > 0 && hasProposalData(viewModel.comparisons ?? []);

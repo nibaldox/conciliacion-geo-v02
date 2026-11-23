@@ -5,6 +5,7 @@ import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import es from '../../../../../locales/es.json';
 import { useSession } from '../../../../../stores/session';
+import { useBenchFocus } from '../../../../../stores/benchFocus';
 import { ProfileView } from '../ProfileView';
 import type { ProfileViewModel } from '../../domain/types';
 
@@ -39,7 +40,7 @@ vi.mock('../../../../charts/Plot', () => ({
 }));
 vi.mock('../../application', async () => ({
   ...await vi.importActual<typeof import('../../application')>('../../application'),
-  useProfileViewModel: () => ({ viewModel, isLoading: false, error: null }),
+  useProfileViewModel: () => ({ viewModel, isLoading, error: null }),
 }));
 
 const baseViewModel: ProfileViewModel = {
@@ -59,6 +60,7 @@ const baseViewModel: ProfileViewModel = {
   }],
 };
 let viewModel: ProfileViewModel = baseViewModel;
+let isLoading = false;
 
 const i18n = createInstance();
 void i18n.init({ lng: 'es', resources: { es: { translation: es } }, initAsync: false });
@@ -73,6 +75,8 @@ void emptyStateI18n.init({
 
 beforeEach(() => {
   viewModel = baseViewModel;
+  isLoading = false;
+  useBenchFocus.setState({ request: null, current: null });
   localStorage.clear();
   useSession.getState().reset();
   useSession.getState().setSelectedSection('section-1');
@@ -299,4 +303,71 @@ describe('ProfileView selection', () => {
     expect(screen.getByText('Selecciona un banco')).toBeInTheDocument();
     expect(row).not.toHaveAttribute('data-selected');
   });
+  it('applies a request for the current section by design number', () => {
+    viewModel = { ...baseViewModel, benches: [{ ...baseViewModel.benches[0]!, designBenchNumber: 2 }] };
+    render(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
+    act(() => useBenchFocus.getState().requestBench('section-1', 2));
+    expect(screen.getByText('Banco 04')).toBeInTheDocument();
+    expect(useBenchFocus.getState().current).toEqual({ sectionId: 'section-1', benchNumber: 4, designBenchNumber: 2 });
+    expect(useBenchFocus.getState().request).toBeNull();
+  });
+
+  it('applies a request made in the same act as a section change after clearing', () => {
+    viewModel = { ...baseViewModel, section: { ...baseViewModel.section, id: 'section-2' }, benches: [{ ...baseViewModel.benches[0]!, designBenchNumber: 2 }] };
+    render(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
+    act(() => {
+      useSession.getState().setSelectedSection('section-2');
+      useBenchFocus.getState().requestBench('section-2', 2);
+    });
+    expect(screen.getByText('Banco 04')).toBeInTheDocument();
+    expect(useBenchFocus.getState().current?.sectionId).toBe('section-2');
+  });
+
+  it('consumes an absent bench without selecting it', () => {
+    render(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
+    act(() => useBenchFocus.getState().requestBench('section-1', 999));
+    expect(screen.getByText('Selecciona un banco')).toBeInTheDocument();
+    expect(useBenchFocus.getState().request).toBeNull();
+  });
+
+  it('keeps another section request pending until its section is selected', () => {
+    viewModel = { ...baseViewModel, benches: [{ ...baseViewModel.benches[0]!, designBenchNumber: 2 }] };
+    render(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
+    act(() => useBenchFocus.getState().requestBench('section-2', 2));
+    expect(useBenchFocus.getState().request).not.toBeNull();
+    viewModel = { ...viewModel, section: { ...viewModel.section, id: 'section-2' } };
+    act(() => useSession.getState().setSelectedSection('section-2'));
+    expect(screen.getByText('Banco 04')).toBeInTheDocument();
+    expect(useBenchFocus.getState().request).toBeNull();
+  });
+
+  it('waits for loading and for the matching section view model', () => {
+    viewModel = { ...baseViewModel, benches: [{ ...baseViewModel.benches[0]!, designBenchNumber: 2 }] };
+    isLoading = true;
+    const { rerender } = render(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
+    act(() => useBenchFocus.getState().requestBench('section-2', 2));
+    act(() => useSession.getState().setSelectedSection('section-2'));
+    expect(useBenchFocus.getState().request).not.toBeNull();
+    isLoading = false;
+    rerender(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
+    expect(useBenchFocus.getState().request).not.toBeNull();
+    viewModel = { ...viewModel, section: { ...viewModel.section, id: 'section-2' } };
+    rerender(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
+    expect(screen.getByText('Banco 04')).toBeInTheDocument();
+    expect(useBenchFocus.getState().request).toBeNull();
+  });
+
+  it('publishes manual selection and clears it on unmount with bounded renders', async () => {
+    const user = userEvent.setup();
+    viewModel = { ...baseViewModel, benches: [{ ...baseViewModel.benches[0]!, designBenchNumber: 2 }] };
+    let renders = 0;
+    const { Profiler } = await import('react');
+    const { unmount } = render(<Profiler id="profile" onRender={() => { renders += 1; }}><I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider></Profiler>);
+    await user.click(screen.getByRole('row', { name: 'Banco 4' }));
+    expect(useBenchFocus.getState().current).toEqual({ sectionId: 'section-1', benchNumber: 4, designBenchNumber: 2 });
+    expect(renders).toBeLessThan(10);
+    unmount();
+    expect(useBenchFocus.getState().current).toBeNull();
+  });
+
 });
