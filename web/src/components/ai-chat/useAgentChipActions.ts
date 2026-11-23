@@ -11,9 +11,20 @@ export interface AgentChipActions {
   selectBench: (sectionId: string, designBench: number) => void;
 }
 
+export function normalizeContextSectionId(
+  selected: string | null,
+  sections: readonly SectionRef[],
+): string | null {
+  if (selected === null) return null;
+  if (sections.some((section) => section.id === selected)) return selected;
+  const matches = sections.filter((section) => section.name === selected);
+  return matches.length === 1 ? matches[0].id : null;
+}
+
 export function useAgentChipActions(): AgentChipActions {
   const { data: sections = [] } = useSections();
-  const contextSectionId = useSession((state) => state.selectedSection);
+  const selectedSection = useSession((state) => state.selectedSection);
+  const contextSectionId = normalizeContextSectionId(selectedSection, sections);
   const openSection = (ref: SectionRef) => {
     const session = useSession.getState();
     session.setSelectedSection(ref.id);
