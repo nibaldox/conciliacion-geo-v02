@@ -15,6 +15,9 @@ import { Spinner } from '../ui/Spinner';
 import { MarkdownMessage } from './MarkdownMessage';
 import { TopoUploadZone } from './TopoUploadZone';
 import { EmbeddedWorkflowGuide } from './EmbeddedWorkflowGuide';
+import { ChatPet } from './ChatPet';
+import { CopilotHeader } from './CopilotHeader';
+import { ContextChip } from './ContextChip';
 import { ConfirmationCard, ToolCallCard, ToolActivityGroup } from './ToolCallCard';
 import { type ResizeDirection, useResizablePanel } from './useResizablePanel';
 
@@ -100,7 +103,7 @@ function MessageBubble({ message, embedded = false }: { message: ChatMessage; em
   const isUser = message.kind === 'user';
   if (embedded) return <div data-slot="ai-chat-message" data-kind={message.kind} className="min-w-0 border-b border-border py-4 last:border-0">
     <div className="mb-2 text-xs font-semibold text-text-secondary">{isUser ? t('aiChat.messages.you') : t('aiChat.messages.agent')}</div>
-    {message.kind === 'agent' ? <MarkdownMessage content={message.text} /> : <p className="whitespace-pre-wrap break-words text-sm font-medium">{message.text}</p>}
+    {message.kind === 'agent' ? <MarkdownMessage content={message.text} chips /> : <p className="whitespace-pre-wrap break-words text-sm font-medium">{message.text}</p>}
   </div>;
   return (
     <div
@@ -177,6 +180,7 @@ function NoticeBanner({ notice }: { notice: ChatNotice }) {
 interface ChatPanelProps {
   onClose?: () => void;
   presentation?: 'floating' | 'embedded';
+  layout?: 'protagonist' | 'copilot';
   /**
    * Desktop-only extra gap subtracted from the stored rect height so the
    * panel's bottom edge clears the floating launcher button (which stays
@@ -209,8 +213,9 @@ const RESIZE_HANDLES: ReadonlyArray<{
  * full-width bottom sheet. Escape closes the panel and focus is
  * restored to the previously focused element.
  */
-export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floating' }: ChatPanelProps) {
+export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floating', layout = 'copilot' }: ChatPanelProps) {
   const embedded = presentation === 'embedded';
+  const protagonist = embedded && layout === 'protagonist';
   const { t } = useTranslation();
   const resizable = useResizablePanel();
   const messages = useAIChat((s) => s.messages);
@@ -247,7 +252,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
     const availableHeight = typeof window !== 'undefined'
       ? (window.visualViewport?.height ?? window.innerHeight)
       : 0;
-    const maxHeight = Math.min(168, Math.max(48, availableHeight - 250));
+    const maxHeight = Math.min(embedded && !protagonist ? 128 : 168, Math.max(48, availableHeight - 250));
     const contentHeight = textarea.scrollHeight;
     const height = Math.min(contentHeight + 2, maxHeight);
     textarea.style.height = `${height}px`;
@@ -256,7 +261,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
 
   useEffect(() => {
     resizeInput();
-  }, [draft, embedded]);
+  }, [draft, embedded, layout]);
 
   useEffect(() => {
     const resize = () => resizeInput();
@@ -387,6 +392,8 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
       style={embedded ? undefined : panelStyle}
     >
       <header className="shrink-0 border-b border-border px-3 py-2">
+        {embedded && !protagonist && <CopilotHeader hasModel={Boolean(headerModel)} />}
+        {embedded && !protagonist && (provider || headerModel) && <div title={[provider, headerModel].filter(Boolean).join(' · ')} className="truncate pl-9 text-xs text-text-muted">{[provider, headerModel].filter(Boolean).join(' · ')}</div>}
         {!embedded && <div className="flex items-center justify-between gap-2">
           <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">
             {t('aiChat.title')}
@@ -455,7 +462,10 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
       </header>
 
       <div ref={listRef} onScroll={(event) => { const el = event.currentTarget; followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48; }} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
-        {embedded && <EmbeddedWorkflowGuide fillDraft={fillDraft} canDraft={providerStateLoaded && !turnActive && !clearing} />}
+        {embedded && messages.length === 0 && <div data-testid="ai-chat-welcome" className="mx-auto w-full max-w-3xl py-6 text-text-secondary">
+          {protagonist ? <div className="text-center"><div className="mx-auto w-20 [&_.ai-pet__svg]:h-20 [&_.ai-pet__svg]:w-20"><ChatPet /></div><h1 className="mt-4 text-2xl text-text-primary">{t('aiChat.welcome.title')}</h1><p className="mt-2 text-sm">{t('aiChat.welcome.subtitle')}</p></div> : <p className="text-xs font-semibold">{t('aiChat.welcome.compact')}</p>}
+        </div>}
+        {embedded && <div className="mx-auto w-full max-w-3xl"><EmbeddedWorkflowGuide fillDraft={fillDraft} canDraft={providerStateLoaded && !turnActive && !clearing} /></div>}
         {notice && <NoticeBanner notice={notice} />}
         {!providerStateLoaded && (
           <div
@@ -508,7 +518,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             </label>
           </div>
         )}
-        {chatEnabled && selection.kind === 'pick' && (
+        {!embedded && chatEnabled && selection.kind === 'pick' && (
           <div
             role="status"
             data-testid={
@@ -600,7 +610,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           </div>
         )}
         {messages.length === 0 && providerStateLoaded && (
-          embedded ? <div className="mx-auto w-full max-w-3xl py-6 text-sm text-text-secondary"><p>{t('aiChat.activity.intro')}</p></div> : <p className="py-4 text-center text-xs text-text-muted">{t('aiChat.messages.empty')}</p>
+          !embedded && <p className="py-4 text-center text-xs text-text-muted">{t('aiChat.messages.empty')}</p>
         )}
         <div
           data-testid="ai-chat-messages"
@@ -637,9 +647,10 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
         <TopoUploadZone />
       </div>
 
+      {embedded && !protagonist && <ContextChip />}
       <form
         data-testid="ai-chat-composer"
-        className={embedded ? "grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2 border-t border-border px-3 py-2" : "flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"}
+        className={embedded ? "mx-auto grid w-full max-w-3xl shrink-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2 border-t border-border px-3 py-2" : "flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"}
         onSubmit={(e) => {
           e.preventDefault();
           handleSubmit();
@@ -648,7 +659,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
         {embedded && (
           <textarea
             ref={inputRef}
-            rows={1}
+            rows={protagonist ? 3 : 1}
             data-testid="ai-chat-input"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -661,7 +672,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             }}
             placeholder={t('aiChat.input.placeholder')}
             aria-label={t('aiChat.input.aria')}
-            className="col-span-2 row-start-1 min-h-[2.25rem] w-full min-w-0 resize-none overflow-y-hidden rounded-md border border-border bg-surface px-3 py-1.5 text-sm leading-5"
+            className={`col-span-2 row-start-1 w-full min-w-0 resize-none overflow-y-hidden rounded-md border border-border bg-surface px-3 py-1.5 text-sm leading-5 ${protagonist ? 'min-h-[4.5rem]' : 'min-h-[2.25rem]'}`}
           />
         )}
         {embedded && (
@@ -676,6 +687,16 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           >
             <span aria-hidden="true">+ </span>{t('aiChat.activity.surfaces')}
           </button>
+        )}
+        {embedded && chatEnabled && selection.kind === 'pick' && (
+          <label className="col-start-1 row-start-2 ml-28 min-w-0 justify-self-start text-xs text-text-muted">
+            <span className="sr-only">{t('aiChat.model.selector_label')}</span>
+            <select data-testid="ai-chat-model-select" value={selection.model ?? ''} onChange={(event) => setSessionModel(event.target.value, 'detected')} aria-label={t('aiChat.model.selector_label')} disabled={busy} className="max-w-full rounded border border-border bg-surface px-2 py-1.5 text-xs">
+              <option value="">{t('aiChat.model.selector_placeholder')}</option>
+              {selection.models.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, selection.models)}{model.tool_use === false ? ` · ${t('aiChat.model.no_tools_suffix')}` : ''}</option>)}
+            </select>
+            {selection.model === null && <span data-testid="ai-chat-models-notice" className="sr-only">{t('aiChat.notice.models_required')}</span>}
+          </label>
         )}
         {!embedded && (
           <input

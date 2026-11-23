@@ -1,10 +1,14 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatPanel } from '../ChatPanel';
 import { historyToChatMessages, useAIChat, type ChatMessage } from '../../../stores/aiChat';
 import { useSession } from '../../../stores/session';
-import { renderWithProviders } from './chatTestUtils';
+import { renderWithProviders, initChatI18n } from './chatTestUtils';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { I18nextProvider } from 'react-i18next';
+import { useWorkspaceMode } from '../../../stores/workspaceMode';
+import { useBenchFocus } from '../../../stores/benchFocus';
 const guidanceMocks = vi.hoisted(() => ({
   sections: [] as Array<{ id: string; name: string }>,
   workflow: {
@@ -157,4 +161,48 @@ it('mantiene el modelo largo accesible bajo un control compacto en embedded', as
   expect(screen.getByTestId('ai-chat-model-chip')).toHaveTextContent(model);
   expect(screen.getByTestId('ai-chat-model-chip')).toBeVisible();
   expect(screen.getByTestId('ai-chat-status')).toHaveTextContent('CONFIGURADO');
+});
+
+
+it('presenta bienvenida protagonista y conserva el textarea, caret y log al cambiar de layout', async () => {
+  useAIChat.setState({ providerStateLoaded: true });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = (layout: 'protagonist' | 'copilot') => <QueryClientProvider client={client}><I18nextProvider i18n={initChatI18n()}><ChatPanel presentation="embedded" layout={layout} /></I18nextProvider></QueryClientProvider>;
+  const { rerender } = render(wrap('protagonist'));
+  expect(screen.getByText('Hola, comencemos.')).toBeVisible();
+  expect(screen.getByTestId('ai-chat-guidance')).toBeVisible();
+  const input = screen.getByTestId('ai-chat-input') as HTMLTextAreaElement;
+  expect(input.rows).toBeGreaterThanOrEqual(3);
+  await userEvent.type(input, 'borrador');
+  input.setSelectionRange(2, 4);
+  const log = screen.getByRole('log');
+  rerender(wrap('copilot'));
+  expect(screen.getByTestId('ai-chat-input')).toBe(input);
+  expect(input).toHaveValue('borrador');
+  expect(input.selectionStart).toBe(2);
+  expect(input.selectionEnd).toBe(4);
+  expect(screen.getByRole('log')).toBe(log);
+  expect(screen.getByText('Agente · Sesión nueva')).toBeVisible();
+});
+
+it('prioriza aprobación sobre herramienta y permite enfocar la conversación', async () => {
+  useAIChat.setState({ messages: [tool('running', 'running')], pendingConfirmation: { invocationId: 'x', name: 'x', argsSummary: 'test' } });
+  useWorkspaceMode.getState().enterCopilot('manualView');
+  renderWithProviders(<ChatPanel presentation="embedded" layout="copilot" />);
+  expect(screen.getByText(/Esperando tu aprobación/)).toBeVisible();
+  act(() => useAIChat.setState({ pendingConfirmation: null }));
+  expect(screen.getByText(/Usando herramientas…/)).toBeVisible();
+  await userEvent.click(screen.getByTestId('ai-chat-focus-conversation'));
+  expect(useWorkspaceMode.getState().mode).toBe('protagonist');
+});
+
+it('muestra el contexto de dashboard, grilla y perfil con banco seleccionado', () => {
+  guidanceMocks.sections = [{ id: '37', name: 'S-37' }];
+  useSession.setState({ activeWorkspaceView: 'dashboard', selectedSection: '37', selectedByUser: true });
+  renderWithProviders(<ChatPanel presentation="embedded" layout="copilot" />);
+  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Dashboard · S-37/);
+  act(() => useSession.setState({ activeWorkspaceView: 'profiles', profilesMode: 'grid' }));
+  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Perfiles · grilla/);
+  act(() => { useSession.setState({ profilesMode: 'detail' }); useBenchFocus.getState().publishCurrent({ sectionId: '37', benchNumber: 1, designBenchNumber: 2 }); });
+  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Perfil S-37 · Banco 2/);
 });
