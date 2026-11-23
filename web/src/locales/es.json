@@ -1,5 +1,5 @@
 {
-  "agentWorkspace": {"heading": "¿Qué quieres conciliar?", "open": "Abrir espacio de trabajo", "expandChat": "Ampliar chat", "chat": "Chat", "workspace": "Espacio de trabajo", "navigation": "Navegación del espacio de trabajo"},
+  "agentWorkspace": {"heading": "¿Qué quieres conciliar?", "open": "Abrir espacio de trabajo", "expandChat": "Ampliar chat", "chat": "Chat", "workspace": "Espacio de trabajo", "navigation": "Navegación del espacio de trabajo", "focus": "Enfocar conversación", "resize": "Ancho del panel del agente"},
   "recentSessions": {
     "button": "Sesiones",
     "title": "Sesiones recientes",
@@ -1872,6 +1872,11 @@
       }
     },
     "tool": {
+     "duration_ms": "{{ms}} ms",
+     "duration_s": "{{s}} s",
+     "no_duration": "Sin tiempo registrado",
+     "params": "Parámetros",
+     "result": "Resultado",
      "running": "ejecutando «{{name}}»…",
      "status_ok": "Completado",
      "status_error": "Error",
@@ -1880,6 +1885,32 @@
      "collapse": "Ocultar detalle",
      "download": "Descargar archivo",
      "downloading": "Descargando…"
+    },
+    "copilot": {
+      "agent": "Agente",
+      "status_ready": "Listo",
+      "status_thinking": "Pensando…",
+      "status_tool": "Usando herramientas…",
+      "status_confirm": "Esperando tu aprobación",
+      "status_error": "Con error",
+      "status_off": "Sin modelo"
+    },
+    "welcome": {
+      "title": "Hola, comencemos.",
+      "subtitle": "Te guío paso a paso para conciliar el diseño con la topografía real.",
+      "compact": "Agente · Sesión nueva"
+    },
+    "context": {
+      "viewing": "Viendo: {{context}}",
+      "tooltip": "Lo que estás viendo en el lienzo",
+      "grid": "grilla",
+      "profile": "Perfil {{name}}",
+      "section": "{{view}} · {{name}}",
+      "bench": "Banco {{n}}"
+    },
+    "chips": {
+      "open_section": "Abrir el perfil de {{name}}",
+      "select_bench": "Seleccionar el banco {{n}} de {{name}}"
     },
     "confirm": {
       "title": "Confirmación requerida",

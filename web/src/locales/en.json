@@ -1,5 +1,5 @@
 {
-  "agentWorkspace": {"heading": "What would you like to reconcile?", "open": "Open workspace", "expandChat": "Expand chat", "chat": "Chat", "workspace": "Workspace", "navigation": "Workspace navigation"},
+  "agentWorkspace": {"heading": "What would you like to reconcile?", "open": "Open workspace", "expandChat": "Expand chat", "chat": "Chat", "workspace": "Workspace", "navigation": "Workspace navigation", "focus": "Focus conversation", "resize": "Agent panel width"},
   "recentSessions": {
     "button": "Sessions",
     "title": "Recent sessions",
@@ -1872,6 +1872,11 @@
       }
     },
     "tool": {
+     "duration_ms": "{{ms}} ms",
+     "duration_s": "{{s}} s",
+     "no_duration": "No recorded time",
+     "params": "Parameters",
+     "result": "Result",
      "running": "running \"{{name}}\"…",
      "status_ok": "Completed",
      "status_error": "Error",
@@ -1880,6 +1885,32 @@
      "collapse": "Hide details",
      "download": "Download file",
      "downloading": "Downloading…"
+    },
+    "copilot": {
+      "agent": "Agent",
+      "status_ready": "Ready",
+      "status_thinking": "Thinking…",
+      "status_tool": "Using tools…",
+      "status_confirm": "Waiting for your approval",
+      "status_error": "Error",
+      "status_off": "No model"
+    },
+    "welcome": {
+      "title": "Hi, let's get started.",
+      "subtitle": "I'll guide you step by step to reconcile the design with the as-built topography.",
+      "compact": "Agent · New session"
+    },
+    "context": {
+      "viewing": "Viewing: {{context}}",
+      "tooltip": "What you are viewing on the canvas",
+      "grid": "grid",
+      "profile": "Profile {{name}}",
+      "section": "{{view}} · {{name}}",
+      "bench": "Bench {{n}}"
+    },
+    "chips": {
+      "open_section": "Open the profile of {{name}}",
+      "select_bench": "Select bench {{n}} of {{name}}"
     },
     "confirm": {
       "title": "Confirmation required",
