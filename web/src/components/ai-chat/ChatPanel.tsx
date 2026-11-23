@@ -465,7 +465,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
         {embedded && messages.length === 0 && <div data-testid="ai-chat-welcome" className="mx-auto w-full max-w-3xl py-6 text-text-secondary">
           {protagonist ? <div className="text-center"><div className="mx-auto w-20 [&_.ai-pet__svg]:h-20 [&_.ai-pet__svg]:w-20"><ChatPet /></div><h1 className="mt-4 text-2xl text-text-primary">{t('aiChat.welcome.title')}</h1><p className="mt-2 text-sm">{t('aiChat.welcome.subtitle')}</p></div> : <p className="text-xs font-semibold">{t('aiChat.welcome.compact')}</p>}
         </div>}
-        {embedded && <div className="mx-auto w-full max-w-3xl"><EmbeddedWorkflowGuide fillDraft={fillDraft} canDraft={providerStateLoaded && !turnActive && !clearing} /></div>}
+        {embedded && <div className="mx-auto w-full max-w-3xl"><EmbeddedWorkflowGuide fillDraft={fillDraft} canDraft={false} /></div>}
         {notice && <NoticeBanner notice={notice} />}
         {!providerStateLoaded && (
           <div
@@ -731,6 +731,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           </button>
         )}
       </form>
+      {protagonist && messages.length === 0 && <EmbeddedWorkflowGuide suggestionsOnly fillDraft={fillDraft} canDraft={providerStateLoaded && !turnActive && !clearing} />}
 
       {!embedded && resizable.isDesktop &&
         RESIZE_HANDLES.map(({ direction, labelKey, orientation, className }) => (

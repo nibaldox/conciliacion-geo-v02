@@ -63,19 +63,28 @@ it('agrupa herramientas consecutivas sin ocultar confirmaciones ni respuestas y 
   renderWithProviders(<ChatPanel presentation="embedded" />);
   const groups = screen.getAllByRole('button', { name: /Actividad del agente/ });
   expect(groups).toHaveLength(2);
-  expect(groups[0]).toHaveAttribute('aria-expanded', 'false');
+  expect(groups[0]).toHaveAttribute('aria-expanded', 'true');
   expect(groups[0]).toHaveTextContent('2');
   expect(groups[0]).toHaveTextContent(/error/i);
+  const steps = screen.getAllByRole('button', { name: /Consultar resultados/ });
+  expect(steps).toHaveLength(3);
+  expect(steps[1]).toHaveTextContent('Error');
   expect(screen.getByText('Confirmación visible')).toBeVisible();
   expect(screen.getByText('Respuesta visible')).toBeVisible();
-  await userEvent.click(groups[0]);
-  expect(groups[0]).toHaveAttribute('aria-expanded', 'true');
+  await userEvent.click(steps[1]);
   expect(screen.getByText('Fallo específico')).toBeVisible();
+  await userEvent.click(groups[0]);
+  expect(groups[0]).toHaveAttribute('aria-expanded', 'false');
+  expect(steps[0]).not.toBeVisible();
+  expect(screen.getByText('Confirmación visible')).toBeVisible();
+  expect(screen.getByText('Respuesta visible')).toBeVisible();
   act(() => useAIChat.setState({ messages: [...messages, { kind: 'agent', id: 'f', text: 'continuación' }] }));
-  expect(groups[0]).toHaveAttribute('aria-expanded', 'true');
+  expect(groups[0]).toHaveAttribute('aria-expanded', 'false');
   groups[0].focus();
   await userEvent.keyboard('{Enter}');
-  expect(groups[0]).toHaveAttribute('aria-expanded', 'false');
+  expect(groups[0]).toHaveAttribute('aria-expanded', 'true');
+  expect(steps[0]).toBeVisible();
+  expect(screen.getByText('Fallo específico')).toBeVisible();
 });
 
 it('identifica Diseño como siguiente paso sin duplicar controles de carga', () => {
@@ -88,7 +97,7 @@ it('identifica Diseño como siguiente paso sin duplicar controles de carga', () 
 it('ofrece un borrador sin enviar ni sobrescribir lo escrito', async () => {
   const send = vi.fn();
   useAIChat.setState({ providerStateLoaded: true, send });
-  renderWithProviders(<ChatPanel presentation="embedded" />);
+  renderWithProviders(<ChatPanel presentation="embedded" layout="protagonist" />);
   const starter = screen.getByRole('button', { name: 'Guiarme para conciliar' });
   const input = screen.getByTestId('ai-chat-input');
   await userEvent.type(input, 'Mi borrador');
@@ -102,7 +111,7 @@ it('ofrece un borrador sin enviar ni sobrescribir lo escrito', async () => {
 });
 
 
-it('muestra la descarga directamente al abrir el grupo y conserva foco y posición de lectura', async () => {
+it('muestra la descarga al abrir el paso y conserva foco y posición de lectura', async () => {
   useAIChat.setState({ messages: [{ kind: 'tool', id: 'export', invocationId: 'export', name: 'export_report', status: 'ok', summary: null, error: null, download: { format: 'excel', query: { filters: '{"sector":["Norte"]}' } } }] });
   renderWithProviders(<ChatPanel presentation="embedded" />);
   const group = screen.getByRole('button', { name: /Actividad del agente/ });
@@ -110,14 +119,18 @@ it('muestra la descarga directamente al abrir el grupo y conserva foco y posici�
   Object.defineProperties(list, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
   list.scrollTop = 100;
   fireEvent.scroll(list);
-  group.focus();
+  expect(group).toHaveAttribute('aria-expanded', 'true');
+  const step = screen.getByRole('button', { name: /Exportar informe/ });
+  expect(step).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.queryByTestId('ai-chat-tool-download')).not.toBeVisible();
+  step.focus();
   await userEvent.keyboard(' ');
-  expect(group).toHaveFocus();
+  expect(step).toHaveFocus();
   expect(screen.getByTestId('ai-chat-tool-download')).toBeVisible();
   expect(group).not.toContainElement(screen.getByTestId('ai-chat-tool-download'));
   act(() => useAIChat.setState({ messages: [...useAIChat.getState().messages, { kind: 'agent', id: 'reply', text: 'texto nuevo' }] }));
   expect(list.scrollTop).toBe(100);
-  expect(group).toHaveFocus();
+  expect(step).toHaveFocus();
 });
 
 
@@ -134,11 +147,14 @@ it('distingue historial sin estado inequívoco de errores vivos y con código', 
   renderWithProviders(<ChatPanel presentation="embedded" />);
   const group = screen.getByRole('button', { name: /Actividad del agente/ });
   expect(group).toHaveTextContent('Error');
-  await userEvent.click(group);
+  expect(group).toHaveAttribute('aria-expanded', 'true');
   expect(screen.getAllByText(/Sin estado registrado/)).toHaveLength(2);
-  expect(screen.getByText(/Consultar resultados · Error/)).toBeVisible();
-  expect(screen.getByText(/Exportar informe · Error/)).toBeVisible();
-  expect(screen.getByText(/Consultar perfil · Completado/)).toBeVisible();
+  expect(screen.getByRole('button', { name: /Consultar resultados/ }).textContent).toMatch(/Consultar resultados.*Error/);
+  const exportStep = screen.getByRole('button', { name: /Exportar informe/ });
+  expect(exportStep.textContent).toMatch(/Exportar informe.*Error/);
+  expect(screen.getByRole('button', { name: /Consultar perfil/ })).toBeVisible();
+  await userEvent.click(exportStep);
+  expect(screen.getByText('failure_code')).toBeVisible();
   expect(screen.queryByTestId('ai-chat-tool-download')).toBeNull();
 });
 
@@ -205,4 +221,60 @@ it('muestra el contexto de dashboard, grilla y perfil con banco seleccionado', (
   expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Perfiles · grilla/);
   act(() => { useSession.setState({ profilesMode: 'detail' }); useBenchFocus.getState().publishCurrent({ sectionId: '37', benchNumber: 1, designBenchNumber: 2 }); });
   expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Perfil S-37 · Banco 2/);
+});
+
+
+it('ubica la sugerencia después del compositor solo en protagonista y no en la guía', () => {
+  useAIChat.setState({ providerStateLoaded: true });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = (layout: 'protagonist' | 'copilot') => <QueryClientProvider client={client}><I18nextProvider i18n={initChatI18n()}><ChatPanel presentation="embedded" layout={layout} /></I18nextProvider></QueryClientProvider>;
+  const { rerender } = render(wrap('protagonist'));
+  const starter = screen.getByRole('button', { name: 'Guiarme para conciliar' });
+  expect(screen.getAllByRole('button', { name: 'Guiarme para conciliar' })).toHaveLength(1);
+  expect(screen.getByTestId('ai-chat-guidance')).not.toContainElement(starter);
+  expect(screen.getByTestId('ai-chat-composer').compareDocumentPosition(starter) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  rerender(wrap('copilot'));
+  expect(screen.queryByRole('button', { name: 'Guiarme para conciliar' })).toBeNull();
+});
+
+it('conserva la posición de lectura al cambiar de layout en ambos sentidos', () => {
+  useAIChat.setState({ messages: [{ kind: 'user', id: 'scroll', text: 'Texto de lectura' }] });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = (layout: 'protagonist' | 'copilot') => <QueryClientProvider client={client}><I18nextProvider i18n={initChatI18n()}><ChatPanel presentation="embedded" layout={layout} /></I18nextProvider></QueryClientProvider>;
+  const { rerender } = render(wrap('protagonist'));
+  const list = screen.getByRole('log').parentElement!;
+  Object.defineProperties(list, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 200 } });
+  list.scrollTop = 123;
+  fireEvent.scroll(list);
+  rerender(wrap('copilot'));
+  expect(screen.getByRole('log').parentElement).toBe(list);
+  expect(list.scrollTop).toBe(123);
+  rerender(wrap('protagonist'));
+  expect(list.scrollTop).toBe(123);
+});
+
+it('resuelve la sección por id o nombre único y rechaza nombres duplicados', () => {
+  guidanceMocks.sections = [{ id: '0', name: 'S-37' }, { id: '1', name: 'S-38' }];
+  useSession.setState({ activeWorkspaceView: 'profiles', profilesMode: 'detail', selectedSection: '0', selectedByUser: true });
+  useBenchFocus.getState().publishCurrent({ sectionId: '0', benchNumber: 1, designBenchNumber: 2 });
+  renderWithProviders(<ChatPanel presentation="embedded" layout="copilot" />);
+  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent('Perfil S-37 · Banco 2');
+  act(() => useSession.setState({ selectedSection: 'S-37' }));
+  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent('Perfil S-37 · Banco 2');
+  guidanceMocks.sections = [{ id: '0', name: 'S-37' }, { id: '1', name: 'S-37' }];
+  act(() => useSession.setState({ profilesMode: 'grid' }));
+  act(() => useSession.setState({ profilesMode: 'detail' }));
+  expect(screen.getByTestId('ai-chat-context-chip')).not.toHaveTextContent(/S-37|Banco 2/);
+});
+
+it('renderiza chips reales solo en el mensaje del agente embebido', () => {
+  guidanceMocks.sections = [{ id: '37', name: 'S-37' }];
+  useAIChat.setState({ messages: [{ kind: 'agent', id: 'agent-chip', text: 'S-37 presenta banco 2' }, { kind: 'user', id: 'user-chip', text: 'S-37 presenta banco 2' }] });
+  renderWithProviders(<ChatPanel presentation="embedded" />);
+  const agent = document.querySelector('[data-slot="ai-chat-message"][data-kind="agent"]') as HTMLElement;
+  const user = document.querySelector('[data-slot="ai-chat-message"][data-kind="user"]') as HTMLElement;
+  expect(within(agent).getByTestId('ai-chat-chip-section')).toBeVisible();
+  expect(within(agent).getByRole('button', { name: /banco 2/i })).toBeVisible();
+  expect(within(user).queryAllByRole('button')).toHaveLength(0);
+  expect(user).toHaveTextContent('S-37 presenta banco 2');
 });
