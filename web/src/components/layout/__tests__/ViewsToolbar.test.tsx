@@ -5,6 +5,7 @@ import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import es from '../../../locales/es.json';
 import { useSession } from '../../../stores/session';
+import { useWorkspaceMode } from '../../../stores/workspaceMode';
 
 const apiState = vi.hoisted(() => ({
   sections: [] as { id: string }[],
@@ -32,6 +33,29 @@ beforeEach(() => {
 });
 
 describe('ViewsToolbar', () => {
+  it('marks clicks and keyboard selection as manual when AI-first is enabled', async () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    vi.stubEnv('VITE_AI_FIRST', 'true');
+    useWorkspaceMode.getState().focusConversation();
+    const user = userEvent.setup();
+    renderToolbar();
+    await user.click(screen.getByRole('tab', { name: 'Vista 3D' }));
+    expect(useWorkspaceMode.getState().lastReason).toBe('manualView');
+    useWorkspaceMode.getState().focusConversation();
+    await user.keyboard('{ArrowLeft}');
+    expect(useWorkspaceMode.getState().lastReason).toBe('manualView');
+    vi.unstubAllEnvs();
+  });
+
+  it('does not mark selection as manual when AI-first is disabled', async () => {
+    vi.stubEnv('VITE_AI_FIRST', 'false');
+    useWorkspaceMode.getState().focusConversation();
+    const user = userEvent.setup();
+    renderToolbar();
+    await user.click(screen.getByRole('tab', { name: 'Vista 3D' }));
+    expect(useWorkspaceMode.getState().lastReason).toBe('focusConversation');
+    vi.unstubAllEnvs();
+  });
   it('renders the views as tabs in workflow order with hotkey badges', () => {
     renderToolbar();
     expect(screen.getByRole('navigation', { name: 'Vistas de análisis' })).toHaveAttribute('data-slot', 'views-toolbar');

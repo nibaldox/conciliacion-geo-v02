@@ -1,6 +1,8 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
+import { useWorkspaceMode } from '../../stores/workspaceMode';
+import { isChatUiEnabled } from '../ai-chat/FloatingChatButton';
 import { useWorkflowStatus } from '../../hooks/useWorkflowStatus';
 import { Icon3D, IconProfiles, IconDashboard, IconLightning, IconExport, IconLock } from '../ui/Icons';
 
@@ -31,6 +33,9 @@ export function ViewsToolbar({ onNavigate }: ViewsToolbarProps) {
   }, [activeView]);
 
   const select = (key: WorkspaceView) => {
+    if (isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true') {
+      useWorkspaceMode.getState().enterCopilot('manualView');
+    }
     setActiveView(key);
     onNavigate?.();
   };

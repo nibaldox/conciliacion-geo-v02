@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { DEMO_MESH_IDS, useSession, type WorkflowStepKey } from '../../stores/session';
+import { useWorkspaceMode } from '../../stores/workspaceMode';
+import { isChatUiEnabled } from '../ai-chat/FloatingChatButton';
 import { DropZone } from '../mesh/MeshUpload';
 import { TryDemoButton } from '../demo/TryDemoButton';
 import { SectionCurveForm } from '../sections/SectionCurveForm';
@@ -144,15 +146,20 @@ export function LeftSidebar() {
 
   useEffect(() => {
     if (openWorkflowStep === 'sections' && sectionTab === 'curves') {
+      if (isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true') {
+        useWorkspaceMode.getState().enterCopilot('manualView');
+      }
       setActiveWorkspaceView('3d');
     }
   }, [openWorkflowStep, sectionTab, setActiveWorkspaceView]);
 
   const didAutoSwitchTo3D = useRef(false);
   useEffect(() => {
-    if (!didAutoSwitchTo3D.current && designMeshId && topoMeshId) {
-      didAutoSwitchTo3D.current = true;
-      if (!isVirtualDemo) setActiveWorkspaceView('3d');
+    if (!isChatUiEnabled(import.meta.env.VITE_AI_CHAT) || import.meta.env.VITE_AI_FIRST !== 'true') {
+      if (!didAutoSwitchTo3D.current && designMeshId && topoMeshId) {
+        didAutoSwitchTo3D.current = true;
+        if (!isVirtualDemo) setActiveWorkspaceView('3d');
+      }
     }
   }, [designMeshId, topoMeshId, isVirtualDemo, setActiveWorkspaceView]);
 

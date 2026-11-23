@@ -36,6 +36,7 @@ vi.mock('./components/export/ExportPanel', () => ({ ExportPanel: () => <div data
 
 import App from './App';
 import { DEMO_MESH_IDS, useSession, type DemoData } from './stores/session';
+import { useWorkspaceMode } from './stores/workspaceMode';
 
 const testI18n = i18n.createInstance();
 void testI18n.use(initReactI18next).init({ lng: 'es', resources: { es: { translation: es } }, initAsync: false });
@@ -50,6 +51,18 @@ function renderApp() {
 }
 
 describe('App workspace empty states', () => {
+  it('treats all five hotkeys as manual views under AI-first', async () => {
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    vi.stubEnv('VITE_AI_FIRST', 'true');
+    const user = userEvent.setup();
+    renderApp();
+    for (const key of ['1', '2', '3', '4', '5']) {
+      act(() => useWorkspaceMode.getState().focusConversation());
+      await user.keyboard(key);
+      expect(useWorkspaceMode.getState().lastReason).toBe('manualView');
+    }
+    vi.unstubAllEnvs();
+  });
   beforeEach(() => {
     apiState.sections = [];
     apiState.status = undefined;

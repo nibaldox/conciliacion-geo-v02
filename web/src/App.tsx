@@ -28,6 +28,13 @@ import { useStartDemo } from './components/demo/TryDemoButton';
 
 import { ExportPanel } from './components/export/ExportPanel';
 import { FloatingChatButton, isChatUiEnabled } from './components/ai-chat/FloatingChatButton';
+import { useWorkspaceModeCoordinator } from './components/ai-chat/useWorkspaceModeCoordinator';
+import { useWorkspaceMode } from './stores/workspaceMode';
+
+function WorkspaceModeCoordinator() {
+  useWorkspaceModeCoordinator();
+  return null;
+}
 
 function WorkspaceEmptyState(props: EmptyStateProps) {
   return (
@@ -99,7 +106,7 @@ function ProfilesWorkspace() {
 
 
 
-function WorkspaceRouter() {
+function WorkspaceRouter({ aiFirst }: { aiFirst: boolean }) {
   const activeWorkspaceView = useSession((s) => s.activeWorkspaceView);
   const designMeshId = useSession((s) => s.designMeshId);
   const topoMeshId = useSession((s) => s.topoMeshId);
@@ -122,11 +129,11 @@ function WorkspaceRouter() {
   const bothUploaded = !!designMeshId && !!topoMeshId;
   const hasSections = sections && sections.length > 0;
   useEffect(() => {
-    if (isComplete && !wasComplete.current && useSession.getState().activeWorkspaceView === '3d') {
+    if (!aiFirst && isComplete && !wasComplete.current && useSession.getState().activeWorkspaceView === '3d') {
       setActiveWorkspaceView('dashboard');
     }
     wasComplete.current = isComplete;
-  }, [isComplete, setActiveWorkspaceView]);
+  }, [aiFirst, isComplete, setActiveWorkspaceView]);
 
   if (!bothUploaded && activeWorkspaceView !== '3d') {
     return (
@@ -227,10 +234,12 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
   const { isDark } = useTheme();
   const { i18n } = useTranslation();
   const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
+  const aiFirst = isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true';
 
   // Workspace view hotkeys
   useHotkeys(['1', '2', '3', '4', '5'], (e) => {
     const target = e.key;
+    if (aiFirst) useWorkspaceMode.getState().enterCopilot('manualView');
     if (target === '1') setActiveWorkspaceView('dashboard');
     if (target === '2') setActiveWorkspaceView('profiles');
     if (target === '3') setActiveWorkspaceView('3d');
@@ -253,7 +262,6 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
     return () => i18n.off('languageChanged', handler);
   }, [i18n]);
 
-  const aiFirst = isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true';
   const workspace = (
     <AppLayout assistant={aiFirst}>
       {!aiFirst && sessionRestoreFailed && (
@@ -263,7 +271,7 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
       )}
       <ErrorBoundary>
         <Suspense fallback={<LoadingSpinner />}>
-          <WorkspaceRouter />
+          <WorkspaceRouter aiFirst={aiFirst} />
         </Suspense>
       </ErrorBoundary>
     </AppLayout>
@@ -272,6 +280,7 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
     <QueryClientProvider client={queryClient}>
       {aiFirst ? (
         <>
+          <WorkspaceModeCoordinator />
           {sessionRestoreFailed && <div role="alert" className="fixed top-2 right-2 z-[100] rounded-lg border border-border bg-surface-raised p-3 text-sm text-text-primary">{i18n.t('sessionRecovery.failed')}</div>}
           {workspace}
         </>
