@@ -832,3 +832,23 @@ describe('aiChat store — ui_context from the user section selection', () => {
     expect(requestBody(1)).not.toHaveProperty('ui_context');
   });
 });
+
+
+describe('tool metadata', () => {
+  it('retains arguments and validates durations, including orphan results', () => {
+    useAIChat.getState().reset();
+    useAIChat.getState().applyAgentEvent({ type: 'tool_call', invocation_id: 'meta', name: 'get_profile', args: { section: 'S-37' }, requires_confirmation: false });
+    useAIChat.getState().applyAgentEvent({ type: 'tool_result', invocation_id: 'meta', name: 'get_profile', ok: true, summary: 'ok', error: null, duration_ms: 123 });
+    expect(useAIChat.getState().messages[0]).toMatchObject({ args: { section: 'S-37' }, durationMs: 123 });
+    for (const [index, duration] of [NaN, -1, undefined].entries()) {
+      useAIChat.getState().applyAgentEvent({ type: 'tool_result', invocation_id: `orphan-${index}`, name: 'get_profile', ok: true, summary: '', error: null, duration_ms: duration } as Parameters<ReturnType<typeof useAIChat.getState>['applyAgentEvent']>[0]);
+      expect(useAIChat.getState().messages.at(-1)).toMatchObject({ durationMs: null });
+    }
+  });
+});
+
+  it('restored history does not invent metadata', () => {
+    const [card] = historyToChatMessages([{ role: 'tool', ok: true, summary: 'ok', error: null }]);
+    expect(card).not.toHaveProperty('args');
+    expect(card).not.toHaveProperty('durationMs');
+  });

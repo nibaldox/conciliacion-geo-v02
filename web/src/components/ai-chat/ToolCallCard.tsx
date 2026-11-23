@@ -140,24 +140,60 @@ export function ToolCallCard({ message }: { message: ToolCardMessage }) {
   );
 }
 
-export function ToolActivityGroup({ messages }: { messages: ToolCardMessage[] }) {
+function ActivityStep({ message }: { message: ToolCardMessage }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  const unknown = message.status === 'error' && message.invocationId.startsWith('restored_') && !message.error?.trim();
+  const duration = message.durationMs == null ? null : message.durationMs < 1000
+    ? t('aiChat.tool.duration_ms', { ms: message.durationMs })
+    : t('aiChat.tool.duration_s', { s: (message.durationMs / 1000).toFixed(1) });
+  return <div className="min-w-0">
+    <button type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((value) => !value)} className="flex w-full min-w-0 items-center gap-2 text-left focus-visible:ring-2 focus-visible:ring-accent">
+      <span className="shrink-0">{expanded ? '▾' : '▸'}</span>
+      {message.status === 'running' && <Spinner size="sm" />}
+      <span className="shrink-0">{t(`aiChat.activity.names.${message.name}`, { defaultValue: message.name })}</span>
+      {unknown && <span className="shrink-0">{t('aiChat.activity.unrecorded')}</span>}
+      {!unknown && message.status === 'error' && <span className="shrink-0 text-[var(--status-nok-text)]">{t('aiChat.tool.status_error')}</span>}
+      {duration && <span className="shrink-0">{duration}</span>}
+      {message.summary && <span title={message.summary} className="min-w-0 truncate">⎿ {message.summary}</span>}
+    </button>
+    <div id={id} hidden={!expanded} className="min-w-0 pl-4">
+      <p className="break-all font-mono">{message.name}</p>
+      <p>{duration ?? t('aiChat.tool.no_duration')}</p>
+      {message.args && <><p>{t('aiChat.tool.params')}</p><table className="w-full table-fixed"><tbody>{Object.entries(message.args).map(([key, value]) => <tr key={key}><th className="break-all text-left">{key}</th><td className="break-all">{formatParameter(value)}</td></tr>)}</tbody></table></>}
+      {message.summary && <p className="whitespace-pre-wrap break-words">{message.summary}</p>}
+      {message.status === 'error' && message.error && <p className="whitespace-pre-wrap break-words text-[var(--status-nok-text)]">{message.error}</p>}
+      {message.status === 'ok' && <ExportDownloadButton message={message} />}
+    </div>
+  </div>;
+}
+
+function formatParameter(value: unknown): string {
+  if (value !== null && typeof value === 'object') {
+    try { return (JSON.stringify(value) ?? String(value)).slice(0, 300); } catch { return String(value).slice(0, 300); }
+  }
+  return String(value);
+}
+
+export function ToolActivityGroup({ messages }: { messages: ToolCardMessage[] }) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(true);
+  const [showAll, setShowAll] = useState(false);
   const id = useId();
   const unknown = (m: ToolCardMessage) => m.status === 'error' && m.invocationId.startsWith('restored_') && !m.error?.trim();
   const error = messages.some((m) => m.status === 'error' && !unknown(m));
   const hasUnknown = messages.some(unknown);
   const running = messages.some((m) => m.status === 'running');
+  const collapsed = messages.length > 6 && !showAll;
   return <div className="min-w-0 border-y border-border py-2 text-xs text-text-secondary">
     <button type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((v) => !v)} className="flex w-full items-center gap-2 text-left font-medium focus-visible:ring-2 focus-visible:ring-accent">
       <span aria-hidden="true">{expanded ? '▾' : '▸'}</span><span>{t('aiChat.activity.title')} · {messages.length}</span><span className={error ? 'text-[var(--status-nok-text)]' : ''}>{error ? t('aiChat.tool.status_error') : running ? t('aiChat.activity.running') : hasUnknown ? t('aiChat.activity.unrecorded') : t('aiChat.tool.status_ok')}</span>
     </button>
-    <div id={id} hidden={!expanded} className="min-w-0 space-y-3 pt-3">{messages.map((m) => <div key={m.id} className="min-w-0">
-      <p className="break-words font-medium text-text-primary">{t(`aiChat.activity.names.${m.name}`, { defaultValue: m.name })} · {unknown(m) ? t('aiChat.activity.unrecorded') : m.status === 'running' ? t('aiChat.activity.running') : t(m.status === 'ok' ? 'aiChat.tool.status_ok' : 'aiChat.tool.status_error')}</p>
-      {m.summary && <p className="mt-1 whitespace-pre-wrap break-words">{m.summary}</p>}
-      {m.status === 'error' && m.error && <p className="mt-1 whitespace-pre-wrap break-words text-[var(--status-nok-text)]">{m.error}</p>}
-      {m.status === 'ok' && <ExportDownloadButton message={m} />}
-    </div>)}</div>
+    <div id={id} hidden={!expanded} className="min-w-0 space-y-1 pt-2">
+      {(collapsed ? messages.slice(0, 3) : messages).map((m) => <ActivityStep key={m.id} message={m} />)}
+      {collapsed && <><button type="button" onClick={() => setShowAll(true)}>+{messages.length - 5}</button>{messages.slice(-2).map((m) => <ActivityStep key={m.id} message={m} />)}</>}
+    </div>
   </div>;
 }
 
@@ -185,19 +221,20 @@ export function ConfirmationCard({
     <div
       data-slot="ai-chat-confirmation-card"
       data-resolution={message.resolution}
-      className="rounded-lg border border-[var(--color-status-warning)] bg-surface px-3 py-2 text-xs"
+      className="min-w-0 rounded-lg border border-[var(--color-status-warning)] bg-surface px-3 py-2 text-xs"
       role="alertdialog"
       aria-label={t('aiChat.confirm.title')}
     >
-      <p className="font-semibold text-text-primary">
+      <p data-slot="ai-chat-confirmation-title" className="font-semibold text-text-primary">
         {t('aiChat.confirm.title')}
       </p>
-      <p className="mt-1 font-medium text-text-primary">{message.name}</p>
+      <p className="mt-1 break-words font-medium text-text-primary">{t(`aiChat.activity.names.${message.name}`, { defaultValue: message.name })}</p>
+      <p className="break-all font-mono text-text-muted">{message.name}</p>
       <p className="mt-1 whitespace-pre-wrap break-words text-text-secondary">
         {message.argsSummary}
       </p>
       {message.resolution === 'pending' ? (
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           <button
             type="button"
             data-testid="ai-chat-confirm-approve"

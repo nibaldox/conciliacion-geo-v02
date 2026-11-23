@@ -1,3 +1,7 @@
+import { Children, cloneElement, isValidElement, type ReactNode, type ReactElement } from 'react';
+import { findAgentChips } from '../../utils/agentChips';
+import { AgentChip } from './AgentChip';
+import { useAgentChipActions, type AgentChipActions } from './useAgentChipActions';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -20,6 +24,7 @@ function sanitizeHref(url: string): string {
 interface MarkdownMessageProps {
   content: string;
   className?: string;
+  chips?: boolean;
 }
 
 /**
@@ -29,7 +34,42 @@ interface MarkdownMessageProps {
  * open in a new tab with rel="noopener noreferrer", and <img> is never
  * emitted so model content cannot trigger requests to external hosts.
  */
-export function MarkdownMessage({ content, className }: MarkdownMessageProps) {
+export function MarkdownMessage(props: MarkdownMessageProps) {
+  return props.chips ? <ChippedMarkdownMessage {...props} /> : <MarkdownBody {...props} />;
+}
+
+function ChippedMarkdownMessage(props: MarkdownMessageProps) {
+  const actions = useAgentChipActions();
+  return <MarkdownBody {...props} actions={actions} />;
+}
+
+function chipBlock(children: ReactNode, actions: AgentChipActions): ReactNode {
+  let context = actions.contextSectionId;
+  let key = 0;
+  const visit = (child: ReactNode): ReactNode => {
+    if (typeof child === 'string') {
+      const chips = findAgentChips(child, actions.sections, context);
+      const result: ReactNode[] = [];
+      let offset = 0;
+      for (const chip of chips) {
+        result.push(child.slice(offset, chip.start));
+        result.push(<AgentChip key={key++} chip={chip} actions={actions} />);
+        if (chip.kind === 'section') context = chip.sectionId;
+        offset = chip.end;
+      }
+      result.push(child.slice(offset));
+      return result;
+    }
+    if (Array.isArray(child)) return Children.map(child, visit);
+    if (isValidElement<{ children?: ReactNode }>(child) && (child.type === 'strong' || child.type === 'em')) {
+      return cloneElement(child as ReactElement<{ children?: ReactNode }>, {}, visit(child.props.children));
+    }
+    return child;
+  };
+  return visit(children);
+}
+
+function MarkdownBody({ content, className, actions }: MarkdownMessageProps & { actions?: AgentChipActions }) {
   if (content.length > MAX_MARKDOWN_CHARS) {
     return (
       <p className={`whitespace-pre-wrap break-words ${className ?? ''}`}>
@@ -65,7 +105,7 @@ export function MarkdownMessage({ content, className }: MarkdownMessageProps) {
           ),
           p: ({ children }) => (
             <p className="my-1 whitespace-pre-wrap break-words first:mt-0 last:mb-0">
-              {children}
+              {actions ? chipBlock(children, actions) : children}
             </p>
           ),
           ul: ({ children }) => (
@@ -75,7 +115,7 @@ export function MarkdownMessage({ content, className }: MarkdownMessageProps) {
             <ol className="my-1 list-decimal space-y-0.5 pl-5">{children}</ol>
           ),
           li: ({ children }) => (
-            <li className="break-words pl-0.5">{children}</li>
+            <li className="break-words pl-0.5">{actions ? chipBlock(children, actions) : children}</li>
           ),
           blockquote: ({ children }) => (
             <blockquote className="my-1 break-words border-l-2 border-accent pl-3 text-text-secondary">
@@ -133,12 +173,12 @@ export function MarkdownMessage({ content, className }: MarkdownMessageProps) {
           ),
           th: ({ children }) => (
             <th className="border-b-2 border-border px-2 py-1.5 text-left text-xs font-semibold text-text-primary">
-              {children}
+              {actions ? chipBlock(children, actions) : children}
             </th>
           ),
           td: ({ children }) => (
             <td className="border-b border-border px-2 py-1.5 align-top">
-              {children}
+              {actions ? chipBlock(children, actions) : children}
             </td>
           ),
         }}

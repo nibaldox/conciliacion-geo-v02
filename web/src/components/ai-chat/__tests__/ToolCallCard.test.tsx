@@ -19,7 +19,7 @@ vi.mock('../../../api/client', () => ({
 
 import { useAIChat } from '../../../stores/aiChat';
 import type { AgentToolResultDownload } from '../../../api/agentChat';
-import { ToolCallCard } from '../ToolCallCard';
+import { ToolCallCard, ToolActivityGroup, type ToolCardMessage } from '../ToolCallCard';
 import { initChatI18n, renderWithProviders } from './chatTestUtils';
 
 const EXPORT_OK_SUMMARY = JSON.stringify({
@@ -346,5 +346,54 @@ describe('ToolCallCard — download payload of the tool_result event', () => {
     expect(screen.getByTestId('ai-chat-tool-download')).toHaveTextContent(
       'Descargar archivo',
     );
+  });
+});
+
+const step: ToolCardMessage = { kind: 'tool', id: '1', invocationId: '1', name: 'get_workflow_state', status: 'ok', summary: 'resumen completo', error: null, args: { section: 'S-37' }, durationMs: 250 };
+describe('tool activity', () => {
+  it('shows a localized one-line step, opens its parameters and toggles the group', async () => {
+    initChatI18n();
+    renderWithProviders(<ToolActivityGroup messages={[step]} />);
+    const row = screen.getByRole('button', { name: /resumen completo/ });
+    expect(row).toHaveTextContent('250 ms');
+    expect(row).toHaveTextContent('⎿');
+    row.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(screen.getByText('Parámetros')).toBeVisible();
+    expect(screen.getByText('S-37')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: /Actividad del agente/ }));
+    expect(row).not.toBeVisible();
+  });
+  it('collapses the middle of long groups', async () => {
+    initChatI18n();
+    renderWithProviders(<ToolActivityGroup messages={Array.from({ length: 8 }, (_, i) => ({ ...step, id: String(i), invocationId: String(i), summary: `resumen ${i}` }))} />);
+    expect(screen.queryByText('⎿ resumen 3')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: '+3' }));
+    expect(screen.getByText('⎿ resumen 3')).toBeVisible();
+  });
+});
+
+describe('tool activity states', () => {
+  it('preserves running, errors and unrecorded restored status', async () => {
+    initChatI18n();
+    renderWithProviders(<ToolActivityGroup messages={[
+      { ...step, id: 'running', status: 'running', summary: null, durationMs: null },
+      { ...step, id: 'error', status: 'error', error: 'codigo_error', summary: null, durationMs: 1500 },
+      { ...step, id: 'unknown', invocationId: 'restored_1', status: 'error', error: null, summary: null },
+    ]} />);
+    expect(screen.getByText('Sin estado registrado')).toBeVisible();
+    expect(screen.getAllByText('1.5 s')[0]).toBeVisible();
+    const rows = screen.getAllByRole('button', { name: /Revisar estado del flujo/ });
+    rows[1].focus();
+    await userEvent.keyboard(' ');
+    expect(screen.getByText('codigo_error')).toBeVisible();
+    expect(rows[0].querySelector('svg')).not.toBeNull();
+  });
+  it('shows export download inside the step detail', async () => {
+    initChatI18n();
+    renderWithProviders(<ToolActivityGroup messages={[{ ...step, name: 'export_report', summary: EXPORT_OK_SUMMARY }]} />);
+    const row = screen.getByRole('button', { name: /Exportar informe/ });
+    await userEvent.click(row);
+    expect(screen.getByTestId('ai-chat-tool-download')).toBeVisible();
   });
 });

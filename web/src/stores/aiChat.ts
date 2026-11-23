@@ -52,6 +52,8 @@ export type ChatMessage =
       summary: string | null;
       error: string | null;
       download?: AgentToolResultDownload | null;
+      durationMs?: number | null;
+      args?: Record<string, unknown> | null;
     }
   | {
       kind: 'confirmation';
@@ -814,6 +816,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
               id: makeMessageId(),
               invocationId: event.invocation_id,
               name: event.name,
+              args: event.args,
               status: 'running',
               summary: null,
               error: null,
@@ -827,6 +830,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
           (m) => m.kind === 'tool' && m.invocationId === event.invocation_id,
         );
         const download = event.download ? { download: event.download } : {};
+        const durationMs = typeof event.duration_ms === 'number' && Number.isFinite(event.duration_ms) && event.duration_ms >= 0 ? event.duration_ms : null;
         const messages = [...state.messages];
         if (index >= 0) {
           const card = messages[index] as Extract<
@@ -838,6 +842,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
             status: event.ok ? 'ok' : 'error',
             summary: event.summary,
             error: event.error,
+            durationMs,
             ...download,
           };
         } else {
@@ -849,6 +854,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
             status: event.ok ? 'ok' : 'error',
             summary: event.summary,
             error: event.error,
+            durationMs,
             ...download,
           });
         }
