@@ -21,7 +21,7 @@ beforeEach(() => {
   useWorkspaceMode.getState().resetForSession('protagonist', 'initial');
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('reduced-motion'), addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('AgentWorkspaceShell', () => {
   it('shows a loading copilot shell before the initial restored decision', () => {
     useSession.setState({ designMeshId: 'design', topoMeshId: 'topo' });
@@ -99,8 +99,21 @@ describe('AgentWorkspaceShell', () => {
     expect(input).toHaveAttribute('data-layout', 'copilot');
     expect(counters.mounts).toBe(1);
     act(() => useWorkspaceMode.getState().focusConversation());
-    expect(screen.queryByText('workspace content')).toBeNull();
+    expect(screen.getByText('workspace content')).toBeTruthy();
+    expect(screen.getByText('workspace content').closest('.agent-shell__workspace')).toHaveAttribute('inert');
     expect(screen.getByLabelText('draft')).toBe(input);
+  });
+  it('defers the first canvas mount until the animated transition ends', () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('innerWidth', 1200);
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    useWorkspaceMode.setState({ mode: 'protagonist', initialDecided: true });
+    const { container } = render(<AgentWorkspaceShell><div>workspace deferred</div></AgentWorkspaceShell>);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(screen.queryByText('workspace deferred')).toBeNull();
+    act(() => { vi.advanceTimersByTime(250); });
+    expect(screen.getByText('workspace deferred')).toBeTruthy();
+    expect(container.querySelector('.agent-shell__canvas')).toBeTruthy();
   });
   it('survives unavailable storage on read and write', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });

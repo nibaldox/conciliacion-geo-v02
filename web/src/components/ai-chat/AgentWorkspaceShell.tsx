@@ -64,7 +64,8 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
   useLayoutEffect(() => {
     if (actualMode === 'protagonist' && lastReason === 'focusConversation' &&
       (document.activeElement === document.body || !document.activeElement?.isConnected ||
-        document.activeElement?.closest('[data-testid="ai-chat-focus-conversation"]'))) {
+        document.activeElement?.closest('[data-testid="ai-chat-focus-conversation"]') ||
+        document.activeElement?.closest('.agent-shell__workspace'))) {
       grid.current?.querySelector<HTMLElement>('[data-testid="ai-chat-input"]')?.focus();
     }
   }, [actualMode, lastReason]);
@@ -93,19 +94,26 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
     previous.current = mode;
     if (!changed || !node) return;
     if (!firstDecision) setAllowAnimation(true);
-    if (mode === 'copilot') setCanvasMounted(true);
     if (firstDecision || reduced || window.innerWidth < 900) {
-      setCanvasMounted(mode === 'copilot');
+      if (mode === 'copilot') setCanvasMounted(true);
       return;
     }
     const total = node.getBoundingClientRect().width;
     const targetChat = mode === 'copilot' ? Math.min(widthRef.current, Math.max(0, total - 480)) : total;
     const startChat = measured.current?.chat ?? (oldMode === 'protagonist' ? total : Math.min(widthRef.current, Math.max(0, total - 480)));
     const startCanvas = measured.current?.canvas ?? total - startChat;
+    const canvas = node.querySelector<HTMLElement>('.agent-shell__canvas');
+    const chat = node.querySelector<HTMLElement>('.agent-shell__chat > :not(.agent-shell__resize)');
+    if (canvas) { canvas.style.width = `${mode === 'copilot' ? total - targetChat : startCanvas}px`; canvas.style.flex = 'none'; }
+    if (chat) { chat.style.width = `${targetChat}px`; chat.style.flex = 'none'; }
+    const release = () => {
+      if (canvas) { canvas.style.width = ''; canvas.style.flex = ''; }
+      if (chat) { chat.style.width = ''; chat.style.flex = ''; }
+    };
     node.style.transition = 'none';
     node.style.gridTemplateColumns = `${startCanvas}px ${startChat}px`;
     void node.offsetWidth;
-    node.style.transition = `grid-template-columns ${mode === 'copilot' ? 380 : 280}ms cubic-bezier(.2,.8,.2,1)`;
+    node.style.transition = `grid-template-columns 200ms ${mode === 'copilot' ? 'cubic-bezier(0.2,0,0,1)' : 'cubic-bezier(0.4,0,1,1)'}`;
     node.style.gridTemplateColumns = `${Math.max(0, total - targetChat)}px ${targetChat}px`;
     let done = false;
     const finish = () => {
@@ -113,12 +121,13 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
       done = true;
       node.style.transition = '';
       node.style.gridTemplateColumns = '';
-      if (mode === 'protagonist') setCanvasMounted(false);
+      release();
+      if (mode === 'copilot') setCanvasMounted(true);
     };
     const onEnd = (event: TransitionEvent) => { if (event.target === node && event.propertyName === 'grid-template-columns') finish(); };
     node.addEventListener('transitionend', onEnd);
-    const timer = window.setTimeout(finish, mode === 'copilot' ? 430 : 330);
-    return () => { node.removeEventListener('transitionend', onEnd); window.clearTimeout(timer); node.style.transition = ''; node.style.gridTemplateColumns = ''; };
+    const timer = window.setTimeout(finish, 250);
+    return () => { node.removeEventListener('transitionend', onEnd); window.clearTimeout(timer); node.style.transition = ''; node.style.gridTemplateColumns = ''; release(); };
   }, [mode, reduced, initialDecided]);
   const updateWidth = (value: number) => {
     const next = Math.min(520, Math.max(320, value));
@@ -126,6 +135,12 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
   };
   const persistWidth = (value: number) => {
     try { localStorage.setItem(WIDTH_KEY, String(value)); } catch { /* Storage is optional. */ }
+  };
+  const setDragging = (dragging: boolean) => {
+    const canvas = grid.current?.querySelector<HTMLElement>('.agent-shell__canvas');
+    if (!canvas) return;
+    canvas.style.width = dragging ? `${canvas.getBoundingClientRect().width}px` : '';
+    canvas.style.flex = dragging ? 'none' : '';
   };
   const style = { '--agent-chat-width': `${width}px` } as CSSProperties;
   return (
@@ -136,10 +151,10 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
       </nav>}
       <div className="agent-shell__grid" ref={grid}>
         <div className="agent-shell__workspace" aria-hidden={mode === 'protagonist' ? true : undefined} inert={mode === 'protagonist' ? true : undefined}>
-          {canvasMounted && <div className="agent-shell__canvas">{waiting ? <LoadingSpinner /> : <>{canvasHeader}{children}</>}</div>}
+          {canvasMounted ? <div className="agent-shell__canvas">{waiting ? <LoadingSpinner /> : <>{canvasHeader}{children}</>}</div> : <div className="agent-shell__placeholder" aria-hidden="true" />}
         </div>
         <div className="agent-shell__chat">
-          {mode === 'copilot' && <CopilotResizeHandle width={width} onChange={updateWidth} onCommit={persistWidth} />}
+          {mode === 'copilot' && <CopilotResizeHandle width={width} onChange={updateWidth} onCommit={persistWidth} onDragChange={setDragging} />}
           <ChatPanel presentation="embedded" layout={mode} onClose={() => setMobileView('workspace')} />
         </div>
       </div>

@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-interface Props { width: number; onChange: (width: number) => void; onCommit?: (width: number) => void }
+interface Props { width: number; onChange: (width: number) => void; onCommit?: (width: number) => void; onDragChange?: (dragging: boolean) => void }
 
-export function CopilotResizeHandle({ width, onChange, onCommit }: Props) {
+export function CopilotResizeHandle({ width, onChange, onCommit, onDragChange }: Props) {
   const { t } = useTranslation();
   const handle = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; width: number; value: number } | null>(null);
+  const frame = useRef<number | null>(null);
+  useLayoutEffect(() => () => { if (frame.current !== null) cancelAnimationFrame(frame.current); }, []);
   const [measured, setMeasured] = useState<{ width: number; max: number } | null>(null);
   useLayoutEffect(() => {
     const chat = handle.current?.parentElement;
@@ -29,8 +31,10 @@ export function CopilotResizeHandle({ width, onChange, onCommit }: Props) {
   const clamp = (value: number) => Math.min(max, Math.max(Math.min(320, max), value));
   const finish = () => {
     if (!drag.current) return;
+    if (frame.current !== null) { cancelAnimationFrame(frame.current); frame.current = null; onChange(drag.current.value); }
     onCommit?.(drag.current.value);
     drag.current = null;
+    onDragChange?.(false);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const next = event.key === 'ArrowLeft' ? effective + 16 : event.key === 'ArrowRight' ? effective - 16 : event.key === 'Home' ? 320 : event.key === 'End' ? max : null;
@@ -41,6 +45,7 @@ export function CopilotResizeHandle({ width, onChange, onCommit }: Props) {
     event.preventDefault();
     const actual = event.currentTarget.parentElement?.getBoundingClientRect().width || effective;
     drag.current = { x: event.clientX, width: actual, value: actual };
+    onDragChange?.(true);
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   return <div ref={handle} className="agent-shell__resize" role="separator" tabIndex={0} aria-label={t('agentWorkspace.resize')} aria-orientation="vertical" aria-valuemin={Math.min(320, max)} aria-valuemax={max} aria-valuenow={effective} onKeyDown={onKeyDown} onPointerDown={onPointerDown} onPointerMove={(event) => {
@@ -48,6 +53,9 @@ export function CopilotResizeHandle({ width, onChange, onCommit }: Props) {
     if (event.buttons === 0) { finish(); return; }
     const value = clamp(drag.current.width + drag.current.x - event.clientX);
     drag.current.value = value;
-    onChange(value);
+    if (frame.current === null) frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      if (drag.current) onChange(drag.current.value);
+    });
   }} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish} />;
 }

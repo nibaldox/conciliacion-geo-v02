@@ -8,6 +8,36 @@ function Harness() {
   return <CopilotResizeHandle width={width} onChange={setWidth} />;
 }
 describe('CopilotResizeHandle', () => {
+  it('coalesces pointer moves and flushes the last width on release', () => {
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const raf = vi.fn(() => 42);
+    vi.stubGlobal('requestAnimationFrame', raf);
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    const change = vi.fn(); const commit = vi.fn();
+    render(<CopilotResizeHandle width={390} onChange={change} onCommit={commit} />);
+    const handle = screen.getByRole('separator'); handle.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(handle, { button: 0, clientX: 500 });
+    fireEvent.pointerMove(handle, { buttons: 1, clientX: 480 });
+    fireEvent.pointerMove(handle, { buttons: 1, clientX: 450 });
+    expect(raf).toHaveBeenCalledTimes(1);
+    expect(change).not.toHaveBeenCalled();
+    fireEvent.pointerUp(handle);
+    expect(change).toHaveBeenCalledTimes(1);
+    expect(change).toHaveBeenCalledWith(440);
+    expect(commit).toHaveBeenCalledWith(440);
+    vi.unstubAllGlobals();
+  });
+  it('notifies drag boundaries once to freeze and release the canvas', () => {
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    const onDragChange = vi.fn();
+    render(<CopilotResizeHandle width={390} onChange={() => {}} onDragChange={onDragChange} />);
+    const handle = screen.getByRole('separator'); handle.setPointerCapture = vi.fn();
+    fireEvent.pointerDown(handle, { button: 0, clientX: 500 });
+    expect(onDragChange).toHaveBeenCalledWith(true);
+    fireEvent.pointerUp(handle); fireEvent.lostPointerCapture(handle);
+    expect(onDragChange.mock.calls).toEqual([[true], [false]]);
+    vi.unstubAllGlobals();
+  });
   it('ignores non-primary pointer drags', () => {
     vi.stubGlobal('PointerEvent', MouseEvent);
     render(<Harness />);
@@ -49,6 +79,7 @@ describe('CopilotResizeHandle', () => {
     handle.setPointerCapture = vi.fn();
     fireEvent.pointerDown(handle, { button: 0, buttons: 1, clientX: 500 });
     fireEvent.pointerMove(handle, { buttons: 1, clientX: 490 });
+    fireEvent.pointerUp(handle);
     expect(change).toHaveBeenLastCalledWith(360);
     rect.mockRestore();
     vi.unstubAllGlobals();
@@ -60,8 +91,8 @@ describe('CopilotResizeHandle', () => {
     handle.setPointerCapture = vi.fn();
     fireEvent.pointerDown(handle, { clientX: 500, pointerId: 1 });
     fireEvent.pointerMove(handle, { clientX: 450, pointerId: 1, buttons: 1 });
-    expect(handle).toHaveAttribute('aria-valuenow', '440');
     fireEvent.pointerUp(handle, { clientX: 450, pointerId: 1 });
+    expect(handle).toHaveAttribute('aria-valuenow', '440');
     vi.unstubAllGlobals();
   });
 });
