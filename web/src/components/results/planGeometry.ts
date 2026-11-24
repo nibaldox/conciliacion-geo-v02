@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ProfileData, SectionResponse, VerticesResponse } from '../../api/types';
 
 export interface Projection {
@@ -56,52 +57,91 @@ export function projectPlanPoint(x: number, y: number, projection: Projection): 
   return [projection.left + (x - projection.xMin) * projection.scale, projection.top + (projection.yMax - y) * projection.scale];
 }
 
-export function createSurfaceRaster(vertices: VerticesResponse, projection: Projection): string {
-  const canvas = document.createElement('canvas');
-  canvas.width = projection.width; canvas.height = projection.height;
-  const context = canvas.getContext('2d');
-  if (!context) return '';
-  const points = vertices.x.map((x, i) => projectPlanPoint(x, vertices.y[i]!, projection));
-  let zMin = Infinity, zMax = -Infinity;
-  for (const z of vertices.z) {
-    if (!Number.isFinite(z)) continue;
-    zMin = Math.min(zMin, z); zMax = Math.max(zMax, z);
+export function surfaceFaceColor(vertices: Pick<VerticesResponse, 'x' | 'y' | 'z'>, a: number, b: number, c: number, zMin: number, zRange: number): string | null {
+  const ux = vertices.x[b]! - vertices.x[a]!, uy = vertices.y[b]! - vertices.y[a]!, uz = vertices.z[b]! - vertices.z[a]!;
+  const vx = vertices.x[c]! - vertices.x[a]!, vy = vertices.y[c]! - vertices.y[a]!, vz = vertices.z[c]! - vertices.z[a]!;
+  const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+  const length = Math.hypot(nx, ny, nz);
+  if (!Number.isFinite(length) || length === 0) return null;
+  const light = Math.abs((nx + 0.6 * ny + 0.8 * nz) / (length * Math.hypot(1, 0.6, 0.8)));
+  const elevation = Math.min(1, Math.max(0, ((vertices.z[a]! + vertices.z[b]! + vertices.z[c]!) / 3 - zMin) / zRange));
+  const relief = 0.58 + 0.62 * light;
+  return `rgb(${Math.round((104 + (190 - 104) * elevation) * relief)}, ${Math.round((126 + (177 - 126) * elevation) * relief)}, ${Math.round((103 + (143 - 103) * elevation) * relief)})`;
+}
+
+interface RasterEntry { promise: Promise<string>; url?: string; evicted: boolean }
+const rasterCache = new WeakMap<VerticesResponse, Map<string, RasterEntry>>();
+
+export function createSurfaceRaster(vertices: VerticesResponse, projection: Projection): Promise<string> {
+  let cache = rasterCache.get(vertices);
+  if (!cache) { cache = new Map(); rasterCache.set(vertices, cache); }
+  const key = [projection.width, projection.height, projection.xMin, projection.yMin, projection.xMax, projection.yMax, projection.scale, projection.left, projection.top].join('|');
+  const existing = cache.get(key);
+  if (existing) { cache.delete(key); cache.set(key, existing); return existing.promise; }
+  const entry: RasterEntry = { promise: Promise.resolve(''), evicted: false };
+  entry.promise = new Promise((resolve) => {
+    // Yield to the initial render, so section lines are interactive first.
+    setTimeout(() => {
+      if (entry.evicted) { resolve(''); return; }
+      const canvas = document.createElement('canvas');
+      canvas.width = projection.width; canvas.height = projection.height;
+      const context = canvas.getContext('2d');
+      if (!context) { resolve(''); return; }
+      const points = new Float64Array(vertices.x.length * 2);
+      for (let i = 0; i < vertices.x.length; i++) {
+        points[2 * i] = projection.left + (vertices.x[i]! - projection.xMin) * projection.scale;
+        points[2 * i + 1] = projection.top + (projection.yMax - vertices.y[i]!) * projection.scale;
+      }
+      let zMin = Infinity, zMax = -Infinity;
+      for (const z of vertices.z) { if (Number.isFinite(z)) { zMin = Math.min(zMin, z); zMax = Math.max(zMax, z); } }
+      const zRange = Math.max(1, zMax - zMin);
+      context.save(); context.beginPath();
+      context.rect(projection.left, projection.top, (projection.xMax - projection.xMin) * projection.scale, (projection.yMax - projection.yMin) * projection.scale);
+      context.clip();
+      if (vertices.faces?.length) {
+        for (const face of vertices.faces) {
+          if (face.length !== 3) continue;
+          const [a, b, c] = face as [number, number, number];
+          if (a < 0 || b < 0 || c < 0 || a >= vertices.x.length || b >= vertices.x.length || c >= vertices.x.length) continue;
+          const color = surfaceFaceColor(vertices, a, b, c, zMin, zRange);
+          if (color === null) continue;
+          context.fillStyle = color; context.beginPath();
+          context.moveTo(points[2 * a]!, points[2 * a + 1]!); context.lineTo(points[2 * b]!, points[2 * b + 1]!); context.lineTo(points[2 * c]!, points[2 * c + 1]!);
+          context.closePath(); context.fill();
+        }
+      } else {
+        context.fillStyle = 'rgb(155, 155, 155)';
+        for (let i = 0; i < vertices.x.length; i++) {
+          if (!Number.isFinite(vertices.x[i]) || !Number.isFinite(vertices.y[i]) || !Number.isFinite(vertices.z[i])) continue;
+          context.fillRect(points[2 * i]!, points[2 * i + 1]!, 2, 2);
+        }
+      }
+      context.restore();
+      canvas.toBlob((blob) => {
+        if (!blob || entry.evicted) { resolve(''); return; }
+        entry.url = URL.createObjectURL(blob); resolve(entry.url);
+      }, 'image/png');
+    }, 0);
+  });
+  cache.set(key, entry);
+  if (cache.size > 4) {
+    const oldestKey = cache.keys().next().value!;
+    const oldest = cache.get(oldestKey)!; oldest.evicted = true;
+    if (oldest.url) URL.revokeObjectURL(oldest.url);
+    cache.delete(oldestKey);
   }
-  const zRange = Math.max(1, zMax - zMin);
-  context.save();
-  context.beginPath();
-  context.rect(projection.left, projection.top, (projection.xMax - projection.xMin) * projection.scale, (projection.yMax - projection.yMin) * projection.scale);
-  context.clip();
-  if (vertices.faces?.length) {
-    for (const face of vertices.faces) {
-      if (face.length !== 3) continue;
-      const [a, b, c] = face as [number, number, number];
-      if (!points[a] || !points[b] || !points[c]) continue;
-      const u = [vertices.x[b]! - vertices.x[a]!, vertices.y[b]! - vertices.y[a]!, vertices.z[b]! - vertices.z[a]!];
-      const v = [vertices.x[c]! - vertices.x[a]!, vertices.y[c]! - vertices.y[a]!, vertices.z[c]! - vertices.z[a]!];
-      const normal = [u[1]! * v[2]! - u[2]! * v[1]!, u[2]! * v[0]! - u[0]! * v[2]!, u[0]! * v[1]! - u[1]! * v[0]!];
-      const length = Math.hypot(...normal);
-      if (!Number.isFinite(length) || length === 0) continue;
-      const light = Math.abs((normal[0]! + 0.6 * normal[1]! + 0.8 * normal[2]!) / (length * Math.hypot(1, 0.6, 0.8)));
-      const elevation = Math.min(1, Math.max(0, ((vertices.z[a]! + vertices.z[b]! + vertices.z[c]!) / 3 - zMin) / zRange));
-      const relief = 0.58 + 0.62 * light;
-      const low = [104, 126, 103];
-      const high = [190, 177, 143];
-      const channels = low.map((value, index) => Math.round((value + (high[index]! - value) * elevation) * relief));
-      context.fillStyle = `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
-      context.beginPath();
-      context.moveTo(...points[a]!); context.lineTo(...points[b]!); context.lineTo(...points[c]!);
-      context.closePath(); context.fill();
-    }
-  } else {
-    context.fillStyle = 'rgb(155, 155, 155)';
-    for (let i = 0; i < points.length; i++) {
-      if (![vertices.x[i], vertices.y[i], vertices.z[i]].every(Number.isFinite)) continue;
-      context.fillRect(points[i]![0], points[i]![1], 2, 2);
-    }
-  }
-  context.restore();
-  return canvas.toDataURL('image/png');
+  return entry.promise;
+}
+
+export function useSurfaceRaster(vertices: VerticesResponse | undefined, projection: Projection | null): string {
+  const [result, setResult] = useState<{ vertices: VerticesResponse; projection: Projection; url: string }>();
+  useEffect(() => {
+    if (!vertices || !projection) return;
+    let active = true;
+    void Promise.resolve(createSurfaceRaster(vertices, projection)).then((url) => { if (active) setResult({ vertices, projection, url }); });
+    return () => { active = false; };
+  }, [vertices, projection]);
+  return result?.vertices === vertices && result?.projection === projection ? result.url : '';
 }
 
 export function sectionPlanPoints(section: SectionResponse, profile?: ProfileData): [number, number][] {

@@ -13,7 +13,7 @@ import { planColor, planStatusStrokeDash, sectionParameterPassRate, sectionScore
 
 export type { PlanColorBy, PlanStatusKey } from './planColors';
 
-import { createPlanProjection, createSurfaceRaster, projectPlanPoint, sectionPlanPoints, planBounds, type Projection } from './planGeometry';
+import { createPlanProjection, useSurfaceRaster, projectPlanPoint, sectionPlanPoints, planBounds, type Projection } from './planGeometry';
 
 export { createPlanProjection, projectPlanPoint } from './planGeometry';
 
@@ -60,7 +60,14 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
   const { t } = useTranslation();
   const [fullSurface, setFullSurface] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
-  const [tooltip, setTooltip] = useState({ x: 0, y: 0 });
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const tooltipPosition = useRef({ x: 0, y: 0 });
+  const moveTooltip = (event: React.MouseEvent<SVGGElement>) => {
+    const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+    if (!rect) return;
+    tooltipPosition.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    if (tooltipRef.current) { tooltipRef.current.style.left = `${tooltipPosition.current.x + 12}px`; tooltipRef.current.style.top = `${tooltipPosition.current.y + 12}px`; }
+  };
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
@@ -95,7 +102,7 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
   const frameBounds = planBounds(frameLines.flatMap((line) => line.points));
   const [xMin, yMin, xMax, yMax] = frameBounds ?? [];
   const projection = useMemo(() => vertices ? createPlanProjection(vertices, !fullSurface && xMin !== undefined && yMin !== undefined && xMax !== undefined && yMax !== undefined ? [[xMin, yMin], [xMax, yMax]] : [], variant === 'panel') : null, [vertices, fullSurface, xMin, yMin, xMax, yMax, variant]);
-  const raster = useMemo(() => vertices && projection ? createSurfaceRaster(vertices, projection) : '', [vertices, projection]);
+  const raster = useSurfaceRaster(vertices, projection);
   const sorted = [...lines].sort((a, b) => a.points[a.points.length - 1]![0] - b.points[b.points.length - 1]![0]);
   const half = Math.ceil(sorted.length / 2);
   const labelPositions = new Map<string, [number, number]>();
@@ -127,12 +134,12 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
     const desired = projection ? 120 / (projection.scale * view.zoom) : 10;
     const scaleMeters = choices.reduce((best, value) => Math.abs(value - desired) < Math.abs(best - desired) ? value : best, choices[0]!);
     return <div className="relative h-full w-full overflow-hidden bg-surface-sunken" onKeyDown={(event) => { if (event.key === 'Escape') onSelectSection?.(null); }}>
-      {loading ? <div className="flex h-full items-center justify-center"><Spinner /></div> : error || !projection || !raster || !lines.length ? <p className="flex h-full items-center justify-center text-sm text-text-muted">{t('plan_view.unavailable')}</p> : <>
+      {loading ? <div className="flex h-full items-center justify-center"><Spinner /></div> : error || !projection || !lines.length ? <p className="flex h-full items-center justify-center text-sm text-text-muted">{t('plan_view.unavailable')}</p> : <>
         <svg ref={svgRef} viewBox={`${view.x} ${view.y} ${width} ${height}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={t('plan_view.title')} className="h-full w-full touch-none"
           onPointerDown={(event) => { if (event.button !== 0) return; drag.current = { x: event.clientX, y: event.clientY, moved: false }; (event.target as Element).setPointerCapture?.(event.pointerId); }}
           onPointerMove={move} onPointerUp={() => { suppressClick.current = drag.current?.moved ?? false; drag.current = null; }} onPointerCancel={() => { drag.current = null; }}
           onClick={() => { if (!suppressClick.current) onSelectSection?.(null); suppressClick.current = false; }}>
-          <image href={raster} width="1000" height="600" />
+          <image href={raster || undefined} opacity={raster ? 1 : 0} className="transition-opacity duration-150 motion-reduce:transition-none" width="1000" height="600" />
           {lines.map(({ section, points }) => {
             const status = statuses.get(section.name) ?? 'UNKNOWN';
             const enabled = visibleStatuses?.has(status) ?? true;
@@ -146,8 +153,8 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
             const statusLabel = status === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + status.toLowerCase());
             return <g key={section.id} data-section-name={section.name} data-status={status} opacity={!enabled ? 0.18 : selectedSection && !selected ? 0.55 : 1}
               role={enabled ? 'button' : undefined} tabIndex={enabled ? 0 : undefined} aria-label={enabled ? `${section.name} · ${statusLabel}` : undefined} aria-pressed={enabled ? selected : undefined}
-              onMouseEnter={(event) => { if (!enabled) return; setHovered(section.name); const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect(); if (rect) setTooltip({ x: event.clientX - rect.left, y: event.clientY - rect.top }); }}
-              onMouseMove={(event) => { const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect(); if (rect) setTooltip({ x: event.clientX - rect.left, y: event.clientY - rect.top }); }}
+              onMouseEnter={(event) => { if (!enabled) return; moveTooltip(event); setHovered(section.name); }}
+              onMouseMove={moveTooltip}
               onMouseLeave={() => setHovered(null)}
               onClick={(event) => { event.stopPropagation(); if (enabled && !suppressClick.current) onSelectSection?.(section.name); suppressClick.current = false; }}
               onKeyDown={(event) => { if (enabled && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelectSection?.(section.name); } }}>
@@ -163,7 +170,7 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
         <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
           <g fill="var(--color-text-primary)" stroke="var(--color-text-primary)" strokeWidth="2" fontSize="16"><text x="40" y="477" stroke="none">N</text><path d="M 45 515 L 45 484 M 38 494 L 45 484 L 52 494" fill="none"/><path d={`M 40 552 v -6 h ${scaleMeters * projection.scale * view.zoom} v 6 M 40 549 h ${scaleMeters * projection.scale * view.zoom}`} fill="none"/><text x="40" y="575" stroke="none">{scaleMeters} m</text></g>
         </svg>
-        {hovered && activeName && <div role="tooltip" className="pointer-events-none absolute z-10 bg-surface-raised p-2 text-xs text-text-primary" style={{ left: tooltip.x + 12, top: tooltip.y + 12 }}><div>{activeName}</div><div>{activeStatus === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + activeStatus.toLowerCase())}</div><div>{t('plan_view.score')}: {activeScore == null ? '—' : `${activeScore.toFixed(1)} %`}</div></div>}
+        {hovered && activeName && <div ref={tooltipRef} role="tooltip" className="pointer-events-none absolute z-10 bg-surface-raised p-2 text-xs text-text-primary" style={{ left: tooltipPosition.current.x + 12, top: tooltipPosition.current.y + 12 }}><div>{activeName}</div><div>{activeStatus === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + activeStatus.toLowerCase())}</div><div>{t('plan_view.score')}: {activeScore == null ? '—' : `${activeScore.toFixed(1)} %`}</div></div>}
       </>}
       <div className="absolute left-2 top-2 bg-surface-raised"><SegmentedControl label={t('plan_view.title')} options={[{ value: 'evaluated', label: t('plan_view.evaluated_area') }, { value: 'full', label: t('plan_view.full_surface') }]} value={fullSurface ? 'full' : 'evaluated'} onChange={(value) => setFullSurface(value === 'full')} /></div>
       <div className="absolute right-2 top-2 flex flex-col bg-surface-raised text-text-primary">{([['zoom_in', '+', () => zoomAt(view.zoom * 1.5)], ['zoom_out', '−', () => zoomAt(view.zoom / 1.5)], ['zoom_reset', '↺', () => setView({ x: 0, y: 0, zoom: 1 })]] as const).map(([key, label, action]) => <button key={key} type="button" aria-label={t(`plan_view.${key}`)} className="h-8 w-8" onClick={action}>{label}</button>)}</div>
@@ -188,9 +195,9 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
         />
       )}
     >
-      {loading ? <div className="flex aspect-[5/3] items-center justify-center"><Spinner /></div> : error || !projection || !raster || !lines.length ? <p className="flex aspect-[5/3] items-center justify-center text-sm text-text-muted">{t('plan_view.unavailable')}</p> : (
+      {loading ? <div className="flex aspect-[5/3] items-center justify-center"><Spinner /></div> : error || !projection || !lines.length ? <p className="flex aspect-[5/3] items-center justify-center text-sm text-text-muted">{t('plan_view.unavailable')}</p> : (
         <svg viewBox="0 0 1000 600" role="img" aria-label={t('plan_view.title')} className="w-full rounded-md bg-surface-sunken" style={{ maxHeight: 620 }}>
-          <image href={raster} width="1000" height="600" />
+          <image href={raster || undefined} opacity={raster ? 1 : 0} className="transition-opacity duration-150 motion-reduce:transition-none" width="1000" height="600" />
           {Array.from({ length: 5 }, (_, index) => {
             const x = projection.xMin + (projection.xMax - projection.xMin) * index / 4;
             const y = projection.yMin + (projection.yMax - projection.yMin) * index / 4;

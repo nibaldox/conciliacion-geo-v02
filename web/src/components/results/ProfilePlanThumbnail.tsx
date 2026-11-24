@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useMeshVerticesRoi, useSections, useSectionProfiles } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import { Spinner } from '../ui/Spinner';
-import { createPlanProjection, createSurfaceRaster, expandPlanBounds, projectPlanPoint, sectionPlanPoints, planBounds } from './planGeometry';
+import { createPlanProjection, useSurfaceRaster, expandPlanBounds, projectPlanPoint, sectionPlanPoints, planBounds } from './planGeometry';
 
 export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ sectionId, showTitle = true, fill = false }: { sectionId: string; showTitle?: boolean; fill?: boolean }) {
   const { t } = useTranslation();
@@ -23,7 +23,7 @@ export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ section
   const { data: vertices, isLoading, error } = useMeshVerticesRoi(topoMeshId, roiBounds);
   const hasActive = lines.some((line) => line.section.id === sectionId);
   const projection = useMemo(() => vertices && hasActive && xMin !== undefined && yMin !== undefined && xMax !== undefined && yMax !== undefined ? createPlanProjection(vertices, [[xMin, yMin], [xMax, yMax]], false, { width: 1000, height: 900 }, 0.24) : null, [vertices, hasActive, xMin, yMin, xMax, yMax]);
-  const raster = useMemo(() => vertices && projection ? createSurfaceRaster(vertices, projection) : '', [vertices, projection]);
+  const raster = useSurfaceRaster(vertices, projection);
   const loading = isLoading || profiles.some((profile) => profile.isLoading);
   const mediaClass = fill
     ? 'aspect-[10/9] w-full rounded-md bg-surface-sunken xl:aspect-auto xl:min-h-0 xl:flex-1'
@@ -31,9 +31,9 @@ export const ProfilePlanThumbnail = memo(function ProfilePlanThumbnail({ section
   return (
     <section data-slot="profile-plan-thumbnail" data-active-section={sectionId} className={`min-w-0 space-y-2${fill ? ' flex h-full min-h-0 flex-col' : ''}`}>
       {showTitle && <h3 className="shrink-0 border-b border-border pb-2 text-sm font-medium text-text-primary">{t('profile_plan.title')}</h3>}
-      {loading ? <div className={`flex ${mediaClass} items-center justify-center text-text-muted`}><Spinner size="sm" /></div> : error || !projection || !raster ? <div className={`flex ${mediaClass} items-center justify-center px-4 text-center text-xs text-text-muted`}>{t('plan_view.unavailable')}</div> : (
+      {loading ? <div className={`flex ${mediaClass} items-center justify-center text-text-muted`}><Spinner size="sm" /></div> : error || !projection ? <div className={`flex ${mediaClass} items-center justify-center px-4 text-center text-xs text-text-muted`}>{t('plan_view.unavailable')}</div> : (
         <svg viewBox="0 0 1000 900" preserveAspectRatio="xMidYMid meet" className={`${mediaClass} overflow-hidden`} role="img" aria-label={t('profile_plan.active', { name: active?.name })}>
-          <image href={raster} width="1000" height="900" />
+          <image href={raster || undefined} opacity={raster ? 1 : 0} className="transition-opacity duration-150 motion-reduce:transition-none" width="1000" height="900" />
           {[...lines].sort((a, b) => Number(a.section.id === sectionId) - Number(b.section.id === sectionId)).map(({ section, points }) => (
             <polyline key={section.id} data-section-id={section.id} data-active={section.id === sectionId}
               points={points.map((point) => projectPlanPoint(...point, projection).join(',')).join(' ')}
