@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import i18n from '../../../i18n';
-import { ResultFilters } from '../ResultFilters';
+import { ActiveFilterChips, ResultFilters, buildActiveFilterChips } from '../ResultFilters';
 import { EMPTY_RESULT_FILTERS, type ResultFilterState } from '../resultFilters.utils';
 import type { ComparisonResult } from '../../../api/types';
 
@@ -162,5 +162,43 @@ describe('ResultFilters', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Restablecer' }));
     expect(latest!).toEqual({ sector: [], section: [], level: [], bench: [3] });
+  });
+
+  it('renderiza chips visibles y removibles para banco, sector, sección y cota via ActiveFilterChips', async () => {
+    const user = userEvent.setup();
+    function ControlledChips() {
+      const [filters, setFilters] = useState<ResultFilterState>({
+        bench: [2],
+        sector: ['', 'Norte'],
+        section: ['S01'],
+        level: ['2960'],
+      });
+      return <ActiveFilterChips filters={filters} onChange={setFilters} />;
+    }
+    render(<ControlledChips />);
+    expect(screen.getByText('Banco: B2')).toBeInTheDocument();
+    expect(screen.getByText('Sector: (sin sector)')).toBeInTheDocument();
+    expect(screen.getByText('Sector: Norte')).toBeInTheDocument();
+    expect(screen.getByText('Sección: S01')).toBeInTheDocument();
+    expect(screen.getByText('Cota nominal: 2960')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Banco: B2/i }));
+    expect(screen.queryByText('Banco: B2')).not.toBeInTheDocument();
+    expect(screen.getByText('Sector: Norte')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Sector: \(sin sector\)/i }));
+    expect(screen.queryByText('Sector: (sin sector)')).not.toBeInTheDocument();
+    expect(screen.getByText('Sector: Norte')).toBeInTheDocument();
+  });
+
+  it('buildActiveFilterChips devuelve vacío sin filtros y ActiveFilterChips no renderiza nada', () => {
+    const chips = buildActiveFilterChips(
+      EMPTY_RESULT_FILTERS,
+      { bench: 'Banco', sector: 'Sector', section: 'Sección', level: 'Cota', noSector: '(sin sector)' },
+      () => {},
+    );
+    expect(chips).toEqual([]);
+    const { container } = render(<ActiveFilterChips filters={EMPTY_RESULT_FILTERS} onChange={() => {}} />);
+    expect(container.firstChild).toBeNull();
   });
 });

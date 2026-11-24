@@ -225,7 +225,7 @@ export function ToolActivityGroup({ messages }: { messages: ToolCardMessage[] })
     </button>
     <div id={id} hidden={!expanded} className="min-w-0 space-y-1 pt-2">
       {(collapsed ? messages.slice(0, 3) : messages).map((m, index) => <ActivityStep key={m.id} message={m} focusRef={index === 3 ? (node) => { revealedRef.current = node; if (node && focusRevealed.current) { node.focus(); focusRevealed.current = false; } } : undefined} />)}
-      {collapsed && <><button type="button" aria-label={t('aiChat.activity.show_more', { count: messages.length - 5 })} onClick={() => { focusRevealed.current = true; setShowAll(true); }}>+{messages.length - 5}</button>{messages.slice(-2).map((m) => <ActivityStep key={m.id} message={m} />)}</>}
+      {collapsed && <><button type="button" aria-label={t('aiChat.activity.show_more', { count: messages.length - 5 })} onClick={() => { focusRevealed.current = true; setShowAll(true); }} className="cursor-pointer rounded border border-border px-2 py-0.5 text-xs text-text-secondary hover:bg-surface-muted hover:text-text-primary">+{messages.length - 5}</button>{messages.slice(-2).map((m) => <ActivityStep key={m.id} message={m} />)}</>}
     </div>
   </div>;
 }
@@ -256,7 +256,7 @@ export function ConfirmationCard({
     <div
       data-slot="ai-chat-confirmation-card"
       data-resolution={message.resolution}
-      className={`${presentation === 'embedded' ? 'min-w-0 ' : ''}rounded-lg border border-[var(--color-status-warning)] bg-surface px-3 py-2 text-xs`}
+      className={`${presentation === 'embedded' ? 'min-w-0 ' : ''}rounded-lg border border-[var(--status-warn-border)] bg-surface px-3 py-2 text-xs`}
       role="alertdialog"
       aria-label={t('aiChat.confirm.title')}
     >

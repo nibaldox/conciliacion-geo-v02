@@ -21,27 +21,26 @@ interface TooltipProps {
   children: ReactNode;
   /** Show on which side. Default 'top'. */
   side?: 'top' | 'bottom' | 'left' | 'right';
+  /** Alignment of the bubble. Default 'center'. */
+  align?: 'center' | 'start' | 'end';
   /** When true, don't render the wrapper span (merge props onto child). */
   asChild?: boolean;
   /** Optional className applied to the wrapper. */
   className?: string;
 }
 
-export function Tooltip({ content, children, side = 'top', asChild, className }: TooltipProps) {
+export function Tooltip({ content, children, side = 'top', align = 'center', asChild, className }: TooltipProps) {
+  const alignAttr = align !== 'center' ? align : undefined;
   if (asChild) {
-    // The asChild pattern would normally require a Slot from radix-ui
-    // or @radix-ui/react-slot. We don't have that dep, so we fall back
-    // to wrapping. The caller is responsible for ensuring the child
-    // is a single focusable element.
     return (
-      <span className={`conciliacion-tooltip ${className ?? ''}`} data-side={side}>
+      <span className={`conciliacion-tooltip ${className ?? ''}`} data-side={side} data-align={alignAttr}>
         {children}
         <span role="tooltip" className="conciliacion-tooltip__bubble">{content}</span>
       </span>
     );
   }
   return (
-    <span className={`conciliacion-tooltip ${className ?? ''}`} data-side={side}>
+    <span className={`conciliacion-tooltip ${className ?? ''}`} data-side={side} data-align={alignAttr}>
       {children}
       <span role="tooltip" className="conciliacion-tooltip__bubble">{content}</span>
     </span>

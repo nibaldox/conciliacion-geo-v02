@@ -197,3 +197,117 @@ export function ResultFilters({ results, filters, onChange, compact = false }: {
     </section>
   );
 }
+
+export interface ActiveFilterChip {
+  readonly key: string;
+  readonly dimension: 'bench' | 'sector' | 'section' | 'level';
+  readonly label: string;
+  readonly valueLabel: string;
+  readonly onRemove: () => void;
+}
+
+export interface ActiveFilterChipLabels {
+  readonly bench: string;
+  readonly sector: string;
+  readonly section: string;
+  readonly level: string;
+  readonly noSector: string;
+}
+
+export function buildActiveFilterChips(
+  filters: ResultFilterState,
+  labels: ActiveFilterChipLabels,
+  onChange: (next: ResultFilterState) => void,
+): ActiveFilterChip[] {
+  const chips: ActiveFilterChip[] = [];
+  for (const bench of filters.bench) {
+    const valueLabel = `B${bench}`;
+    chips.push({
+      key: `bench:${bench}`,
+      dimension: 'bench',
+      label: `${labels.bench}: ${valueLabel}`,
+      valueLabel,
+      onRemove: () => onChange({ ...filters, bench: filters.bench.filter((item) => item !== bench) }),
+    });
+  }
+  for (const sector of filters.sector) {
+    const valueLabel = sector === '' ? labels.noSector : sector;
+    chips.push({
+      key: `sector:${sector}`,
+      dimension: 'sector',
+      label: `${labels.sector}: ${valueLabel}`,
+      valueLabel,
+      onRemove: () => onChange({ ...filters, sector: filters.sector.filter((item) => item !== sector) }),
+    });
+  }
+  for (const section of filters.section) {
+    chips.push({
+      key: `section:${section}`,
+      dimension: 'section',
+      label: `${labels.section}: ${section}`,
+      valueLabel: section,
+      onRemove: () => onChange({ ...filters, section: filters.section.filter((item) => item !== section) }),
+    });
+  }
+  for (const level of filters.level) {
+    const valueLabel = level === '' ? '—' : level;
+    chips.push({
+      key: `level:${level}`,
+      dimension: 'level',
+      label: `${labels.level}: ${valueLabel}`,
+      valueLabel,
+      onRemove: () => onChange({ ...filters, level: filters.level.filter((item) => item !== level) }),
+    });
+  }
+  return chips;
+}
+
+export function ActiveFilterChips({
+  filters,
+  onChange,
+  className = '',
+}: {
+  readonly filters: ResultFilterState;
+  readonly onChange: (filters: ResultFilterState) => void;
+  readonly className?: string;
+}) {
+  const { t } = useTranslation();
+  const chips = buildActiveFilterChips(
+    filters,
+    {
+      bench: t('table.col_bench', { defaultValue: 'Banco' }),
+      sector: t('dashboard.sector', { defaultValue: 'Sector' }),
+      section: t('table.col_section', { defaultValue: 'Sección' }),
+      level: t('results.filters.level_nominal', { defaultValue: 'Cota nominal' }),
+      noSector: t('results.filters.no_sector', { defaultValue: '(sin sector)' }),
+    },
+    onChange,
+  );
+  if (chips.length === 0) return null;
+  const clearLabel = t('dashboard.context.clear_filter', { defaultValue: 'Limpiar filtro' });
+  return (
+    <div
+      data-slot="active-filter-chips"
+      role="group"
+      aria-label={t('dashboard.context.active_filters', { defaultValue: 'Filtros activos' })}
+      className={`flex flex-wrap items-center gap-1.5 ${className}`.trim()}
+    >
+      {chips.map((chip) => (
+        <span
+          key={chip.key}
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-muted px-2 py-0.5 text-xs text-text-primary"
+        >
+          <span>{chip.label}</span>
+          <button
+            type="button"
+            onClick={chip.onRemove}
+            aria-label={`${clearLabel}: ${chip.label}`}
+            className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-surface-sunken hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            ×
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}

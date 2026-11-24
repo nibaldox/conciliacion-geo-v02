@@ -277,7 +277,7 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
   const workspace = (
     <AppLayout assistant={aiFirst}>
       {!aiFirst && sessionRestoreFailed && (
-        <div role="alert" className="mx-4 mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--color-status-error)', color: 'var(--color-status-error)' }}>
+        <div role="alert" className="mx-4 mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--status-nok-border)', color: 'var(--status-nok-text)' }}>
           {i18n.t('sessionRecovery.failed')}
         </div>
       )}

@@ -18,7 +18,7 @@
   border-radius: 0.4rem;
   font-size: 0.75rem;
   line-height: 1.2;
-  max-width: 18rem;
+  max-width: min(18rem, calc(100vw - 2rem));
   width: max-content;
   pointer-events: none;
   background-color: var(--color-text-primary, #e6e9ee);
@@ -34,6 +34,17 @@
   transform-origin: bottom center;
   translate: -50% 0;
   white-space: normal;
+}
+.conciliacion-tooltip[data-align="start"] .conciliacion-tooltip__bubble {
+  left: 0;
+  translate: 0 0;
+  transform-origin: bottom left;
+}
+.conciliacion-tooltip[data-align="end"] .conciliacion-tooltip__bubble {
+  left: auto;
+  right: 0;
+  translate: 0 0;
+  transform-origin: bottom right;
 }
 .conciliacion-tooltip[data-side="bottom"] .conciliacion-tooltip__bubble {
   bottom: auto;
@@ -63,6 +74,14 @@
 .conciliacion-tooltip[data-side="bottom"]:hover .conciliacion-tooltip__bubble,
 .conciliacion-tooltip[data-side="bottom"]:focus-within .conciliacion-tooltip__bubble {
   translate: -50% 0;
+}
+.conciliacion-tooltip[data-align="start"]:hover .conciliacion-tooltip__bubble,
+.conciliacion-tooltip[data-align="start"]:focus-within .conciliacion-tooltip__bubble {
+  translate: 0 0;
+}
+.conciliacion-tooltip[data-align="end"]:hover .conciliacion-tooltip__bubble,
+.conciliacion-tooltip[data-align="end"]:focus-within .conciliacion-tooltip__bubble {
+  translate: 0 0;
 }
 .conciliacion-tooltip[data-side="left"]:hover .conciliacion-tooltip__bubble,
 .conciliacion-tooltip[data-side="left"]:focus-within .conciliacion-tooltip__bubble {
@@ -116,6 +135,14 @@
  * font payload — looks the same on dev as in prod.
  * ──────────────────────────────────────────────────────────── */
 @theme {
+  --status-missing-bg: rgba(148, 163, 184, 0.14);
+  --status-missing-text: #94a3b8;
+  --status-missing-border: #475569;
+
+  --color-status-warning: var(--status-warn-border);
+  --color-status-error: var(--status-nok-border);
+  --color-status-ok: var(--status-ok-border);
+  --color-status-ok-text: var(--status-ok-text);
   /* Brand data colors — brighter for dark backgrounds */
   --color-mine-blue: #4da5f5;
   --color-mine-green: #22c5aa;
@@ -196,6 +223,11 @@
  * instead of near-black, and desaturated status badges.
  * ──────────────────────────────────────────────────────────── */
 .light {
+  --color-status-warning: var(--status-warn-border);
+  --color-status-error: var(--status-nok-border);
+  --color-status-ok: var(--status-ok-border);
+  --color-status-ok-text: var(--status-ok-text);
+
   --color-surface: #eceef1;
   --color-surface-raised: #f6f7f9;
   --color-surface-muted: #e1e5ea;

@@ -10,6 +10,7 @@ vi.mock('../../../api/hooks', () => ({
   useResults: () => ({ data: mocks.rows }),
   useSections: () => ({ data: [] }),
   useSettings: () => ({ data: undefined }),
+  useMeshInfo: () => ({ data: undefined }),
   useExportExcel: () => ({ isPending: false, isError: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
   useExportWord: () => ({ isPending: false, isError: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
   useExportPdf: () => ({ isPending: false, isError: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
@@ -76,7 +77,7 @@ describe('flat content surfaces', () => {
     mocks.rows = [makeRow()];
     const { container } = render(<Dashboard />);
 
-    expect(screen.getByText('dashboard.rail.parameters')).toBeTruthy();
+    expect(screen.getByText('dashboard.directional.title')).toBeTruthy();
 
     const blocks = container.querySelectorAll('section, [data-slot]');
     expect(blocks.length).toBeGreaterThan(0);

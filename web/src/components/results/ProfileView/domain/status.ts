@@ -129,6 +129,22 @@ export function classifyComparisonBenchStatus(
   return classifyBenchScore(resolveBenchScore(comparison));
 }
 
+export function classifyProfileStatusFromRows(
+  rows: readonly BenchScoreInput[],
+): BenchStatus {
+  let sum = 0;
+  let count = 0;
+  for (const row of rows) {
+    const score = resolveBenchScore(row);
+    if (score !== null) {
+      sum += score;
+      count += 1;
+    }
+  }
+  if (count === 0) return 'UNKNOWN';
+  return classifyBenchScore(sum / count);
+}
+
 // ─── Severity ordering ──────────────────────────────────────
 
 /** Numeric severity for ordering/comparison. Higher = worse. */

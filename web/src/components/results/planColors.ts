@@ -1,4 +1,5 @@
 import type { ComparisonResult } from '../../api/types';
+import { isValidBenchScore, resolveBenchScore } from './ProfileView/domain';
 import type { BenchStatus } from './ProfileView/domain/types';
 
 export type PlanColorBy = 'status' | 'score' | 'height' | 'angle' | 'berm';
@@ -11,8 +12,20 @@ export function sectionParameterPassRate(rows: readonly ComparisonResult[], sect
 }
 
 export function sectionScore(rows: readonly ComparisonResult[], section: string): number | null {
-  const scores = rows.filter((row) => row.section === section).map((row) => row.section_score).filter((score): score is number => typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100);
-  return scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null;
+  const sectionRows = rows.filter((row) => row.section === section);
+  const benchScores = sectionRows
+    .map((row) => resolveBenchScore(row))
+    .filter((score): score is number => score !== null);
+  if (benchScores.length > 0) {
+    return benchScores.reduce((sum, score) => sum + score, 0) / benchScores.length;
+  }
+  const sectionScores = sectionRows
+    .filter((row) => row.type !== 'MISSING' && row.type !== 'EXTRA')
+    .map((row) => row.section_score)
+    .filter((score): score is number => isValidBenchScore(score));
+  return sectionScores.length > 0
+    ? sectionScores.reduce((sum, score) => sum + score, 0) / sectionScores.length
+    : null;
 }
 
 export function planStatusStrokeDash(status: PlanStatusKey): string | undefined {

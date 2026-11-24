@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -8,17 +8,25 @@ import {
   type ColumnDef,
   type SortingState,
 } from '@tanstack/react-table';
-import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useResults } from '../../api/hooks';
+import { useResults, useSections } from '../../api/hooks';
+import { useBenchFocus } from '../../stores/benchFocus';
 import { useSession } from '../../stores/session';
 import {
   formatMeters,
   formatDegrees,
   formatDeviation,
+  formatLocaleNumber,
   getMatchClass,
 } from '../../utils/format';
 import type { ComparisonResult, MatchType } from '../../api/types';
+import {
+  classifyBenchScore,
+  resolveBenchScore,
+  STATUS_BG_VAR,
+  STATUS_BORDER_VAR,
+  STATUS_FG_VAR,
+} from './ProfileView/domain/status';
 import { filterResults, type ResultFilterState } from './resultFilters.utils';
 import { ProposalTable } from './ProposalTable';
 
@@ -28,7 +36,7 @@ interface ResultsTableProps {
   ResultFiltersComponent?: React.ComponentType<{ results: ComparisonResult[]; filters: ResultFilterState; onChange: (filters: ResultFilterState) => void }>;
 }
 
-const ID_COLUMNS = new Set(['section', 'sector', 'level', 'bench_num', 'type']);
+const ID_COLUMNS = new Set(['section', 'sector', 'level', 'bench_num', 'type', 'status', 'action']);
 
 function statusTextColor(status: string): string | undefined {
   const s = (status ?? '').toUpperCase();
@@ -57,7 +65,7 @@ function MatchBadge({ type, t }: { type: MatchType; t: (k: string) => string }) 
   );
 }
 
-type OrderMode = 'section' | 'level';
+type OrderMode = 'section' | 'level' | 'severity';
 
 function levelNum(level: string): number {
   if (!level || level.trim() === '') return Number.NEGATIVE_INFINITY;
@@ -72,6 +80,26 @@ function compareSections(a: string, b: string): number {
 function compareByOrder(a: ComparisonResult, b: ComparisonResult, mode: OrderMode): number {
   const la = levelNum(a.level);
   const lb = levelNum(b.level);
+  if (mode === 'severity') {
+    const aMatch = a.type === 'MATCH';
+    const bMatch = b.type === 'MATCH';
+    if (aMatch !== bMatch) return aMatch ? -1 : 1;
+    if (aMatch && bMatch) {
+      const scoreA = resolveBenchScore(a);
+      const scoreB = resolveBenchScore(b);
+      if (scoreA !== null && scoreB !== null) {
+        if (scoreA !== scoreB) return scoreA - scoreB;
+      } else if (scoreA !== null) {
+        return -1;
+      } else if (scoreB !== null) {
+        return 1;
+      }
+    }
+    const s = compareSections(a.section, b.section);
+    if (s !== 0) return s;
+    if (lb !== la) return lb - la;
+    return a.bench_num - b.bench_num;
+  }
   if (mode === 'level') {
     if (lb !== la) return lb - la;
     return compareSections(a.section, b.section);
@@ -82,12 +110,31 @@ function compareByOrder(a: ComparisonResult, b: ComparisonResult, mode: OrderMod
 
 export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
   const filtersFromSession = useSession((s) => s.filters);
+  const setSelectedSection = useSession((s) => s.setSelectedSection);
+  const setProfilesMode = useSession((s) => s.setProfilesMode);
+  const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
   const filters = filtersProp ?? filtersFromSession;
   const { data: results, isLoading, error } = useResults();
-  const { t } = useTranslation();
+  const { data: sections } = useSections();
+  const { t, i18n } = useTranslation();
+  const isEnglish = i18n.resolvedLanguage?.toLowerCase().startsWith('en') ?? false;
 
   const [sorting, setSorting] = useState<SortingState>([]);
   const [orderMode, setOrderMode] = useState<OrderMode>('section');
+
+  const sectionIdByName = useMemo(() => {
+    const map = new Map<string, string | null>();
+    if (sections) {
+      for (const sec of sections) {
+        if (map.has(sec.name)) {
+          map.set(sec.name, null);
+        } else {
+          map.set(sec.name, sec.id);
+        }
+      }
+    }
+    return map;
+  }, [sections]);
 
   const filteredData = useMemo(
     () => filterResults(results ?? [], filters),
@@ -141,6 +188,87 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         header: t('table.col_type'),
         size: 90,
         cell: ({ getValue }) => <MatchBadge type={getValue() as MatchType} t={t} />,
+      },
+      {
+        id: 'status',
+        accessorFn: (row) => (row.type === 'MATCH' ? classifyBenchScore(resolveBenchScore(row)) : undefined),
+        sortUndefined: 'last',
+        header: t('table.col_status', { defaultValue: 'Estado' }),
+        size: 110,
+        cell: ({ row }) => {
+          if (row.original.type !== 'MATCH') {
+            return <span className="text-text-muted">—</span>;
+          }
+          const status = classifyBenchScore(resolveBenchScore(row.original));
+          const label =
+            status === 'CUMPLE'
+              ? t('status.cumple', { defaultValue: 'CUMPLE' })
+              : status === 'NO_CUMPLE'
+                ? t('status.no_cumple', { defaultValue: 'NO CUMPLE' })
+                : t('dashboard.rail.status_unknown', { defaultValue: 'Sin dato' });
+          return (
+            <span
+              className="inline-block rounded-full border px-2 py-0.5 text-xs font-medium"
+              style={{
+                backgroundColor: STATUS_BG_VAR[status],
+                color: STATUS_FG_VAR[status],
+                borderColor: STATUS_BORDER_VAR[status],
+              }}
+            >
+              {label}
+            </span>
+          );
+        },
+      },
+      {
+        id: 'score',
+        accessorFn: (row) => resolveBenchScore(row) ?? undefined,
+        sortUndefined: 'last',
+        header: t('table.col_score', { defaultValue: 'Score' }),
+        size: 85,
+        cell: ({ getValue }) => {
+          const score = getValue<number | undefined>();
+          if (score == null) {
+            return <span className="text-text-muted">—</span>;
+          }
+          const status = classifyBenchScore(score);
+          return (
+            <span className="font-medium tabular-nums" style={{ color: STATUS_FG_VAR[status] }}>
+              {formatLocaleNumber(score, i18n.language, 0)}/100
+            </span>
+          );
+        },
+      },
+      {
+        id: 'action',
+        enableSorting: false,
+        header: t('table.col_action', { defaultValue: 'Acción' }),
+        size: 90,
+        cell: ({ row }) => {
+          const sectionId = sectionIdByName.get(row.original.section) ?? null;
+          if (!sectionId) {
+            return <span className="text-text-muted">—</span>;
+          }
+          return (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSection(sectionId);
+                setProfilesMode('detail');
+                setActiveWorkspaceView('profiles');
+                useBenchFocus.getState().requestBench(sectionId, row.original.bench_num);
+              }}
+              aria-label={t('dashboard.priority.open_profile_aria', {
+                section: row.original.section,
+                defaultValue: `${t('table.open_profile', { defaultValue: 'Abrir perfil' })} ${row.original.section}`,
+              })}
+              title={t('table.open_profile', { defaultValue: 'Abrir perfil' })}
+              className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs font-medium text-accent transition-colors hover:bg-surface-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              → {isEnglish ? 'Profile' : 'Perfil'}
+            </button>
+          );
+        },
       },
       {
         accessorKey: 'delta_crest',
@@ -256,7 +384,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         ),
       },
     ],
-    [t, idColumns],
+    [t, i18n.language, isEnglish, idColumns, sectionIdByName, setSelectedSection, setProfilesMode, setActiveWorkspaceView],
   );
 
   const table = useReactTable({
@@ -322,6 +450,7 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
         >
           <option value="section">{t('table.order_by_section', { defaultValue: 'Por Sección' })}</option>
           <option value="level">{t('table.order_by_level', { defaultValue: 'Por Nivel' })}</option>
+          <option value="severity">{t('table.order_by_severity', { defaultValue: 'Por gravedad' })}</option>
         </select>
       </div>
       <div className="overflow-x-auto">
@@ -332,9 +461,9 @@ export function ResultsTable({ filters: filtersProp }: ResultsTableProps = {}) {
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className={`cursor-pointer select-none whitespace-nowrap px-3 py-2 text-xs font-medium text-text-muted hover:text-text-primary ${ID_COLUMNS.has(header.column.id) ? 'text-left' : 'text-right'}`}
+                    className={`select-none whitespace-nowrap px-3 py-2 text-xs font-medium text-text-muted ${header.column.getCanSort() ? 'cursor-pointer hover:text-text-primary' : ''} ${ID_COLUMNS.has(header.column.id) ? 'text-left' : 'text-right'}`}
                     style={{ width: header.getSize() }}
-                    onClick={header.column.getToggleSortingHandler()}
+                    onClick={header.column.getCanSort() ? header.column.getToggleSortingHandler() : undefined}
                   >
                     <div className={`flex items-center gap-1 ${ID_COLUMNS.has(header.column.id) ? '' : 'justify-end'}`}>
                       {flexRender(header.column.columnDef.header, header.getContext())}

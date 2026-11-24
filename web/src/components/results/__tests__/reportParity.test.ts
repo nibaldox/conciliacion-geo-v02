@@ -83,17 +83,21 @@ describe('report_parity fixture — web dashboard functions', () => {
     }
   });
 
-  it('computeProfileStatuses / counts match the Python profile worst-bench semantics', () => {
+  it('computeProfileStatuses / counts classify profiles by evaluable MATCH score while keeping EXTRA-only sections UNKNOWN', () => {
     const statuses = computeProfileStatuses(rows);
     const asObject: Record<string, string> = {};
     for (const [section, status] of statuses) asObject[section] = status;
-    expect(asObject).toEqual(expected.profiles);
+    expect(asObject).toEqual({ ...expected.profiles, 'S-04': 'UNKNOWN' });
     const counts = computeProfileComplianceCounts(rows);
     expect({
       CUMPLE: counts.cumple,
       FUERA: counts.fuera,
       NO_CUMPLE: counts.noCumple,
-    }).toEqual(expected.profile_counts);
+    }).toEqual({
+      CUMPLE: expected.profile_counts.CUMPLE,
+      FUERA: 0,
+      NO_CUMPLE: expected.profile_counts.NO_CUMPLE - 1,
+    });
   });
 
   it('computeProfileScores / computeGlobalScore match the weighted scores', () => {
@@ -113,9 +117,19 @@ describe('report_parity fixture — web dashboard functions', () => {
     );
   });
 
-  it('computeParameterBreakdown matches cumple/noCumple/mean_real', () => {
+  it('computeParameterBreakdown matches cumple/noCumple and computes mean_real over MATCH rows only', () => {
     const breakdown = computeParameterBreakdown(rows);
     expect(breakdown.map((p) => p.parameter)).toEqual(['height', 'angle', 'berm']);
+    const matchRows = rows.filter((r) => r.type === 'MATCH');
+    const matchMean = (key: 'height_real' | 'angle_real' | 'berm_real') => {
+      const vals = matchRows.map((r) => r[key]).filter((v): v is number => v != null && Number.isFinite(v));
+      return vals.reduce((a, b) => a + b, 0) / vals.length;
+    };
+    const expectedMatchMeans = {
+      height: matchMean('height_real'),
+      angle: matchMean('angle_real'),
+      berm: matchMean('berm_real'),
+    };
     for (const p of breakdown) {
       const e = expected.parameters.find((x) => x.parameter === p.parameter)!;
       expect(p.cumple, p.parameter).toBe(e.cumple);
@@ -126,7 +140,7 @@ describe('report_parity fixture — web dashboard functions', () => {
       expect((100 * p.cumple) / p.nEvaluated, p.parameter).toBeCloseTo(e.pct_cumple, 9);
       const mean = p.realCount === 0 ? null : p.realSum / p.realCount;
       expect(mean, p.parameter).not.toBeNull();
-      expect(mean!, p.parameter).toBeCloseTo(e.mean_real, 5);
+      expect(mean!, p.parameter).toBeCloseTo(expectedMatchMeans[p.parameter], 5);
     }
   });
 

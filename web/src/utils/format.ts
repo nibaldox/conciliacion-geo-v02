@@ -50,3 +50,55 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+const numberFormatCache = new Map<string, Intl.NumberFormat>();
+
+export function resolveNumberLocale(language?: string): string {
+  return language?.toLowerCase().startsWith('en') ? 'en-US' : 'es-CL';
+}
+
+function getNumberFormatter(language: string | undefined, decimals: number): Intl.NumberFormat {
+  const locale = resolveNumberLocale(language);
+  const digits = Math.max(0, Math.floor(decimals));
+  const key = `${locale}:${digits}`;
+  let formatter = numberFormatCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+    numberFormatCache.set(key, formatter);
+  }
+  return formatter;
+}
+
+export function formatLocaleNumber(
+  value: number | null | undefined,
+  language?: string,
+  decimals = 1,
+): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const normalized = Object.is(value, -0) ? 0 : value;
+  return getNumberFormatter(language, decimals).format(normalized);
+}
+
+export function formatLocaleSigned(
+  value: number | null | undefined,
+  language?: string,
+  decimals = 1,
+  unit = '',
+): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const normalized = Object.is(value, -0) ? 0 : value;
+  const sign = normalized >= 0 ? '+' : '';
+  return `${sign}${getNumberFormatter(language, decimals).format(normalized)}${unit}`;
+}
+
+export function formatLocalePercent(
+  value: number | null | undefined,
+  language?: string,
+  decimals = 1,
+): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${formatLocaleNumber(value, language, decimals)} %`;
+}

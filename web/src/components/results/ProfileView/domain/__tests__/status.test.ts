@@ -10,6 +10,7 @@ import {
   forEachStatus,
   formatStatus,
   resolveBenchScore,
+  classifyProfileStatusFromRows,
 } from '../status';
 import { assertNever } from '../types';
 import type { BenchStatus } from '../types';
@@ -93,6 +94,69 @@ describe('resolveBenchScore', () => {
       angle_status: 'CUMPLE',
       berm_status: 'CUMPLE',
     })).toBeNull();
+  });
+});
+
+describe('classifyProfileStatusFromRows', () => {
+  it('returns UNKNOWN for empty rows', () => {
+    expect(classifyProfileStatusFromRows([])).toBe('UNKNOWN');
+  });
+
+  it('returns UNKNOWN when rows contain only MISSING or EXTRA entries', () => {
+    expect(classifyProfileStatusFromRows([
+      { type: 'MISSING', bench_score: 0 },
+      { type: 'EXTRA', bench_score: 0 },
+    ])).toBe('UNKNOWN');
+  });
+
+  it('returns UNKNOWN when MATCH rows have only invalid or unresolvable scores', () => {
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', bench_score: NaN },
+      { type: 'MATCH', bench_score: 105 },
+      { type: 'MATCH', bench_score: -1 },
+      { type: 'MATCH', height_status: null, angle_status: 'CUMPLE', berm_status: 'CUMPLE' },
+    ])).toBe('UNKNOWN');
+  });
+
+  it('ignores MISSING and EXTRA rows when computing passing mean from MATCH rows', () => {
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', bench_score: 90 },
+      { type: 'MATCH', bench_score: 70 },
+      { type: 'MISSING' },
+      { type: 'EXTRA' },
+    ])).toBe('CUMPLE');
+  });
+
+  it('returns NO_CUMPLE when mean of evaluable MATCH scores is below 70', () => {
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', bench_score: 60 },
+      { type: 'MATCH', bench_score: 70 },
+    ])).toBe('NO_CUMPLE');
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', bench_score: 69.9 },
+    ])).toBe('NO_CUMPLE');
+  });
+
+  it('returns CUMPLE at the exact 70 boundary', () => {
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', bench_score: 70 },
+    ])).toBe('CUMPLE');
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', bench_score: 60 },
+      { type: 'MATCH', bench_score: 80 },
+    ])).toBe('CUMPLE');
+  });
+
+  it('uses parameter-derived fallback scores for MATCH rows without explicit bench_score', () => {
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', height_status: 'CUMPLE', angle_status: 'CUMPLE', berm_status: 'CUMPLE' },
+      { type: 'MATCH', height_status: 'CUMPLE', angle_status: 'NO CUMPLE', berm_status: 'NO CUMPLE' },
+      { type: 'MISSING' },
+    ])).toBe('NO_CUMPLE');
+    expect(classifyProfileStatusFromRows([
+      { type: 'MATCH', height_status: 'CUMPLE', angle_status: 'NO CUMPLE', berm_status: 'CUMPLE' },
+      { type: 'MISSING' },
+    ])).toBe('CUMPLE');
   });
 });
 

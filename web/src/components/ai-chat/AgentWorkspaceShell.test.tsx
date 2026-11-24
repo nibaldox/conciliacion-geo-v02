@@ -1,10 +1,23 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useEffect } from 'react';
+import type { AIProvidersState } from '../../api/aiChat';
+import { useAIChat } from '../../stores/aiChat';
 import { useWorkspaceMode } from '../../stores/workspaceMode';
 import { useSession } from '../../stores/session';
 import { AgentWorkspaceShell } from './AgentWorkspaceShell';
 import { useCanvasHidden } from './canvasVisibility';
+
+function makeProviderState(chatEnabled: boolean): AIProvidersState {
+  return {
+    providers: chatEnabled ? ['lmstudio'] : [],
+    supports_tool_calls: chatEnabled ? { lmstudio: true } : {},
+    chat_enabled: chatEnabled,
+    chat_provider: chatEnabled ? 'lmstudio' : null,
+    chat_local_only: true,
+    chat_model: '',
+  };
+}
 
 function VisibilityProbe() {
   const hidden = useCanvasHidden();
@@ -21,6 +34,7 @@ vi.mock('./ChatPanel', () => ({ ChatPanel: ({ layout }: { layout: string }) => {
 
 beforeEach(() => {
   counters.mounts = 0;
+  useAIChat.getState().reset();
   useSession.getState().reset();
   useWorkspaceMode.setState({ initialDecided: false });
   localStorage.clear();
@@ -213,5 +227,89 @@ describe('AgentWorkspaceShell', () => {
     expect(localStorage.getItem('conciliacion.agentWorkspace.copilotWidth.v1')).toBe('520');
     fireEvent.keyDown(handle, { key: 'Home' });
     expect(handle).toHaveAttribute('aria-valuenow', '320');
+  });
+  it('auto-collapses the copilot pane when chat is disabled and re-expands if enabled later', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(false) });
+    const { container } = render(<AgentWorkspaceShell><div>workspace</div></AgentWorkspaceShell>);
+    const shell = container.querySelector('.agent-shell');
+    const toggle = screen.getByTestId('ai-chat-copilot-toggle');
+    const chatBody = container.querySelector('.agent-shell__chat-body');
+    expect(shell).toHaveClass('agent-shell--copilot-collapsed');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-label', 'agentWorkspace.expand_copilot');
+    expect(toggle).toHaveAttribute('title', 'agentWorkspace.expand_copilot');
+    expect(chatBody).toHaveAttribute('inert');
+    expect(chatBody).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('separator')).toBeNull();
+    act(() => useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(true) }));
+    expect(shell).not.toHaveClass('agent-shell--copilot-collapsed');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAttribute('aria-label', 'agentWorkspace.collapse_copilot');
+    expect(chatBody).not.toHaveAttribute('inert');
+    expect(chatBody).not.toHaveAttribute('aria-hidden');
+  });
+  it('toggles copilot manually and preserves manual choice across provider updates', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(false) });
+    const { container } = render(<AgentWorkspaceShell><div>workspace</div></AgentWorkspaceShell>);
+    const shell = container.querySelector('.agent-shell');
+    const toggle = screen.getByTestId('ai-chat-copilot-toggle');
+    expect(shell).toHaveClass('agent-shell--copilot-collapsed');
+    fireEvent.click(toggle);
+    expect(shell).not.toHaveClass('agent-shell--copilot-collapsed');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAttribute('aria-label', 'agentWorkspace.collapse_copilot');
+    act(() => useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(false) }));
+    expect(shell).not.toHaveClass('agent-shell--copilot-collapsed');
+    fireEvent.click(toggle);
+    expect(shell).toHaveClass('agent-shell--copilot-collapsed');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    act(() => useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(true) }));
+    expect(shell).toHaveClass('agent-shell--copilot-collapsed');
+  });
+  it('keeps chat visible in protagonist mode even when chat is disabled', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    useWorkspaceMode.setState({ mode: 'protagonist', initialDecided: true });
+    useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(false) });
+    const { container } = render(<AgentWorkspaceShell><div>workspace</div></AgentWorkspaceShell>);
+    const shell = container.querySelector('.agent-shell');
+    const chatBody = container.querySelector('.agent-shell__chat-body');
+    expect(shell).not.toHaveClass('agent-shell--copilot-collapsed');
+    expect(screen.queryByTestId('ai-chat-copilot-toggle')).toBeNull();
+    expect(chatBody).not.toHaveAttribute('inert');
+    expect(chatBody).not.toHaveAttribute('aria-hidden');
+    expect(screen.getByTestId('ai-chat-input')).toBeTruthy();
+  });
+  it('marks the hidden mobile pane as inert and aria-hidden in copilot mode', () => {
+    vi.stubGlobal('innerWidth', 600);
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width: 899px'), addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(false) });
+    const { container } = render(<AgentWorkspaceShell><div>workspace</div></AgentWorkspaceShell>);
+    const shell = container.querySelector('.agent-shell');
+    const workspace = container.querySelector('.agent-shell__workspace');
+    const chat = container.querySelector('.agent-shell__chat');
+    expect(shell).not.toHaveClass('agent-shell--copilot-collapsed');
+    expect(screen.queryByTestId('ai-chat-copilot-toggle')).toBeNull();
+    expect(chat).toHaveAttribute('aria-hidden', 'true');
+    expect(chat).toHaveAttribute('inert');
+    expect(workspace).not.toHaveAttribute('aria-hidden');
+    expect(workspace).not.toHaveAttribute('inert');
+    fireEvent.click(screen.getByText('agentWorkspace.chat'));
+    expect(workspace).toHaveAttribute('aria-hidden', 'true');
+    expect(workspace).toHaveAttribute('inert');
+    expect(chat).not.toHaveAttribute('aria-hidden');
+    expect(chat).not.toHaveAttribute('inert');
+  });
+  it('keeps the left rail open during data entry on 1024px when copilot collapses', () => {
+    vi.stubGlobal('innerWidth', 1024);
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    expect(useSession.getState().sidebarCollapsed).toBe(true);
+    act(() => useAIChat.setState({ providerStateLoaded: true, providerState: makeProviderState(false) }));
+    expect(useSession.getState().sidebarCollapsed).toBe(false);
   });
 });

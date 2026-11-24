@@ -17,9 +17,9 @@ export function StatusDot({ tone }: { tone: StatusTone }) {
   );
 }
 
-export function InfoTip({ label, children, side = 'bottom' }: { label: string; children: ReactNode; side?: 'top' | 'bottom' | 'left' | 'right' }) {
+export function InfoTip({ label, children, side = 'bottom', align = 'start' }: { label: string; children: ReactNode; side?: 'top' | 'bottom' | 'left' | 'right'; align?: 'center' | 'start' | 'end' }) {
   return (
-    <Tooltip content={children} side={side}>
+    <Tooltip content={children} side={side} align={align}>
       <button
         type="button"
         aria-label={label}

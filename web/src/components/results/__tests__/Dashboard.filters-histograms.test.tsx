@@ -1,12 +1,16 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import i18n from '../../../i18n';
 import { buildHistogram, Dashboard, filterByBench } from '../Dashboard';
+import { useBenchFocus } from '../../../stores/benchFocus';
 import type { ComparisonResult } from '../../../api/types';
 
 const mocks = vi.hoisted(() => ({
   rows: [] as unknown[],
+  sections: [{ id: '0', name: 'S-001', length: 200 }] as Array<{ id: string; name: string; length?: number }>,
   tolerances: null as Record<string, Record<string, number>> | null,
+  designFilename: 'diseno_f10.stl' as string | null,
+  topoFilename: 'topo_ene.stl' as string | null,
   setSelectedSection: vi.fn(),
   setProfilesMode: vi.fn(),
   setActiveWorkspaceView: vi.fn(),
@@ -20,8 +24,16 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../api/hooks', () => ({
   useResults: () => ({ data: mocks.rows }),
-  useSections: () => ({ data: [{ id: '0', name: 'S-001' }] }),
+  useSections: () => ({ data: mocks.sections }),
   useProfile: () => ({ data: null, isPending: false, isError: false }),
+  useMeshInfo: (meshId: string | null) => ({
+    data:
+      meshId === 'design-1' && mocks.designFilename
+        ? { filename: mocks.designFilename }
+        : meshId === 'topo-1' && mocks.topoFilename
+          ? { filename: mocks.topoFilename }
+          : undefined,
+  }),
   useSettings: () => ({
     data: mocks.tolerances === null ? undefined : { tolerances: mocks.tolerances },
   }),
@@ -30,6 +42,8 @@ vi.mock('../../../api/hooks', () => ({
 vi.mock('../../../stores/session', () => ({
   useSession: (selector: (s: unknown) => unknown) =>
     selector({
+      designMeshId: 'design-1',
+      topoMeshId: 'topo-1',
       filters: mocks.filters,
       setSelectedSection: mocks.setSelectedSection,
       setProfilesMode: mocks.setProfilesMode,
@@ -41,7 +55,24 @@ vi.mock('../../../stores/session', () => ({
 }));
 
 vi.mock('../CompliancePlanView', () => ({
-  CompliancePlanView: (props: { results: ComparisonResult[]; variant?: string; colorBy?: string; visibleStatuses?: Set<string>; onSelectSection?: (name: string) => void }) => <button data-testid="plan" data-rows={props.results.length} data-variant={props.variant} data-color={props.colorBy} data-statuses={[...(props.visibleStatuses ?? [])].join(',')} onClick={() => props.onSelectSection?.('S-001')}>Select plan</button>,
+  CompliancePlanView: (props: {
+    results: ComparisonResult[];
+    variant?: string;
+    colorBy?: string;
+    visibleStatuses?: Set<string>;
+    onSelectSection?: (name: string) => void;
+  }) => (
+    <button
+      data-testid="plan"
+      data-rows={props.results.length}
+      data-variant={props.variant}
+      data-color={props.colorBy}
+      data-has-visible-statuses={props.visibleStatuses ? 'yes' : 'no'}
+      onClick={() => props.onSelectSection?.('S-001')}
+    >
+      Select plan
+    </button>
+  ),
 }));
 
 vi.mock('../DesignAchievementPanel', () => ({
@@ -88,39 +119,29 @@ function makeRow(overrides: Partial<ComparisonResult> = {}): ComparisonResult {
 }
 
 beforeAll(async () => {
-  i18n.addResource('es', 'translation', 'dashboard.filters.no_matching_results', 'Ningún resultado coincide con la combinación de filtros activa. Ajusta o restablece los filtros de sector, sección, nivel o banco.');
   await i18n.changeLanguage('es');
 });
 
-const HISTOGRAM_SEGMENTS = ['Altura', 'Ángulo', 'Cresta', 'Pata', 'Berma'];
+beforeEach(() => {
+  mocks.sections = [{ id: '0', name: 'S-001', length: 200 }];
+  mocks.tolerances = null;
+  mocks.designFilename = 'diseno_f10.stl';
+  mocks.topoFilename = 'topo_ene.stl';
+  mocks.filters = { sector: [], section: [], level: [], bench: [] };
+  mocks.setSelectedSection.mockClear();
+  mocks.setProfilesMode.mockClear();
+  mocks.setActiveWorkspaceView.mockClear();
+  useBenchFocus.setState({ request: null, current: null });
+});
 
-function histogramGroup(): HTMLElement {
-  return screen.getByRole('group', { name: 'Variable del histograma' });
-}
-
-function selectHistogram(label: string): void {
-  const button = [...histogramGroup().querySelectorAll('button')].find((node) => node.textContent === label);
-  if (!button) throw new Error(`missing segment ${label}`);
-  fireEvent.click(button);
-}
-
-function collectHistogramBands(): number[][] {
-  const bands: number[][] = [];
-  for (const label of HISTOGRAM_SEGMENTS) {
-    selectHistogram(label);
-    const plots = plotData();
-    const histogram = plots.find((plot) => (plot.layout.shapes?.length ?? 0) > 0)!;
-    for (const shape of histogram.layout.shapes ?? []) bands.push([shape.x0, shape.x1]);
-  }
-  return bands;
-}
-
-function plotData(): { data: unknown; layout: { shapes?: { x0: number; x1: number }[] } }[] {
+function plotData(): { data: unknown; layout: { shapes?: { type?: string; x0: number; x1: number }[] } }[] {
   return screen
     .getAllByTestId('plot')
     .map((node) => ({
       data: JSON.parse(node.getAttribute('data-data') ?? '[]'),
-      layout: JSON.parse(node.getAttribute('data-layout') ?? '{}') as { shapes?: { x0: number; x1: number }[] },
+      layout: JSON.parse(node.getAttribute('data-layout') ?? '{}') as {
+        shapes?: { type?: string; x0: number; x1: number }[];
+      },
     }));
 }
 
@@ -155,11 +176,15 @@ describe('buildHistogram (bandas de tolerancia)', () => {
   });
 });
 
-describe('Dashboard filtros compactos', () => {
-  it('ancla cada menú a su selector y mantiene etiquetas sin saltos', () => {
+describe('Dashboard filtros compactos y barra de contexto', () => {
+  it('muestra barra de contexto con nombres de mallas, largo y popover de filtros anclado', () => {
     mocks.rows = [makeRow()];
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
     const { container } = render(<Dashboard />);
+    const contextBar = container.querySelector('[data-slot="dashboard-context-bar"]')!;
+    expect(contextBar.textContent).toContain('diseno_f10.stl');
+    expect(contextBar.textContent).toContain('topo_ene.stl');
+    expect(contextBar.textContent).toContain('200 m');
+
     fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
     const panel = container.querySelector('#dashboard-filter-panel')!;
     expect(panel.className).toContain('right-0');
@@ -170,30 +195,34 @@ describe('Dashboard filtros compactos', () => {
     }
     expect(panel.querySelector('[data-slot="dashboard-bench-filter"]')!.className).toContain('flex-wrap');
   });
-  it('mantiene controles principales visibles y despliega los filtros con contador y Escape', () => {
+
+  it('mantiene controles principales visibles, elimina chips de estado y despliega filtros con Escape', () => {
     mocks.rows = [makeRow(), makeRow({ bench_num: 2 })];
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
     const { container, rerender } = render(<Dashboard />);
     expect(screen.getByRole('group', { name: 'Colorear por' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Cumple', pressed: true })).toBeVisible();
+    expect(screen.queryByRole('group', { name: 'Filtrar por estado' })).toBeNull();
     expect(container.querySelector('[data-slot="dashboard-bench-filter"]')).toBeNull();
     expect(container.querySelector('[data-slot="result-filters"]')).toBeNull();
+
     const toggle = screen.getByRole('button', { name: 'Filtros' });
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(container.querySelector('[data-slot="dashboard-bench-filter"]')).toBeVisible();
     expect(container.querySelector('[data-slot="result-filters"]')).toBeVisible();
+
     mocks.filters = { sector: ['Norte'], section: [], level: [], bench: [1] };
     rerender(<Dashboard />);
     expect(screen.getByRole('button', { name: 'Filtros · 2' })).toBeVisible();
+    expect(container.querySelector('[data-slot="dashboard-active-filters"]')).toBeTruthy();
+
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.getByRole('button', { name: 'Filtros · 2' })).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('[data-slot="result-filters"]')).toBeNull();
   });
+
   it('aplica banco desde el panel a la planta y cierra al pulsar fuera', () => {
     mocks.rows = [makeRow(), makeRow({ bench_num: 2, level: '3200' })];
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
     const { container, rerender } = render(<Dashboard />);
     expect(screen.getByTestId('plan')).toHaveAttribute('data-rows', '2');
     fireEvent.click(screen.getByRole('button', { name: 'Filtros' }));
@@ -208,27 +237,84 @@ describe('Dashboard filtros compactos', () => {
   });
 });
 
-describe('Dashboard layout B', () => {
-  it('connects hero, color, selection, filters and profile id', () => {
-    mocks.rows = [makeRow(), makeRow({ bench_num: 2 })];
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+describe('Dashboard jerarquía geotécnica (Ola 3)', () => {
+  it('conecta hero (default berm), cobertura, KPIs sin Fuera, tabla por cota, lista prioritaria y selección', () => {
+    mocks.sections = [
+      { id: '0', name: 'S-001', length: 200 },
+      { id: '1', name: 'S-002', length: 200 },
+    ];
+    mocks.rows = [
+      makeRow({ section: 'S-001', bench_num: 1, level: '3150', berm_real: 8, bench_score: 100 }),
+      makeRow({
+        section: 'S-001',
+        bench_num: 2,
+        level: '3135',
+        berm_design: 8,
+        berm_real: 3.5,
+        berm_min: 7,
+        berm_status: 'NO CUMPLE',
+        delta_crest: 4.2,
+        bench_score: 40,
+      }),
+    ];
     const { container } = render(<Dashboard />);
+
     const plan = screen.getByTestId('plan');
-    expect(plan.getAttribute('data-variant')).toBe('hero');
-    expect(container.querySelector('[data-slot="dashboard-rail"]')).toBeTruthy();
-    expect(container.querySelector('[data-slot="dashboard-rail"] .bg-surface-raised.rounded-lg')).toBeNull();
+    expect(plan).toHaveAttribute('data-variant', 'hero');
+    expect(plan).toHaveAttribute('data-color', 'berm');
+    expect(plan).toHaveAttribute('data-has-visible-statuses', 'no');
+
+    expect(container.querySelector('[data-slot="dashboard-coverage"]')).toBeTruthy();
+    expect(container.querySelector('[data-slot="dashboard-coverage-count"]')?.textContent).toContain('1 de 2 secciones');
+    expect(container.querySelector('[data-slot="dashboard-coverage-count"]')?.textContent).toContain('2 comparados');
+
+    const kpis = container.querySelector('[data-slot="dashboard-kpis"]')!;
+    expect(kpis.textContent).not.toContain('Fuera de tolerancia');
+    expect(kpis.textContent).toContain('70,0');
+
     fireEvent.click(screen.getByRole('button', { name: 'Puntaje' }));
-    expect(plan.getAttribute('data-color')).toBe('score');
+    expect(plan).toHaveAttribute('data-color', 'score');
+
     fireEvent.click(plan);
-    expect(container.querySelector('[data-slot="selected-section"]')?.textContent).toContain('S-001');
-    expect(screen.getByRole('button', { name: /Abrir perfil/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Abrir perfil/ }));
+    const selectedPanel = container.querySelector('[data-slot="selected-section"]')!;
+    expect(selectedPanel.textContent).toContain('S-001');
+    fireEvent.click(within(selectedPanel as HTMLElement).getByRole('button', { name: /Abrir perfil/ }));
     expect(mocks.setSelectedSection).toHaveBeenCalledWith('0');
     expect(mocks.setProfilesMode).toHaveBeenCalledWith('detail');
     expect(mocks.setActiveWorkspaceView).toHaveBeenCalledWith('profiles');
-    fireEvent.click(screen.getByRole('button', { name: 'Cumple', pressed: true }));
-    expect(plan.getAttribute('data-statuses')?.split(',')).not.toContain('CUMPLE');
-    expect(screen.queryByRole('button', { name: /Abrir perfil/ })).toBeNull();
+
+    const levelTable = container.querySelector('[data-slot="level-compliance-table"]')!;
+    fireEvent.click(levelTable.querySelector('tr[data-level="3135"]')!);
+    expect(mocks.filters.level).toEqual(['3135']);
+
+    mocks.setSelectedSection.mockClear();
+    mocks.setProfilesMode.mockClear();
+    mocks.setActiveWorkspaceView.mockClear();
+    const priorityList = container.querySelector('[data-slot="priority-review-list"]')!;
+    const priorityBtn = within(priorityList as HTMLElement).getByRole('button', { name: /Abrir perfil de la sección S-001/ });
+    fireEvent.click(priorityBtn);
+    expect(mocks.setSelectedSection).toHaveBeenCalledWith('0');
+    expect(mocks.setProfilesMode).toHaveBeenCalledWith('detail');
+    expect(mocks.setActiveWorkspaceView).toHaveBeenCalledWith('profiles');
+    expect(useBenchFocus.getState().request).toMatchObject({ sectionId: '0', designBench: 2 });
+  });
+
+  it('oculta Cumplimiento por sector cuando no hay sectores asignados y colapsa métricas complementarias', () => {
+    mocks.rows = [makeRow({ sector: '' })];
+    const { container } = render(<Dashboard />);
+    expect(container.querySelector('[data-slot="sector-compliance"]')).toBeNull();
+    const complementary = container.querySelector('details[data-slot="complementary-metrics"]') as HTMLDetailsElement;
+    expect(complementary).toBeTruthy();
+    expect(complementary.open).toBe(false);
+    expect(screen.getByTestId('design-achievement-panel')).toBeTruthy();
+    expect(screen.getByTestId('proposal-summary-card')).toBeTruthy();
+  });
+
+  it('muestra Sin dato en KPIs solo cuando existen perfiles UNKNOWN', () => {
+    mocks.rows = [makeRow({ section: 'S-001', type: 'MISSING', height_status: 'NO CONSTRUIDO', angle_status: '-', berm_status: 'FALTA BANCO' })];
+    const { container } = render(<Dashboard />);
+    const kpis = container.querySelector('[data-slot="dashboard-kpis"]')!;
+    expect(kpis.textContent).toContain('Sin dato');
   });
 });
 
@@ -243,7 +329,6 @@ describe('Dashboard filtros compartidos', () => {
       makeRow({ sector: 'Sur', bench_num: 2 }),
       makeRow({ sector: 'Sur', bench_num: 3 }),
     ];
-    mocks.tolerances = null;
     mocks.filters = { sector: ['Sur'], section: [], level: [], bench: [] };
     render(<Dashboard />);
     const serialized = screen
@@ -255,11 +340,15 @@ describe('Dashboard filtros compartidos', () => {
   });
 
   it('usa tokens de tema en lugar de colores hex fijos en los gráficos', () => {
-    mocks.rows = [makeRow({ sector: 'Norte' }), makeRow({ sector: 'Sur', height_status: 'NO CUMPLE', angle_status: 'NO CUMPLE', berm_status: 'NO CUMPLE' })];
-    mocks.tolerances = null;
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
+    mocks.rows = [
+      makeRow({ sector: 'Norte' }),
+      makeRow({ sector: 'Sur', height_status: 'NO CUMPLE', angle_status: 'NO CUMPLE', berm_status: 'NO CUMPLE' }),
+    ];
     render(<Dashboard />);
-    const serialized = screen.getAllByTestId('plot').map((node) => `${node.getAttribute('data-data')}${node.getAttribute('data-layout')}`).join('');
+    const serialized = screen
+      .getAllByTestId('plot')
+      .map((node) => `${node.getAttribute('data-data')}${node.getAttribute('data-layout')}`)
+      .join('');
     expect(serialized).not.toMatch(/#[0-9a-fA-F]{6}/);
     expect(serialized).toContain('var(--status-ok-text)');
     expect(serialized).toContain('var(--status-nok-text)');
@@ -267,42 +356,15 @@ describe('Dashboard filtros compartidos', () => {
 
   it('explica que la combinación de filtros activa no tiene resultados', () => {
     mocks.rows = [makeRow()];
-    mocks.tolerances = null;
     mocks.filters = { sector: ['Sur'], section: ['S-002'], level: ['3200'], bench: [2] };
     render(<Dashboard />);
-    expect(screen.getByRole('status').textContent).toBe(
-      'Ningún resultado coincide con la combinación de filtros activa. Ajusta o restablece los filtros de sector, sección, nivel o banco.',
-    );
+    expect(screen.getByText(/Ningún resultado coincide con la combinación de filtros activa/)).toBeTruthy();
     expect(screen.queryByText('Desviación de Altura (m)')).toBeNull();
   });
 });
 
-describe('Dashboard distribución de desviaciones con selector', () => {
-  it('agrupa los cinco histogramas en una sección con selector y un solo gráfico', () => {
-    mocks.rows = [makeRow()];
-    mocks.tolerances = {
-      bench_height: { neg: 0.7, pos: 1.3 },
-      face_angle: { neg: 4, pos: 2 },
-      berm_width: { min: 5.5 },
-      crest_toe_deviation: { neg: 0.9, pos: 1.1 },
-    };
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
-    render(<Dashboard />);
-    expect(screen.getByText('Distribución de desviaciones')).toBeTruthy();
-    const segments = [...histogramGroup().querySelectorAll('button')].map((node) => node.textContent);
-    expect(segments).toEqual(HISTOGRAM_SEGMENTS);
-    const plotCount = screen.getAllByTestId('plot').length;
-    expect(screen.getAllByText('Desviación de Altura (m)').length).toBe(1);
-    selectHistogram('Pata');
-    expect(screen.getAllByText('Desviación de Pata (m)').length).toBe(1);
-    expect(screen.queryByText('Desviación de Altura (m)')).toBeNull();
-    selectHistogram('Berma');
-    expect(screen.getAllByText('Ancho de berma (m)').length).toBe(1);
-    expect(screen.getAllByTestId('plot').length).toBe(plotCount);
-    expect(histogramGroup().querySelector('[aria-pressed="true"]')?.textContent).toBe('Berma');
-  });
-
-  it('usa bandas asimétricas de tolerancia y mínimo de berma', () => {
+describe('Dashboard distribución de desviaciones en grilla de 5 mini-histogramas', () => {
+  it('renderiza los cinco mini-histogramas simultáneamente con bandas asimétricas y mínimo de berma', () => {
     mocks.rows = [
       makeRow({ height_dev: 0.2, angle_dev: 0.5, delta_crest: 0.1, delta_toe: -0.4, berm_real: 7 }),
     ];
@@ -312,39 +374,44 @@ describe('Dashboard distribución de desviaciones con selector', () => {
       berm_width: { min: 5.5 },
       crest_toe_deviation: { neg: 0.9, pos: 1.1 },
     };
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
-    render(<Dashboard />);
-    const bands = collectHistogramBands();
-    expect(bands.some(([x0, x1]) => x0 === -0.7 && x1 === 1.3)).toBe(true);
-    expect(bands.some(([x0, x1]) => x0 === -0.9 && x1 === 1.1)).toBe(true);
-    const bermBand = bands.find(([x0]) => x0 === 5.5);
+    const { container } = render(<Dashboard />);
+    const grid = container.querySelector('[data-slot="deviation-histograms-grid"]')!;
+    expect(grid).toBeTruthy();
+    for (const key of ['height', 'angle', 'crest', 'toe', 'berm']) {
+      expect(grid.querySelector(`[data-slot="histogram-card-${key}"]`)).toBeTruthy();
+    }
+    const rectBands = plotData()
+      .flatMap((plot) => (plot.layout.shapes ?? []).filter((shape) => shape.type === 'rect'))
+      .map((shape) => [shape.x0, shape.x1]);
+    expect(rectBands.some(([x0, x1]) => x0 === -0.7 && x1 === 1.3)).toBe(true);
+    expect(rectBands.some(([x0, x1]) => x0 === -0.9 && x1 === 1.1)).toBe(true);
+    const bermBand = rectBands.find(([x0]) => x0 === 5.5);
     expect(bermBand).toBeDefined();
     expect(bermBand![1]).toBeGreaterThan(5.5);
   });
 
   it('recurre a DEFAULT_TOLERANCES sin configuración', () => {
     mocks.rows = [makeRow({ berm_real: 8 })];
-    mocks.tolerances = null;
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
     render(<Dashboard />);
-    const bands = collectHistogramBands();
-    expect(bands.some(([x0, x1]) => x0 === -2 && x1 === 2)).toBe(true);
-    expect(bands.some(([x0, x1]) => x0 === 7 && x1 > 7)).toBe(true);
+    const rectBands = plotData()
+      .flatMap((plot) => (plot.layout.shapes ?? []).filter((shape) => shape.type === 'rect'))
+      .map((shape) => [shape.x0, shape.x1]);
+    expect(rectBands.some(([x0, x1]) => x0 === -2 && x1 === 2)).toBe(true);
+    expect(rectBands.some(([x0, x1]) => x0 === 7 && x1 > 7)).toBe(true);
   });
 });
 
-
 describe('Dashboard rail parameter detail', () => {
-  it('places compact parameter details immediately after bars and before selection', () => {
+  it('places DirectionalSummary, compact 5-column parameter detail (sin No comparados) and SelectedSectionPanel in order', () => {
     mocks.rows = [makeRow()];
-    mocks.filters = { sector: [], section: [], level: [], bench: [] };
     const { container } = render(<Dashboard />);
     const rail = container.querySelector('[data-slot="dashboard-rail"]')!;
-    const bars = rail.querySelector('[data-slot="parameter-bars"]')!;
-    const details = rail.querySelector('details')!;
-    expect(bars.nextElementSibling).toBe(details);
+    const directional = rail.querySelector('[data-slot="directional-summary"]')!;
+    const details = rail.querySelector('details[data-slot="parameter-detail"]')!;
+    expect(directional.nextElementSibling).toBe(details);
     expect(details.nextElementSibling).toHaveAttribute('data-slot', 'selected-section');
-    expect(details.className).toContain('[&_.overflow-x-auto]:overflow-visible');
     expect(details.querySelectorAll('[data-parameter]')).toHaveLength(3);
+    expect(details.querySelectorAll('thead th')).toHaveLength(5);
+    expect(details.querySelector('[data-col="no-comparados"]')).toBeNull();
   });
 });

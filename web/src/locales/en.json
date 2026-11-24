@@ -1,5 +1,16 @@
 {
-  "agentWorkspace": {"heading": "What would you like to reconcile?", "open": "Open workspace", "expandChat": "Expand chat", "chat": "Chat", "workspace": "Workspace", "navigation": "Workspace navigation", "focus": "Focus conversation", "resize": "Agent panel width"},
+  "agentWorkspace": {
+    "heading": "What would you like to reconcile?",
+    "open": "Open workspace",
+    "expandChat": "Expand chat",
+    "chat": "Chat",
+    "workspace": "Workspace",
+    "navigation": "Workspace navigation",
+    "focus": "Focus conversation",
+    "resize": "Agent panel width",
+    "collapse_copilot": "Collapse copilot",
+    "expand_copilot": "Expand copilot"
+  },
   "recentSessions": {
     "button": "Sessions",
     "title": "Recent sessions",
@@ -288,7 +299,12 @@
     "col_berm_effective": "Effective berm width (m)",
     "order_label": "Order",
     "order_by_section": "By section",
-    "order_by_level": "By level"
+    "order_by_level": "By level",
+    "col_status": "Status",
+    "col_score": "Score",
+    "col_action": "Action",
+    "open_profile": "Open profile",
+    "order_by_severity": "By severity"
   },
   "results": {
     "filters": {
@@ -1521,8 +1537,8 @@
     },
     "kpi": {
       "global_score": "Global weighted score",
-      "global_score_help": "Average across profiles with matched benches. Each profile averages its benches: berm 60, angle 10, and height 30 points.",
-      "profile_classification_help": "A bench passes at score ≥70 and fails below 70; each profile takes its worst bench status. Incomplete data is UNKNOWN. Individual metrics keep their tolerance statuses.",
+      "global_score_help": "Weighted average across profiles with compared benches. Bench weights: berm 60, height 30, angle 10 (all-or-nothing per parameter). Global thresholds: ≥70 green, ≥50 amber, <50 red.",
+      "profile_classification_help": "Each profile passes if the weighted average of its compared (MATCH) benches is ≥70 (<70 Fail; no compared benches: No data). Unbuilt and extra benches are reported under Coverage without failing the profile; compared benches with truncated design berms remain in the official score and are flagged in Coverage.",
       "profiles_ok": "Compliant Profiles",
       "profiles_outside": "Profiles Outside Tolerance",
       "profiles_no": "Non-Compliant Profiles",
@@ -1600,7 +1616,87 @@
     "kpi_global": "Global Compliance",
     "kpi_height": "Bench Height",
     "kpi_angle": "Face Angle",
-    "kpi_berm": "Berm Width"
+    "kpi_berm": "Berm Width",
+    "context": {
+      "design": "Design",
+      "topo": "Topography",
+      "section_length": "Section length",
+      "criteria_label": "Criteria",
+      "height_tol": "Height tol.",
+      "angle_tol": "Angle tol.",
+      "berm_min": "Min berm",
+      "crest_toe_tol": "Crest/toe tol.",
+      "formula_short": "Formula (berm 60, height 30, angle 10)",
+      "active_filters": "Active filters",
+      "clear_filter": "Clear filter",
+      "add_filter": "Add filter"
+    },
+    "coverage": {
+      "title": "Section Coverage & Completeness",
+      "sections_of": "{{evaluated}} of {{total}} sections",
+      "sections_missing_one": "{{count}} section without profile",
+      "sections_missing_other": "{{count}} sections without profile",
+      "sections_missing_list_toggle": "View missing sections detail",
+      "benches_funnel": "{{design}} design → {{compared}} compared → {{evaluable}} fully evaluable",
+      "truncated_count": "Truncated",
+      "not_excavated_count": "Not excavated",
+      "unmeasured_count": "Unmeasured",
+      "extra_count": "Extra",
+      "truncated_berm_warning": "{{count}} compared benches ({{pct}} %) have their design berm truncated by section length (< {{min}} m).",
+      "all_sections_ok": "All sections have a valid profile.",
+      "complete_with_missing": "Complete ({{missing}} without profile)"
+    },
+    "directional": {
+      "title": "Directional Deviations & Trends",
+      "berm_deficit": "mean deficit {{value}} m vs design",
+      "berm_effective": "effective berm (with spill): {{pct}} % ({{ok}}/{{total}})",
+      "crest_loss": "mean loss {{value}} m ({{gt1}} > 1 m, {{gt3}} > 3 m)",
+      "crest_sign_note": "+ = retreat / crest loss",
+      "angle_flatter": "{{count}} of {{total}} flatter (median {{median}}°)",
+      "angle_steeper": "{{count}} steeper",
+      "height_over_under": "{{over}} over · {{under}} under tolerance"
+    },
+    "byLevel": {
+      "title": "Performance by Bench / Level",
+      "level": "Elevation",
+      "compared": "Compared",
+      "not_built": "Not built",
+      "score": "Score",
+      "small_sample": "Small sample (n={{n}})",
+      "filter_by_level": "Filter by level"
+    },
+    "priority": {
+      "title": "Priority Corrective Actions",
+      "empty": "No critical deviations pending.",
+      "section": "Section",
+      "bench": "Bench",
+      "level": "Elevation",
+      "reason": "Reason",
+      "open": "Open",
+      "reason_effective_berm": "Critical effective berm due to spill",
+      "reason_berm_below_min": "Berm width below minimum",
+      "reason_crest_loss": "Severe crest loss (> 3 m)",
+      "reason_low_score": "Low bench score (< 70)",
+      "open_profile_aria": "Open profile for section {{section}}"
+    },
+    "histograms": {
+      "title": "Deviation Distribution",
+      "n_label": "n = {{n}}",
+      "median_label": "Median: {{value}}",
+      "out_of_tol_label": "Out of tol.: {{pct}}%",
+      "band_pass": "PASS",
+      "band_min": "Min {{min}} m",
+      "sign_crest": "+ = crest loss",
+      "sign_toe": "+ = over-excavation / − = toe remnant",
+      "sign_angle": "− = flatter · + = steeper",
+      "sign_height": "+ = higher · − = lower",
+      "berm_zeros_note": "{{count}} benches with actual 0 m berm (truncated)",
+      "berm_title": "Actual berm width (m)"
+    },
+    "complementary": {
+      "title": "Complementary metrics (Design achievement · Proposal)",
+      "summary_hint": "Performance summary and geometric optimization proposal"
+    }
   },
   "status": {
     "cumple": "PASS",
@@ -1670,7 +1766,11 @@
     "zoom_out": "Zoom out",
     "zoom_reset": "Reset zoom",
     "color_scale": "Color scale",
-    "full_surface": "Full surface"
+    "full_surface": "Full surface",
+    "scale_berm": "Scale: Berm",
+    "scale_score": "Scale: Score",
+    "scale_height": "Scale: Height",
+    "scale_angle": "Scale: Angle"
   },
   "project_input": {
     "curve_help": "How to define the segment",
@@ -1800,7 +1900,7 @@
       "network_error": "No connection to the server; please try again.",
       "cleared": "Conversation removed from the server. Starting a new conversation.",
       "download_failed": "The generated file could not be downloaded; please try again."
-      },
+    },
     "model": {
       "session_label": "Model loaded in the local AI server (this session only)",
       "selector_label": "Model loaded in the local AI server",
@@ -1810,23 +1910,23 @@
       "refresh": "Check again"
     },
     "guidance": {
-        "load_design": "Design surface is missing. Load Design first.",
-        "load_topo": "The topography surface is missing.",
-        "review": "Review the analysis and its non-compliances.",
-        "profile": "Review the selected section profile.",
-        "review_cta": "Review non-compliances",
-        "profile_cta": "Ask about this profile",
-        "review_prompt": "Review the completed reconciliation and explain the non-compliances found, citing the relevant results. Do not modify the analysis.",
-        "profile_prompt": "Explain the profile of the currently selected section, including its relevant results. Do not modify the analysis.",
-        "sections": "Define the sections for the reconciliation before continuing.",
-        "parameters": "Review and confirm the reconciliation parameters before continuing.",
-        "ready": "The reconciliation is ready. Review the setup before running it.",
-        "open_loader": "Open surface loader",
-        "cta_design": "Load Design",
-        "cta_topo": "Load topography",
-        "processing": "Reconciliation is in progress. You can inspect the workflow without starting another action.",
-        "prepare": "Prepare the next step: define sections and confirm parameters before running reconciliation."
-      },
+      "load_design": "Design surface is missing. Load Design first.",
+      "load_topo": "The topography surface is missing.",
+      "review": "Review the analysis and its non-compliances.",
+      "profile": "Review the selected section profile.",
+      "review_cta": "Review non-compliances",
+      "profile_cta": "Ask about this profile",
+      "review_prompt": "Review the completed reconciliation and explain the non-compliances found, citing the relevant results. Do not modify the analysis.",
+      "profile_prompt": "Explain the profile of the currently selected section, including its relevant results. Do not modify the analysis.",
+      "sections": "Define the sections for the reconciliation before continuing.",
+      "parameters": "Review and confirm the reconciliation parameters before continuing.",
+      "ready": "The reconciliation is ready. Review the setup before running it.",
+      "open_loader": "Open surface loader",
+      "cta_design": "Load Design",
+      "cta_topo": "Load topography",
+      "processing": "Reconciliation is in progress. You can inspect the workflow without starting another action.",
+      "prepare": "Prepare the next step: define sections and confirm parameters before running reconciliation."
+    },
     "input": {
       "placeholder": "Type your message…",
       "aria": "Message for the assistant",
@@ -1874,19 +1974,19 @@
       }
     },
     "tool": {
-     "duration_ms": "{{ms}} ms",
-     "duration_s": "{{s}} s",
-     "no_duration": "No recorded time",
-     "params": "Parameters",
-     "result": "Result",
-     "running": "running \"{{name}}\"…",
-     "status_ok": "Completed",
-     "status_error": "Error",
-     "denied_note": "Operation cancelled by the user; nothing was changed.",
-     "expand": "Show details",
-     "collapse": "Hide details",
-     "download": "Download file",
-     "downloading": "Downloading…"
+      "duration_ms": "{{ms}} ms",
+      "duration_s": "{{s}} s",
+      "no_duration": "No recorded time",
+      "params": "Parameters",
+      "result": "Result",
+      "running": "running \"{{name}}\"…",
+      "status_ok": "Completed",
+      "status_error": "Error",
+      "denied_note": "Operation cancelled by the user; nothing was changed.",
+      "expand": "Show details",
+      "collapse": "Hide details",
+      "download": "Download file",
+      "downloading": "Downloading…"
     },
     "copilot": {
       "agent": "Agent",

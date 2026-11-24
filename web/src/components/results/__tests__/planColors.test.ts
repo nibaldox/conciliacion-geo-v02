@@ -13,6 +13,23 @@ describe('plan colors', () => {
     expect(sectionScore([row({ section_score: 80 }), row({ section_score: 60 }), row({ section_score: NaN })], 'A')).toBe(70);
     expect(sectionScore([row({})], 'A')).toBeNull();
   });
+  it('recalculates section score from filtered bench scores before falling back to section_score', () => {
+    expect(sectionScore([
+      row({ section: 'S-70', level: '3065', type: 'MATCH', bench_score: 90, section_score: 45 }),
+    ], 'S-70')).toBe(90);
+    expect(sectionScore([
+      row({ section: 'S-70', type: 'MATCH', bench_score: 90, section_score: 45 }),
+      row({ section: 'S-70', type: 'MATCH', bench_score: 70, section_score: 45 }),
+      row({ section: 'S-70', type: 'MISSING', bench_score: 0, section_score: 45 }),
+    ], 'S-70')).toBe(80);
+    expect(sectionScore([
+      row({ section: 'S-70', type: 'MISSING', section_score: 45 }),
+      row({ section: 'S-70', type: 'EXTRA', section_score: 55 }),
+    ], 'S-70')).toBeNull();
+    expect(sectionScore([
+      row({ section: 'S-70', type: 'MATCH', bench_score: 105, section_score: 105 }),
+    ], 'S-70')).toBeNull();
+  });
   it('maps status tokens and scale stops', () => {
     expect(planColor('status', 'CUMPLE')).toBe('var(--status-ok-text)');
     expect(planColor('status', 'FUERA')).toBe('var(--status-warn-text)');

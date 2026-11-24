@@ -43,6 +43,7 @@ export {
   classifyBenchScore,
   resolveBenchScore,
   classifyComparisonBenchStatus,
+  classifyProfileStatusFromRows,
   compareStatus,
   forEachStatus,
   formatStatus,

@@ -22,13 +22,11 @@ describe('hero plan', () => {
     const b = container.querySelector('[data-section-name="B"]')!;
     const spy = vi.spyOn(colors, 'planStatusStrokeDash');
     fireEvent.mouseEnter(a);
-    // Four legend swatches plus the newly focused group.
-    expect(spy).toHaveBeenCalledTimes(5);
+    expect(spy).toHaveBeenCalledTimes(4);
     spy.mockClear();
     fireEvent.mouseLeave(a);
     fireEvent.mouseEnter(b);
-    // Two commits, four legend swatches each, and one group per commit.
-    expect(spy).toHaveBeenCalledTimes(10);
+    expect(spy).toHaveBeenCalledTimes(8);
     spy.mockRestore();
   });
   it('does not reproject every section when hovering', () => {
@@ -65,27 +63,34 @@ describe('hero plan', () => {
     rerender(<CompliancePlanView {...props} selectedSection={null} />);
     expect(overlay()).toBeNull();
   });
-  it('matches status line patterns to the visible legend and omits patterns for metrics', () => {
-    const rows = ['A', 'B', 'C', 'D'].map((section) => ({ section }) as ComparisonResult);
+  it('matches status line patterns to the visible legend and shows scale labels for metrics', () => {
+    const rows = ['A', 'C', 'D'].map((section) => ({ section }) as ComparisonResult);
     const states = new Map([
       ['A', 'CUMPLE' as const],
-      ['B', 'FUERA' as const],
       ['C', 'NO_CUMPLE' as const],
       ['D', 'UNKNOWN' as const],
     ]);
     const { container, rerender } = render(<CompliancePlanView variant="hero" results={rows} statuses={states} />);
     const dashFor = (element: Element | null) => element?.getAttribute('stroke-dasharray');
-    for (const status of ['CUMPLE', 'FUERA', 'NO_CUMPLE', 'UNKNOWN']) {
+    expect(container.querySelector('[data-status-swatch="FUERA"]')).toBeNull();
+    for (const status of ['CUMPLE', 'NO_CUMPLE', 'UNKNOWN']) {
       const line = container.querySelector(`[data-status="${status}"] [data-plan-line]`);
       const swatch = container.querySelector(`[data-status-swatch="${status}"]`);
       expect(dashFor(line)).toBe(dashFor(swatch));
       expect(line?.getAttribute('stroke')).toBe(swatch?.getAttribute('stroke'));
     }
     expect(dashFor(container.querySelector('[data-status="CUMPLE"] [data-plan-line]'))).toBeNull();
-    expect(dashFor(container.querySelector('[data-status="FUERA"] [data-plan-line]'))).toBeTruthy();
     expect(dashFor(container.querySelector('[data-status="NO_CUMPLE"] [data-plan-line]'))).toBeTruthy();
     rerender(<CompliancePlanView variant="hero" results={rows} statuses={states} colorBy="score" />);
     expect(container.querySelectorAll('[data-plan-line][stroke-dasharray]')).toHaveLength(0);
+    expect(container.textContent).toContain('plan_view.scale_score');
+    expect(container.textContent).toContain('0');
+    expect(container.textContent).toContain('100');
+    expect(container.textContent).not.toContain('100 %');
+    rerender(<CompliancePlanView variant="hero" results={rows} statuses={states} colorBy="berm" />);
+    expect(container.textContent).toContain('plan_view.scale_berm');
+    expect(container.textContent).toContain('0 %');
+    expect(container.textContent).toContain('100 %');
   });
   it('keeps the evaluated framing stable when result filters change', () => {
     const allRows = [...results, { section: 'B', height_status: 'NO_CUMPLE', section_score: 30 } as ComparisonResult];
@@ -121,7 +126,10 @@ describe('hero plan', () => {
     render(<CompliancePlanView variant="hero" results={results} statuses={statuses} onSelectSection={onSelectSection} />);
     const section = screen.getByRole('button', { name: /A/ });
     fireEvent.mouseEnter(section);
-    expect(screen.getByRole('tooltip').textContent).toContain('A');
+    const tooltip = screen.getByRole('tooltip');
+    expect(tooltip.textContent).toContain('A');
+    expect(tooltip.textContent).toContain('50,0 /100');
+    expect(tooltip.textContent).not.toContain('%');
     fireEvent.keyDown(section, { key: ' ' });
     expect(onSelectSection).toHaveBeenCalledWith('A');
     fireEvent.mouseLeave(section);

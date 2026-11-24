@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMeshVertices, useSectionProfiles, useSections } from '../../api/hooks';
+import { formatLocaleNumber } from '../../utils/format';
 import type { GuideCurve } from '../../stores/session';
 import { selectGuideLine } from './planGuideLine';
 import type { ComparisonResult } from '../../api/types';
@@ -77,7 +78,8 @@ export interface CompliancePlanViewProps {
 }
 
 export function CompliancePlanView({ results, frameResults, statuses, variant = 'panel', colorBy = 'status', visibleStatuses, selectedSection, onSelectSection }: CompliancePlanViewProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const language = i18n?.resolvedLanguage ?? i18n?.language;
   const [fullSurface, setFullSurface] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
@@ -200,11 +202,11 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
         <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
           <g fill="var(--color-text-primary)" stroke="var(--color-text-primary)" strokeWidth="2" fontSize="16"><text x="40" y="477" stroke="none">N</text><path d="M 45 515 L 45 484 M 38 494 L 45 484 L 52 494" fill="none"/><path d={`M 40 552 v -6 h ${scaleMeters * projection.scale * view.zoom} v 6 M 40 549 h ${scaleMeters * projection.scale * view.zoom}`} fill="none"/><text x="40" y="575" stroke="none">{scaleMeters} m</text></g>
         </svg>
-        {hovered && activeName && <div ref={tooltipRef} role="tooltip" className="pointer-events-none absolute z-10 bg-surface-raised p-2 text-xs text-text-primary" style={{ left: tooltipPosition.current.x + 12, top: tooltipPosition.current.y + 12 }}><div>{activeName}</div><div>{activeStatus === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + activeStatus.toLowerCase())}</div><div>{t('plan_view.score')}: {activeScore == null ? '—' : `${activeScore.toFixed(1)} %`}</div></div>}
+        {hovered && activeName && <div ref={tooltipRef} role="tooltip" className="pointer-events-none absolute z-10 bg-surface-raised p-2 text-xs text-text-primary" style={{ left: tooltipPosition.current.x + 12, top: tooltipPosition.current.y + 12 }}><div>{activeName}</div><div>{activeStatus === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + activeStatus.toLowerCase())}</div><div>{t('plan_view.score')}: {activeScore == null ? '—' : `${formatLocaleNumber(activeScore, language, 1)} /100`}</div></div>}
       </>}
       <div className="absolute left-2 top-2 bg-surface-raised"><SegmentedControl label={t('plan_view.title')} options={[{ value: 'evaluated', label: t('plan_view.evaluated_area') }, { value: 'full', label: t('plan_view.full_surface') }]} value={fullSurface ? 'full' : 'evaluated'} onChange={(value) => setFullSurface(value === 'full')} /></div>
       <div className="absolute right-2 top-2 flex flex-col bg-surface-raised text-text-primary">{([['zoom_in', '+', () => zoomAt(view.zoom * 1.5)], ['zoom_out', '−', () => zoomAt(view.zoom / 1.5)], ['zoom_reset', '↺', () => setView({ x: 0, y: 0, zoom: 1 })]] as const).map(([key, label, action]) => <button key={key} type="button" aria-label={t(`plan_view.${key}`)} className="h-8 w-8" onClick={action}>{label}</button>)}</div>
-      <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-3 bg-surface-raised px-2 py-1 text-xs text-text-muted">{colorBy === 'status' ? <>{([['CUMPLE', 'passing'], ['FUERA', 'outside'], ['NO_CUMPLE', 'failing'], ['UNKNOWN', 'no_score']] as const).map(([status, label]) => <StatusLegendItem status={status} label={t(`plan_view.${label}`)} key={status} />)}</> : <><span>0 %</span><span aria-label={t('plan_view.color_scale')} className="h-2 w-32" style={{ background: 'linear-gradient(to right, #eb485d, #e68f19, #39ab60)' }} /><span>100 %</span></>}</div>
+      <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-3 whitespace-nowrap bg-surface-raised px-2.5 py-1 text-xs text-text-muted">{colorBy === 'status' ? <>{([['CUMPLE', 'passing'], ['NO_CUMPLE', 'failing'], ['UNKNOWN', 'no_score']] as const).map(([status, label]) => <StatusLegendItem status={status} label={t(`plan_view.${label}`)} key={status} />)}</> : <><span className="font-medium text-text-secondary">{t(`plan_view.scale_${colorBy}`)}</span><span>{colorBy === 'score' ? '0' : '0 %'}</span><span aria-label={t('plan_view.color_scale')} className="h-2 w-32" style={{ background: 'linear-gradient(to right, #eb485d, #e68f19, #39ab60)' }} /><span>{colorBy === 'score' ? '100' : '100 %'}</span></>}</div>
     </div>;
   }
   return (

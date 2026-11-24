@@ -101,7 +101,7 @@ function elementCard(
   const denom = key === 'crest' ? summary.crest_denom : key === 'toe' ? summary.toe_denom : summary.berm_denom;
   const delta = key === 'crest' ? summary.delta_crest_mean : key === 'toe' ? summary.delta_toe_mean : null;
   return (
-    <div key={key} className="min-w-0 space-y-0.5 border-l border-border pl-3">
+    <div key={key} className="min-w-0 space-y-0.5 break-words border-l border-border pl-3">
       <h4 className="m-0 text-xs font-normal text-text-muted">{tx(key)}</h4>
       <p className="m-0 text-xl font-semibold tabular-nums text-text-primary">{fmtPercent(pct, lang)}</p>
       {pct == null ? <p className="m-0 text-xs text-text-muted">{tx('noData')}</p> : null}
@@ -109,7 +109,7 @@ function elementCard(
         {cumple} / {denom}
       </p>
       {delta != null ? (
-        <p className="m-0 text-xs tabular-nums text-text-muted">
+        <p className="m-0 break-words text-xs tabular-nums text-text-muted">
           {tx('meanCorrection')}: {fmtSignedMeters(delta, unit, lang)}
         </p>
       ) : null}
@@ -183,9 +183,9 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
 
       {!isPending && !isError && data && !isNoData ? (
         <>
-          <div className="flex flex-wrap items-end gap-x-10 gap-y-4">
+          <div className="space-y-4">
             <dl className="m-0">
-              <div className="flex items-baseline gap-2">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <dt className="order-last text-xs text-text-muted">{tx('globalScore')}</dt>
                 <dd className="m-0 text-3xl font-semibold leading-none tabular-nums text-text-primary">
                   {data.summary.global_score == null
@@ -201,7 +201,7 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
                 </dd>
               </div>
             </dl>
-            <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               {ELEMENTS.map((el) => elementCard(el, data.summary, tx, unit, lang))}
             </div>
           </div>
@@ -218,49 +218,52 @@ export function DesignAchievementPanel({ filters }: { filters?: ResultFilterStat
             </div>
           </details>
 
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
-              <caption className="pb-2 text-left text-xs text-text-muted" style={{ captionSide: 'top' }}>
-                {tx('tolerances')}{' '}
-                {data.tolerances.neg === data.tolerances.pos
-                  ? `±${fmtNumber(Math.abs(data.tolerances.pos), lang)} ${unit}`
-                  : `−${fmtNumber(Math.abs(data.tolerances.neg), lang)} / +${fmtNumber(
-                      data.tolerances.pos,
-                      lang,
-                    )} ${unit}`}
-                {' · '}
-                {tx(
-                  data.tolerances_source === 'session' ? 'tolSourceSession' : 'tolSourceCoreDefault',
-                )}
-              </caption>
-              <thead>
-                <tr className="border-b border-border text-xs text-text-muted">
-                  <th scope="col" className="py-2 pr-4 text-left font-medium">
-                    {tx('sector')}
-                  </th>
-                  <th scope="col" className="py-2 pr-4 text-right font-medium">
-                    {tx('nEvaluable')}
-                  </th>
-                  <th scope="col" className="py-2 text-right font-medium">
-                    {tx('achievement')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.sectors.map((row) => (
-                  <tr key={row.sector} className="border-b border-border last:border-b-0">
-                    <th scope="row" className="py-2 pr-4 text-left font-medium text-text-primary">
-                      {row.sector === '' ? tx('noSector') : row.sector}
+          <p className="m-0 text-xs text-text-muted">
+            {tx('tolerances')}{' '}
+            {data.tolerances.neg === data.tolerances.pos
+              ? `±${fmtNumber(Math.abs(data.tolerances.pos), lang)} ${unit}`
+              : `−${fmtNumber(Math.abs(data.tolerances.neg), lang)} / +${fmtNumber(
+                  data.tolerances.pos,
+                  lang,
+                )} ${unit}`}
+            {' · '}
+            {tx(
+              data.tolerances_source === 'session' ? 'tolSourceSession' : 'tolSourceCoreDefault',
+            )}
+          </p>
+
+          {data.sectors.length > 0 && !(data.sectors.length === 1 && data.sectors[0].sector === '') ? (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-border text-xs text-text-muted">
+                    <th scope="col" className="py-2 pr-4 text-left font-medium">
+                      {tx('sector')}
                     </th>
-                    <td className="py-2 pr-4 text-right tabular-nums text-text-secondary">{row.n_evaluable}</td>
-                    <td className="py-2 text-right tabular-nums text-text-secondary">
-                      {row.global_score == null ? tx('noData') : fmtNumber(row.global_score, lang)}
-                    </td>
+                    <th scope="col" className="py-2 pr-4 text-right font-medium">
+                      {tx('nEvaluable')}
+                    </th>
+                    <th scope="col" className="py-2 text-right font-medium">
+                      {tx('achievement')}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {data.sectors.map((row) => (
+                    <tr key={row.sector} className="border-b border-border last:border-b-0">
+                      <th scope="row" className="py-2 pr-4 text-left font-medium text-text-primary">
+                        {row.sector === '' ? tx('noSector') : row.sector}
+                      </th>
+                      <td className="py-2 pr-4 text-right tabular-nums text-text-secondary">{row.n_evaluable}</td>
+                      <td className="py-2 text-right tabular-nums text-text-secondary">
+                        {row.global_score == null ? tx('noData') : fmtNumber(row.global_score, lang)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </>
       ) : null}
 

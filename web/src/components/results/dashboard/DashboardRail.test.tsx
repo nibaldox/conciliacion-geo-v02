@@ -1,8 +1,12 @@
-import '../../../i18n';
-import { describe, expect, it, vi } from 'vitest';
+import i18n from '../../../i18n';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { ComparisonResult } from '../../../api/types';
 import { ParameterBars, SelectedSectionPanel } from './DashboardRail';
+
+beforeAll(async () => {
+  await i18n.changeLanguage('es');
+});
 
 const profile = vi.hoisted(() => vi.fn(() => ({ data: { design: { distances: [0, 1], elevations: [1, 0] }, topo: { distances: [0, 1], elevations: [2, 1] } }, isPending: false, isError: false })));
 const mode = vi.hoisted(() => vi.fn());
@@ -20,6 +24,38 @@ describe('selected section preview', () => {
     expect(mode).toHaveBeenCalledWith('detail');
     expect(open).toHaveBeenCalledOnce();
   });
+  it('formats score and signed deviations with locale decimals', () => {
+    const row = {
+      section: 'S1',
+      bench_num: 1,
+      type: 'MATCH',
+      level: '3150',
+      height_dev: 0.4,
+      angle_dev: -1.5,
+      delta_crest: 2.3,
+      delta_toe: -0.7,
+      height_status: 'CUMPLE',
+      angle_status: 'CUMPLE',
+      berm_status: 'CUMPLE',
+      bench_score: 85.5,
+    } as ComparisonResult;
+    const { container } = render(
+      <SelectedSectionPanel
+        name="S1"
+        sectionId="id-7"
+        rows={[row]}
+        statuses={new Map([['S1', 'CUMPLE']])}
+        canOpen
+        onClear={() => {}}
+        onOpen={() => {}}
+      />,
+    );
+    const panel = container.querySelector('[data-slot="selected-section"]')!;
+    expect(panel.textContent).toContain('85,5 /100');
+    expect(panel.textContent).toContain('+0,4 m');
+    expect(panel.textContent).toContain('-1,5°');
+    expect(panel.textContent).toContain('+2,3 m');
+  });
   it('reserves space when no section is selected', () => {
     const { container } = render(<SelectedSectionPanel name={null} sectionId={null} rows={[]} statuses={new Map()} canOpen={false} onClear={() => {}} onOpen={() => {}} />);
     expect(container.querySelector('[data-slot="profile-preview-placeholder"]')).toHaveTextContent('—');
@@ -32,7 +68,7 @@ describe('parameter bars compared benches', () => {
   it('shows 3 of 8 and excludes 19 unmatched rows from bars and denominator', () => {
     const rows = [...Array.from({ length: 3 }, () => comparison('MATCH', 'CUMPLE')), ...Array.from({ length: 5 }, () => comparison('MATCH', 'NO CUMPLE')), ...Array.from({ length: 19 }, (_, i) => comparison(i % 2 ? 'EXTRA' : 'MISSING', 'CUMPLE'))];
     const { container } = render(<ParameterBars rows={rows} />);
-    expect(screen.getByText('37.5%')).toBeInTheDocument();
+    expect(screen.getByText('37,5 %')).toBeInTheDocument();
     expect(container.querySelector('p')).toHaveTextContent('8');
     const bar = container.querySelector('[aria-label]')!;
     expect(bar.children[0]).toHaveStyle({ width: '37.5%' });
@@ -44,12 +80,11 @@ describe('parameter bars compared benches', () => {
   });
   it('excludes unknown statuses from parameter denominator', () => {
     const { container } = render(<ParameterBars rows={[comparison('MATCH', 'CUMPLE'), comparison('MATCH', '-')]} />);
-    expect(screen.getAllByText('100.0%')).toHaveLength(3);
+    expect(screen.getAllByText('100,0 %')).toHaveLength(3);
     expect(container.querySelector('p')).toHaveTextContent('2');
   });
   it('shows a dash for a parameter with no evaluable statuses', () => {
     render(<ParameterBars rows={[comparison('MATCH', '-')]} />);
     expect(screen.getByText('—')).toBeInTheDocument();
   });
-
 });

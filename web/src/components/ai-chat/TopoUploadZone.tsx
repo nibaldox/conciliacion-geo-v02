@@ -295,7 +295,7 @@ export function TopoUploadZone({ roleRequest = null }: { roleRequest?: Readonly<
         <div
           role="alert"
           data-testid="ai-chat-replace-warning"
-          className="mt-2 rounded-lg border border-[var(--color-status-warning)] bg-surface px-3 py-2 text-xs"
+          className="mt-2 rounded-lg border border-[var(--status-warn-border)] bg-surface px-3 py-2 text-xs"
         >
           <p className="text-text-primary">
             {t('aiChat.upload.replace_warning', {

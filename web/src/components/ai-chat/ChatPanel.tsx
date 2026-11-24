@@ -23,8 +23,8 @@ import { type ResizeDirection, useResizablePanel } from './useResizablePanel';
 
 const NOTICE_TONE: Record<ChatNotice['severity'], string> = {
   info: 'border-border text-text-secondary',
-  warning: 'border-[var(--color-status-warning)] text-text-primary',
-  error: 'border-[var(--color-status-error)] text-text-primary',
+  warning: 'border-[var(--status-warn-border)] text-text-primary',
+  error: 'border-[var(--status-nok-border)] text-text-primary',
 };
 
 type PanelStatus =
@@ -478,7 +478,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
 
       <div data-testid={embedded ? "ai-chat-column" : undefined} ref={listRef} onScroll={(event) => { const el = event.currentTarget; followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48; }} className={`flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2 ${embedded ? 'mx-auto w-full max-w-3xl' : ''}`}>
         {embedded && messages.length === 0 && <div data-testid="ai-chat-welcome" className="mx-auto w-full max-w-3xl py-6 text-text-secondary">
-          {protagonist ? <div className="text-center"><div className="mx-auto w-20 [&_.ai-pet__svg]:h-20 [&_.ai-pet__svg]:w-20"><ChatPet /></div><h1 className="mt-4 text-2xl text-text-primary">{t('aiChat.welcome.title')}</h1><p className="mt-2 text-sm">{t('aiChat.welcome.subtitle')}</p></div> : <p className="text-xs font-semibold">{t('aiChat.welcome.compact')}</p>}
+          {protagonist ? <div className="text-center"><div className="mx-auto w-20 [&_.ai-pet__svg]:h-20 [&_.ai-pet__svg]:w-20"><ChatPet /></div><h2 className="mt-4 text-2xl text-text-primary">{t('aiChat.welcome.title')}</h2><p className="mt-2 text-sm">{t('aiChat.welcome.subtitle')}</p></div> : <p className="text-xs font-semibold">{t('aiChat.welcome.compact')}</p>}
         </div>}
         {embedded && <div className="mx-auto w-full max-w-3xl"><EmbeddedWorkflowGuide fillDraft={fillDraft} canDraft={false} /></div>}
         {notice && <NoticeBanner notice={notice} />}
@@ -513,7 +513,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           <div
             role="status"
             data-testid="ai-chat-placeholder-model-warning"
-            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--color-status-warning)]'}`}
+            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--status-warn-border)]'}`}
           >
             <p>{t('aiChat.notice.placeholder_model_warn')}</p>
             <label className="mt-2 block">
@@ -543,7 +543,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             }
             className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${
               selection.model === null
-                ? 'border-[var(--color-status-warning)]'
+                ? 'border-[var(--status-warn-border)]'
                 : 'border-border'
             }`}
           >
@@ -585,7 +585,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             <div
               role="status"
               data-testid="ai-chat-models-notice"
-              className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--color-status-warning)]'}`}
+              className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--status-warn-border)]'}`}
             >
               <div className="flex items-start justify-between gap-2">
                 <p>
@@ -619,7 +619,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           <div
             role="status"
             data-testid="ai-chat-model-no-tools"
-            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--color-status-warning)]'}`}
+            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--status-warn-border)]'}`}
           >
             {t('aiChat.notice.model_no_tools')}
           </div>
@@ -692,29 +692,31 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           />
         )}
         {embedded && (
-          <button
-            type="button"
-            data-testid="ai-chat-attachments"
-            aria-label={t('aiChat.activity.surfaces')}
-            title={t('aiChat.activity.surfaces')}
-            aria-expanded={attachmentsOpen}
-            onClick={() => setAttachmentsOpen((open) => !open)}
-            className="col-start-1 row-start-2 justify-self-start shrink-0 rounded-md border border-border px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
-          >
-            <span aria-hidden="true">+ </span>{t('aiChat.activity.surfaces')}
-          </button>
+          <div className="col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              data-testid="ai-chat-attachments"
+              aria-label={t('aiChat.activity.surfaces')}
+              title={t('aiChat.activity.surfaces')}
+              aria-expanded={attachmentsOpen}
+              onClick={() => setAttachmentsOpen((open) => !open)}
+              className="shrink-0 rounded-md border border-border px-2 py-1.5 text-sm text-text-secondary hover:bg-surface-muted"
+            >
+              <span aria-hidden="true">+ </span>{t('aiChat.activity.surfaces')}
+            </button>
+            {chatEnabled && selection.kind === 'pick' && (
+              <label className="min-w-0 text-xs text-text-muted">
+                <span className="sr-only">{t('aiChat.model.selector_label')}</span>
+                <select data-testid="ai-chat-model-select" value={selection.model ?? ''} onChange={(event) => setSessionModel(event.target.value, 'detected')} aria-label={t('aiChat.model.selector_label')} disabled={busy} className="max-w-full rounded border border-border bg-surface px-2 py-1.5 text-xs">
+                  <option value="">{t('aiChat.model.selector_placeholder')}</option>
+                  {selection.models.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, selection.models)}{model.tool_use === false ? ` · ${t('aiChat.model.no_tools_suffix')}` : ''}</option>)}
+                </select>
+                {selection.model === null && <span data-testid="ai-chat-models-notice" className="block mt-1 text-text-secondary">{t('aiChat.notice.models_required')}</span>}
+              </label>
+            )}
+            {headerModel && selection.kind !== 'pick' && <span title={headerModel} className="min-w-0 truncate text-xs text-text-muted">{headerModel}</span>}
+          </div>
         )}
-        {embedded && chatEnabled && selection.kind === 'pick' && (
-          <label className="col-start-1 row-start-2 ml-28 min-w-0 justify-self-start text-xs text-text-muted">
-            <span className="sr-only">{t('aiChat.model.selector_label')}</span>
-            <select data-testid="ai-chat-model-select" value={selection.model ?? ''} onChange={(event) => setSessionModel(event.target.value, 'detected')} aria-label={t('aiChat.model.selector_label')} disabled={busy} className="max-w-full rounded border border-border bg-surface px-2 py-1.5 text-xs">
-              <option value="">{t('aiChat.model.selector_placeholder')}</option>
-              {selection.models.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, selection.models)}{model.tool_use === false ? ` · ${t('aiChat.model.no_tools_suffix')}` : ''}</option>)}
-            </select>
-            {selection.model === null && <span data-testid="ai-chat-models-notice" className="block mt-1 text-text-secondary">{t('aiChat.notice.models_required')}</span>}
-          </label>
-        )}
-        {embedded && headerModel && selection.kind !== 'pick' && <span title={headerModel} className="col-start-1 row-start-2 ml-28 min-w-0 truncate text-xs text-text-muted">{headerModel}</span>}
         {!embedded && (
           <input
             ref={legacyInputRef}

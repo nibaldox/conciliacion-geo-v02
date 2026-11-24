@@ -45,6 +45,7 @@ const fakeResults: ComparisonResult[] = [
 
 vi.mock('../../../api/hooks', () => ({
   useResults: () => ({ data: fakeResults, isLoading: false, error: null }),
+  useSections: () => ({ data: [], isLoading: false, error: null }),
 }));
 
 beforeEach(() => {

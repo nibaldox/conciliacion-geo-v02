@@ -25,7 +25,7 @@ describe('Streamlit compliance parity', () => {
     expect(computeGlobalScore(rows)).toBe(65);
     expect([...computeProfileScores(rows)]).toEqual([['S-01', 90], ['S-02', 40]]);
   });
-  it('classifies profile banks by score and takes the worst bank status', () => {
+  it('classifies profiles by mean score of evaluable MATCH benches and marks sections without MATCH benches as UNKNOWN', () => {
     const rows = [
       row({ section: 'OK', bench_score: 0 }),
       row({ section: 'OUT', height_status: 'FUERA DE TOLERANCIA', bench_score: 100 }),
@@ -35,9 +35,9 @@ describe('Streamlit compliance parity', () => {
       row({ section: 'EXTRA', type: 'EXTRA', bench_num: 999, height_status: 'NO CUMPLE' }),
     ];
     expect([...computeProfileStatuses(rows)]).toEqual([
-      ['OK', 'NO_CUMPLE'], ['OUT', 'CUMPLE'], ['FAIL', 'CUMPLE'], ['MISSING', 'NO_CUMPLE'], ['UNKNOWN', 'UNKNOWN'], ['EXTRA', 'NO_CUMPLE'],
+      ['OK', 'NO_CUMPLE'], ['OUT', 'CUMPLE'], ['FAIL', 'CUMPLE'], ['MISSING', 'UNKNOWN'], ['UNKNOWN', 'UNKNOWN'], ['EXTRA', 'UNKNOWN'],
     ]);
-    expect(computeProfileComplianceCounts(rows)).toEqual({ cumple: 2, fuera: 0, noCumple: 3 });
+    expect(computeProfileComplianceCounts(rows)).toEqual({ cumple: 2, fuera: 0, noCumple: 1 });
   });
 
   it('keeps the 0–100 weighted score separate from the profile classification counts', () => {
@@ -50,12 +50,13 @@ describe('Streamlit compliance parity', () => {
     expect(computeProfileComplianceCounts(rows)).toEqual({ cumple: 2, fuera: 0, noCumple: 1 });
   });
 
-  it('includes additional topography in All, but excludes it when a design bank is selected', () => {
+  it('does not let MISSING or EXTRA rows force a passing profile to NO_CUMPLE', () => {
     const rows = [
-      row({ section: 'S-01', type: 'MATCH', bench_num: 4, bench_num_topo: 2 }),
+      row({ section: 'S-01', type: 'MATCH', bench_num: 4, bench_num_topo: 2, bench_score: 90 }),
+      row({ section: 'S-01', type: 'MISSING', bench_num: 5, height_status: 'NO CONSTRUIDO' }),
       row({ section: 'S-01', type: 'EXTRA', bench_num: 999, bench_num_topo: 3, height_status: 'NO CUMPLE' }),
     ];
-    expect(computeProfileStatuses(rows).get('S-01')).toBe('NO_CUMPLE');
+    expect(computeProfileStatuses(rows).get('S-01')).toBe('CUMPLE');
     expect(computeProfileStatuses(rows.filter((item) => item.bench_num === 4)).get('S-01')).toBe('CUMPLE');
   });
 
@@ -150,9 +151,10 @@ describe('D11 — per-parameter compliance over MATCH benches only', () => {
     expect((100 * byParameter.angle.cumple) / byParameter.angle.nEvaluated).toBe(100);
   });
 
-  it('keeps averaging the real value of every row that carries a status', () => {
-    expect(byParameter.height.realSum / byParameter.height.realCount).toBeCloseTo((15 + 17 + 15 + 15 + 6) / 5, 9);
-    expect(byParameter.angle.realCount).toBe(4);
+  it('averages real values over MATCH rows only so EXTRA rows do not pollute Promedio real', () => {
+    expect(byParameter.height.realSum / byParameter.height.realCount).toBeCloseTo((15 + 17 + 15 + 15) / 4, 9);
+    expect(byParameter.height.realCount).toBe(4);
+    expect(byParameter.angle.realCount).toBe(3);
   });
 
   it('leaves the denominator at zero when nothing was compared', () => {

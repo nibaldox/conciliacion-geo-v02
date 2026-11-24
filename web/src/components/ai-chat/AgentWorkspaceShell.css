@@ -9,10 +9,20 @@
 .agent-shell--no-animation.agent-shell--copilot .agent-shell__canvas { animation: none; }
 @keyframes agent-canvas-enter { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
 .agent-shell__chat { display: flex; position: relative; min-height: 0; min-width: 0; border-left: 1px solid var(--color-border); background: var(--color-surface-raised); }
-.agent-shell__chat > :not(.agent-shell__resize) { width: 100%; min-height: 0; }
+.agent-shell__chat-body { display: flex; flex: 1; width: 100%; min-width: 0; min-height: 0; }
+.agent-shell__chat-body > * { width: 100%; min-height: 0; }
+.agent-shell__copilot-toggle { position: absolute; z-index: 6; top: 10px; left: -12px; width: 24px; height: 24px; border-radius: 9999px; border: 1px solid var(--color-border); cursor: pointer; }
 .agent-shell__resize { position: absolute; z-index: 5; left: -4px; top: 0; width: 8px; height: 100%; cursor: col-resize; touch-action: none; }
+.agent-shell__resize::after { content: ""; position: absolute; left: 3px; top: 0; width: 2px; height: 100%; background: transparent; transition: background-color 150ms ease; }
+.agent-shell__resize:hover::after, .agent-shell__resize:focus-visible::after { background: var(--color-accent); }
 .agent-shell__resize:focus-visible { outline: 2px solid var(--color-accent); }
 .agent-shell__controls { display: none; }
+@media (min-width: 900px) {
+  .agent-shell--copilot.agent-shell--copilot-collapsed .agent-shell__grid { grid-template-columns: minmax(0, 1fr) 32px; }
+  .agent-shell--copilot.agent-shell--copilot-collapsed .agent-shell__chat { width: 32px; justify-content: center; align-items: flex-start; padding-top: 8px; }
+  .agent-shell--copilot.agent-shell--copilot-collapsed .agent-shell__chat > :not(.agent-shell__copilot-toggle) { display: none; }
+  .agent-shell--copilot.agent-shell--copilot-collapsed .agent-shell__copilot-toggle { position: static; border: 0; border-radius: 6px; background: transparent; }
+}
 @media (prefers-reduced-motion: reduce) { .agent-shell--copilot .agent-shell__canvas { animation: none; } }
 @media (max-width: 899px) {
   .agent-shell__grid, .agent-shell--copilot .agent-shell__grid { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
@@ -21,6 +31,6 @@
   .agent-shell__controls button[aria-pressed="true"] { background: var(--color-surface-muted); font-weight: 700; }
   .agent-shell__workspace, .agent-shell__chat { grid-column: 1; grid-row: 1; }
   .agent-shell__chat { border: 0; }
-  .agent-shell__resize { display: none; }
+  .agent-shell__resize, .agent-shell__copilot-toggle { display: none; }
   .agent-shell--copilot.agent-shell--mobile-workspace .agent-shell__chat, .agent-shell--copilot.agent-shell--mobile-chat .agent-shell__workspace, .agent-shell--protagonist .agent-shell__workspace { visibility: hidden; pointer-events: none; }
 }

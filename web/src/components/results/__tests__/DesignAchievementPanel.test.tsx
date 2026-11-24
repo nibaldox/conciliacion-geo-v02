@@ -185,6 +185,26 @@ describe('DesignAchievementPanel', () => {
     expect(within(table).getAllByRole('row')).toHaveLength(3);
   });
 
+  it('oculta la tabla de sectores cuando está vacía o solo tiene sector vacío, conservando la tolerancia', () => {
+    const filled = makeSummary({
+      global_score: 65,
+      n_evaluable: 2,
+      crest_cumple: 1,
+      crest_denom: 2,
+      crest_pct: 50,
+    });
+    const singleEmptySector = [{ sector: '', ...filled }];
+    useDesignAchievementMock.mockReturnValue(hookResult({ data: makeResponse(filled, singleEmptySector) }));
+    const { rerender } = render(<DesignAchievementPanel />);
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByText(/Tolerancia|Tolerance/i)).toBeTruthy();
+
+    useDesignAchievementMock.mockReturnValue(hookResult({ data: makeResponse(filled, []) }));
+    rerender(<DesignAchievementPanel />);
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.getByText(/Tolerancia|Tolerance/i)).toBeTruthy();
+  });
+
   it('error: mensaje con rol alert y reintento, sin falsos ceros', () => {
     const refetch = vi.fn();
     useDesignAchievementMock.mockReturnValue(

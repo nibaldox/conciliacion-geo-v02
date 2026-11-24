@@ -10,6 +10,6 @@ export function AgentChip({ chip, actions }: { chip: Chip; actions: AgentChipAct
     data-testid={section ? 'ai-chat-chip-section' : 'ai-chat-chip-bench'}
     aria-label={section ? t('aiChat.chips.open_section', { name: chip.name }) : t('aiChat.chips.select_bench', { n: chip.designBench, name: chip.sectionName })}
     onClick={() => section ? actions.openSection({ id: chip.sectionId, name: chip.name }) : actions.selectBench(chip.sectionId, chip.designBench)}
-    className="inline rounded-sm border border-border px-1 font-mono text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    className="inline rounded-sm border border-border px-1 font-mono text-text-secondary cursor-pointer transition-colors hover:border-accent hover:bg-accent-bg hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
   >{section ? chip.name : chip.label}</button>;
 }

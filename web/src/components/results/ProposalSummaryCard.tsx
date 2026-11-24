@@ -95,9 +95,9 @@ export function ProposalSummaryCard({
 
       {!isPending && !isError && summary ? (
         <>
-          <dl className="m-0 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <dl className="m-0 grid grid-cols-2 gap-3 lg:grid-cols-4">
             <div className="min-w-0 border-l border-border pl-3">
-              <dt className="truncate text-xs font-normal text-text-muted">{t('proposal.globalScore')}</dt>
+              <dt className="text-xs font-normal leading-snug break-words text-text-muted">{t('proposal.globalScore')}</dt>
               <dd
                 className="m-0 text-xl font-semibold tabular-nums"
                 style={{ color: scoreColorVar(summary.proposed_global_score) }}
@@ -109,7 +109,7 @@ export function ProposalSummaryCard({
               <dd className="m-0 text-xs text-text-muted">{t('proposal.scoreScale')}</dd>
             </div>
             <div className="min-w-0 border-l border-border pl-3">
-              <dt className="truncate text-xs font-normal text-text-muted">{t('proposal.coverage')}</dt>
+              <dt className="text-xs font-normal leading-snug break-words text-text-muted">{t('proposal.coverage')}</dt>
               <dd className="m-0 text-xl font-semibold tabular-nums text-text-primary">
                 {summary.coverage.n_evaluable} / {summary.coverage.n_design_benches}
               </dd>
@@ -121,13 +121,13 @@ export function ProposalSummaryCard({
               </dd>
             </div>
             <div className="min-w-0 border-l border-border pl-3">
-              <dt className="truncate text-xs font-normal text-text-muted">{t('proposal.splitBenches')}</dt>
+              <dt className="text-xs font-normal leading-snug break-words text-text-muted">{t('proposal.splitBenches')}</dt>
               <dd className="m-0 text-xl font-semibold tabular-nums text-text-primary">
                 {summary.n_split_benches}
               </dd>
             </div>
             <div className="min-w-0 border-l border-border pl-3">
-              <dt className="truncate text-xs font-normal text-text-muted">{t('proposal.debt')}</dt>
+              <dt className="text-xs font-normal leading-snug break-words text-text-muted">{t('proposal.debt')}</dt>
               <dd className="m-0 text-xl font-semibold tabular-nums" style={{ color: 'var(--status-warn-text)' }}>
                 {fmt(summary.excavation_debt_area_m2, locale)} m²
               </dd>

@@ -7,12 +7,14 @@ import es from '../../../locales/es.json';
 import { useSession } from '../../../stores/session';
 
 const apiState = vi.hoisted(() => ({
-  sections: [] as { id: string }[],
+  sections: [] as { id: string; name?: string }[],
+  results: undefined as { section: string }[] | undefined,
   status: undefined as { status: string } | undefined,
 }));
 
 vi.mock('../../../api/hooks', () => ({
   useSections: () => ({ data: apiState.sections }),
+  useResults: () => ({ data: apiState.results }),
   useProcessStatus: () => ({ data: apiState.status }),
 }));
 
@@ -33,6 +35,7 @@ function renderHeader() {
 beforeEach(() => {
   useSession.getState().reset();
   apiState.sections = [];
+  apiState.results = undefined;
   apiState.status = undefined;
 });
 
@@ -67,13 +70,29 @@ describe('Header project status', () => {
     expect(chip).toHaveAttribute('data-tone', 'warn');
   });
 
-  it('reports a completed analysis with the ok tone', () => {
+  it('reports a completed analysis with the ok tone when all sections are evaluated', () => {
     useSession.setState({ designMeshId: 'design', topoMeshId: 'topo' });
-    apiState.sections = [{ id: 'section-1' }];
+    apiState.sections = [{ id: 'section-1', name: 'S-01' }];
+    apiState.results = [{ section: 'S-01' }];
     apiState.status = { status: 'complete' };
     renderHeader();
     const chip = screen.getByRole('status');
     expect(chip).toHaveTextContent('Análisis completo');
     expect(chip).toHaveAttribute('data-tone', 'ok');
+  });
+
+  it('reports missing section profiles with warn tone when complete analysis has fewer evaluated sections', () => {
+    useSession.setState({ designMeshId: 'design', topoMeshId: 'topo' });
+    apiState.sections = [
+      { id: 'section-1', name: 'S-01' },
+      { id: 'section-2', name: 'S-02' },
+      { id: 'section-3', name: 'S-03' },
+    ];
+    apiState.results = [{ section: 'S-01' }];
+    apiState.status = { status: 'complete' };
+    renderHeader();
+    const chip = screen.getByRole('status');
+    expect(chip).toHaveTextContent('Completo (2 sin perfil)');
+    expect(chip).toHaveAttribute('data-tone', 'warn');
   });
 });
