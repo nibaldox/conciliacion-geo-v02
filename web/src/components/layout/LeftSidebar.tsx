@@ -23,6 +23,7 @@ import { useWorkflowStatus, type WorkflowStatus } from '../../hooks/useWorkflowS
 import { useSidebarResize } from './useSidebarResize';
 import { TolerancesForm, mergeTolerance } from './TolerancesForm';
 import { LanguageToggle } from './LanguageToggle';
+import { RecentSessionsList } from '../session/RecentSessionsList';
 
 type SectionTab = 'curves' | 'file';
 
@@ -74,6 +75,8 @@ function stepSummary(key: WorkflowStepKey, workflow: WorkflowStatus, t: TFunctio
 
 export function LeftSidebar() {
   const { t } = useTranslation();
+  const mode = useWorkspaceMode((s) => s.mode);
+  const showAgentRail = isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true' && mode === 'protagonist';
   const sidebarCollapsed = useSession((s) => s.sidebarCollapsed);
   const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
   const setActiveWorkspaceView = useSession((s) => s.setActiveWorkspaceView);
@@ -413,6 +416,7 @@ export function LeftSidebar() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3" data-slot="project-controls">
+        {showAgentRail && <RecentSessionsList />}
         {STEP_ORDER.map((key, i) => {
           const status = steps[key];
           return (
@@ -432,6 +436,18 @@ export function LeftSidebar() {
             </div>
           );
         })}
+        {showAgentRail && <section className="mt-3 border-t border-border pt-3">
+          <h3 className="ui-section-title">{t('workspace.analysis')}</h3>
+          <div className="mt-2 flex flex-col">
+            {([
+              ['dashboard', 'workspace.summary'],
+              ['profiles', 'workspace.profiles'],
+              ['3d', 'workspace.view3d'],
+              ['blast', 'workspace.blast'],
+              ['export-ai', 'workspace.export'],
+            ] as const).map(([view, label]) => <button key={view} type="button" className="px-3 py-2 text-left text-sm text-text-secondary hover:bg-surface-muted" onClick={() => { setActiveWorkspaceView(view); useWorkspaceMode.getState().enterCopilot('manualView'); }}>{t(label)}</button>)}
+          </div>
+        </section>}
       </div>
 
       <div

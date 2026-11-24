@@ -5,6 +5,7 @@
     "title": "Recent sessions",
     "current": "Current",
     "open": "Open",
+    "view_all": "View all",
     "sections_one": "{{count}} section",
     "sections_other": "{{count}} sections",
     "results_one": "{{count}} result",

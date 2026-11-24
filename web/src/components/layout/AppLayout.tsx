@@ -23,6 +23,16 @@ export function AppLayout({ children, assistant = false }: AppLayoutProps) {
     </div>
   </div>;
 
+  const canvasHeader = <>
+    <div data-slot="step-title-bar" className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-surface-raised px-3 pt-4 pb-1 md:px-6">
+      <h2 className="text-xl font-semibold tracking-tight md:text-2xl">{t(titles[view])}</h2>
+      <DemoBanner />
+    </div>
+    <ViewsToolbar onNavigate={() => {
+      if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches) setSidebarCollapsed(true);
+    }} />
+  </>;
+
   return (
     <div data-slot="app-layout" className="flex h-dvh flex-col overflow-hidden bg-surface font-sans text-text-primary">
       <a href="#main-content" className="skip-to-content">{t('workspace.skip')}</a>
@@ -30,14 +40,7 @@ export function AppLayout({ children, assistant = false }: AppLayoutProps) {
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <LeftSidebar />
         <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div data-slot="step-title-bar" className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-surface-raised px-3 pt-4 pb-1 md:px-6">
-            <h2 className="text-xl font-semibold tracking-tight md:text-2xl">{t(titles[view])}</h2>
-            <DemoBanner />
-          </div>
-          <ViewsToolbar onNavigate={() => {
-            if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 767px)').matches) setSidebarCollapsed(true);
-          }} />
-          {assistant ? <AgentWorkspaceShell>{content}</AgentWorkspaceShell> : content}
+          {assistant ? <AgentWorkspaceShell canvasHeader={canvasHeader}>{content}</AgentWorkspaceShell> : <>{canvasHeader}{content}</>}
         </main>
       </div>
     </div>

@@ -8,6 +8,7 @@ import en from '../../../locales/en.json';
 import { DEFAULT_SETTINGS, DEFAULT_TOLERANCES } from '../../../utils/constants';
 import { useSession } from '../../../stores/session';
 import { LeftSidebar } from '../LeftSidebar';
+import { useWorkspaceMode } from '../../../stores/workspaceMode';
 
 const sectionsState = vi.hoisted(() => ({ data: [] as Array<{ id: string }> }));
 const saveState = vi.hoisted(() => ({ autoComplete: true, onSuccess: undefined as (() => void) | undefined }));
@@ -33,6 +34,7 @@ vi.mock('../../sections/SectionList', () => ({ SectionList: () => <div /> }));
 vi.mock('../../analysis/ProcessButton', () => ({ ProcessButton: () => <div data-testid="process-button" /> }));
 vi.mock('../../analysis/ProcessProgress', () => ({ ProcessProgress: () => <div /> }));
 vi.mock('../LanguageToggle', () => ({ LanguageToggle: () => <div /> }));
+vi.mock('../../session/RecentSessionsList', () => ({ RecentSessionsList: () => <div data-testid="recent-sessions" /> }));
 
 const i18n = createInstance();
 void i18n.init({ lng: 'es', resources: { es: { translation: es } }, initAsync: false });
@@ -52,6 +54,19 @@ function stepButton(key: string): HTMLElement {
 }
 
 describe('LeftSidebar — flujo de trabajo vertical', () => {
+  it('muestra sesiones y vistas en protagonista y navega a copiloto', () => {
+    vi.stubEnv('VITE_AI_FIRST', 'true');
+    vi.stubEnv('VITE_AI_CHAT', 'true');
+    useWorkspaceMode.getState().resetForSession('protagonist', 'initial');
+    useSession.getState().reset();
+    renderSidebar();
+    expect(screen.getByTestId('recent-sessions')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('workspace.summary') }));
+    expect(useSession.getState().activeWorkspaceView).toBe('dashboard');
+    expect(useWorkspaceMode.getState().mode).toBe('copilot');
+    expect(screen.queryByTestId('recent-sessions')).toBeNull();
+    vi.unstubAllEnvs();
+  });
   beforeAll(() => {
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: false,

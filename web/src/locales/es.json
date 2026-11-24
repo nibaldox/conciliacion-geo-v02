@@ -5,6 +5,7 @@
     "title": "Sesiones recientes",
     "current": "Actual",
     "open": "Abrir",
+    "view_all": "Ver todas",
     "sections_one": "{{count}} sección",
     "sections_other": "{{count}} secciones",
     "results_one": "{{count}} resultado",
