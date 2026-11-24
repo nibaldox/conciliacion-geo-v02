@@ -124,3 +124,8 @@ export function findAgentChips(text: string, sections: readonly SectionRef[], co
   }
   return chips.sort((a, b) => a.start - b.start);
 }
+
+/** Secciones mencionadas, incluidas las ambiguas, en orden y sin solapes. */
+export function findSectionMentions(text: string, sections: readonly SectionRef[]): readonly NameMatch[] {
+  return selectNameMatches(findNameMatches(text, sections), new Uint8Array(text.length));
+}

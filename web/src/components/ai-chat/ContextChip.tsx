@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
+import { useWorkspaceMode } from '../../stores/workspaceMode';
 import { useBenchFocus } from '../../stores/benchFocus';
 import { describeViewContext, type WorkspaceViewId } from '../../utils/viewContext';
 import { resolveVisibleSection } from './useAgentChipActions';
@@ -19,9 +20,9 @@ export function ContextChip() {
   const view = useSession((state) => state.activeWorkspaceView);
   const profilesMode = useSession((state) => state.profilesMode);
   const selectedId = useSession((state) => state.selectedSection);
-  const selectedByUser = useSession((state) => state.selectedByUser);
+  const mode = useWorkspaceMode((state) => state.mode);
   const current = useBenchFocus((state) => state.current);
-  const section = resolveVisibleSection({ selected: selectedId, selectedByUser, view, profilesMode }, sections);
+  const section = resolveVisibleSection({ selected: selectedId, mode, view, profilesMode }, sections);
   const bench = section && current?.sectionId === section.id && current.designBenchNumber !== null
     ? { designBench: current.designBenchNumber }
     : null;

@@ -51,7 +51,9 @@ export function ProfileView({ blastDataAvailable = false, lastRunAt }: ProfileVi
 
   useEffect(() => {
     clearCrossLink();
-  }, [selectedSectionId, clearCrossLink]);
+    const pending = useBenchFocus.getState().request;
+    if (pending && pending.sectionId !== selectedSectionId) consumeRequest(pending.nonce);
+  }, [selectedSectionId, clearCrossLink, consumeRequest]);
 
   useEffect(() => {
     if (!request || request.sectionId !== selectedSectionId || isLoading || error || viewModel?.section.id !== selectedSectionId) return;

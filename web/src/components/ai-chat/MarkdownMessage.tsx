@@ -1,5 +1,5 @@
-import { Children, cloneElement, isValidElement, type ReactNode, type ReactElement } from 'react';
-import { findAgentChips } from '../../utils/agentChips';
+import { Children, cloneElement, isValidElement, useRef, type ReactNode, type ReactElement } from 'react';
+import { findAgentChips, findSectionMentions } from '../../utils/agentChips';
 import { AgentChip } from './AgentChip';
 import { useAgentChipActions, type AgentChipActions } from './useAgentChipActions';
 import ReactMarkdown from 'react-markdown';
@@ -40,12 +40,23 @@ export function MarkdownMessage(props: MarkdownMessageProps) {
 
 function ChippedMarkdownMessage(props: MarkdownMessageProps) {
   const actions = useAgentChipActions();
-  return <MarkdownBody {...props} actions={actions} />;
+  const context = useRef<string | null>(null);
+  if (context.current === null && actions.contextSectionId !== null) context.current = actions.contextSectionId;
+  return <MarkdownBody {...props} actions={{ ...actions, contextSectionId: context.current }} />;
 }
 
 function chipBlock(children: ReactNode, actions: AgentChipActions): ReactNode {
   let context = actions.contextSectionId;
   let key = 0;
+  const updateContext = (text: string) => {
+    for (const mention of findSectionMentions(text, actions.sections)) context = mention.section?.id ?? null;
+  };
+  const textContent = (child: ReactNode): string => {
+    if (typeof child === 'string' || typeof child === 'number') return String(child);
+    if (Array.isArray(child)) return child.map(textContent).join('');
+    if (isValidElement<{ children?: ReactNode }>(child)) return textContent(child.props.children);
+    return '';
+  };
   const visit = (child: ReactNode): ReactNode => {
     if (typeof child === 'string') {
       const chips = findAgentChips(child, actions.sections, context);
@@ -54,15 +65,19 @@ function chipBlock(children: ReactNode, actions: AgentChipActions): ReactNode {
       for (const chip of chips) {
         result.push(child.slice(offset, chip.start));
         result.push(<AgentChip key={key++} chip={chip} actions={actions} />);
-        if (chip.kind === 'section') context = chip.sectionId;
         offset = chip.end;
       }
       result.push(child.slice(offset));
+      updateContext(child);
       return result;
     }
     if (Array.isArray(child)) return Children.map(child, visit);
-    if (isValidElement<{ children?: ReactNode }>(child) && (child.type === 'strong' || child.type === 'em')) {
-      return cloneElement(child as ReactElement<{ children?: ReactNode }>, {}, visit(child.props.children));
+    if (isValidElement<{ children?: ReactNode; node?: { tagName?: string } }>(child)) {
+      const tag = child.props.node?.tagName ?? child.type;
+      if (tag === 'strong' || tag === 'em' || tag === 'del') {
+        return cloneElement(child as ReactElement<{ children?: ReactNode }>, {}, visit(child.props.children));
+      }
+      if (tag === 'code' || tag === 'a') updateContext(textContent(child.props.children));
     }
     return child;
   };
@@ -173,7 +188,7 @@ function MarkdownBody({ content, className, actions }: MarkdownMessageProps & { 
           ),
           th: ({ children }) => (
             <th className="border-b-2 border-border px-2 py-1.5 text-left text-xs font-semibold text-text-primary">
-              {actions ? chipBlock(children, actions) : children}
+              {children}
             </th>
           ),
           td: ({ children }) => (

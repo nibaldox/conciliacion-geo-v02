@@ -330,14 +330,12 @@ describe('ProfileView selection', () => {
     expect(useBenchFocus.getState().request).toBeNull();
   });
 
-  it('keeps another section request pending until its section is selected', () => {
-    viewModel = { ...baseViewModel, benches: [{ ...baseViewModel.benches[0]!, designBenchNumber: 2 }] };
+  it('discards a pending request when the user changes away from its section', () => {
+    isLoading = true;
     render(<I18nextProvider i18n={i18n}><ProfileView /></I18nextProvider>);
-    act(() => useBenchFocus.getState().requestBench('section-2', 2));
+    act(() => useBenchFocus.getState().requestBench('section-1', 2));
     expect(useBenchFocus.getState().request).not.toBeNull();
-    viewModel = { ...viewModel, section: { ...viewModel.section, id: 'section-2' } };
     act(() => useSession.getState().setSelectedSection('section-2'));
-    expect(screen.getByText('Banco 04')).toBeInTheDocument();
     expect(useBenchFocus.getState().request).toBeNull();
   });
 

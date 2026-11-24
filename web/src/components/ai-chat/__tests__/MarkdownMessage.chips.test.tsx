@@ -1,14 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MarkdownMessage } from '../MarkdownMessage';
+import { useWorkspaceMode } from '../../../stores/workspaceMode';
 import { useSession } from '../../../stores/session';
 import { useBenchFocus } from '../../../stores/benchFocus';
 import { initChatI18n, renderWithProviders } from './chatTestUtils';
 
 vi.mock('../../../api/hooks', async (importOriginal) => ({
   ...await importOriginal<typeof import('../../../api/hooks')>(),
-  useSections: () => ({ data: [{ id: '0', name: 'S-37' }] }),
+  useSections: () => ({ data: [{ id: '0', name: 'S-37' }, { id: '1', name: 'S-12' }, { id: '2', name: 'S-1' }, { id: '3', name: 'S-1' }] }),
 }));
 
 describe('agent chips', () => {
@@ -36,5 +37,34 @@ describe('section navigation', () => {
     renderWithProviders(<MarkdownMessage chips content="S-37" />);
     await userEvent.click(screen.getByTestId('ai-chat-chip-section'));
     expect(useSession.getState()).toMatchObject({ selectedSection: '0', profilesMode: 'detail', activeWorkspaceView: 'profiles' });
+  });
+});
+
+describe('visible message attribution', () => {
+  it.each(['`S-12`', '[S-12](https://example.com)', '**S-12**'])('uses preceding mention %s', async (mention) => {
+    initChatI18n();
+    useWorkspaceMode.setState({ mode: 'copilot' });
+    useSession.setState({ selectedSection: '0', activeWorkspaceView: 'profiles', profilesMode: 'detail' });
+    renderWithProviders(<MarkdownMessage chips content={`${mention} banco 2`} />);
+    await userEvent.click(screen.getByTestId('ai-chat-chip-bench'));
+    expect(useBenchFocus.getState().request?.sectionId).toBe('1');
+  });
+  it.each(['**S-1**', '`S-1`', '[S-1](https://example.com)'])('blocks ambiguous mention %s', (mention) => {
+    useWorkspaceMode.setState({ mode: 'copilot' });
+    useSession.setState({ selectedSection: '0', activeWorkspaceView: 'profiles', profilesMode: 'detail' });
+    renderWithProviders(<MarkdownMessage chips content={`${mention} banco 2`} />);
+    expect(screen.queryByTestId('ai-chat-chip-bench')).toBeNull();
+  });
+  it('freezes context after first resolution', async () => {
+    useWorkspaceMode.setState({ mode: 'copilot' });
+    useSession.setState({ selectedSection: '0', activeWorkspaceView: 'profiles', profilesMode: 'detail' });
+    renderWithProviders(<MarkdownMessage chips content="banco 2" />);
+    act(() => useSession.setState({ selectedSection: '1' }));
+    await userEvent.click(screen.getByTestId('ai-chat-chip-bench'));
+    expect(useBenchFocus.getState().request?.sectionId).toBe('0');
+  });
+  it('does not chip table headers', () => {
+    renderWithProviders(<MarkdownMessage chips content={'| S-12 banco 2 |\n| --- |\n| S-37 |'} />);
+    expect(document.querySelector('th button')).toBeNull();
   });
 });

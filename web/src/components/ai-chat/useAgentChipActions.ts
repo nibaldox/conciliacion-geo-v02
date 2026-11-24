@@ -23,15 +23,15 @@ export function normalizeContextSectionId(
 }
 
 export function resolveVisibleSection(
-  { selected, selectedByUser, view, profilesMode }: {
+  { selected, view, profilesMode, mode }: {
     selected: string | null;
-    selectedByUser: boolean;
+    mode: 'protagonist' | 'copilot';
     view: WorkspaceViewId;
     profilesMode: 'grid' | 'detail';
   },
   sections: readonly SectionRef[],
 ): SectionRef | null {
-  if (!selectedByUser && !(view === 'profiles' && profilesMode === 'detail')) return null;
+  if (mode !== 'copilot' || view !== 'profiles' || profilesMode !== 'detail') return null;
   const id = normalizeContextSectionId(selected, sections);
   return sections.find((section) => section.id === id) ?? null;
 }
@@ -39,10 +39,10 @@ export function resolveVisibleSection(
 export function useAgentChipActions(): AgentChipActions {
   const { data: sections = [] } = useSections();
   const selected = useSession((state) => state.selectedSection);
-  const selectedByUser = useSession((state) => state.selectedByUser);
+  const mode = useWorkspaceMode((state) => state.mode);
   const view = useSession((state) => state.activeWorkspaceView);
   const profilesMode = useSession((state) => state.profilesMode);
-  const contextSectionId = resolveVisibleSection({ selected, selectedByUser, view, profilesMode }, sections)?.id ?? null;
+  const contextSectionId = resolveVisibleSection({ selected, mode, view, profilesMode }, sections)?.id ?? null;
   const openSection = (ref: SectionRef) => {
     const session = useSession.getState();
     session.setSelectedSection(ref.id);

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MarkdownMessage } from '../MarkdownMessage';
 import { ContextChip } from '../ContextChip';
 import { normalizeContextSectionId } from '../useAgentChipActions';
+import { useWorkspaceMode } from '../../../stores/workspaceMode';
 import { useSession } from '../../../stores/session';
 import { useBenchFocus } from '../../../stores/benchFocus';
 import { initChatI18n, renderWithProviders } from './chatTestUtils';
@@ -37,7 +38,8 @@ describe('normalizeContextSectionId', () => {
 describe('normalized context in MarkdownMessage', () => {
   it.each([true, false])('links a bench without a preceding mention with demoMode=%s', async (demoMode) => {
     initChatI18n();
-    useSession.setState({ selectedSection: 'S-37', selectedByUser: true, activeWorkspaceView: 'dashboard', demoMode });
+    useWorkspaceMode.setState({ mode: 'copilot' });
+    useSession.setState({ selectedSection: 'S-37', selectedByUser: true, activeWorkspaceView: 'profiles', profilesMode: 'detail', demoMode });
     renderWithProviders(<MarkdownMessage chips content="Revisa el banco 2" />);
     await userEvent.click(screen.getByTestId('ai-chat-chip-bench'));
     expect(useSession.getState().selectedSection).toBe('0');
@@ -48,6 +50,7 @@ describe('normalized context in MarkdownMessage', () => {
 
 describe('shared visible context', () => {
   it('uses the automatically selected profile in detail for both context and bench', async () => {
+    useWorkspaceMode.setState({ mode: 'copilot' });
     useSession.setState({ selectedSection: 'S-01', selectedByUser: false, activeWorkspaceView: 'profiles', profilesMode: 'detail' });
     useBenchFocus.getState().publishCurrent(null);
     renderWithProviders(<><ContextChip /><MarkdownMessage chips content="Revisa el banco 2" /></>);
@@ -57,17 +60,25 @@ describe('shared visible context', () => {
   });
 
   it('does not attribute a bench to an automatic dashboard selection', () => {
+    useWorkspaceMode.setState({ mode: 'copilot' });
     useSession.setState({ selectedSection: 'S-01', selectedByUser: false, activeWorkspaceView: 'dashboard', profilesMode: 'detail' });
     renderWithProviders(<><ContextChip /><MarkdownMessage chips content="Revisa el banco 2" /></>);
     expect(screen.getByTestId('ai-chat-context-chip')).not.toHaveTextContent('S-01');
     expect(screen.queryByTestId('ai-chat-chip-bench')).toBeNull();
   });
 
-  it('uses a user-selected dashboard section for both context and bench', async () => {
-    useSession.setState({ selectedSection: 'S-01', selectedByUser: true, activeWorkspaceView: 'dashboard', profilesMode: 'grid' });
+  it.each(['dashboard', '3d', 'blast', 'export-ai', 'profiles'] as const)('does not use hidden selection in %s', (view) => {
+    useWorkspaceMode.setState({ mode: 'copilot' });
+    useSession.setState({ selectedSection: 'S-01', selectedByUser: true, activeWorkspaceView: view, profilesMode: 'grid' });
     renderWithProviders(<><ContextChip /><MarkdownMessage chips content="Revisa el banco 2" /></>);
-    expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent('Dashboard · S-01');
-    await userEvent.click(screen.getByTestId('ai-chat-chip-bench'));
-    expect(useBenchFocus.getState().request).toMatchObject({ sectionId: '2', designBench: 2 });
+    expect(screen.getByTestId('ai-chat-context-chip')).not.toHaveTextContent('S-01');
+    expect(screen.queryByTestId('ai-chat-chip-bench')).toBeNull();
+  });
+  it('does not use a profile section in protagonist mode', () => {
+    useWorkspaceMode.setState({ mode: 'protagonist' });
+    useSession.setState({ selectedSection: 'S-01', selectedByUser: true, activeWorkspaceView: 'profiles', profilesMode: 'detail' });
+    renderWithProviders(<><ContextChip /><MarkdownMessage chips content="Revisa el banco 2" /></>);
+    expect(screen.getByTestId('ai-chat-context-chip')).not.toHaveTextContent('S-01');
+    expect(screen.queryByTestId('ai-chat-chip-bench')).toBeNull();
   });
 });
