@@ -60,6 +60,23 @@ describe('workspace mode coordinator', () => {
     rerender();
     expectMode('copilot', 'dashboard');
   });
+  it('recovers restored results after an initial error without manual navigation', () => {
+    query.value = { isSuccess: false, isError: true };
+    const { rerender } = renderHook(() => useWorkspaceModeCoordinator());
+    setQuery('complete', 2);
+    rerender();
+    expectMode('copilot', 'dashboard');
+    expect(useWorkspaceMode.getState().lastReason).toBe('resultsRestored');
+  });
+  it('recovers results after an intermediate idle response following an initial error', () => {
+    query.value = { isSuccess: false, isError: true };
+    const { rerender } = renderHook(() => useWorkspaceModeCoordinator());
+    setQuery('idle');
+    rerender();
+    setQuery('complete', 2);
+    rerender();
+    expectMode('copilot', 'dashboard');
+  });
   it('uses meshes but never dashboard when the process query errors', () => {
     meshes();
     query.value = { isSuccess: false, isError: true };

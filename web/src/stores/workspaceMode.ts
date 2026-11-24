@@ -7,6 +7,8 @@ export type ModeReason = 'initial' | CopilotReason | 'focusConversation' | 'newS
 export interface WorkspaceModeState {
   mode: WorkspaceMode;
   lastReason: ModeReason;
+  initialDecided: boolean;
+  markInitialDecided: () => void;
   /** Pasa a copiloto (idempotente: si ya está en copiloto, solo actualiza lastReason). */
   enterCopilot: (reason: CopilotReason) => void;
   /** Única vuelta explícita al modo protagonista (botón «Enfocar conversación»). */
@@ -18,6 +20,8 @@ export interface WorkspaceModeState {
 export const useWorkspaceMode = create<WorkspaceModeState>((set) => ({
   mode: 'protagonist',
   lastReason: 'initial',
+  initialDecided: false,
+  markInitialDecided: () => set({ initialDecided: true }),
   enterCopilot: (reason) => set({ mode: 'copilot', lastReason: reason }),
   focusConversation: () => set({ mode: 'protagonist', lastReason: 'focusConversation' }),
   resetForSession: (mode, reason) => set({ mode, lastReason: reason }),

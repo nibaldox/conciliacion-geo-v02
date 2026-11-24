@@ -25,7 +25,7 @@ export function AppLayout({ children, assistant = false }: AppLayoutProps) {
 
   const canvasHeader = <>
     <div data-slot="step-title-bar" className="flex shrink-0 flex-wrap items-center justify-between gap-3 bg-surface-raised px-3 pt-4 pb-1 md:px-6">
-      <h2 className="text-xl font-semibold tracking-tight md:text-2xl">{t(titles[view])}</h2>
+      <h2 tabIndex={-1} className="text-xl font-semibold tracking-tight md:text-2xl">{t(titles[view])}</h2>
       <DemoBanner />
     </div>
     <ViewsToolbar onNavigate={() => {

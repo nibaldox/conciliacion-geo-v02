@@ -14,6 +14,7 @@ export function useWorkspaceModeCoordinator() {
   const previousMeshes = useRef(false);
   const previousDemo = useRef(false);
   const previousComplete = useRef(false);
+  const initialError = useRef(false);
 
   useEffect(() => {
     const unsubscribeSession = useSession.subscribe((state, previous) => {
@@ -49,11 +50,13 @@ export function useWorkspaceModeCoordinator() {
 
     if (!initialized.current) {
       if (!isSuccess && !isError) return;
+      initialError.current = isError;
       previousMeshes.current = both;
       previousDemo.current = demo;
       previousComplete.current = complete;
       if (manualNavigation.current) {
         initialized.current = true;
+        useWorkspaceMode.getState().markInitialDecided();
         return;
       }
       if (isSuccess && (demo || (complete && (data?.n_results ?? 0) > 0))) {
@@ -64,7 +67,16 @@ export function useWorkspaceModeCoordinator() {
         navigate('3d');
       }
       initialized.current = true;
+      useWorkspaceMode.getState().markInitialDecided();
       return;
+    }
+
+    if (initialError.current && complete && (data?.n_results ?? 0) > 0) {
+      initialError.current = false;
+      if (!manualNavigation.current) {
+        useWorkspaceMode.getState().enterCopilot('resultsRestored');
+        navigate('dashboard');
+      }
     }
 
     if (demo && !previousDemo.current) {

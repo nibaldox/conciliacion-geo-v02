@@ -12,7 +12,7 @@ export function RecentSessionsList() {
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  if (!query.isSuccess || !query.data.sessions.length) return null;
+  if (!query.isSuccess || !Array.isArray(query.data?.sessions) || !query.data.sessions.length) return null;
 
   return (
     <section className="border-b border-border pb-3">

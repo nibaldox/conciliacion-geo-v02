@@ -37,6 +37,11 @@ describe('recent sessions in the rail', () => {
     const { container } = mount();
     expect(container.firstChild).toBeNull();
   });
+  it('renders nothing when sessions is not an array', () => {
+    state.result = { isSuccess: true, data: { sessions: null } };
+    const { container } = mount();
+    expect(container.firstChild).toBeNull();
+  });
   it('renders nothing for an empty list', () => {
     state.result = { isSuccess: true, data: { ttl_days: 30, sessions: [] } };
     const { container } = mount();

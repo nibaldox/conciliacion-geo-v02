@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { useWorkspaceMode } from '../../stores/workspaceMode';
+import { LoadingSpinner } from '../LoadingSpinner';
 import { ChatPanel } from './ChatPanel';
 import { CopilotResizeHandle } from './CopilotResizeHandle';
 import { useAgentChatInvalidationBridge } from './FloatingChatButton';
@@ -9,19 +10,32 @@ import './AgentWorkspaceShell.css';
 
 const WIDTH_KEY = 'conciliacion.agentWorkspace.copilotWidth.v1';
 function initialWidth() {
-  const value = Number(localStorage.getItem(WIDTH_KEY));
-  return Number.isFinite(value) && value >= 320 && value <= 520 ? value : 390;
+  try {
+    const value = Number(localStorage.getItem(WIDTH_KEY));
+    return Number.isFinite(value) && value >= 320 && value <= 520 ? value : 390;
+  } catch {
+    return 390;
+  }
 }
 
 export function AgentWorkspaceShell({ children, canvasHeader }: { children: ReactNode; canvasHeader?: ReactNode }) {
   const { t } = useTranslation();
-  const mode = useWorkspaceMode((s) => s.mode);
+  const actualMode = useWorkspaceMode((s) => s.mode);
+  const lastReason = useWorkspaceMode((s) => s.lastReason);
+  const initialDecided = useWorkspaceMode((s) => s.initialDecided);
+  const bothMeshes = useSession((s) => Boolean(s.designMeshId && s.topoMeshId));
+  const waiting = !initialDecided && bothMeshes;
+  const mode = waiting ? 'copilot' : actualMode;
+  const wasInitiallyDecided = useRef(initialDecided);
+  const [allowAnimation, setAllowAnimation] = useState(initialDecided);
+  const skipInitialAnimation = !initialDecided || !allowAnimation;
   const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
   const [mobileView, setMobileView] = useState<'chat' | 'workspace'>('workspace');
   const [width, setWidth] = useState(initialWidth);
   const [canvasMounted, setCanvasMounted] = useState(mode === 'copilot');
   const [reduced, setReduced] = useState(() => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const grid = useRef<HTMLDivElement>(null);
+  const focusCanvas = useRef(false);
   const previous = useRef(mode);
   const measured = useRef<{ canvas: number; chat: number } | null>(null);
   const widthRef = useRef(width);
@@ -35,6 +49,25 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
     media.addEventListener('change', change);
     return () => media.removeEventListener('change', change);
   }, []);
+  useLayoutEffect(() => useWorkspaceMode.subscribe((state, old) => {
+    if (state.lastReason === 'manualView' && window.innerWidth < 900) setMobileView('workspace');
+    if (state.mode === 'copilot' && old.mode === 'protagonist' && state.lastReason === 'manualView') {
+      focusCanvas.current = Boolean(document.activeElement?.closest('[data-slot="left-sidebar"]'));
+    }
+  }), []);
+  useLayoutEffect(() => {
+    if (focusCanvas.current && canvasMounted && !waiting) {
+      grid.current?.querySelector<HTMLElement>('.agent-shell__workspace h2')?.focus();
+      focusCanvas.current = false;
+    }
+  }, [canvasMounted, waiting, mode]);
+  useLayoutEffect(() => {
+    if (actualMode === 'protagonist' && lastReason === 'focusConversation' &&
+      (document.activeElement === document.body || !document.activeElement?.isConnected ||
+        document.activeElement?.closest('[data-testid="ai-chat-focus-conversation"]'))) {
+      grid.current?.querySelector<HTMLElement>('[data-testid="ai-chat-input"]')?.focus();
+    }
+  }, [actualMode, lastReason]);
   useLayoutEffect(() => {
     const node = grid.current;
     if (!node || typeof ResizeObserver === 'undefined') return;
@@ -55,10 +88,13 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
     const node = grid.current;
     const oldMode = previous.current;
     const changed = oldMode !== mode;
+    const firstDecision = !wasInitiallyDecided.current;
+    if (initialDecided) wasInitiallyDecided.current = true;
     previous.current = mode;
     if (!changed || !node) return;
+    if (!firstDecision) setAllowAnimation(true);
     if (mode === 'copilot') setCanvasMounted(true);
-    if (reduced || window.innerWidth < 900) {
+    if (firstDecision || reduced || window.innerWidth < 900) {
       setCanvasMounted(mode === 'copilot');
       return;
     }
@@ -83,25 +119,27 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
     node.addEventListener('transitionend', onEnd);
     const timer = window.setTimeout(finish, mode === 'copilot' ? 430 : 330);
     return () => { node.removeEventListener('transitionend', onEnd); window.clearTimeout(timer); node.style.transition = ''; node.style.gridTemplateColumns = ''; };
-  }, [mode, reduced]);
+  }, [mode, reduced, initialDecided]);
   const updateWidth = (value: number) => {
     const next = Math.min(520, Math.max(320, value));
     setWidth(next);
-    localStorage.setItem(WIDTH_KEY, String(next));
+  };
+  const persistWidth = (value: number) => {
+    try { localStorage.setItem(WIDTH_KEY, String(value)); } catch { /* Storage is optional. */ }
   };
   const style = { '--agent-chat-width': `${width}px` } as CSSProperties;
   return (
-    <div className={`agent-shell agent-shell--${mode} agent-shell--mobile-${mobileView}`} style={style}>
+    <div className={`agent-shell agent-shell--${mode} agent-shell--mobile-${mobileView}${skipInitialAnimation ? ' agent-shell--no-animation' : ''}`} style={style}>
       {mode === 'copilot' && <nav className="agent-shell__controls" aria-label={t('agentWorkspace.navigation')}>
         <button type="button" onClick={() => setMobileView('workspace')} aria-pressed={mobileView === 'workspace'}>{t('agentWorkspace.workspace')}</button>
         <button type="button" onClick={() => setMobileView('chat')} aria-pressed={mobileView === 'chat'}>{t('agentWorkspace.chat')}</button>
       </nav>}
       <div className="agent-shell__grid" ref={grid}>
         <div className="agent-shell__workspace" aria-hidden={mode === 'protagonist' ? true : undefined} inert={mode === 'protagonist' ? true : undefined}>
-          {canvasMounted && <div className="agent-shell__canvas">{canvasHeader}{children}</div>}
+          {canvasMounted && <div className="agent-shell__canvas">{waiting ? <LoadingSpinner /> : <>{canvasHeader}{children}</>}</div>}
         </div>
         <div className="agent-shell__chat">
-          {mode === 'copilot' && <CopilotResizeHandle width={width} onChange={updateWidth} />}
+          {mode === 'copilot' && <CopilotResizeHandle width={width} onChange={updateWidth} onCommit={persistWidth} />}
           <ChatPanel presentation="embedded" layout={mode} onClose={() => setMobileView('workspace')} />
         </div>
       </div>
