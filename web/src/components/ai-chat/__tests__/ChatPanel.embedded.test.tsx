@@ -244,15 +244,25 @@ it('prioriza aprobación sobre herramienta y permite enfocar la conversación', 
 
 it('muestra el contexto de dashboard, grilla y perfil con banco seleccionado', () => {
   guidanceMocks.sections = [{ id: '37', name: 'S-37' }];
+  useWorkspaceMode.setState({ mode: 'copilot' });
   useSession.setState({ activeWorkspaceView: 'dashboard', selectedSection: '37', selectedByUser: true });
   renderWithProviders(<ChatPanel presentation="embedded" layout="copilot" />);
-  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Dashboard · S-37/);
+  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/^Viendo: Dashboard$/);
   act(() => useSession.setState({ activeWorkspaceView: 'profiles', profilesMode: 'grid' }));
   expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Perfiles · grilla/);
   act(() => { useSession.setState({ profilesMode: 'detail' }); useBenchFocus.getState().publishCurrent({ sectionId: '37', benchNumber: 1, designBenchNumber: 2 }); });
   expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/Perfil S-37 · Banco 2/);
 });
 
+
+it('no muestra sección ni banco en protagonista aunque Perfiles esté en detalle', () => {
+  guidanceMocks.sections = [{ id: '37', name: 'S-37' }];
+  useWorkspaceMode.setState({ mode: 'protagonist' });
+  useSession.setState({ activeWorkspaceView: 'profiles', profilesMode: 'detail', selectedSection: '37', selectedByUser: true });
+  useBenchFocus.getState().publishCurrent({ sectionId: '37', benchNumber: 1, designBenchNumber: 2 });
+  renderWithProviders(<ChatPanel presentation="embedded" layout="copilot" />);
+  expect(screen.getByTestId('ai-chat-context-chip')).toHaveTextContent(/^Viendo: Perfiles$/);
+});
 
 it('ubica la sugerencia después del compositor solo en protagonista y no en la guía', () => {
   useAIChat.setState({ providerStateLoaded: true });
@@ -284,6 +294,7 @@ it('conserva la posición de lectura al cambiar de layout en ambos sentidos', ()
 });
 
 it('resuelve la sección por id o nombre único y rechaza nombres duplicados', () => {
+  useWorkspaceMode.setState({ mode: 'copilot' });
   guidanceMocks.sections = [{ id: '0', name: 'S-37' }, { id: '1', name: 'S-38' }];
   useSession.setState({ activeWorkspaceView: 'profiles', profilesMode: 'detail', selectedSection: '0', selectedByUser: true });
   useBenchFocus.getState().publishCurrent({ sectionId: '0', benchNumber: 1, designBenchNumber: 2 });
