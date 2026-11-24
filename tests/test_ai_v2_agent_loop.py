@@ -508,6 +508,7 @@ async def test_invalid_schema_args_never_execute():
         "error": "invalid_arguments",
         "reason": "schema_validation",
         "message": MSG_INVALID_ARGS,
+        "detail": "Argumentos inválidos: 'mesh_id' debe ser texto.",
     }
     assert "123" not in tool_message["content"]
     assert events[-1].finish_reason == "stop"

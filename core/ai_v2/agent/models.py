@@ -14,12 +14,38 @@ from datetime import date
 from enum import Enum
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _FilterSectorName = Annotated[str, Field(min_length=1, max_length=120)]
 _FilterSectionName = Annotated[str, Field(min_length=1, max_length=60)]
 _FilterLevelLabel = Annotated[str, Field(min_length=1, max_length=20)]
 _QueryText = Annotated[str, Field(max_length=120)]
+
+_ROW_LIMIT_MIN = 1
+_ROW_LIMIT_MAX = 50
+_FILTER_LIST_FIELDS = ("sector", "section", "level", "bench")
+
+
+def _wrap_scalar(value: object) -> object:
+    """Wrap one bare filter value into a one-item list (``"S-11"`` → ``["S-11"]``).
+
+    Lists, tuples, dicts and ``None`` pass through untouched so the normal
+    validation still applies to them; only JSON scalars are wrapped.
+    """
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        return [value]
+    return value
+
+
+def _clamped_row_limit(value: object) -> object:
+    """Clamp an integer-like ``row_limit`` into ``[1, 50]`` instead of rejecting it."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, int):
+        return max(_ROW_LIMIT_MIN, min(_ROW_LIMIT_MAX, value))
+    return value
 
 
 class ToolRisk(str, Enum):
@@ -318,7 +344,19 @@ class ResultQueryArgs(_StrictArgs):
     parameter: Optional[Literal["height", "angle", "berm"]] = None
     status: Optional[str] = Field(default=None, max_length=40)
     include_rows: bool = False
-    row_limit: int = Field(default=20, ge=1, le=50)
+    row_limit: int = Field(default=20, ge=_ROW_LIMIT_MIN, le=_ROW_LIMIT_MAX)
+
+    # Tolerant inputs (mode="before" leaves the JSON schema untouched): a bare
+    # filter value becomes a one-item list and row_limit is clamped.
+    @field_validator(*_FILTER_LIST_FIELDS, mode="before")
+    @classmethod
+    def _wrap_filter_scalars(cls, value: object) -> object:
+        return _wrap_scalar(value)
+
+    @field_validator("row_limit", mode="before")
+    @classmethod
+    def _clamp_row_limit(cls, value: object) -> object:
+        return _clamped_row_limit(value)
 
 
 class AchievementFilterArgs(_StrictArgs):
@@ -334,6 +372,12 @@ class AchievementFilterArgs(_StrictArgs):
     section: Optional[list[str]] = Field(default=None, max_length=20)
     level: Optional[list[str]] = Field(default=None, max_length=60)
     bench: Optional[list[int]] = Field(default=None, max_length=50)
+
+    # A bare filter value becomes a one-item list (schema unchanged).
+    @field_validator(*_FILTER_LIST_FIELDS, mode="before")
+    @classmethod
+    def _wrap_filter_scalars(cls, value: object) -> object:
+        return _wrap_scalar(value)
 
 
 class BlastCorrelationArgs(_StrictArgs):

@@ -67,6 +67,18 @@ _NO_SCOREABLE_BENCHES_WARNING = "no hay bancos MATCH puntuables con los filtros 
 
 _UNMEASURED_KEY = "sin_medir"
 
+_SECTIONS_ORDER = "score_asc"
+_COMPARED_TYPE = "MATCH"
+_COUNTS_MEANING_RESULTS = (
+    "n_results = filas de resultado (todas las clasificaciones: comparados, "
+    "no construidos, extra…); n_compared_benches = bancos comparados (MATCH)"
+)
+_COUNTS_MEANING_QUERY = (
+    "n_matched_rows = filas de resultado que pasan el filtro (todas las "
+    "clasificaciones: comparados, no construidos, extra…); n_compared_benches "
+    "= bancos comparados (MATCH) con el mismo filtro"
+)
+
 _STATUS_FIELDS: Tuple[str, ...] = (
     "section_status",
     "height_status",
@@ -335,6 +347,38 @@ def _aggregate_results(
     return _results_from_rows(session_id, section=section)
 
 
+def _section_rank_key(item: Tuple[str, Dict[str, Any]]) -> Tuple[int, float, int, str]:
+    """Worst score first (None last), then worst status, then name."""
+    name, entry = item
+    score = entry.get("score")
+    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+        return (1, 0.0, -entry["worst_rank"], name)
+    return (0, float(score), -entry["worst_rank"], name)
+
+
+def _compared_count_sql(session_id: str) -> int:
+    """Number of MATCH result rows (compared benches) of the session."""
+    conn = db.get_connection()
+    try:
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM results WHERE session_id = ? "
+                "AND json_extract(data, '$.type') = ?",
+                (session_id, _COMPARED_TYPE),
+            ).fetchone()
+            return int(row["n"])
+        except sqlite3.OperationalError:
+            count = 0
+            for raw in conn.execute(
+                "SELECT data FROM results WHERE session_id = ?", (session_id,)
+            ):
+                if json.loads(raw["data"]).get("type") == _COMPARED_TYPE:
+                    count += 1
+            return count
+    finally:
+        conn.close()
+
+
 def _section_compliance(
     session_id: str,
     section_name: str,
@@ -360,6 +404,7 @@ async def get_workflow_state(session_id: str, args: NoArgs) -> Dict[str, Any]:
     """Aggregate session state from SQL counts and small JSON columns."""
     status = db.get_process_status(session_id)
     n_results = db.get_results_count(session_id)
+    n_compared = _compared_count_sql(session_id) if n_results else 0
     sections = db.get_sections(session_id)
     meshes = db.get_all_meshes(session_id)
     design = next((m for m in meshes if m["type"] == "design"), None)
@@ -367,6 +412,8 @@ async def get_workflow_state(session_id: str, args: NoArgs) -> Dict[str, Any]:
     return {
         "n_sections": len(sections),
         "n_results": n_results,
+        "n_compared_benches": n_compared,
+        "counts_meaning": _COUNTS_MEANING_RESULTS,
         "process_status": status["status"],
         "has_design_mesh": design is not None,
         "has_topo_mesh": topo is not None,
@@ -430,10 +477,7 @@ async def list_sections(session_id: str, args: NoArgs) -> Dict[str, Any]:
 async def get_results_summary(session_id: str, args: NoArgs) -> Dict[str, Any]:
     """Aggregate comparison results: counts per status, sector and section."""
     counters, sections = _aggregate_results(session_id)
-    ranked = sorted(
-        sections.items(),
-        key=lambda item: (-item[1]["worst_rank"], item[0]),
-    )
+    ranked = sorted(sections.items(), key=_section_rank_key)
     shown = ranked[:_MAX_SECTION_ENTRIES]
     scores = [
         entry["score"]
@@ -450,6 +494,8 @@ async def get_results_summary(session_id: str, args: NoArgs) -> Dict[str, Any]:
     section_status = counters["section_status"]
     return {
         "n_results": sum(section_status.values()),
+        "n_compared_benches": counters["type"].get(_COMPARED_TYPE, 0),
+        "counts_meaning": _COUNTS_MEANING_RESULTS,
         "by_section_status": {_json_key(k): v for k, v in section_status.items()},
         "by_type": {_json_key(k): v for k, v in counters["type"].items()},
         "by_sector": {_json_key(k): v for k, v in counters["sector"].items()},
@@ -461,6 +507,7 @@ async def get_results_summary(session_id: str, args: NoArgs) -> Dict[str, Any]:
         "n_sections": len(sections),
         "sections_shown": len(shown),
         "sections_truncated": len(shown) < len(ranked),
+        "sections_order": _SECTIONS_ORDER,
         "sections": [
             {
                 "name": name,
@@ -1375,10 +1422,7 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
         fields["section"] = row.get("section")
         fields["section_score"] = row.get("section_score")
         _absorb_row(fields, counters, sections)
-    ranked = sorted(
-        sections.items(),
-        key=lambda item: (-item[1]["worst_rank"], item[0]),
-    )
+    ranked = sorted(sections.items(), key=_section_rank_key)
     shown = ranked[:_MAX_SECTION_ENTRIES]
 
     level_counter: Counter = Counter()
@@ -1445,6 +1489,9 @@ async def query_results(session_id: str, args: ResultQueryArgs) -> Dict[str, Any
         "weighted_score": weighted_score,
         "n_total_rows": unfiltered_count,
         "n_matched_rows": len(filtered),
+        "n_compared_benches": counters["type"].get(_COMPARED_TYPE, 0),
+        "counts_meaning": _COUNTS_MEANING_QUERY,
+        "sections_order": _SECTIONS_ORDER,
         "pct_by_parameter": {
             param: _pct_entry(counters[status_field])
             for param, status_field in _PARAMETER_STATUS_FIELDS.items()

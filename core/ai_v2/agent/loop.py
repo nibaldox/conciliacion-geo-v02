@@ -148,6 +148,8 @@ _OBSERVATION_PRESERVE_KEYS = frozenset(
         "status_by_parameter",
         "n_total_rows",
         "n_matched_rows",
+        "n_compared_benches",
+        "counts_meaning",
         "levels_truncated",
         "warnings",
         "tolerances",
@@ -177,6 +179,12 @@ MSG_TOOL_UNAVAILABLE = (
     "Herramienta no disponible: no está en el catálogo del agente."
 )
 MSG_INVALID_ARGS = "Argumentos inválidos para la herramienta."
+MSG_INVALID_ARGS_REPEATED = (
+    "Esta llamada ya falló con los mismos argumentos; corrige los "
+    "parámetros o responde sin la herramienta."
+)
+_ARG_ERROR_MAX_FIELDS = 3
+_ARG_ERROR_DETAIL_MAX_CHARS = 300
 MSG_TOOL_FAILED = "La herramienta falló durante su ejecución; inténtalo de nuevo."
 MSG_TOOL_TIMEOUT = "La herramienta excedió su tiempo máximo de ejecución."
 MSG_PROVIDER_UNSUPPORTED = (
@@ -745,7 +753,7 @@ async def _handle_tool_call(
         )
         return events, None
 
-    validated, raw_args, arg_error = _validated_args(spec, call)
+    validated, raw_args, arg_error, arg_detail = _validated_args_detail(spec, call)
     if arg_error is not None or validated is None:
         events = [
             ToolCallEvent(
@@ -766,12 +774,9 @@ async def _handle_tool_call(
         conversation.append(
             _tool_message(
                 call.call_id,
-                {
-                    "ok": False,
-                    "error": "invalid_arguments",
-                    "reason": arg_error,
-                    "message": MSG_INVALID_ARGS,
-                },
+                _invalid_args_observation(
+                    conversation, call, arg_error or "schema_validation", arg_detail
+                ),
             )
         )
         return events, None
@@ -932,9 +937,149 @@ async def _execute_tool(
     return events, observation
 
 
+def _field_label(loc: tuple[Any, ...]) -> str:
+    parts = [str(part) for part in loc if not isinstance(part, int)]
+    return ".".join(parts) if parts else "argumentos"
+
+
+def _bound_text(ctx: Mapping[str, Any] | None, key: str) -> str:
+    value = (ctx or {}).get(key)
+    return _cut(f"{value}", 20)
+
+
+def _error_phrase(error: Mapping[str, Any]) -> str:
+    """One Spanish phrase per pydantic error; never echoes the input value."""
+    field = f"'{_field_label(tuple(error.get('loc') or ()))}'"
+    kind = str(error.get("type") or "")
+    ctx = error.get("ctx")
+    if kind == "extra_forbidden":
+        return f"{field} no es un parámetro de esta herramienta"
+    if kind == "missing":
+        return f"falta {field}, que es obligatorio"
+    if kind in ("less_than_equal", "less_than"):
+        op = "≤" if kind == "less_than_equal" else "<"
+        bound = _bound_text(ctx, "le" if kind == "less_than_equal" else "lt")
+        return f"{field} debe ser {op} {bound}"
+    if kind in ("greater_than_equal", "greater_than"):
+        op = "≥" if kind == "greater_than_equal" else ">"
+        bound = _bound_text(ctx, "ge" if kind == "greater_than_equal" else "gt")
+        return f"{field} debe ser {op} {bound}"
+    if kind == "literal_error":
+        return f"{field} debe ser uno de: {_cut(str((ctx or {}).get('expected', '')), 80)}"
+    if kind == "list_type":
+        return f"{field} debe ser una lista"
+    if kind in ("string_type", "string_too_short", "string_too_long"):
+        if kind == "string_type":
+            return f"{field} debe ser texto"
+        bound = _bound_text(ctx, "max_length" if kind == "string_too_long" else "min_length")
+        limit = "a lo sumo" if kind == "string_too_long" else "al menos"
+        return f"{field} debe tener {limit} {bound} caracteres"
+    if kind in ("too_long", "too_short"):
+        bound = _bound_text(ctx, "max_length" if kind == "too_long" else "min_length")
+        limit = "a lo sumo" if kind == "too_long" else "al menos"
+        return f"{field} debe tener {limit} {bound} elementos"
+    if kind.startswith("int_"):
+        return f"{field} debe ser un número entero"
+    if kind.startswith("float_") or kind == "finite_number":
+        return f"{field} debe ser un número finito"
+    if kind.startswith("bool_"):
+        return f"{field} debe ser true o false"
+    if kind.startswith("date_"):
+        return f"{field} debe ser una fecha AAAA-MM-DD"
+    if kind == "dict_type" or kind == "model_type":
+        return f"{field} debe ser un objeto"
+    return f"{field} tiene un valor no válido"
+
+
+def _validation_detail(exc: ValidationError) -> str:
+    """Actionable one-line Spanish summary of up to 3 failing fields."""
+    phrases: list[str] = []
+    for error in exc.errors(include_url=False, include_input=False):
+        phrase = _error_phrase(error)
+        if phrase not in phrases:
+            phrases.append(phrase)
+        if len(phrases) >= _ARG_ERROR_MAX_FIELDS:
+            break
+    text = "Argumentos inválidos: " + "; ".join(phrases) + "."
+    return _cut(text, _ARG_ERROR_DETAIL_MAX_CHARS)
+
+
+def _canonical_raw_args(arguments: Any) -> str | None:
+    try:
+        parsed = json.loads(str(arguments or "") or "{}")
+    except ValueError:
+        return "raw:" + str(arguments)
+    return json.dumps(parsed, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _repeated_invalid_call(
+    conversation: list[dict[str, Any]], call: ToolCallRequest
+) -> bool:
+    """True when this exact (name, args) already failed validation this turn."""
+    target = _canonical_raw_args(call.arguments)
+    if target is None:
+        return False
+    turn = _turn_messages(conversation)
+    invalid_ids = {
+        message["tool_call_id"]
+        for message in turn
+        if isinstance(message, dict)
+        and message.get("role") == "tool"
+        and isinstance(message.get("tool_call_id"), str)
+        and _observation_error(message.get("content")) == "invalid_arguments"
+    }
+    if not invalid_ids:
+        return False
+    for message in turn:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        for entry in message.get("tool_calls") or []:
+            if not isinstance(entry, dict) or entry.get("id") not in invalid_ids:
+                continue
+            function = entry.get("function") or {}
+            if not isinstance(function, dict) or function.get("name") != call.name:
+                continue
+            if _canonical_raw_args(function.get("arguments")) == target:
+                return True
+    return False
+
+
+def _invalid_args_observation(
+    conversation: list[dict[str, Any]],
+    call: ToolCallRequest,
+    reason: str,
+    detail: str | None,
+) -> dict[str, Any]:
+    """Model-facing observation for a call whose arguments did not validate."""
+    observation: dict[str, Any] = {
+        "ok": False,
+        "error": "invalid_arguments",
+        "reason": reason,
+        "message": MSG_INVALID_ARGS,
+    }
+    text = detail or (
+        "Argumentos inválidos: el JSON de argumentos no se pudo interpretar."
+        if reason == "invalid_json"
+        else None
+    )
+    if _repeated_invalid_call(conversation, call):
+        observation["repeated"] = True
+        text = f"{text} {MSG_INVALID_ARGS_REPEATED}" if text else MSG_INVALID_ARGS_REPEATED
+    if text:
+        observation["detail"] = _cut(text, _ARG_ERROR_DETAIL_MAX_CHARS + 120)
+    return observation
+
+
 def _validated_args(
     spec: ToolSpec, call: ToolCallRequest
 ) -> tuple[BaseModel | None, dict[str, Any] | None, str | None]:
+    model, raw, reason, _detail = _validated_args_detail(spec, call)
+    return model, raw, reason
+
+
+def _validated_args_detail(
+    spec: ToolSpec, call: ToolCallRequest
+) -> tuple[BaseModel | None, dict[str, Any] | None, str | None, str | None]:
     """Validate raw provider arguments against the spec model.
 
     Returns ``(validated_model, raw_args_for_event, None)`` on success;
@@ -945,11 +1090,11 @@ def _validated_args(
     try:
         raw = call.parse_arguments()
     except ValueError:
-        return None, None, "invalid_json"
+        return None, None, "invalid_json", None
     try:
-        return spec.args_model.model_validate(raw), raw, None
-    except ValidationError:
-        return None, raw, "schema_validation"
+        return spec.args_model.model_validate(raw), raw, None, None
+    except ValidationError as exc:
+        return None, raw, "schema_validation", _validation_detail(exc)
 
 
 def _turn_messages(conversation: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -210,7 +210,11 @@ AGENT_TOOLS: tuple[ToolSpec, ...] = (
             "(include_rows=true) up to row_limit rows with "
             "design vs as-built values and deviations. Use it when the "
             "user asks about a specific level, bench, sector or status. "
-            "nominal_levels contains export labels by sector; levels_truncated signals omitted exact levels."
+            "nominal_levels contains export labels by sector; levels_truncated signals omitted exact levels. "
+            "sections is ordered from worst to best section_score (worst first), so the worst "
+            "sections are always included; n_compared_benches is the number of compared "
+            "benches (MATCH rows), while n_matched_rows counts every result row that passes "
+            "the filters (compared, not built and extra)."
         ),
         args_model=ResultQueryArgs,
         risk=ToolRisk.READ,
