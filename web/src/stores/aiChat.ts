@@ -816,7 +816,7 @@ export const useAIChat = create<AIChatState>((set, get) => ({
               id: makeMessageId(),
               invocationId: event.invocation_id,
               name: event.name,
-              args: event.args,
+              args: event.args !== null && typeof event.args === 'object' && !Array.isArray(event.args) && (Object.getPrototypeOf(event.args) === Object.prototype || Object.getPrototypeOf(event.args) === null) ? event.args : null,
               status: 'running',
               summary: null,
               error: null,

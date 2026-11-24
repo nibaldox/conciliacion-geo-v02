@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { memo, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ChatMessage, ChatNotice } from '../../stores/aiChat';
 import { useAIChat } from '../../stores/aiChat';
@@ -84,11 +84,11 @@ function derivePanelStatus(options: {
   return 'configured';
 }
 
-function MessageBubble({ message, embedded = false }: { message: ChatMessage; embedded?: boolean }) {
+const MessageBubble = memo(function MessageBubble({ message, embedded = false }: { message: ChatMessage; embedded?: boolean }) {
   const { t } = useTranslation();
   if (message.kind === 'tool') return <ToolCallCard message={message} />;
   if (message.kind === 'confirmation') {
-    return <ConfirmationCardLazy message={message} />;
+    return <ConfirmationCardLazy message={message} embedded={embedded} />;
   }
   if (message.kind === 'observation') {
     return (
@@ -129,12 +129,14 @@ function MessageBubble({ message, embedded = false }: { message: ChatMessage; em
       </div>
     </div>
   );
-}
+}, (prev, next) => prev.message === next.message && prev.embedded === next.embedded);
 
 function ConfirmationCardLazy({
   message,
+  embedded,
 }: {
   message: Extract<ChatMessage, { kind: 'confirmation' }>;
+  embedded: boolean;
 }) {
   const busy = useAIChat((s) => s.streaming || s.sendInFlight || s.clearing);
   const approve = useAIChat((s) => s.approve);
@@ -142,6 +144,7 @@ function ConfirmationCardLazy({
   return (
     <ConfirmationCard
       message={message}
+      presentation={embedded ? 'embedded' : 'floating'}
       busy={busy}
       onApprove={() => void approve()}
       onDeny={() => void deny()}
@@ -708,7 +711,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
               <option value="">{t('aiChat.model.selector_placeholder')}</option>
               {selection.models.map((model) => <option key={model.id} value={model.id}>{modelOptionLabel(model, selection.models)}{model.tool_use === false ? ` · ${t('aiChat.model.no_tools_suffix')}` : ''}</option>)}
             </select>
-            {selection.model === null && <span data-testid="ai-chat-models-notice" className="sr-only">{t('aiChat.notice.models_required')}</span>}
+            {selection.model === null && <span data-testid="ai-chat-models-notice" className="block mt-1 text-text-secondary">{t('aiChat.notice.models_required')}</span>}
           </label>
         )}
         {embedded && headerModel && selection.kind !== 'pick' && <span title={headerModel} className="col-start-1 row-start-2 ml-28 min-w-0 truncate text-xs text-text-muted">{headerModel}</span>}

@@ -19,7 +19,7 @@ vi.mock('../../../api/client', () => ({
 
 import { useAIChat } from '../../../stores/aiChat';
 import type { AgentToolResultDownload } from '../../../api/agentChat';
-import { ToolCallCard, ToolActivityGroup, type ToolCardMessage } from '../ToolCallCard';
+import { ToolCallCard, ToolActivityGroup, ConfirmationCard, type ToolCardMessage } from '../ToolCallCard';
 import { initChatI18n, renderWithProviders } from './chatTestUtils';
 
 const EXPORT_OK_SUMMARY = JSON.stringify({
@@ -368,7 +368,7 @@ describe('tool activity', () => {
     initChatI18n();
     renderWithProviders(<ToolActivityGroup messages={Array.from({ length: 8 }, (_, i) => ({ ...step, id: String(i), invocationId: String(i), summary: `resumen ${i}` }))} />);
     expect(screen.queryByText('⎿ resumen 3')).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: '+3' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Mostrar 3 pasos más' }));
     expect(screen.getByText('⎿ resumen 3')).toBeVisible();
   });
 });
@@ -405,4 +405,30 @@ it('announces a completed activity step without showing its status', () => {
   const row = screen.getByRole('button', { name: /Revisar estado del flujo.*Completado/ });
   const status = row.querySelector('.sr-only');
   expect(status).toHaveTextContent('Completado');
+});
+
+
+it('limits and sanitizes parameters only when the activity step opens', async () => {
+  const args = Object.fromEntries(Array.from({ length: 23 }, (_, i) => [`k${i}`, i === 0 ? 'X'.repeat(310) + '\u202e' : i === 1 ? 'a\u0000\u202eb' : i]));
+  const { container } = renderWithProviders(<ToolActivityGroup messages={[{ ...step, args }]} />);
+  expect(container.querySelectorAll('tr')).toHaveLength(0);
+  await userEvent.click(screen.getByRole('button', { name: /resumen completo/ }));
+  expect(container.querySelectorAll('tr')).toHaveLength(20);
+  expect(container.querySelector('td')?.textContent).toBe('X'.repeat(300));
+  expect(screen.getByText('a��b')).toBeVisible();
+  expect(screen.getByText('+3')).toBeVisible();
+});
+
+it('moves focus to the first newly revealed step', async () => {
+  renderWithProviders(<ToolActivityGroup messages={Array.from({ length: 8 }, (_, i) => ({ ...step, id: String(i), summary: `paso ${i}` }))} />);
+  await userEvent.click(screen.getByRole('button', { name: 'Mostrar 3 pasos más' }));
+  expect(screen.getByRole('button', { name: /paso 3/ })).toHaveFocus();
+});
+
+it('keeps the original floating confirmation presentation', () => {
+  const message = { kind: 'confirmation' as const, id: 'c', invocationId: 'c', name: 'get_workflow_state', argsSummary: 'impacto', resolution: 'pending' as const };
+  const { container } = renderWithProviders(<ConfirmationCard message={message} busy={false} onApprove={() => {}} onDeny={() => {}} />);
+  expect(container.querySelector('[data-slot="ai-chat-confirmation-card"]')).toHaveClass('rounded-lg');
+  expect(container.querySelector('[data-slot="ai-chat-confirmation-card"]')).not.toHaveClass('min-w-0');
+  expect(screen.getAllByText('get_workflow_state')).toHaveLength(1);
 });

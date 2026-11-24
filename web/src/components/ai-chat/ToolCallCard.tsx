@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   downloadExportFile,
@@ -140,7 +140,7 @@ export function ToolCallCard({ message }: { message: ToolCardMessage }) {
   );
 }
 
-function ActivityStep({ message }: { message: ToolCardMessage }) {
+function ActivityStep({ message, focusRef }: { message: ToolCardMessage; focusRef?: React.Ref<HTMLButtonElement> }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const id = useId();
@@ -149,7 +149,7 @@ function ActivityStep({ message }: { message: ToolCardMessage }) {
     ? t('aiChat.tool.duration_ms', { ms: message.durationMs })
     : t('aiChat.tool.duration_s', { s: (message.durationMs / 1000).toFixed(1) });
   return <div className="min-w-0">
-    <button type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((value) => !value)} className="flex w-full min-w-0 items-center gap-2 text-left focus-visible:ring-2 focus-visible:ring-accent">
+    <button ref={focusRef} type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((value) => !value)} className="flex w-full min-w-0 items-center gap-2 text-left focus-visible:ring-2 focus-visible:ring-accent">
       <span className="shrink-0">{expanded ? '▾' : '▸'}</span>
       {message.status === 'running' && <Spinner size="sm" />}
       <span className="shrink-0">{t(`aiChat.activity.names.${message.name}`, { defaultValue: message.name })}</span>
@@ -159,28 +159,35 @@ function ActivityStep({ message }: { message: ToolCardMessage }) {
       {duration && <span className="shrink-0">{duration}</span>}
       {message.summary && <span title={message.summary} className="min-w-0 truncate">⎿ {message.summary}</span>}
     </button>
-    <div id={id} hidden={!expanded} className="min-w-0 pl-4">
+    {expanded && <div id={id} className="min-w-0 pl-4">
       <p className="break-all font-mono">{message.name}</p>
       <p>{duration ?? t('aiChat.tool.no_duration')}</p>
-      {message.args && <><p>{t('aiChat.tool.params')}</p><table className="w-full table-fixed"><tbody>{Object.entries(message.args).map(([key, value]) => <tr key={key}><th className="break-all text-left">{key}</th><td className="break-all">{formatParameter(value)}</td></tr>)}</tbody></table></>}
+      {message.args && <><p>{t('aiChat.tool.params')}</p><table className="w-full table-fixed"><tbody>{Object.entries(message.args).slice(0, 20).map(([key, value]) => <tr key={key}><th className="break-all text-left">{sanitizeParameter(key)}</th><td className="break-all">{formatParameter(value)}</td></tr>)}</tbody></table>{Object.keys(message.args).length > 20 && <p>+{Object.keys(message.args).length - 20}</p>}</>}
       {message.summary && <p className="whitespace-pre-wrap break-words">{message.summary}</p>}
       {message.status === 'error' && message.error && <p className="whitespace-pre-wrap break-words text-[var(--status-nok-text)]">{message.error}</p>}
       {message.status === 'ok' && <ExportDownloadButton message={message} />}
-    </div>
+    </div>}
   </div>;
 }
 
+function sanitizeParameter(value: string): string {
+  return value.replace(/[\p{Cc}\p{Cf}]/gu, '\uFFFD').slice(0, 300);
+}
+
 function formatParameter(value: unknown): string {
-  if (value !== null && typeof value === 'object') {
-    try { return (JSON.stringify(value) ?? String(value)).slice(0, 300); } catch { return String(value).slice(0, 300); }
+  try {
+    return sanitizeParameter(typeof value === 'string' ? value : JSON.stringify(value) ?? String(value));
+  } catch {
+    return sanitizeParameter(String(value));
   }
-  return String(value);
 }
 
 export function ToolActivityGroup({ messages }: { messages: ToolCardMessage[] }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [showAll, setShowAll] = useState(false);
+  const revealedRef = useRef<HTMLButtonElement>(null);
+  const focusRevealed = useRef(false);
   const id = useId();
   const unknown = (m: ToolCardMessage) => m.status === 'error' && m.invocationId.startsWith('restored_') && !m.error?.trim();
   const error = messages.some((m) => m.status === 'error' && !unknown(m));
@@ -192,14 +199,15 @@ export function ToolActivityGroup({ messages }: { messages: ToolCardMessage[] })
       <span aria-hidden="true">{expanded ? '▾' : '▸'}</span><span>{t('aiChat.activity.title')} · {messages.length}</span><span className={error ? 'text-[var(--status-nok-text)]' : ''}>{error ? t('aiChat.tool.status_error') : running ? t('aiChat.activity.running') : hasUnknown ? t('aiChat.activity.unrecorded') : t('aiChat.tool.status_ok')}</span>
     </button>
     <div id={id} hidden={!expanded} className="min-w-0 space-y-1 pt-2">
-      {(collapsed ? messages.slice(0, 3) : messages).map((m) => <ActivityStep key={m.id} message={m} />)}
-      {collapsed && <><button type="button" onClick={() => setShowAll(true)}>+{messages.length - 5}</button>{messages.slice(-2).map((m) => <ActivityStep key={m.id} message={m} />)}</>}
+      {(collapsed ? messages.slice(0, 3) : messages).map((m, index) => <ActivityStep key={m.id} message={m} focusRef={index === 3 ? (node) => { revealedRef.current = node; if (node && focusRevealed.current) { node.focus(); focusRevealed.current = false; } } : undefined} />)}
+      {collapsed && <><button type="button" aria-label={t('aiChat.activity.show_more', { count: messages.length - 5 })} onClick={() => { focusRevealed.current = true; setShowAll(true); }}>+{messages.length - 5}</button>{messages.slice(-2).map((m) => <ActivityStep key={m.id} message={m} />)}</>}
     </div>
   </div>;
 }
 
 interface ConfirmationCardProps {
   message: ConfirmationCardMessage;
+  presentation?: 'floating' | 'embedded';
   busy: boolean;
   onApprove: () => void;
   onDeny: () => void;
@@ -213,6 +221,7 @@ interface ConfirmationCardProps {
  */
 export function ConfirmationCard({
   message,
+  presentation = 'floating',
   busy,
   onApprove,
   onDeny,
@@ -222,20 +231,19 @@ export function ConfirmationCard({
     <div
       data-slot="ai-chat-confirmation-card"
       data-resolution={message.resolution}
-      className="min-w-0 rounded-lg border border-[var(--color-status-warning)] bg-surface px-3 py-2 text-xs"
+      className={`${presentation === 'embedded' ? 'min-w-0 ' : ''}rounded-lg border border-[var(--color-status-warning)] bg-surface px-3 py-2 text-xs`}
       role="alertdialog"
       aria-label={t('aiChat.confirm.title')}
     >
-      <p data-slot="ai-chat-confirmation-title" className="font-semibold text-text-primary">
+      <p data-slot={presentation === 'embedded' ? "ai-chat-confirmation-title" : undefined} className="font-semibold text-text-primary">
         {t('aiChat.confirm.title')}
       </p>
-      <p className="mt-1 break-words font-medium text-text-primary">{t(`aiChat.activity.names.${message.name}`, { defaultValue: message.name })}</p>
-      <p className="break-all font-mono text-text-muted">{message.name}</p>
+      {presentation === 'embedded' ? <><p className="mt-1 break-words font-medium text-text-primary">{t(`aiChat.activity.names.${message.name}`, { defaultValue: message.name })}</p><p className="break-all font-mono text-text-muted">{message.name}</p></> : <p className="mt-1 font-medium text-text-primary">{message.name}</p>}
       <p className="mt-1 whitespace-pre-wrap break-words text-text-secondary">
         {message.argsSummary}
       </p>
       {message.resolution === 'pending' ? (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className={presentation === 'embedded' ? "mt-2 flex flex-wrap gap-2" : "mt-2 flex gap-2"}>
           <button
             type="button"
             data-testid="ai-chat-confirm-approve"

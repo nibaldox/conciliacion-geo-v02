@@ -1840,6 +1840,7 @@
       "streaming": "El asistente está trabajando…"
     },
     "activity": {
+      "show_more": "Mostrar {{count}} pasos más",
       "title": "Actividad del agente",
       "running": "En curso",
       "unrecorded": "Sin estado registrado",

@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ChatPanel } from '../ChatPanel';
+import * as Markdown from '../MarkdownMessage';
 import { historyToChatMessages, useAIChat, type ChatMessage } from '../../../stores/aiChat';
 import { useSession } from '../../../stores/session';
 import { renderWithProviders, initChatI18n } from './chatTestUtils';
@@ -122,7 +123,7 @@ it('muestra la descarga al abrir el paso y conserva foco y posición de lectura'
   expect(group).toHaveAttribute('aria-expanded', 'true');
   const step = screen.getByRole('button', { name: /Exportar informe/ });
   expect(step).toHaveAttribute('aria-expanded', 'false');
-  expect(screen.queryByTestId('ai-chat-tool-download')).not.toBeVisible();
+  expect(screen.queryByTestId('ai-chat-tool-download')).toBeNull();
   step.focus();
   await userEvent.keyboard(' ');
   expect(step).toHaveFocus();
@@ -306,4 +307,24 @@ it('renderiza chips reales solo en el mensaje del agente embebido', () => {
   expect(within(agent).getByRole('button', { name: /banco 2/i })).toBeVisible();
   expect(within(user).queryAllByRole('button')).toHaveLength(0);
   expect(user).toHaveTextContent('S-37 presenta banco 2');
+});
+
+
+it('does not render earlier messages again when the last message streams', () => {
+  const spy = vi.spyOn(Markdown, 'MarkdownMessage');
+  const first: ChatMessage = { kind: 'agent', id: 'first', text: 'primero' };
+  const last: ChatMessage = { kind: 'agent', id: 'last', text: 'segundo' };
+  useAIChat.setState({ messages: [first, last] });
+  renderWithProviders(<ChatPanel presentation="embedded" />);
+  const before = spy.mock.calls.filter(([props]) => props.content === 'primero').length;
+  act(() => useAIChat.setState({ messages: [first, { ...last, text: 'segundo token' }] }));
+  expect(spy.mock.calls.filter(([props]) => props.content === 'primero')).toHaveLength(before);
+  spy.mockRestore();
+});
+
+it('uses a trash icon for the clear action', () => {
+  renderWithProviders(<ChatPanel presentation="embedded" />);
+  const clear = screen.getByTestId('ai-chat-clear');
+  expect(clear.querySelector('svg')).not.toBeNull();
+  expect(clear).not.toHaveTextContent('×');
 });

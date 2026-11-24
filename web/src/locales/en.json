@@ -1840,6 +1840,7 @@
       "streaming": "The assistant is working…"
     },
     "activity": {
+      "show_more": "Show {{count}} more steps",
       "title": "Agent activity",
       "running": "In progress",
       "unrecorded": "No status recorded",

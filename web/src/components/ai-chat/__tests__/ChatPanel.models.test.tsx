@@ -694,3 +694,13 @@ describe('ChatPanel — honest manual and override status', () => {
     );
   });
 });
+
+
+it('shows the model selection instruction visibly in embedded mode', async () => {
+  vi.spyOn(useAIChat.getState(), 'init').mockResolvedValue();
+  useAIChat.setState({ providerStateLoaded: true, providerState: providersBody({ chat_models: modelsState(['alpha', 'beta']) }) });
+  renderWithProviders(<ChatPanel presentation="embedded" />);
+  const notice = await screen.findByTestId('ai-chat-models-notice');
+  expect(notice).toBeVisible();
+  expect(notice).not.toHaveClass('sr-only');
+});

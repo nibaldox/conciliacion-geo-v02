@@ -852,3 +852,12 @@ describe('tool metadata', () => {
     expect(card).not.toHaveProperty('args');
     expect(card).not.toHaveProperty('durationMs');
   });
+
+
+it('rejects non-plain tool arguments from the stream', () => {
+  for (const args of ['bad', [], null, new Date()]) {
+    useAIChat.getState().applyAgentEvent({ type: 'tool_call', invocation_id: 'bad-' + String(args), name: 'x', args: args as unknown as Record<string, unknown>, requires_confirmation: false });
+    const message = useAIChat.getState().messages.at(-1);
+    expect(message?.kind === 'tool' && message.args).toBeNull();
+  }
+});
