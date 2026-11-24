@@ -2,17 +2,46 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ComparisonResult } from '../../../api/types';
 import { CompliancePlanView } from '../CompliancePlanView';
+import * as geometry from '../planGeometry';
+import * as colors from '../planColors';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../../../stores/session', () => ({ useSession: (selector: (state: { topoMeshId: string }) => unknown) => selector({ topoMeshId: 'mesh' }) }));
-vi.mock('../../../api/hooks', () => ({
-  useMeshVertices: () => ({ data: { x: [0, 100], y: [0, 100], z: [0, 1] } }),
+vi.mock('../../../api/hooks', () => { const vertices = { x: [0, 100], y: [0, 100], z: [0, 1] }; return ({
+  useMeshVertices: () => ({ data: vertices }),
   useSections: () => ({ data: [{ id: '1', name: 'A', origin: [20, 20], azimuth: 0 }, { id: '2', name: 'B', origin: [60, 20], azimuth: 0 }, { id: '3', name: 'C', origin: [20, 60], azimuth: 0 }, { id: '4', name: 'D', origin: [60, 60], azimuth: 0 }] }),
   useSectionProfiles: (ids: string[]) => ids.map(() => ({ data: { topo: { distances: [0, 50], elevations: [1, 2] } } })),
-}));
+}); });
 vi.mock('../planGeometry', async (importOriginal) => ({ ...await importOriginal<typeof import('../planGeometry')>(), createSurfaceRaster: () => 'raster' }));
 const results = [{ section: 'A', height_status: 'CUMPLE', section_score: 50 }] as ComparisonResult[];
 const statuses = new Map([['A', 'CUMPLE' as const]]);
 describe('hero plan', () => {
+  it('renders only changed section groups on hover', () => {
+    const rows = ['A', 'B', 'C', 'D'].map((section) => ({ section }) as ComparisonResult);
+    const { container } = render(<CompliancePlanView variant="hero" results={rows} statuses={statuses} />);
+    const a = container.querySelector('[data-section-name="A"]')!;
+    const b = container.querySelector('[data-section-name="B"]')!;
+    const spy = vi.spyOn(colors, 'planStatusStrokeDash');
+    fireEvent.mouseEnter(a);
+    // Four legend swatches plus the newly focused group.
+    expect(spy).toHaveBeenCalledTimes(5);
+    spy.mockClear();
+    fireEvent.mouseLeave(a);
+    fireEvent.mouseEnter(b);
+    // Two commits, four legend swatches each, and one group per commit.
+    expect(spy).toHaveBeenCalledTimes(10);
+    spy.mockRestore();
+  });
+  it('does not reproject every section when hovering', () => {
+    const spy = vi.spyOn(geometry, 'projectPlanPoint');
+    const rows = ['A', 'B', 'C', 'D'].map((section) => ({ section }) as ComparisonResult);
+    const { container } = render(<CompliancePlanView variant="hero" results={rows} statuses={statuses} />);
+    spy.mockClear();
+    fireEvent.mouseEnter(container.querySelector('[data-section-name="A"]')!);
+    fireEvent.mouseLeave(container.querySelector('[data-section-name="A"]')!);
+    fireEvent.mouseEnter(container.querySelector('[data-section-name="B"]')!);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
   it('overlays only the selected visible section and tracks selection and zoom', () => {
     const rows = [...results, { section: 'B', height_status: 'NO_CUMPLE', section_score: 30 } as ComparisonResult];
     const states = new Map([['A', 'CUMPLE' as const], ['B', 'NO_CUMPLE' as const]]);

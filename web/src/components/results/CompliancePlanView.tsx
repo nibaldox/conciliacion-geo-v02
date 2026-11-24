@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import type { PointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMeshVertices, useSectionProfiles, useSections } from '../../api/hooks';
 import type { GuideCurve } from '../../stores/session';
 import { selectGuideLine } from './planGuideLine';
-import type { ComparisonResult, SectionResponse } from '../../api/types';
+import type { ComparisonResult } from '../../api/types';
 import { useSession } from '../../stores/session';
 import type { BenchStatus } from './ProfileView/domain/types';
 import { Spinner } from '../ui/Spinner';
@@ -28,22 +28,42 @@ function GuideLine({ guide, projection }: { guide: GuideCurve; projection: Proje
   return <polyline data-guide-line="" points={points.map((point) => projectPlanPoint(...point, projection).join(',')).join(' ')} fill="none" stroke="var(--color-accent-bright)" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" aria-hidden="true" />;
 }
 
-function PlanSection({ section, points, projection, status, labelPosition }: { section: SectionResponse; points: [number, number][]; projection: Projection; status?: BenchStatus; labelPosition: [number, number] }) {
+const PlanSection = memo(function PlanSection({ name, coordinates, firstX, firstY, endX, endY, status, labelX, labelY }: { name: string; coordinates: string; firstX: number; firstY: number; endX: number; endY: number; status?: BenchStatus; labelX: number; labelY: number }) {
   const { t } = useTranslation();
   const state = status ?? 'UNKNOWN';
   const color = state === 'UNKNOWN' ? 'var(--color-text-muted)' : state === 'CUMPLE' ? 'var(--status-ok-text)' : state === 'FUERA' ? 'var(--status-warn-text)' : 'var(--status-nok-text)';
-  const label = `${section.name} · ${state === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + state.toLowerCase())}`;
-  const projected = points.map((point) => projectPlanPoint(...point, projection));
-  const endpoint = labelPosition[0] < 500 ? projected[0]! : projected[projected.length - 1]!;
+  const label = `${name} · ${state === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + state.toLowerCase())}`;
+  const endpoint = labelX < 500 ? [firstX, firstY] : [endX, endY];
   return (
-    <g data-section-name={section.name} data-compliance-status={state} data-status={state}>
+    <g data-section-name={name} data-compliance-status={state} data-status={state}>
       <title>{label}</title>
-      <polyline points={projected.map((point) => point.join(',')).join(' ')} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeDasharray={planStatusStrokeDash(state)} />
-      <line x1={endpoint[0]} y1={endpoint[1]} x2={labelPosition[0]} y2={labelPosition[1] - 4} stroke={color} strokeWidth="1" opacity="0.45" />
-      <text x={labelPosition[0]} y={labelPosition[1]} textAnchor={labelPosition[0] < 500 ? 'end' : 'start'} fill={color} fontSize="14" fontWeight="600" stroke="var(--color-surface-sunken)" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{section.name}</text>
+      <polyline points={coordinates} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeDasharray={planStatusStrokeDash(state)} />
+      <line x1={endpoint[0]} y1={endpoint[1]} x2={labelX} y2={labelY - 4} stroke={color} strokeWidth="1" opacity="0.45" />
+      <text x={labelX} y={labelY} textAnchor={labelX < 500 ? 'end' : 'start'} fill={color} fontSize="14" fontWeight="600" stroke="var(--color-surface-sunken)" strokeWidth="3" paintOrder="stroke" strokeLinejoin="round">{name}</text>
     </g>
   );
+});
+
+interface HeroSectionProps {
+  name: string; status: PlanStatusKey; statusLabel: string; coordinates: string;
+  endX: number; endY: number; color: string; colorBy: PlanColorBy;
+  enabled: boolean; selected: boolean; focused: boolean; opacity: number; zoom: number;
+  onEnter: (name: string, event: React.MouseEvent<SVGGElement>) => void;
+  onMove: (event: React.MouseEvent<SVGGElement>) => void;
+  onLeave: () => void; onSelect: (name: string, enabled: boolean, keyboard: boolean) => void;
 }
+const HeroSection = memo(function HeroSection({ name, status, statusLabel, coordinates, endX, endY, color, colorBy, enabled, selected, focused, opacity, zoom, onEnter, onMove, onLeave, onSelect }: HeroSectionProps) {
+  return <g data-section-name={name} data-status={status} opacity={opacity}
+    role={enabled ? 'button' : undefined} tabIndex={enabled ? 0 : undefined} aria-label={enabled ? `${name} · ${statusLabel}` : undefined} aria-pressed={enabled ? selected : undefined}
+    onMouseEnter={(event) => { if (enabled) onEnter(name, event); }} onMouseMove={onMove} onMouseLeave={onLeave}
+    onClick={(event) => { event.stopPropagation(); onSelect(name, enabled, false); }}
+    onKeyDown={(event) => { if (enabled && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelect(name, true, true); } }}>
+    {selected && <polyline points={coordinates} fill="none" stroke="var(--color-text-primary)" strokeWidth="9" vectorEffect="non-scaling-stroke" strokeLinecap="round" />}
+    <polyline data-plan-line="" points={coordinates} fill="none" stroke={color} strokeWidth={focused ? 5 : 3} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeDasharray={colorBy === 'status' ? planStatusStrokeDash(status) : undefined} />
+    {focused && <text x={endX} y={endY} dx={5 / zoom} dy={-5 / zoom} fill="var(--color-text-primary)" fontSize={14 / zoom} stroke="var(--color-surface-sunken)" strokeWidth={3 / zoom} paintOrder="stroke">{name}</text>}
+    <polyline points={coordinates} fill="none" stroke="transparent" strokeWidth="14" vectorEffect="non-scaling-stroke" pointerEvents={enabled ? 'stroke' : 'none'} />
+  </g>;
+});
 
 export interface CompliancePlanViewProps {
   results: readonly ComparisonResult[];
@@ -62,15 +82,18 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
   const [hovered, setHovered] = useState<string | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const tooltipPosition = useRef({ x: 0, y: 0 });
-  const moveTooltip = (event: React.MouseEvent<SVGGElement>) => {
+  const moveTooltip = useCallback((event: React.MouseEvent<SVGGElement>) => {
     const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
     if (!rect) return;
     tooltipPosition.current = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     if (tooltipRef.current) { tooltipRef.current.style.left = `${tooltipPosition.current.x + 12}px`; tooltipRef.current.style.top = `${tooltipPosition.current.y + 12}px`; }
-  };
+  }, []);
+  const enterSection = useCallback((name: string, event: React.MouseEvent<SVGGElement>) => { moveTooltip(event); setHovered(name); }, [moveTooltip]);
+  const leaveSection = useCallback(() => setHovered(null), []);
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
   const drag = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
+  const selectSection = useCallback((name: string, enabled: boolean, keyboard: boolean) => { if (enabled && (keyboard || !suppressClick.current)) onSelectSection?.(name); if (!keyboard) suppressClick.current = false; }, [onSelectSection]);
   const svgRef = useCallback((node: SVGSVGElement | null) => {
     if (!node) return;
     const handleWheel = (event: WheelEvent) => {
@@ -103,6 +126,27 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
   const [xMin, yMin, xMax, yMax] = frameBounds ?? [];
   const projection = useMemo(() => vertices ? createPlanProjection(vertices, !fullSurface && xMin !== undefined && yMin !== undefined && xMax !== undefined && yMax !== undefined ? [[xMin, yMin], [xMax, yMax]] : [], variant === 'panel') : null, [vertices, fullSurface, xMin, yMin, xMax, yMax, variant]);
   const raster = useSurfaceRaster(vertices, projection);
+  // Section/profile hooks may return fresh wrapper arrays on every render; the
+  // coordinate key preserves the cached projections until actual geometry changes.
+  const geometryKey = JSON.stringify(lines.map(({ section, points }) => [section.id, points]), (_key, value: unknown) => typeof value === 'number' && !Number.isFinite(value) ? String(value) : value);
+  const projectedLines = useMemo(() => {
+    return new Map(lines.map(({ section, points }) => {
+      const projected = projection ? points.map((point) => projectPlanPoint(...point, projection)) : [];
+      return [section.id, { coordinates: projected.map((point) => point.join(',')).join(' '), first: projected[0], endpoint: projected[projected.length - 1] }] as const;
+    }));
+  // geometryKey represents the full section geometry; wrappers may be unstable.
+  }, [geometryKey, projection]);
+  const sectionValues = useMemo(() => {
+    const values = new Map<string, { status: PlanStatusKey; score: number | null; color: string }>();
+    for (const row of results) {
+      if (values.has(row.section)) continue;
+      const status = statuses.get(row.section) ?? 'UNKNOWN';
+      const score = sectionScore(results, row.section);
+      const value = colorBy === 'status' ? status : colorBy === 'score' ? (score == null ? null : score / 100) : sectionParameterPassRate(results, row.section, colorBy);
+      values.set(row.section, { status, score, color: planColor(colorBy, value) });
+    }
+    return values;
+  }, [results, colorBy, statuses]);
   const sorted = [...lines].sort((a, b) => a.points[a.points.length - 1]![0] - b.points[b.points.length - 1]![0]);
   const half = Math.ceil(sorted.length / 2);
   const labelPositions = new Map<string, [number, number]>();
@@ -129,7 +173,7 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
     };
     const activeName = hovered ?? selectedSection;
     const activeStatus = activeName ? statuses.get(activeName) ?? 'UNKNOWN' : 'UNKNOWN';
-    const activeScore = activeName ? sectionScore(results, activeName) : null;
+    const activeScore = activeName ? sectionValues.get(activeName)?.score ?? null : null;
     const choices = [10, 20, 50, 100, 200, 500];
     const desired = projection ? 120 / (projection.scale * view.zoom) : 10;
     const scaleMeters = choices.reduce((best, value) => Math.abs(value - desired) < Math.abs(best - desired) ? value : best, choices[0]!);
@@ -140,32 +184,18 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
           onPointerMove={move} onPointerUp={() => { suppressClick.current = drag.current?.moved ?? false; drag.current = null; }} onPointerCancel={() => { drag.current = null; }}
           onClick={() => { if (!suppressClick.current) onSelectSection?.(null); suppressClick.current = false; }}>
           <image href={raster || undefined} opacity={raster ? 1 : 0} className="transition-opacity duration-150 motion-reduce:transition-none" width="1000" height="600" />
-          {lines.map(({ section, points }) => {
-            const status = statuses.get(section.name) ?? 'UNKNOWN';
+          {lines.map(({ section }) => {
+            const values = sectionValues.get(section.name)!;
+            const { status, color } = values;
             const enabled = visibleStatuses?.has(status) ?? true;
             const selected = section.name === selectedSection;
-            const focused = hovered === section.name || selected;
-            const value = colorBy === 'status' ? status : colorBy === 'score' ? (() => { const score = sectionScore(results, section.name); return score == null ? null : score / 100; })() : sectionParameterPassRate(results, section.name, colorBy);
-            const color = planColor(colorBy, value);
-            const projected = points.map((point) => projectPlanPoint(...point, projection));
-            const coordinates = projected.map((point) => point.join(',')).join(' ');
-            const endpoint = projected[projected.length - 1]!;
+            const projected = projectedLines.get(section.id)!;
+            const endpoint = projected.endpoint!;
             const statusLabel = status === 'UNKNOWN' ? t('plan_view.no_score') : t('status.' + status.toLowerCase());
-            return <g key={section.id} data-section-name={section.name} data-status={status} opacity={!enabled ? 0.18 : selectedSection && !selected ? 0.55 : 1}
-              role={enabled ? 'button' : undefined} tabIndex={enabled ? 0 : undefined} aria-label={enabled ? `${section.name} · ${statusLabel}` : undefined} aria-pressed={enabled ? selected : undefined}
-              onMouseEnter={(event) => { if (!enabled) return; moveTooltip(event); setHovered(section.name); }}
-              onMouseMove={moveTooltip}
-              onMouseLeave={() => setHovered(null)}
-              onClick={(event) => { event.stopPropagation(); if (enabled && !suppressClick.current) onSelectSection?.(section.name); suppressClick.current = false; }}
-              onKeyDown={(event) => { if (enabled && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onSelectSection?.(section.name); } }}>
-              {selected && <polyline points={coordinates} fill="none" stroke="var(--color-text-primary)" strokeWidth="9" vectorEffect="non-scaling-stroke" strokeLinecap="round" />}
-              <polyline data-plan-line="" points={coordinates} fill="none" stroke={color} strokeWidth={focused ? 5 : 3} vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeDasharray={colorBy === 'status' ? planStatusStrokeDash(status) : undefined} />
-              {focused && <text x={endpoint[0]} y={endpoint[1]} dx={5 / view.zoom} dy={-5 / view.zoom} fill="var(--color-text-primary)" fontSize={14 / view.zoom} stroke="var(--color-surface-sunken)" strokeWidth={3 / view.zoom} paintOrder="stroke">{section.name}</text>}
-              <polyline points={coordinates} fill="none" stroke="transparent" strokeWidth="14" vectorEffect="non-scaling-stroke" pointerEvents={enabled ? 'stroke' : 'none'} />
-            </g>;
+            return <HeroSection key={section.id} name={section.name} status={status} statusLabel={statusLabel} coordinates={projected.coordinates} endX={endpoint[0]} endY={endpoint[1]} color={color} colorBy={colorBy} enabled={enabled} selected={selected} focused={hovered === section.name || selected} opacity={!enabled ? 0.18 : selectedSection && !selected ? 0.55 : 1} zoom={view.zoom} onEnter={enterSection} onMove={moveTooltip} onLeave={leaveSection} onSelect={selectSection} />;
           })}
           {guideCurve && <GuideLine guide={guideCurve} projection={projection} />}
-          {lines.filter(({ section }) => section.name === selectedSection && (visibleStatuses?.has(statuses.get(section.name) ?? 'UNKNOWN') ?? true)).map(({ section, points }) => <polyline key={section.id} data-selected-section-line="" points={points.map((point) => projectPlanPoint(...point, projection).join(',')).join(' ')} fill="none" stroke="var(--color-accent-bright)" strokeWidth="3" strokeDasharray="7 5" vectorEffect="non-scaling-stroke" strokeLinecap="round" pointerEvents="none" aria-hidden="true" />)}
+          {lines.filter(({ section }) => section.name === selectedSection && (visibleStatuses?.has(statuses.get(section.name) ?? 'UNKNOWN') ?? true)).map(({ section }) => <polyline key={section.id} data-selected-section-line="" points={projectedLines.get(section.id)!.coordinates} fill="none" stroke="var(--color-accent-bright)" strokeWidth="3" strokeDasharray="7 5" vectorEffect="non-scaling-stroke" strokeLinecap="round" pointerEvents="none" aria-hidden="true" />)}
         </svg>
         <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
           <g fill="var(--color-text-primary)" stroke="var(--color-text-primary)" strokeWidth="2" fontSize="16"><text x="40" y="477" stroke="none">N</text><path d="M 45 515 L 45 484 M 38 494 L 45 484 L 52 494" fill="none"/><path d={`M 40 552 v -6 h ${scaleMeters * projection.scale * view.zoom} v 6 M 40 549 h ${scaleMeters * projection.scale * view.zoom}`} fill="none"/><text x="40" y="575" stroke="none">{scaleMeters} m</text></g>
@@ -210,7 +240,11 @@ export function CompliancePlanView({ results, frameResults, statuses, variant = 
           })}
           <text x="500" y="596" textAnchor="middle" fill="var(--color-text-secondary)" fontSize="13">{t('plan_view.east')}</text>
           <text transform="translate(15 300) rotate(-90)" textAnchor="middle" fill="var(--color-text-secondary)" fontSize="13">{t('plan_view.north')}</text>
-          {lines.map(({ section, points }) => <PlanSection key={section.id} section={section} points={points} projection={projection} status={statuses.get(section.name)} labelPosition={labelPositions.get(section.id)!} />)}
+          {lines.map(({ section }) => {
+            const projected = projectedLines.get(section.id)!;
+            const [labelX, labelY] = labelPositions.get(section.id)!;
+            return <PlanSection key={section.id} name={section.name} coordinates={projected.coordinates} firstX={projected.first![0]} firstY={projected.first![1]} endX={projected.endpoint![0]} endY={projected.endpoint![1]} status={statuses.get(section.name)} labelX={labelX} labelY={labelY} />;
+          })}
         </svg>
       )}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
