@@ -19,7 +19,32 @@ function initialWidth() {
   }
 }
 
-export function AgentWorkspaceShell({ children, canvasHeader }: { children: ReactNode; canvasHeader?: ReactNode }) {
+// The left rail may stay open in copilot only if the shell keeps room for the
+// canvas minimum (480 px) plus the chat minimum (320 px): 800 px. The shell's
+// width is the viewport minus the expanded rail, whose width comes from
+// useSidebarResize (persisted in `sidebar_width`, 360 px by default).
+const MIN_SHELL_WITH_RAIL = 480 + 320;
+const RAIL_WIDTH_KEY = 'sidebar_width';
+function railWidth() {
+  try {
+    const value = parseInt(localStorage.getItem(RAIL_WIDTH_KEY) ?? '', 10);
+    return Number.isFinite(value) && value >= 300 ? Math.min(value, 520) : 360;
+  } catch {
+    return 360;
+  }
+}
+function roomForRail() {
+  return window.innerWidth - railWidth() >= MIN_SHELL_WITH_RAIL;
+}
+
+interface AgentWorkspaceShellProps {
+  children: ReactNode;
+  canvasHeader?: ReactNode;
+  /** True while the initial data is still being entered (workflow not complete). */
+  dataEntry?: boolean;
+}
+
+export function AgentWorkspaceShell({ children, canvasHeader, dataEntry = false }: AgentWorkspaceShellProps) {
   const { t } = useTranslation();
   const actualMode = useWorkspaceMode((s) => s.mode);
   const lastReason = useWorkspaceMode((s) => s.lastReason);
@@ -82,10 +107,14 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
     observer.observe(node.children[1]);
     return () => observer.disconnect();
   }, []);
+  // Acts only on transitions of `mode` or `dataEntry`, so a manual collapse or
+  // expansion between transitions is respected. In copilot the rail stays open
+  // while the initial data is entered (the next step lives in the rail) and
+  // collapses once the analysis is complete or when there is no room for it.
   useLayoutEffect(() => {
     const desktop = typeof matchMedia !== 'function' || !matchMedia('(max-width: 767px)').matches;
-    if (desktop) setSidebarCollapsed(mode === 'copilot');
-  }, [mode, setSidebarCollapsed]);
+    if (desktop) setSidebarCollapsed(mode === 'copilot' && (!dataEntry || !roomForRail()));
+  }, [mode, dataEntry, setSidebarCollapsed]);
   useLayoutEffect(() => {
     const node = grid.current;
     const oldMode = previous.current;

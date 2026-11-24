@@ -29,6 +29,68 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('AgentWorkspaceShell', () => {
+  it('keeps the rail open when entering copilot during data entry', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(useSession.getState().sidebarCollapsed).toBe(false);
+  });
+  it('collapses on entry when complete', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    render(<AgentWorkspaceShell dataEntry={false}><div>workspace</div></AgentWorkspaceShell>);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(useSession.getState().sidebarCollapsed).toBe(true);
+  });
+  it('collapses once on completion and respects a manual expansion across renders', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    const { rerender } = render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    rerender(<AgentWorkspaceShell dataEntry={false}><div>workspace</div></AgentWorkspaceShell>);
+    expect(useSession.getState().sidebarCollapsed).toBe(true);
+    act(() => useSession.getState().setSidebarCollapsed(false));
+    rerender(<AgentWorkspaceShell dataEntry={false}><div>changed</div></AgentWorkspaceShell>);
+    expect(useSession.getState().sidebarCollapsed).toBe(false);
+  });
+  it('expands when completion becomes data entry', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    const { rerender } = render(<AgentWorkspaceShell dataEntry={false}><div>workspace</div></AgentWorkspaceShell>);
+    rerender(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    expect(useSession.getState().sidebarCollapsed).toBe(false);
+  });
+  it('respects a manual collapse during data entry across renders', () => {
+    vi.stubGlobal('innerWidth', 1440);
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    const { rerender } = render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    act(() => useSession.getState().setSidebarCollapsed(true));
+    rerender(<AgentWorkspaceShell dataEntry><div>changed</div></AgentWorkspaceShell>);
+    expect(useSession.getState().sidebarCollapsed).toBe(true);
+  });
+  it('collapses on entry when available width is insufficient', () => {
+    vi.stubGlobal('innerWidth', 1024);
+    render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(useSession.getState().sidebarCollapsed).toBe(true);
+  });
+  it('measures the threshold against the stored rail width', () => {
+    vi.stubGlobal('innerWidth', 1200);
+    const { unmount } = render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(useSession.getState().sidebarCollapsed).toBe(false);
+    unmount();
+    act(() => useWorkspaceMode.getState().focusConversation());
+    localStorage.setItem('sidebar_width', '520');
+    render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(useSession.getState().sidebarCollapsed).toBe(true);
+  });
+  it('does not change the rail on mobile', () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('max-width'), addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    useSession.getState().setSidebarCollapsed(true);
+    render(<AgentWorkspaceShell dataEntry><div>workspace</div></AgentWorkspaceShell>);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(useSession.getState().sidebarCollapsed).toBe(true);
+  });
   it('reports visibility outside the shell and across keep-alive mode changes', () => {
     useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
     render(<><VisibilityProbe /><AgentWorkspaceShell><VisibilityProbe /></AgentWorkspaceShell></>);

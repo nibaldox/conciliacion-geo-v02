@@ -6,10 +6,21 @@ import { ViewsToolbar } from './ViewsToolbar';
 import { DemoBanner } from '../demo/DemoBanner';
 import { useSession } from '../../stores/session';
 import { AgentWorkspaceShell } from '../ai-chat/AgentWorkspaceShell';
+import { useWorkflowStatus } from '../../hooks/useWorkflowStatus';
 
 interface AppLayoutProps { children: ReactNode; assistant?: boolean }
 
 export function AppLayout({ children, assistant = false }: AppLayoutProps) {
+  if (assistant) return <AssistantLayout>{children}</AssistantLayout>;
+  return <LayoutFrame>{children}</LayoutFrame>;
+}
+
+function AssistantLayout({ children }: { children: ReactNode }) {
+  const { isComplete } = useWorkflowStatus();
+  return <LayoutFrame assistant dataEntry={!isComplete}>{children}</LayoutFrame>;
+}
+
+function LayoutFrame({ children, assistant = false, dataEntry = false }: AppLayoutProps & { dataEntry?: boolean }) {
   const view = useSession((s) => s.activeWorkspaceView);
   const setSidebarCollapsed = useSession((s) => s.setSidebarCollapsed);
   const isSpatialView = view === '3d';
@@ -40,7 +51,7 @@ export function AppLayout({ children, assistant = false }: AppLayoutProps) {
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <LeftSidebar />
         <main id="main-content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {assistant ? <AgentWorkspaceShell canvasHeader={canvasHeader}>{content}</AgentWorkspaceShell> : <>{canvasHeader}{content}</>}
+          {assistant ? <AgentWorkspaceShell canvasHeader={canvasHeader} dataEntry={dataEntry}>{content}</AgentWorkspaceShell> : <>{canvasHeader}{content}</>}
         </main>
       </div>
     </div>
