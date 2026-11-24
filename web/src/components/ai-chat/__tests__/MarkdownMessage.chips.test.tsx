@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { act, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -13,6 +14,18 @@ vi.mock('../../../api/hooks', async (importOriginal) => ({
 }));
 
 describe('agent chips', () => {
+  it('keeps the idle pet static while retaining working indicators', () => {
+    const css = readFileSync('src/styles/globals.css', 'utf8');
+    expect(css).not.toMatch(/animation:\s*ai-pet-(breathe|blink)/);
+    expect(css).toMatch(/animation:\s*ai-pet-dots/);
+  });
+  it('renders the chip text inside its layout-preserving reveal from the first render', () => {
+    initChatI18n();
+    renderWithProviders(<MarkdownMessage chips content="Revisa S-37 ahora" />);
+    const chip = screen.getByTestId('ai-chat-chip-section');
+    expect(chip.parentElement).toHaveClass('agent-chip-reveal');
+    expect(chip.parentElement).toHaveTextContent('S-37');
+  });
   it('links sections and benches across emphasis, not code, links or headings', async () => {
     initChatI18n();
     useSession.setState({ selectedSection: null, demoMode: true });

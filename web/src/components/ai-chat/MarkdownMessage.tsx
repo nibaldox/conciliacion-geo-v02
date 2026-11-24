@@ -64,7 +64,7 @@ function chipBlock(children: ReactNode, actions: AgentChipActions): ReactNode {
       let offset = 0;
       for (const chip of chips) {
         result.push(child.slice(offset, chip.start));
-        result.push(<AgentChip key={key++} chip={chip} actions={actions} />);
+        result.push(<span key={key++} className="agent-chip-reveal"><AgentChip chip={chip} actions={actions} /></span>);
         offset = chip.end;
       }
       result.push(child.slice(offset));
