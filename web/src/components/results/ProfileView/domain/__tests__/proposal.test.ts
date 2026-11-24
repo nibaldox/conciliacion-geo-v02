@@ -212,6 +212,21 @@ describe('toProposalRow / toProposalRows', () => {
 });
 
 describe('formateadores', () => {
+  it('reuses formatters while preserving Intl output for each locale and sign option', () => {
+    const original = Intl.NumberFormat;
+    const spy = vi.spyOn(Intl, 'NumberFormat').mockImplementation(function (locale, options) {
+      return new original(locale, options);
+    } as typeof Intl.NumberFormat);
+    const expectedUnsigned = new original('en-US', { maximumFractionDigits: 2 }).format(1234.567);
+    const expectedSigned = new original('en-US', { maximumFractionDigits: 2, signDisplay: 'exceptZero' }).format(1234.567);
+    for (let i = 0; i < 5; i++) {
+      expect(formatProposalNumber(1234.567, 'en')).toBe(expectedUnsigned);
+      expect(formatSignedMeters(1234.567, 'en')).toBe(`${expectedSigned} m`);
+    }
+    expect(spy.mock.calls.length).toBeLessThanOrEqual(2);
+    spy.mockRestore();
+  });
+
   it('formatProposalNumber usa coma decimal en es y recorta a 2 decimales', () => {
     expect(formatProposalNumber(null)).toBe('—');
     expect(formatProposalNumber(Number.NaN)).toBe('—');

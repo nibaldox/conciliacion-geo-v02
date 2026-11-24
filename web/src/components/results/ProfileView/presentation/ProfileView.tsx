@@ -14,7 +14,6 @@ import { useFilterState, useCrossLinkState, useProfileViewModel } from '../appli
 import { hasProposalData } from '../domain';
 import { useSession } from '../../../../stores/session';
 import { useBenchFocus } from '../../../../stores/benchFocus';
-import { Spinner } from '../../../ui/Spinner';
 import { horizontalDeviationWarning } from '../../../../utils/horizontalDeviationMessages';
 
 export interface ProfileViewProps {
@@ -297,10 +296,12 @@ function LoadingState() {
   return (
     <div
       data-slot="profile-view-loading"
-      className="flex items-center justify-center gap-3 rounded-lg border border-border px-6 py-16 text-text-muted"
+      role="status"
+      aria-label={t('profileView.loading')}
+      className="flex flex-col gap-4"
     >
-      <Spinner size="sm" />
-      <span className="text-sm">{t('profileView.loading')}</span>
+      <div className="h-12 bg-surface-sunken" />
+      <div className="h-[440px] bg-surface-sunken md:h-[480px]" />
     </div>
   );
 }

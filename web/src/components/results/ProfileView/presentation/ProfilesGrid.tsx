@@ -5,14 +5,60 @@ import { readThemeColor } from '../../../../utils/theme';
  * section and switches to the single-profile view.
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import Plot from '../../../charts/Plot';
 import type { Data, Layout } from 'plotly.js';
 import { useSession } from '../../../../stores/session';
 import { useSections, useProfile } from '../../../../api/hooks';
 import type { SectionResponse } from '../../../../api/types';
-import { Spinner } from '../../../ui/Spinner';
 import { useTheme } from '../../../../stores/theme';
+
+// Share the queue across cards so a single idle task never mounts more than three plots.
+const pendingCharts = new Set<() => void>();
+let scheduled = false;
+function scheduleCharts() {
+  if (scheduled || pendingCharts.size === 0) return;
+  scheduled = true;
+  const run = () => {
+    scheduled = false;
+    for (const mount of Array.from(pendingCharts).slice(0, 3)) {
+      pendingCharts.delete(mount);
+      mount();
+    }
+    scheduleCharts();
+  };
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(run, { timeout: 200 });
+  else window.setTimeout(run, 0);
+}
+
+function useVisibleChart() {
+  const ref = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(() => typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    const target = ref.current;
+    if (!target || mounted || typeof IntersectionObserver === 'undefined') return;
+    const mount = () => setMounted(true);
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        pendingCharts.add(mount);
+        scheduleCharts();
+      } else pendingCharts.delete(mount);
+    }, { rootMargin: '200px' });
+    observer.observe(target);
+    return () => { observer.disconnect(); pendingCharts.delete(mount); };
+  }, [mounted]);
+  return { ref, mounted };
+}
+
+function ChartFade({ children }: { children: React.ReactNode }) {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  return <div className="h-full transition-opacity duration-150 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none" style={{ opacity: visible ? 1 : 0 }}>{children}</div>;
+}
 
 // ─── Mini chart per section ────────────────────────────────
 
@@ -26,6 +72,7 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
   const { t } = useTranslation();
   const { isDark } = useTheme();
   const { data: profile, isPending, isError, refetch } = useProfile(section.id);
+  const { ref: chartRef, mounted } = useVisibleChart();
 
   const gridColor = readThemeColor('--color-border', isDark ? '#1e293b' : '#e2e8f0');
   const designColor = readThemeColor('--color-mine-blue', '#7693b7');
@@ -110,24 +157,22 @@ function MiniCard({ section, onSelect, isSelected }: MiniCardProps) {
           )}
         </div>
 
-        <div className="relative h-40">
+        <div ref={chartRef} className="relative h-40">
           {isPending && !profile ? (
-            <div className="flex h-full items-center justify-center text-text-muted">
-              <Spinner size="sm" />
-            </div>
+            <div role="status" aria-label={t('common.loading', { defaultValue: 'Cargando…' })} className="h-full bg-surface-sunken" />
           ) : !profile && isError ? (
             <div className="flex h-full items-center justify-center px-3 text-center text-xs text-text-muted">
               {t('profilesGrid.profileError', { defaultValue: 'No se pudo cargar este perfil.' })}
             </div>
-          ) : plotData.length > 0 ? (
-            <Plot
+          ) : plotData.length > 0 ? mounted ? (
+            <ChartFade><Plot
               data={plotData}
               layout={layout}
               config={{ displayModeBar: false, responsive: true }}
               style={{ width: '100%', height: '100%' }}
               useResizeHandler
-            />
-          ) : (
+            /></ChartFade>
+          ) : <div aria-hidden="true" className="h-full bg-surface-sunken" /> : (
             <div className="flex h-full items-center justify-center px-3 text-center text-xs text-text-muted">
               {t('profilesGrid.profileEmpty', { defaultValue: 'Este perfil no tiene datos para mostrar.' })}
             </div>
@@ -168,9 +213,8 @@ export function ProfilesGrid({ onSectionSelect }: ProfilesGridProps) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center gap-3 py-16 text-text-muted">
-        <Spinner size="sm" />
-        <span className="text-sm">{t('common.loading', { defaultValue: 'Cargando…' })}</span>
+      <div role="status" aria-label={t('common.loading', { defaultValue: 'Cargando…' })} className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {[0, 1, 2].map((item) => <div key={item} className="h-40 bg-surface-sunken" />)}
       </div>
     );
   }

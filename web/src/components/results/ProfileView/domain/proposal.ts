@@ -170,11 +170,18 @@ function isFiniteNumber(value: number | null | undefined): value is number {
 
 export type ProposalLang = 'es' | 'en';
 
+const formatters = new Map<string, Intl.NumberFormat>();
 function makeFmt(lang: ProposalLang, signed: boolean): Intl.NumberFormat {
-  return new Intl.NumberFormat(lang === 'en' ? 'en-US' : 'es-AR', {
-    maximumFractionDigits: 2,
-    ...(signed ? { signDisplay: 'exceptZero' as const } : {}),
-  });
+  const key = `${lang}|${signed}`;
+  let formatter = formatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(lang === 'en' ? 'en-US' : 'es-AR', {
+      maximumFractionDigits: 2,
+      ...(signed ? { signDisplay: 'exceptZero' as const } : {}),
+    });
+    formatters.set(key, formatter);
+  }
+  return formatter;
 }
 
 export function formatProposalNumber(value: number | null, lang: ProposalLang = 'es'): string {

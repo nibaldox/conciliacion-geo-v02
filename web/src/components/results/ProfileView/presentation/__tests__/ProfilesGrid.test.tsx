@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { createInstance } from 'i18next';
 import { I18nextProvider } from 'react-i18next';
 import es from '../../../../../locales/es.json';
@@ -50,9 +50,39 @@ beforeEach(() => {
   useTheme.setState({ isDark: true });
 });
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('ProfilesGrid profile query states', () => {
+  it('reserves chart height and mounts only visible charts in batches', () => {
+    vi.useFakeTimers();
+    const callbacks = new Map<Element, IntersectionObserverCallback>();
+    const targets: Element[] = [];
+    class Observer {
+      callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+        this.callback = callback;
+        expect(options?.rootMargin).toBe('200px');
+      }
+      observe(target: Element) { targets.push(target); callbacks.set(target, this.callback); }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal('IntersectionObserver', Observer);
+    queryState.data = { design: { distances: [0, 10], elevations: [100, 90] }, topo: null };
+    sectionsState.data = Array.from({ length: 5 }, (_, i) => ({ id: `s${i}`, name: `S${i}`, sector: '', origin: [0, 0], azimuth: 0, length: 100 }));
+    const { unmount } = render(<I18nextProvider i18n={i18n}><ProfilesGrid /></I18nextProvider>);
+    expect(screen.queryAllByTestId('profile-plot')).toHaveLength(0);
+    expect(targets).toHaveLength(5);
+    act(() => targets.slice(0, 4).forEach(target => callbacks.get(target)?.([{ target, isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)));
+    act(() => { vi.advanceTimersToNextTimer(); });
+    expect(screen.getAllByTestId('profile-plot').length).toBeLessThanOrEqual(4);
+    expect(screen.getAllByTestId('profile-plot').length).toBeGreaterThanOrEqual(2);
+    act(() => { vi.runAllTimers(); });
+    expect(screen.getAllByTestId('profile-plot')).toHaveLength(4);
+    unmount();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
   it('highlights the selected card by section id when its name differs', () => {
     useSession.setState({ selectedSection: 'section-1' });
     render(<I18nextProvider i18n={i18n}><ProfilesGrid /></I18nextProvider>);
