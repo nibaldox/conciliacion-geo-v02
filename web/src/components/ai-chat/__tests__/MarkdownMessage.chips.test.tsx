@@ -14,9 +14,14 @@ vi.mock('../../../api/hooks', async (importOriginal) => ({
 }));
 
 describe('agent chips', () => {
-  it('keeps the idle pet static while retaining working indicators', () => {
+  it('animates the idle pet and disables it under reduced motion', () => {
     const css = readFileSync('src/styles/globals.css', 'utf8');
-    expect(css).not.toMatch(/animation:\s*ai-pet-(breathe|blink)/);
+    expect(css).toMatch(/\.ai-pet__body\s*\{[^}]*animation:\s*ai-pet-breathe/);
+    expect(css).toMatch(/\.ai-pet__eye\s*\{[^}]*animation:\s*ai-pet-blink/);
+    const reducedMotionBlocks = [...css.matchAll(/@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]);
+    const reducedMotion = reducedMotionBlocks.find((block) => /\.ai-pet__body,/.test(block));
+    expect(reducedMotion).toBeDefined();
+    expect(reducedMotion).toMatch(/\.ai-pet__body,\s*\.ai-pet__eye,[^{]*\{\s*animation:\s*none;/);
     expect(css).toMatch(/animation:\s*ai-pet-dots/);
   });
   it('renders the chip text inside its layout-preserving reveal from the first render', () => {

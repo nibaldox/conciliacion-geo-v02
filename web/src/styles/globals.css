@@ -530,6 +530,7 @@ body {
 .ai-pet__body {
   display: block;
   transform-origin: 50% 60%;
+  animation: ai-pet-breathe 6s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   will-change: transform;
 }
 .ai-pet__svg {
@@ -552,6 +553,7 @@ body {
   fill: var(--ai-pet-ink);
   transform-box: fill-box;
   transform-origin: center;
+  animation: ai-pet-blink 6s infinite;
 }
 .ai-pet__helmet-dome { fill: var(--ai-pet-helmet); }
 .ai-pet__helmet-band { fill: var(--ai-pet-helmet-band); }
