@@ -363,6 +363,8 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
     void clearConversation();
   };
 
+  const providerLabel = providerState?.chat_backend_label?.trim() || (isLmStudioLocal ? t('aiChat.header.local_badge') : provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : '');
+
   const bottomGap = Math.max(0, Math.round(bottomOffsetPx));
   const panelStyle: CSSProperties = {
     paddingBottom: 'env(safe-area-inset-bottom)',
@@ -392,8 +394,18 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
       style={embedded ? undefined : panelStyle}
     >
       <header className="shrink-0 border-b border-border px-3 py-2">
-        {embedded && !protagonist && <CopilotHeader hasModel={Boolean(headerModel)} />}
-        {embedded && !protagonist && (provider || headerModel) && <div title={[provider, headerModel].filter(Boolean).join(' · ')} className="truncate pl-9 text-xs text-text-muted">{[provider, headerModel].filter(Boolean).join(' · ')}</div>}
+        {embedded && !protagonist && <CopilotHeader
+          hasModel={Boolean(headerModel)}
+          providerLabel={providerLabel}
+          model={headerModel}
+          onRefresh={() => void loadProviderState()}
+          onClear={handleClear}
+          onClearBlur={() => setConfirmingClear(false)}
+          refreshing={providerStateLoading}
+          busy={busy}
+          clearing={clearing}
+          confirmingClear={confirmingClear}
+        />}
         {!embedded && <div className="flex items-center justify-between gap-2">
           <h2 className="shrink-0 whitespace-nowrap text-sm font-semibold">
             {t('aiChat.title')}
@@ -408,7 +420,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             ×
           </button>
         </div>}
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+        {(!embedded || protagonist) && <div className={`mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] ${protagonist ? 'mx-auto w-full max-w-3xl' : ''}`}>
           {isLmStudioLocal && (
             <span
               data-testid="ai-chat-local-badge"
@@ -458,10 +470,10 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
               ? t('aiChat.clear_confirm')
               : t('aiChat.clear')}
           </button>
-        </div>
+        </div>}
       </header>
 
-      <div ref={listRef} onScroll={(event) => { const el = event.currentTarget; followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48; }} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
+      <div data-testid={embedded ? "ai-chat-column" : undefined} ref={listRef} onScroll={(event) => { const el = event.currentTarget; followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48; }} className={`flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2 ${embedded ? 'mx-auto w-full max-w-3xl' : ''}`}>
         {embedded && messages.length === 0 && <div data-testid="ai-chat-welcome" className="mx-auto w-full max-w-3xl py-6 text-text-secondary">
           {protagonist ? <div className="text-center"><div className="mx-auto w-20 [&_.ai-pet__svg]:h-20 [&_.ai-pet__svg]:w-20"><ChatPet /></div><h1 className="mt-4 text-2xl text-text-primary">{t('aiChat.welcome.title')}</h1><p className="mt-2 text-sm">{t('aiChat.welcome.subtitle')}</p></div> : <p className="text-xs font-semibold">{t('aiChat.welcome.compact')}</p>}
         </div>}
@@ -498,7 +510,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           <div
             role="status"
             data-testid="ai-chat-placeholder-model-warning"
-            className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--color-status-warning)]'}`}
           >
             <p>{t('aiChat.notice.placeholder_model_warn')}</p>
             <label className="mt-2 block">
@@ -570,7 +582,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             <div
               role="status"
               data-testid="ai-chat-models-notice"
-              className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+              className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--color-status-warning)]'}`}
             >
               <div className="flex items-start justify-between gap-2">
                 <p>
@@ -604,7 +616,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
           <div
             role="status"
             data-testid="ai-chat-model-no-tools"
-            className="rounded-lg border border-[var(--color-status-warning)] px-3 py-2 text-xs text-text-primary"
+            className={`rounded-lg border px-3 py-2 text-xs text-text-primary ${embedded ? 'border-border' : 'border-[var(--color-status-warning)]'}`}
           >
             {t('aiChat.notice.model_no_tools')}
           </div>
@@ -650,12 +662,13 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
       {embedded && !protagonist && <ContextChip />}
       <form
         data-testid="ai-chat-composer"
-        className={embedded ? "mx-auto grid w-full max-w-3xl shrink-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-2 border-t border-border px-3 py-2" : "flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"}
+        className={embedded ? "mx-auto w-full max-w-3xl shrink-0 px-3 py-2" : "flex shrink-0 items-end gap-2 border-t border-border px-3 py-2"}
         onSubmit={(e) => {
           e.preventDefault();
           handleSubmit();
         }}
       >
+        <div data-testid={embedded ? "ai-chat-composer-box" : undefined} className={embedded ? "grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2 rounded-xl border border-border bg-surface-raised p-2 focus-within:ring-1 focus-within:ring-accent" : "contents"}>
         {embedded && (
           <textarea
             ref={inputRef}
@@ -672,7 +685,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             }}
             placeholder={t('aiChat.input.placeholder')}
             aria-label={t('aiChat.input.aria')}
-            className={`col-span-2 row-start-1 w-full min-w-0 resize-none overflow-y-hidden rounded-md border border-border bg-surface px-3 py-1.5 text-sm leading-5 ${protagonist ? 'min-h-[4.5rem]' : 'min-h-[2.25rem]'}`}
+            className={`col-span-2 row-start-1 w-full min-w-0 resize-none overflow-y-hidden border-0 bg-transparent px-1 py-1.5 text-sm leading-5 outline-none ${protagonist ? 'min-h-[4.5rem]' : 'min-h-[2.25rem]'}`}
           />
         )}
         {embedded && (
@@ -698,6 +711,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             {selection.model === null && <span data-testid="ai-chat-models-notice" className="sr-only">{t('aiChat.notice.models_required')}</span>}
           </label>
         )}
+        {embedded && headerModel && selection.kind !== 'pick' && <span title={headerModel} className="col-start-1 row-start-2 ml-28 min-w-0 truncate text-xs text-text-muted">{headerModel}</span>}
         {!embedded && (
           <input
             ref={legacyInputRef}
@@ -730,6 +744,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             {t('aiChat.input.send')}
           </button>
         )}
+        </div>
       </form>
       {protagonist && messages.length === 0 && <EmbeddedWorkflowGuide suggestionsOnly fillDraft={fillDraft} canDraft={providerStateLoaded && !turnActive && !clearing} />}
 

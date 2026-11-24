@@ -167,10 +167,10 @@ it('resume de forma neutral un grupo restaurado ambiguo', async () => {
 });
 
 
-it('mantiene el modelo largo accesible bajo un control compacto en embedded', async () => {
+it('mantiene el modelo largo accesible bajo un control compacto en protagonista', async () => {
   const model = 'modelo-tecnico-con-un-identificador-muy-largo-de-mas-de-45-caracteres';
   useAIChat.setState({ providerStateLoaded: true, providerState: { providers: ['lmstudio'], supports_tool_calls: { lmstudio: true }, chat_enabled: true, chat_provider: 'lmstudio', chat_local_only: true, chat_model: model } });
-  renderWithProviders(<ChatPanel presentation="embedded" />);
+  renderWithProviders(<ChatPanel presentation="embedded" layout="protagonist" />);
   const control = screen.getByText('Modelo', { selector: 'summary' });
   expect(control.closest('details')).not.toHaveAttribute('open');
   await userEvent.click(control);
@@ -179,6 +179,35 @@ it('mantiene el modelo largo accesible bajo un control compacto en embedded', as
   expect(screen.getByTestId('ai-chat-status')).toHaveTextContent('CONFIGURADO');
 });
 
+
+it('concentra cabecera y compositor del copiloto sin duplicar proveedor', async () => {
+  const refresh = vi.fn().mockResolvedValue(undefined);
+  const clear = vi.fn().mockResolvedValue(undefined);
+  useAIChat.setState({ providerStateLoaded: true, loadProviderState: refresh, clearConversation: clear, providerState: { providers: ['lmstudio'], supports_tool_calls: { lmstudio: true }, chat_enabled: true, chat_provider: 'lmstudio', chat_local_only: true, chat_model: 'loaded' } });
+  useWorkspaceMode.getState().enterCopilot('manualView');
+  renderWithProviders(<ChatPanel presentation="embedded" layout="copilot" />);
+  const header = screen.getByTestId('ai-chat-panel').querySelector('header')!;
+  expect(within(header).getAllByText(/LM Studio/)).toHaveLength(1);
+  expect(header).not.toHaveTextContent('lmstudio');
+  expect(header).not.toHaveTextContent('CONFIGURADO');
+  await userEvent.click(screen.getByTestId('ai-chat-models-refresh'));
+  expect(refresh).toHaveBeenCalled();
+  const clearButton = screen.getByTestId('ai-chat-clear');
+  expect(clearButton).toHaveAccessibleName();
+  await userEvent.click(clearButton);
+  await userEvent.click(clearButton);
+  expect(clear).toHaveBeenCalled();
+  await userEvent.click(screen.getByTestId('ai-chat-focus-conversation'));
+  expect(useWorkspaceMode.getState().mode).toBe('protagonist');
+  expect(screen.getByTestId('ai-chat-composer-box')).toContainElement(screen.getByTestId('ai-chat-input'));
+  expect(screen.getByTestId('ai-chat-composer-box')).toContainElement(screen.getByTestId('ai-chat-send'));
+});
+
+it('centra los avisos en la columna del protagonista', () => {
+  useAIChat.setState({ providerStateLoaded: true, providerState: { providers: ['lmstudio'], supports_tool_calls: { lmstudio: true }, chat_enabled: true, chat_provider: 'lmstudio', chat_local_only: true, chat_model: 'loaded-model' } });
+  renderWithProviders(<ChatPanel presentation="embedded" layout="protagonist" />);
+  expect(screen.getByTestId('ai-chat-column')).toContainElement(screen.getByTestId('ai-chat-placeholder-model-warning'));
+});
 
 it('presenta bienvenida protagonista y conserva el textarea, caret y log al cambiar de layout', async () => {
   useAIChat.setState({ providerStateLoaded: true });
