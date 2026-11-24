@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useCanvasHidden } from '../ai-chat/canvasVisibility';
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Html, OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
@@ -738,6 +739,7 @@ export interface Mesh3DViewerProps {
 }
 
 export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
+  const canvasHidden = useCanvasHidden();
   const isDark = useTheme((s) => s.isDark);
   const cameraControls = useRef<OrbitControlsImpl | null>(null);
   const cameraCommand = useRef<CameraView | null>(null);
@@ -1122,6 +1124,7 @@ export function Mesh3DViewer({ mode = 'general' }: Mesh3DViewerProps = {}) {
 
   const canvasNode = (
     <Canvas
+      frameloop={canvasHidden ? 'never' : 'always'}
       camera={{ fov: 50, near: 1, far: 50000 }}
       dpr={[1, 1.75]}
       gl={{ antialias: true, preserveDrawingBuffer: true }}

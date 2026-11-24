@@ -4,6 +4,12 @@ import { useEffect } from 'react';
 import { useWorkspaceMode } from '../../stores/workspaceMode';
 import { useSession } from '../../stores/session';
 import { AgentWorkspaceShell } from './AgentWorkspaceShell';
+import { useCanvasHidden } from './canvasVisibility';
+
+function VisibilityProbe() {
+  const hidden = useCanvasHidden();
+  return <span data-testid="canvas-visibility">{hidden ? 'hidden' : 'visible'}</span>;
+}
 
 const counters = vi.hoisted(() => ({ mounts: 0 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -23,6 +29,15 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('AgentWorkspaceShell', () => {
+  it('reports visibility outside the shell and across keep-alive mode changes', () => {
+    useWorkspaceMode.setState({ mode: 'copilot', initialDecided: true });
+    render(<><VisibilityProbe /><AgentWorkspaceShell><VisibilityProbe /></AgentWorkspaceShell></>);
+    expect(screen.getAllByTestId('canvas-visibility').map((node) => node.textContent)).toEqual(['visible', 'visible']);
+    act(() => useWorkspaceMode.getState().focusConversation());
+    expect(screen.getAllByTestId('canvas-visibility').map((node) => node.textContent)).toEqual(['visible', 'hidden']);
+    act(() => useWorkspaceMode.getState().enterCopilot('manualView'));
+    expect(screen.getAllByTestId('canvas-visibility').map((node) => node.textContent)).toEqual(['visible', 'visible']);
+  });
   it('shows a loading copilot shell before the initial restored decision', () => {
     useSession.setState({ designMeshId: 'design', topoMeshId: 'topo' });
     const { container } = render(<AgentWorkspaceShell><div>workspace content</div></AgentWorkspaceShell>);

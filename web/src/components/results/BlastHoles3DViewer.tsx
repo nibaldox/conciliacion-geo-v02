@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
+import { useCanvasHidden } from '../ai-chat/canvasVisibility';
 import { OrbitControls } from '@react-three/drei';
 import { useBlastHolesBySession } from '../../api/hooks';
 import type { BlastHoleSummary } from '../../api/types';
@@ -112,6 +113,7 @@ function BlastHoles3DContent({ sessionId, sectionName }: BlastHoles3DViewerProps
 }
 
 function BlastHolesCanvas({ holes }: { holes: BlastHoleSummary[] }) {
+  const canvasHidden = useCanvasHidden();
   const { t } = useTranslation();
   const hardnessColors = useHardnessColors();
   const [gridColor, gridMinorColor] = useGridColors();
@@ -139,6 +141,7 @@ function BlastHolesCanvas({ holes }: { holes: BlastHoleSummary[] }) {
       <p className="text-xs text-text-muted" data-testid="viewer-hole-count">{t('blast.viewer_hole_count', { count: meshHoles.length })}</p>
       <div className="overflow-hidden rounded-lg border border-border" style={{ width: '100%', height: '500px', backgroundColor: 'var(--color-viewer-bg)' }} data-testid="viewer-canvas-container">
         <Canvas
+          frameloop={canvasHidden ? 'never' : 'always'}
           camera={{ position: [cameraDistance, cameraDistance, cameraDistance], fov: 50 }}
           data-testid="viewer-canvas"
         >

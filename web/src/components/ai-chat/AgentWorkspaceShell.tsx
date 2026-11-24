@@ -6,6 +6,7 @@ import { LoadingSpinner } from '../LoadingSpinner';
 import { ChatPanel } from './ChatPanel';
 import { CopilotResizeHandle } from './CopilotResizeHandle';
 import { useAgentChatInvalidationBridge } from './FloatingChatButton';
+import { CanvasVisibilityContext } from './canvasVisibility';
 import './AgentWorkspaceShell.css';
 
 const WIDTH_KEY = 'conciliacion.agentWorkspace.copilotWidth.v1';
@@ -151,7 +152,7 @@ export function AgentWorkspaceShell({ children, canvasHeader }: { children: Reac
       </nav>}
       <div className="agent-shell__grid" ref={grid}>
         <div className="agent-shell__workspace" aria-hidden={mode === 'protagonist' ? true : undefined} inert={mode === 'protagonist' ? true : undefined}>
-          {canvasMounted ? <div className="agent-shell__canvas">{waiting ? <LoadingSpinner /> : <>{canvasHeader}{children}</>}</div> : <div className="agent-shell__placeholder" aria-hidden="true" />}
+          {canvasMounted ? <div className="agent-shell__canvas">{waiting ? <LoadingSpinner /> : <CanvasVisibilityContext.Provider value={mode === 'protagonist'}>{canvasHeader}{children}</CanvasVisibilityContext.Provider>}</div> : <div className="agent-shell__placeholder" aria-hidden="true" />}
         </div>
         <div className="agent-shell__chat">
           {mode === 'copilot' && <CopilotResizeHandle width={width} onChange={updateWidth} onCommit={persistWidth} onDragChange={setDragging} />}
