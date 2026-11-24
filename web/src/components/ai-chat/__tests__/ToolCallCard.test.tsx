@@ -19,7 +19,7 @@ vi.mock('../../../api/client', () => ({
 
 import { useAIChat } from '../../../stores/aiChat';
 import type { AgentToolResultDownload } from '../../../api/agentChat';
-import { ToolCallCard, ToolActivityGroup, ConfirmationCard, type ToolCardMessage } from '../ToolCallCard';
+import { ToolCallCard, ToolActivityGroup, ConfirmationCard, formatToolDuration, type ToolCardMessage } from '../ToolCallCard';
 import { initChatI18n, renderWithProviders } from './chatTestUtils';
 
 const EXPORT_OK_SUMMARY = JSON.stringify({
@@ -382,7 +382,7 @@ describe('tool activity states', () => {
       { ...step, id: 'unknown', invocationId: 'restored_1', status: 'error', error: null, summary: null },
     ]} />);
     expect(screen.getByText('Sin estado registrado')).toBeVisible();
-    expect(screen.getAllByText('1.5 s')[0]).toBeVisible();
+    expect(screen.getAllByText('1,5 s')[0]).toBeVisible();
     const rows = screen.getAllByRole('button', { name: /Revisar estado del flujo/ });
     rows[1].focus();
     await userEvent.keyboard(' ');
@@ -431,4 +431,62 @@ it('keeps the original floating confirmation presentation', () => {
   expect(container.querySelector('[data-slot="ai-chat-confirmation-card"]')).toHaveClass('rounded-lg');
   expect(container.querySelector('[data-slot="ai-chat-confirmation-card"]')).not.toHaveClass('min-w-0');
   expect(screen.getAllByText('get_workflow_state')).toHaveLength(1);
+});
+
+describe('formatToolDuration', () => {
+  const i18n = initChatI18n();
+
+  it('returns no text when the step has no duration', () => {
+    expect(formatToolDuration(null, 'es', i18n.t)).toBeNull();
+    expect(formatToolDuration(undefined, 'es', i18n.t)).toBeNull();
+  });
+
+  it('shows zero as 0 ms', () => {
+    expect(formatToolDuration(0, 'es', i18n.t)).toBe('0 ms');
+  });
+
+  it('shows sub-millisecond durations as <1 ms', () => {
+    expect(formatToolDuration(0.4, 'es', i18n.t)).toBe('<1 ms');
+  });
+
+  it('rounds milliseconds below one second to whole numbers', () => {
+    expect(formatToolDuration(3.57383, 'es', i18n.t)).toBe('4 ms');
+    expect(formatToolDuration(250, 'es', i18n.t)).toBe('250 ms');
+    expect(formatToolDuration(999.4, 'es', i18n.t)).toBe('999 ms');
+  });
+
+  it('rolls milliseconds that round up to 1000 over to seconds', () => {
+    expect(formatToolDuration(999.6, 'es', i18n.t)).toBe('1,0 s');
+  });
+
+  it('formats seconds with one decimal using the active language separator', () => {
+    expect(formatToolDuration(5847.3, 'es', i18n.t)).toBe('5,8 s');
+    expect(formatToolDuration(5847.3, 'en', i18n.t)).toBe('5.8 s');
+  });
+});
+
+describe('tool activity duration in the UI', () => {
+  it('shows a sub-second step rounded to whole milliseconds', () => {
+    initChatI18n();
+    renderWithProviders(<ToolActivityGroup messages={[{ ...step, durationMs: 3.57383 }]} />);
+    expect(screen.getByText('4 ms')).toBeVisible();
+    expect(screen.queryByText('3.57383 ms')).toBeNull();
+  });
+
+  it('shows seconds with a comma in Spanish', () => {
+    initChatI18n();
+    renderWithProviders(<ToolActivityGroup messages={[{ ...step, durationMs: 5847.3 }]} />);
+    expect(screen.getByText('5,8 s')).toBeVisible();
+  });
+
+  it('shows seconds with a dot when the UI language is English', async () => {
+    const i18n = initChatI18n();
+    await i18n.changeLanguage('en');
+    try {
+      renderWithProviders(<ToolActivityGroup messages={[{ ...step, durationMs: 5847.3 }]} />);
+      expect(screen.getByText('5.8 s')).toBeVisible();
+    } finally {
+      await i18n.changeLanguage('es');
+    }
+  });
 });

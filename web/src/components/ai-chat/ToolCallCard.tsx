@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import {
   downloadExportFile,
@@ -140,14 +141,38 @@ export function ToolCallCard({ message }: { message: ToolCardMessage }) {
   );
 }
 
+/**
+ * Human-readable duration of an agent tool step. Sub-millisecond values
+ * read «<1 ms», below one second whole milliseconds, and from one second
+ * up seconds with one decimal. Milliseconds that round up to 1000 become
+ * seconds («1,0 s»). Returns null when no duration was recorded.
+ */
+export function formatToolDuration(
+  ms: number | null | undefined,
+  language: string,
+  t: TFunction,
+): string | null {
+  if (ms == null) return null;
+  if (ms > 0 && ms < 1) return t('aiChat.tool.duration_ms', { ms: '<1' });
+  const wholeMs = Math.round(ms);
+  if (wholeMs < 1000) {
+    return t('aiChat.tool.duration_ms', {
+      ms: new Intl.NumberFormat(language).format(wholeMs),
+    });
+  }
+  const seconds = new Intl.NumberFormat(language, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(ms / 1000);
+  return t('aiChat.tool.duration_s', { s: seconds });
+}
+
 function ActivityStep({ message, focusRef }: { message: ToolCardMessage; focusRef?: React.Ref<HTMLButtonElement> }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const id = useId();
   const unknown = message.status === 'error' && message.invocationId.startsWith('restored_') && !message.error?.trim();
-  const duration = message.durationMs == null ? null : message.durationMs < 1000
-    ? t('aiChat.tool.duration_ms', { ms: message.durationMs })
-    : t('aiChat.tool.duration_s', { s: (message.durationMs / 1000).toFixed(1) });
+  const duration = formatToolDuration(message.durationMs, i18n.language, t);
   return <div className="min-w-0">
     <button ref={focusRef} type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((value) => !value)} className="flex w-full min-w-0 items-center gap-2 text-left focus-visible:ring-2 focus-visible:ring-accent">
       <span className="shrink-0">{expanded ? '▾' : '▸'}</span>
