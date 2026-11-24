@@ -33,6 +33,16 @@ beforeEach(() => {
 });
 
 describe('ViewsToolbar', () => {
+  it('keeps a single indicator while selection changes', async () => {
+    const user = userEvent.setup();
+    const { container } = renderToolbar();
+    const indicator = container.querySelector('[data-slot="view-indicator"]');
+    expect(indicator).not.toBeNull();
+    await user.click(screen.getByRole('tab', { name: 'Perfiles' }));
+    expect(container.querySelectorAll('[data-slot="view-indicator"]')).toHaveLength(1);
+    expect(container.querySelector('[data-slot="view-indicator"]')).toBe(indicator);
+    expect(screen.getByRole('tab', { name: 'Perfiles' })).toHaveAttribute('aria-selected', 'true');
+  });
   it('marks clicks and keyboard selection as manual when AI-first is enabled', async () => {
     vi.stubEnv('VITE_AI_CHAT', 'true');
     vi.stubEnv('VITE_AI_FIRST', 'true');

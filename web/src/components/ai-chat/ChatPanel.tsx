@@ -101,7 +101,7 @@ const MessageBubble = memo(function MessageBubble({ message, embedded = false }:
     );
   }
   const isUser = message.kind === 'user';
-  if (embedded) return <div data-slot="ai-chat-message" data-kind={message.kind} className="min-w-0 border-b border-border py-4 last:border-0">
+  if (embedded) return <div data-slot="ai-chat-message" data-kind={message.kind} className="calm-appear min-w-0 border-b border-border py-4 last:border-0">
     <div className="mb-2 text-xs font-semibold text-text-secondary">{isUser ? t('aiChat.messages.you') : t('aiChat.messages.agent')}</div>
     {message.kind === 'agent' ? <MarkdownMessage content={message.text} chips /> : <p className="whitespace-pre-wrap break-words text-sm font-medium">{message.text}</p>}
   </div>;
@@ -109,7 +109,7 @@ const MessageBubble = memo(function MessageBubble({ message, embedded = false }:
     <div
       data-slot="ai-chat-message"
       data-kind={message.kind}
-      className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
+      className={`calm-appear flex ${isUser ? 'justify-end' : 'justify-start'}`}
     >
       <div
         className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
@@ -742,7 +742,7 @@ export function ChatPanel({ onClose, bottomOffsetPx = 0, presentation = 'floatin
             type="submit"
             data-testid="ai-chat-send"
             disabled={clearing || !draft.trim()}
-            className={embedded ? "col-start-2 row-start-2 shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50" : "shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"}
+            className={embedded ? "calm-primary col-start-2 row-start-2 shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50" : "calm-primary shrink-0 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg disabled:cursor-not-allowed disabled:opacity-50"}
           >
             {t('aiChat.input.send')}
           </button>

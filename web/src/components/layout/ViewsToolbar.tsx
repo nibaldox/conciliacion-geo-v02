@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSession } from '../../stores/session';
 import { useWorkspaceMode } from '../../stores/workspaceMode';
@@ -26,6 +26,17 @@ export function ViewsToolbar({ onNavigate }: ViewsToolbarProps) {
   const setActiveView = useSession((s) => s.setActiveWorkspaceView);
   const { isComplete } = useWorkflowStatus();
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const indicatorRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const tab = tabRefs.current[VIEWS.findIndex((view) => view.key === activeView)];
+    const indicator = indicatorRef.current;
+    if (!tab || !indicator) return;
+    const update = () => { indicator.style.transform = `translateX(${tab.offsetLeft}px) scaleX(${tab.offsetWidth})`; };
+    update();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    tabRefs.current.forEach((node) => { if (node) observer?.observe(node); });
+    return () => observer?.disconnect();
+  }, [activeView]);
 
   useEffect(() => {
     const activeIndex = VIEWS.findIndex((view) => view.key === activeView);
@@ -59,7 +70,8 @@ export function ViewsToolbar({ onNavigate }: ViewsToolbarProps) {
       aria-label={t('ux.views_nav')}
       className="shrink-0 overflow-x-auto border-b border-border bg-surface-raised px-3 md:px-6"
     >
-      <div role="tablist" aria-label={t('ux.views_nav')} className="flex min-w-max items-stretch gap-1">
+      <div role="tablist" aria-label={t('ux.views_nav')} className="relative flex min-w-max items-stretch gap-1">
+        <span ref={indicatorRef} data-slot="view-indicator" aria-hidden="true" className="view-indicator" />
         {VIEWS.map(({ key, icon: Icon, text, hotkey, requiresComplete }, index) => {
           const active = activeView === key;
           const locked = requiresComplete && !isComplete;

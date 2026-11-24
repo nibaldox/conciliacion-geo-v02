@@ -106,6 +106,15 @@ function ProfilesWorkspace() {
 
 
 
+function WorkspaceFrame({ aiFirst }: { aiFirst: boolean }) {
+  const { t } = useTranslation();
+  return <div className="h-full min-h-0">
+    <Suspense fallback={<div role="status" aria-label={t('common.loading', { defaultValue: 'Cargando…' })} className="workspace-skeleton"><div /><div /></div>}>
+      <WorkspaceRouter aiFirst={aiFirst} />
+    </Suspense>
+  </div>;
+}
+
 function WorkspaceRouter({ aiFirst }: { aiFirst: boolean }) {
   const activeWorkspaceView = useSession((s) => s.activeWorkspaceView);
   const designMeshId = useSession((s) => s.designMeshId);
@@ -135,6 +144,7 @@ function WorkspaceRouter({ aiFirst }: { aiFirst: boolean }) {
     wasComplete.current = isComplete;
   }, [aiFirst, isComplete, setActiveWorkspaceView]);
 
+  const content = (() => {
   if (!bothUploaded && activeWorkspaceView !== '3d') {
     return (
       <WorkspaceEmptyState
@@ -206,6 +216,8 @@ function WorkspaceRouter({ aiFirst }: { aiFirst: boolean }) {
     default:
       return null;
   }
+  })();
+  return <div key={activeWorkspaceView} className="workspace-view h-full min-h-0">{content}</div>;
 }
 
 function LoadingSpinner() {
@@ -270,9 +282,7 @@ function App({ sessionRestoreFailed = false }: { sessionRestoreFailed?: boolean 
         </div>
       )}
       <ErrorBoundary>
-        <Suspense fallback={<LoadingSpinner />}>
-          <WorkspaceRouter aiFirst={aiFirst} />
-        </Suspense>
+        <WorkspaceFrame aiFirst={aiFirst} />
       </ErrorBoundary>
     </AppLayout>
   );

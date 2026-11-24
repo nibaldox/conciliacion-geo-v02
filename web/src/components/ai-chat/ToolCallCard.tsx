@@ -173,9 +173,9 @@ function ActivityStep({ message, focusRef }: { message: ToolCardMessage; focusRe
   const id = useId();
   const unknown = message.status === 'error' && message.invocationId.startsWith('restored_') && !message.error?.trim();
   const duration = formatToolDuration(message.durationMs, i18n.language, t);
-  return <div className="min-w-0">
+  return <div className="min-w-0 calm-appear">
     <button ref={focusRef} type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((value) => !value)} className="flex w-full min-w-0 items-center gap-2 text-left focus-visible:ring-2 focus-visible:ring-accent">
-      <span className="shrink-0">{expanded ? '▾' : '▸'}</span>
+      <span aria-hidden="true" className={`activity-chevron ${expanded ? 'is-expanded' : ''}`}>▸</span>
       {message.status === 'running' && <Spinner size="sm" />}
       <span className="shrink-0">{t(`aiChat.activity.names.${message.name}`, { defaultValue: message.name })}</span>
       {message.status === 'ok' && <span className="sr-only">{t('aiChat.tool.status_ok')}</span>}
@@ -184,14 +184,14 @@ function ActivityStep({ message, focusRef }: { message: ToolCardMessage; focusRe
       {duration && <span className="shrink-0">{duration}</span>}
       {message.summary && <span title={message.summary} className="min-w-0 truncate">⎿ {message.summary}</span>}
     </button>
-    {expanded && <div id={id} className="min-w-0 pl-4">
+    <div id={id} aria-hidden={!expanded} inert={!expanded} className={`activity-detail ${expanded ? 'is-expanded' : ''}`}><div className="min-w-0 overflow-hidden">{expanded && <div className="min-w-0 pl-4">
       <p className="break-all font-mono">{message.name}</p>
       <p>{duration ?? t('aiChat.tool.no_duration')}</p>
       {message.args && <><p>{t('aiChat.tool.params')}</p><table className="w-full table-fixed"><tbody>{Object.entries(message.args).slice(0, 20).map(([key, value]) => <tr key={key}><th className="break-all text-left">{sanitizeParameter(key)}</th><td className="break-all">{formatParameter(value)}</td></tr>)}</tbody></table>{Object.keys(message.args).length > 20 && <p>+{Object.keys(message.args).length - 20}</p>}</>}
       {message.summary && <p className="whitespace-pre-wrap break-words">{message.summary}</p>}
       {message.status === 'error' && message.error && <p className="whitespace-pre-wrap break-words text-[var(--status-nok-text)]">{message.error}</p>}
       {message.status === 'ok' && <ExportDownloadButton message={message} />}
-    </div>}
+    </div>}</div></div>
   </div>;
 }
 
@@ -219,7 +219,7 @@ export function ToolActivityGroup({ messages }: { messages: ToolCardMessage[] })
   const hasUnknown = messages.some(unknown);
   const running = messages.some((m) => m.status === 'running');
   const collapsed = messages.length > 6 && !showAll;
-  return <div className="min-w-0 border-y border-border py-2 text-xs text-text-secondary">
+  return <div className="calm-appear min-w-0 border-y border-border py-2 text-xs text-text-secondary">
     <button type="button" aria-expanded={expanded} aria-controls={id} onClick={() => setExpanded((v) => !v)} className="flex w-full items-center gap-2 text-left font-medium focus-visible:ring-2 focus-visible:ring-accent">
       <span aria-hidden="true">{expanded ? '▾' : '▸'}</span><span>{t('aiChat.activity.title')} · {messages.length}</span><span className={error ? 'text-[var(--status-nok-text)]' : ''}>{error ? t('aiChat.tool.status_error') : running ? t('aiChat.activity.running') : hasUnknown ? t('aiChat.activity.unrecorded') : t('aiChat.tool.status_ok')}</span>
     </button>

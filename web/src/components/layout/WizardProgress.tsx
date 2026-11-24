@@ -68,7 +68,7 @@ export function WizardProgress({ variant = 'numbered' }: WizardProgressProps) {
               aria-current={isActive ? 'step' : undefined}
               className={[
                 'group flex items-center gap-2 px-2.5 py-1 rounded-md',
-                'transition-all duration-150',
+                'transition-[color,background-color,border-color,opacity,transform] duration-150',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1 focus-visible:ring-accent',
                 isClickable
                   ? 'cursor-pointer hover:opacity-90'

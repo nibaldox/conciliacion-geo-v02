@@ -297,7 +297,7 @@ body {
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--color-border);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.04);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: color 0.3s, background-color 0.3s, border-color 0.3s, opacity 0.3s, transform 0.3s;
 }
 
 .dark .glass-card {
@@ -670,4 +670,25 @@ body {
     transition: none;
     will-change: auto;
   }
+}
+
+@keyframes workspace-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes calm-appear { from { opacity: 0; } to { opacity: 1; } }
+.workspace-view { animation: workspace-enter 150ms cubic-bezier(0.2, 0, 0, 1); }
+.workspace-skeleton { padding: 1.5rem; display: grid; gap: 1rem; }
+.workspace-skeleton > div { background: var(--color-surface-muted); border-radius: 0.375rem; height: 2rem; width: 35%; }
+.workspace-skeleton > div + div { height: 22rem; width: 100%; }
+.view-indicator { position: absolute; left: 0; bottom: 0; width: 1px; height: 2px; background: var(--color-accent-bright); transform-origin: left center; transition: transform 200ms cubic-bezier(0.2, 0, 0, 1); pointer-events: none; }
+[data-slot="views-toolbar"] [role="tab"][data-active="true"] { border-bottom-color: transparent; }
+.calm-appear { animation: calm-appear 150ms cubic-bezier(0.2, 0, 0, 1); }
+.activity-chevron { display: inline-block; flex-shrink: 0; transition: transform 200ms cubic-bezier(0.2, 0, 0, 1); }
+.activity-chevron.is-expanded { transform: rotate(90deg); }
+.activity-detail { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 200ms cubic-bezier(0.2, 0, 0, 1); }
+.activity-detail.is-expanded { grid-template-rows: 1fr; }
+[data-slot="views-toolbar"] [role="tab"], .calm-primary { transition: transform 80ms ease-out, color 150ms, background-color 150ms, border-color 150ms; }
+[data-slot="views-toolbar"] [role="tab"]:active, .calm-primary:active:not(:disabled) { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-view, .calm-appear { animation: none; }
+  .view-indicator, .activity-chevron, .activity-detail, [data-slot="views-toolbar"] [role="tab"], .calm-primary { transition: none; }
+  [data-slot="views-toolbar"] [role="tab"]:active, .calm-primary:active:not(:disabled) { transform: none; }
 }
