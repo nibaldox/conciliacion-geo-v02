@@ -3,6 +3,7 @@ import { useSession } from '../../stores/session';
 import { useBenchFocus } from '../../stores/benchFocus';
 import { useWorkspaceMode } from '../../stores/workspaceMode';
 import type { SectionRef } from '../../utils/workspaceTargets';
+import type { WorkspaceViewId } from '../../utils/viewContext';
 
 export interface AgentChipActions {
   sections: readonly SectionRef[];
@@ -21,10 +22,27 @@ export function normalizeContextSectionId(
   return matches.length === 1 ? matches[0].id : null;
 }
 
+export function resolveVisibleSection(
+  { selected, selectedByUser, view, profilesMode }: {
+    selected: string | null;
+    selectedByUser: boolean;
+    view: WorkspaceViewId;
+    profilesMode: 'grid' | 'detail';
+  },
+  sections: readonly SectionRef[],
+): SectionRef | null {
+  if (!selectedByUser && !(view === 'profiles' && profilesMode === 'detail')) return null;
+  const id = normalizeContextSectionId(selected, sections);
+  return sections.find((section) => section.id === id) ?? null;
+}
+
 export function useAgentChipActions(): AgentChipActions {
   const { data: sections = [] } = useSections();
-  const selectedSection = useSession((state) => state.selectedSection);
-  const contextSectionId = normalizeContextSectionId(selectedSection, sections);
+  const selected = useSession((state) => state.selectedSection);
+  const selectedByUser = useSession((state) => state.selectedByUser);
+  const view = useSession((state) => state.activeWorkspaceView);
+  const profilesMode = useSession((state) => state.profilesMode);
+  const contextSectionId = resolveVisibleSection({ selected, selectedByUser, view, profilesMode }, sections)?.id ?? null;
   const openSection = (ref: SectionRef) => {
     const session = useSession.getState();
     session.setSelectedSection(ref.id);

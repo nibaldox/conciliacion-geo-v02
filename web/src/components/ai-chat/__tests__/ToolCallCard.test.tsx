@@ -397,3 +397,12 @@ describe('tool activity states', () => {
     expect(screen.getByTestId('ai-chat-tool-download')).toBeVisible();
   });
 });
+
+
+it('announces a completed activity step without showing its status', () => {
+  initChatI18n();
+  renderWithProviders(<ToolActivityGroup messages={[step]} />);
+  const row = screen.getByRole('button', { name: /Revisar estado del flujo.*Completado/ });
+  const status = row.querySelector('.sr-only');
+  expect(status).toHaveTextContent('Completado');
+});

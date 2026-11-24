@@ -152,7 +152,7 @@ it('distingue historial sin estado inequívoco de errores vivos y con código', 
   expect(screen.getByRole('button', { name: /Consultar resultados/ }).textContent).toMatch(/Consultar resultados.*Error/);
   const exportStep = screen.getByRole('button', { name: /Exportar informe/ });
   expect(exportStep.textContent).toMatch(/Exportar informe.*Error/);
-  expect(screen.getByRole('button', { name: /Consultar perfil/ })).toBeVisible();
+  expect(screen.getByRole('button', { name: /Consultar perfil/ }).textContent).toMatch(/Consultar perfil.*Completado/);
   await userEvent.click(exportStep);
   expect(screen.getByText('failure_code')).toBeVisible();
   expect(screen.queryByTestId('ai-chat-tool-download')).toBeNull();

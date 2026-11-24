@@ -3,6 +3,7 @@ import { useSections } from '../../api/hooks';
 import { useSession } from '../../stores/session';
 import { useBenchFocus } from '../../stores/benchFocus';
 import { describeViewContext, type WorkspaceViewId } from '../../utils/viewContext';
+import { resolveVisibleSection } from './useAgentChipActions';
 
 const VIEW_KEYS: Record<WorkspaceViewId, string> = {
   '3d': 'workspace.view3d',
@@ -20,14 +21,7 @@ export function ContextChip() {
   const selectedId = useSession((state) => state.selectedSection);
   const selectedByUser = useSession((state) => state.selectedByUser);
   const current = useBenchFocus((state) => state.current);
-  const idMatch = selectedByUser && selectedId !== null
-    ? sections.find((section) => String(section.id) === selectedId)
-    : undefined;
-  const nameMatches = selectedByUser && selectedId !== null && !idMatch
-    ? sections.filter((section) => section.name === selectedId)
-    : [];
-  const selected = idMatch ?? (nameMatches.length === 1 ? nameMatches[0] : undefined);
-  const section = selected ? { id: String(selected.id), name: selected.name } : null;
+  const section = resolveVisibleSection({ selected: selectedId, selectedByUser, view, profilesMode }, sections);
   const bench = section && current?.sectionId === section.id && current.designBenchNumber !== null
     ? { designBench: current.designBenchNumber }
     : null;

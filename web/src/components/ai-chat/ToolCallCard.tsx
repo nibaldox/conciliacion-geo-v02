@@ -153,6 +153,7 @@ function ActivityStep({ message }: { message: ToolCardMessage }) {
       <span className="shrink-0">{expanded ? '▾' : '▸'}</span>
       {message.status === 'running' && <Spinner size="sm" />}
       <span className="shrink-0">{t(`aiChat.activity.names.${message.name}`, { defaultValue: message.name })}</span>
+      {message.status === 'ok' && <span className="sr-only">{t('aiChat.tool.status_ok')}</span>}
       {unknown && <span className="shrink-0">{t('aiChat.activity.unrecorded')}</span>}
       {!unknown && message.status === 'error' && <span className="shrink-0 text-[var(--status-nok-text)]">{t('aiChat.tool.status_error')}</span>}
       {duration && <span className="shrink-0">{duration}</span>}
