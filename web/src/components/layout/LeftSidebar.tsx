@@ -147,14 +147,19 @@ export function LeftSidebar() {
     };
   }, []);
 
+  const aiFirst = isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true';
+
   useEffect(() => {
-    if (openWorkflowStep === 'sections' && sectionTab === 'curves') {
-      if (isChatUiEnabled(import.meta.env.VITE_AI_CHAT) && import.meta.env.VITE_AI_FIRST === 'true') {
-        useWorkspaceMode.getState().enterCopilot('manualView');
-      }
+    if (!aiFirst && openWorkflowStep === 'sections' && sectionTab === 'curves') {
       setActiveWorkspaceView('3d');
     }
-  }, [openWorkflowStep, sectionTab, setActiveWorkspaceView]);
+  }, [aiFirst, openWorkflowStep, sectionTab, setActiveWorkspaceView]);
+
+  const openCurvesView = () => {
+    if (!aiFirst) return;
+    useWorkspaceMode.getState().enterCopilot('manualView');
+    setActiveWorkspaceView('3d');
+  };
 
   const didAutoSwitchTo3D = useRef(false);
   useEffect(() => {
@@ -176,7 +181,9 @@ export function LeftSidebar() {
   }, [steps, nextStep, isVirtualDemo, setOpenWorkflowStep]);
 
   const toggleStep = (key: WorkflowStepKey) => {
-    setOpenWorkflowStep(openWorkflowStep === key ? null : key);
+    const opening = openWorkflowStep !== key;
+    setOpenWorkflowStep(opening ? key : null);
+    if (opening && key === 'sections' && sectionTab === 'curves') openCurvesView();
   };
 
   const handleToleranceChange = <K extends keyof Tolerances>(
@@ -234,7 +241,10 @@ export function LeftSidebar() {
                   title={status === 'locked' ? `${title} — ${t('ux.locked_hint')}` : title}
                   onClick={() => {
                     setSidebarCollapsed(false);
-                    if (status !== 'locked') setOpenWorkflowStep(key);
+                    if (status !== 'locked') {
+                      setOpenWorkflowStep(key);
+                      if (key === 'sections' && sectionTab === 'curves') openCurvesView();
+                    }
                   }}
                   className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold transition-opacity hover:opacity-80 cursor-pointer ${COLLAPSED_CIRCLE_CLASSES[status]}`}
                 >
@@ -283,7 +293,10 @@ export function LeftSidebar() {
                 <button
                   key={tab}
                   type="button"
-                  onClick={() => setSectionTab(tab)}
+                  onClick={() => {
+                    setSectionTab(tab);
+                    if (tab === 'curves' && openWorkflowStep === 'sections') openCurvesView();
+                  }}
                   className="h-8 text-xs font-medium rounded-md transition-colors"
                   aria-pressed={sectionTab === tab}
                   style={{
